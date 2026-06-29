@@ -1,0 +1,128 @@
+import sqlite3
+
+DB_NAME = "guild_management.db"
+
+def init_db():
+    """Создает все таблицы в единой БД, если они еще не созданы"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 1. Таблица маппинга пользователей (Discord <-> SWGOH)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_mapping (
+            discord_id TEXT PRIMARY KEY,
+            ally_code TEXT UNIQUE NOT NULL,
+            ingame_name TEXT
+        )
+    """)
+
+    # 2. Таблица нарушений
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS position_warns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ally_code TEXT NOT NULL,
+            category TEXT NOT NULL,
+            subcategory TEXT NOT NULL,
+            date_str TEXT NOT NULL,
+            comment TEXT,
+            FOREIGN KEY (ally_code) REFERENCES user_mapping(ally_code)
+        )
+    """)
+
+    # 3. Таблица задач на прокачку
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ally_code TEXT NOT NULL,
+            base_id TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_value TEXT NOT NULL,
+            deadline TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_by TEXT,
+            date_created TEXT,
+            FOREIGN KEY (ally_code) REFERENCES user_mapping(ally_code),
+            FOREIGN KEY (base_id) REFERENCES game_units(base_id)
+        )
+    """)
+
+    # 4. Справочник игровых юнитов (Персонажи и Корабли)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_units (
+            base_id TEXT PRIMARY KEY,
+            cached_name TEXT NOT NULL
+        )
+    """)
+
+    # Создаем индексы для быстродействия
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_ally ON tasks(ally_code)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+
+    conn.commit()
+    conn.close()
+    print("📋 [БД] Инициализация структуры базы данных успешно завершена.")
+
+# =====================================================================
+# ФУНКЦИИ ДЛЯ РАБОТЫ С НАРУШЕНИЯМИ (WARNS)
+# =====================================================================
+def add_warn(ally_code, category, subcategory, date_str, comment=None):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO position_warns (ally_code, category, subcategory, date_str, comment)
+        VALUES (?, ?, ?, ?, ?)
+    """, (ally_code, category, subcategory, date_str, comment))
+    conn.commit()
+    conn.close()
+
+def get_player_warns(ally_code):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT category, subcategory, date_str, comment 
+        FROM position_warns 
+        WHERE ally_code = ? 
+        ORDER BY id DESC
+    """, (ally_code,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def remove_warn(ally_code, category, subcategory, date_str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        DELETE FROM position_warns 
+        WHERE ally_code = ? AND category = ? AND subcategory = ? AND date_str = ?
+    """, (ally_code, category, subcategory, date_str))
+    conn.commit()
+    conn.close()
+
+def get_all_warns():
+    """Возвращает список всех нарушений гильдии для построения общей текстовой таблицы"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ally_code, category, date_str FROM position_warns")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows    
+
+# =====================================================================
+# ФУНКЦИИ ДЛЯ НАПОЛНЕНИЯ СПРАВОЧНИКА ЮНИТОВ
+# =====================================================================
+def populate_initial_units(units_dict):
+    """Принимает словарь {base_id: имя} и массово загружает в базу"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # Подготавливаем данные для INSERT OR IGNORE, чтобы не затирать кастомные имена
+    data = [(base_id, name) for base_id, name in units_dict.items()]
+    
+    cursor.executemany("""
+        INSERT OR IGNORE INTO game_units (base_id, cached_name)
+        VALUES (?, ?)
+    """, data)
+    
+    conn.commit()
+    conn.close()
