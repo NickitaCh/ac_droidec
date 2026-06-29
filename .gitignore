@@ -1,0 +1,14 @@
+# Переменные окружения (секреты)
+.env
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# База данных SQLite (если она не должна быть в репозитории)
+guild_management.db
+
+# IDE и системные файлы
+.vscode/
+.idea/
+Thumbs.db
