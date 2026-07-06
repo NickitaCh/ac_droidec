@@ -23,6 +23,20 @@ N_LIMIT = 3
 ALLOWED_ROLE_IDS = [1153753506772164629] 
 ALLOWED_USER_IDS = [291656027659698176]  
 
+# === Настройки ротационного тега ===
+PING_CHANNEL_ID = 1222515211659907204  # ID канала, куда слать теги
+PING_ROLE_ID = 1165274669394436197     # ID роли, которую тегать
+PING_START_DATE = "2026-07-06"        # Первый понедельник первой тегаемой недели (ГГГГ-ММ-ДД)
+
+# Расписание тегов: список словарей
+#   time  – время UTC в формате "ЧЧ:ММ"
+#   text  – текст сообщения (можно использовать @роль, но лучше добавлять роль через mention)
+#   days  – список дней недели (0=пн, 1=вт, ..., 6=вс), когда тег активен
+PING_SCHEDULE = [
+    {"time": "18:50", "text": "взводы", "days": [0,1,2,3,4,5,6]},   # вт и пт
+    {"time": "19:50", "text": "ордер", "days": [0,1,2,3,4,5,6]}    # вт и пт
+]
+
 comlink = SwgohComlink(url=COMLINK_URL)
 
 intents = disnake.Intents.default()
@@ -42,6 +56,12 @@ class GuildManagerBot(commands.Bot):
         self.allowed_user_ids = ALLOWED_USER_IDS
         self.allowed_role_ids = ALLOWED_ROLE_IDS
         self.guild_roster_cache = {}  
+        
+        # === Новые атрибуты для ротационного тега ===
+        self.PING_CHANNEL_ID = PING_CHANNEL_ID
+        self.PING_ROLE_ID = PING_ROLE_ID
+        self.PING_TIME_UTC = PING_TIME_UTC
+        self.PING_START_DATE = PING_START_DATE
 
 bot = GuildManagerBot()
 
