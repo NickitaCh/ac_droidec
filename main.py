@@ -60,8 +60,8 @@ class GuildManagerBot(commands.Bot):
         # === Новые атрибуты для ротационного тега ===
         self.PING_CHANNEL_ID = PING_CHANNEL_ID
         self.PING_ROLE_ID = PING_ROLE_ID
-        self.PING_TIME_UTC = PING_TIME_UTC
         self.PING_START_DATE = PING_START_DATE
+        self.PING_SCHEDULE = PING_SCHEDULE
 
 bot = GuildManagerBot()
 
