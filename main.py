@@ -38,7 +38,7 @@ PING_SCHEDULE = [
 ]
 
 # === Настройки поздравлений с днём рождения ===
-BIRTHDAY_CHANNEL_ID = 1176405971715760209  # ID канала для поздравлений
+BIRTHDAY_CHANNEL_ID = 1153767794203172874  # ID канала для поздравлений
 BIRTHDAY_ROLE_ID = 1524054148734259230     # ID роли, которая будет выдаваться в ДР
 
 comlink = SwgohComlink(url=COMLINK_URL)
