@@ -126,3 +126,53 @@ def populate_initial_units(units_dict):
     
     conn.commit()
     conn.close()
+    
+    
+# ================== Дни рождения ==================
+
+def init_birthday_table():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS birthdays (
+            discord_id TEXT PRIMARY KEY,
+            day INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            year INTEGER DEFAULT 2000
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def add_birthday(discord_id: str, day: int, month: int, year: int = 2000):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO birthdays (discord_id, day, month, year)
+        VALUES (?, ?, ?, ?)
+    """, (discord_id, day, month, year))
+    conn.commit()
+    conn.close()
+
+def remove_birthday(discord_id: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM birthdays WHERE discord_id = ?", (discord_id,))
+    conn.commit()
+    conn.close()
+
+def get_all_birthdays():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT discord_id, day, month, year FROM birthdays")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_birthday_by_discord_id(discord_id: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT day, month, year FROM birthdays WHERE discord_id = ?", (discord_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row

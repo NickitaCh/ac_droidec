@@ -37,6 +37,10 @@ PING_SCHEDULE = [
     {"time": "19:50", "text": "ордер", "days": [0,1,2,3,4,5,6]}    # вт и пт
 ]
 
+# === Настройки поздравлений с днём рождения ===
+BIRTHDAY_CHANNEL_ID = 1176405971715760209  # ID канала для поздравлений
+BIRTHDAY_ROLE_ID = 1524054148734259230     # ID роли, которая будет выдаваться в ДР
+
 comlink = SwgohComlink(url=COMLINK_URL)
 
 intents = disnake.Intents.default()
@@ -62,6 +66,9 @@ class GuildManagerBot(commands.Bot):
         self.PING_ROLE_ID = PING_ROLE_ID
         self.PING_START_DATE = PING_START_DATE
         self.PING_SCHEDULE = PING_SCHEDULE
+        
+        self.BIRTHDAY_CHANNEL_ID = BIRTHDAY_CHANNEL_ID
+        self.BIRTHDAY_ROLE_ID = BIRTHDAY_ROLE_ID
 
 bot = GuildManagerBot()
 
@@ -69,6 +76,7 @@ bot = GuildManagerBot()
 async def on_ready():
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
+    database.init_birthday_table()
     
     # 2. Установка статуса бота
     await bot.change_presence(
