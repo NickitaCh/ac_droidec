@@ -58,7 +58,7 @@ class Birthday(commands.Cog):
         today = now.date()
 
         # Утром в 6:00 – поздравление и выдача роли
-        if hour == 17 and minute == 30:
+        if hour == 6 and minute == 0:
             await self.handle_birthday_morning(today)
         # В полночь – снятие роли со всех, у кого она есть, и сброс кэша поздравлений
         if hour == 0 and minute == 0:
