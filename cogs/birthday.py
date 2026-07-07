@@ -42,6 +42,8 @@ class Birthday(commands.Cog):
         self.bot = bot
         self.channel_id = bot.BIRTHDAY_CHANNEL_ID
         self.role_id = bot.BIRTHDAY_ROLE_ID
+        # Защита от дублирования: храним даты, для которых уже поздравляли
+        self.last_congratulated = {}  # ключ: discord_id, значение: date
         self.check_loop.start()
 
     def cog_unload(self):
@@ -55,8 +57,10 @@ class Birthday(commands.Cog):
         minute = now.minute
         today = now.date()
 
-        if hour == 17 and minute == 20:
+        # Утром в 6:00 – поздравление и выдача роли
+        if hour == 17 and minute == 30:
             await self.handle_birthday_morning(today)
+        # В полночь – снятие роли со всех, у кого она есть, и сброс кэша поздравлений
         if hour == 0 and minute == 0:
             await self.handle_birthday_reset()
 
@@ -77,23 +81,39 @@ class Birthday(commands.Cog):
             return
 
         for discord_id_str, day, month, year in all_bdays:
-            if month == today.month and day == today.day:
-                member = guild.get_member(int(discord_id_str))
-                if member is None:
-                    continue
-                if role not in member.roles:
-                    try:
-                        await member.add_roles(role)
-                        print(f"✅ [Birthday] Роль выдана {member.display_name}")
-                    except Exception as e:
-                        print(f"❌ [Birthday] Ошибка выдачи роли {member}: {e}")
+            # Проверяем, совпадает ли день рождения с сегодняшней датой
+            if month != today.month or day != today.day:
+                continue
+
+            discord_id = int(discord_id_str)
+
+            # Проверяем, не поздравляли ли уже сегодня этого пользователя
+            if self.last_congratulated.get(discord_id) == today:
+                continue  # уже поздравляли – пропускаем
+
+            member = guild.get_member(discord_id)
+            if member is None:
+                continue
+
+            # Выдаём роль, если ещё нет
+            if role not in member.roles:
                 try:
-                    await channel.send(f"🎉 {member.mention}, поздравляем с днём рождения! 🎂")
-                    print(f"✅ [Birthday] Поздравление для {member.display_name}")
+                    await member.add_roles(role)
+                    print(f"✅ [Birthday] Роль выдана {member.display_name}")
                 except Exception as e:
-                    print(f"❌ [Birthday] Ошибка отправки: {e}")
+                    print(f"❌ [Birthday] Ошибка выдачи роли {member}: {e}")
+
+            # Отправляем поздравление
+            try:
+                await channel.send(f"У {member.mention} сегодня день рождения")
+                print(f"✅ [Birthday] Поздравление для {member.display_name}")
+                # Запоминаем, что сегодня уже поздравляли
+                self.last_congratulated[discord_id] = today
+            except Exception as e:
+                print(f"❌ [Birthday] Ошибка отправки: {e}")
 
     async def handle_birthday_reset(self):
+        # Снимаем роль с тех, у кого она есть
         channel = self.bot.get_channel(self.channel_id)
         if channel is None:
             return
@@ -110,12 +130,14 @@ class Birthday(commands.Cog):
                 except Exception as e:
                     print(f"❌ [Birthday] Ошибка снятия роли с {member}: {e}")
 
+        # Сбрасываем кэш поздравлений (на случай, если полночь пропущена – очищаем старые записи)
+        self.last_congratulated.clear()
+
     @check_loop.before_loop
     async def before_loop(self):
         await self.bot.wait_until_ready()
 
     # -------------------- Slash-команды --------------------
-    # Используйте ID роли, которой разрешено управлять днями рождения
     ALLOWED_ROLE_ID = 1153753506772164629  # Замените на нужную роль
 
     @commands.slash_command(name="add_birthday", description="Добавить/обновить день рождения")
@@ -148,7 +170,7 @@ class Birthday(commands.Cog):
         user: disnake.User = commands.Param(description="Пользователь")
     ):
         database.remove_birthday(str(user.id))
-        await inter.response.send_message(f"✅ День рождения {user.mention} удалён", ephemeral=True)
+        await inter.response.send_message(f"День рождения {user.mention} удалён", ephemeral=True)
 
     @commands.slash_command(name="birthday_list", description="Список дней рождений гильдии")
     @commands.has_any_role(ALLOWED_ROLE_ID)
@@ -181,7 +203,7 @@ class Birthday(commands.Cog):
             await inter.edit_original_message("Нет участников с сохранёнными днями рождения.")
             return
 
-        await inter.edit_original_message("🎂 **Дни рождения гильдии:**\n" + "\n".join(lines))
+        await inter.edit_original_message("**Дни рождения гильдии:**\n" + "\n".join(lines))
 
 
 def setup(bot: commands.Bot):
