@@ -105,7 +105,7 @@ class Birthday(commands.Cog):
 
             # Отправляем поздравление
             try:
-                await channel.send(f"У {member.mention} сегодня день рождения")
+                await channel.send(f"### 🎉 {member.mention} сегодня отмечает день рождения!")
                 print(f"✅ [Birthday] Поздравление для {member.display_name}")
                 # Запоминаем, что сегодня уже поздравляли
                 self.last_congratulated[discord_id] = today

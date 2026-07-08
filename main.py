@@ -41,6 +41,9 @@ PING_SCHEDULE = [
 BIRTHDAY_CHANNEL_ID = 1153767794203172874  # ID канала для поздравлений
 BIRTHDAY_ROLE_ID = 1524054148734259230     # ID роли, которая будет выдаваться в ДР
 
+OFFICER_CHANNEL_ID = 1222515211659907204  # ID канала для отчётов и уведомлений
+ALLOWED_OFFICER_ROLE_ID = 1153753506772164629  # та же роль, что и для других команд
+
 comlink = SwgohComlink(url=COMLINK_URL)
 
 intents = disnake.Intents.default()
@@ -69,6 +72,9 @@ class GuildManagerBot(commands.Bot):
         
         self.BIRTHDAY_CHANNEL_ID = BIRTHDAY_CHANNEL_ID
         self.BIRTHDAY_ROLE_ID = BIRTHDAY_ROLE_ID
+        
+        self.OFFICER_CHANNEL_ID = OFFICER_CHANNEL_ID
+        self.ALLOWED_OFFICER_ROLE_ID = ALLOWED_OFFICER_ROLE_ID
 
 bot = GuildManagerBot()
 
@@ -77,6 +83,7 @@ async def on_ready():
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
     database.init_birthday_table()
+    database.init_manual_event_tables()
     
     # 2. Установка статуса бота
     await bot.change_presence(
