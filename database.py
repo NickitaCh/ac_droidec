@@ -222,3 +222,12 @@ def clear_manual_scores(event_type):
     cursor.execute("DELETE FROM manual_event_scores WHERE event_type = ?", (event_type,))
     conn.commit()
     conn.close()
+    
+    
+def get_allycode_by_discord_id(discord_id: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ally_code FROM user_mapping WHERE discord_id = ?", (discord_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
