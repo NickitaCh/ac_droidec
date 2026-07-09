@@ -118,29 +118,16 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     def parse_player_stats(self, tb_result, member_id):
-        """Собирает детальную статистику игрока по всем зонам (включая агрегированные поля)."""
-        stats = {
-            "summary": 0,
-            "power": 0,
-            "strike_encounter": 0,
-            "strike_attempt": 0,
-            "unit_donated": 0,
-            "covert_complete": 0,
-            "covert_attempt": 0,
-            "rounds": defaultdict(int),
-        }
+        """Собирает суммарный счёт и разбивку по зонам для одного игрока."""
+        total_score = 0
+        zones = []
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
-                if ps.get("memberId") != member_id:
-                    continue
-                for key, value in ps.items():
-                    if key == "memberId":
-                        continue
-                    if key in stats:
-                        stats[key] += int(value)
-                    elif key.startswith("summary_round_"):
-                        stats["rounds"][key] += int(value)
-        return stats
+                if ps.get("memberId") == member_id:
+                    score = int(ps.get("score", 0))
+                    total_score += score
+                    zones.append((zone.get("mapStatId", "неизвестная зона"), score))
+        return {"score": total_score, "zones": zones}
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
@@ -213,7 +200,6 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
-        # Получаем allycode из кэша состава гильдии
         cache = self.bot.guild_roster_cache
         if not cache or name not in cache:
             await inter.edit_original_message("Ошибка: игрок не найден в кэше состава. Дождитесь загрузки состава.")
@@ -221,14 +207,12 @@ class GuildEvents(commands.Cog):
         allycode = cache[name]
 
         try:
-            # Получаем профиль игрока и его playerId
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
                 return
 
-            # Загружаем гильдию с историей ТБ
             guild = await asyncio.wait_for(
                 asyncio.to_thread(
                     self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
@@ -240,40 +224,17 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            # Ищем memberId в гильдии, соответствующий playerId (для точного сопоставления)
-            member_id = None
-            for m in guild.get("member", []):
-                if m.get("playerId") == player_id:
-                    member_id = player_id  # используем тот же playerId
-                    break
-            if not member_id:
-                # Если не нашли (редкий случай), берём playerId напрямую
-                member_id = player_id
-
-            # Собираем статистику
-            stats = self.parse_player_stats(result, member_id)
-            if stats["summary"] == 0:
+            # Используем player_id как member_id
+            stats = self.parse_player_stats(result, player_id)
+            if stats["score"] == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            # Формируем Embed
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
-            embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
-            embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
-            embed.add_field(name="Боевые миссии (усп/поп)",
-                            value=f"{stats['strike_encounter']} / {stats['strike_attempt']}", inline=True)
-            embed.add_field(name="Деплой (юнитов)", value=str(stats['unit_donated']), inline=True)
-            embed.add_field(name="Спецмиссии (усп/поп)",
-                            value=f"{stats['covert_complete']} / {stats['covert_attempt']}", inline=True)
-
-            rounds = []
-            for r in range(1, 7):
-                key = f"summary_round_{r}"
-                if key in stats["rounds"]:
-                    rounds.append(f"Раунд {r}: {stats['rounds'][key]:,}")
-            if rounds:
-                embed.add_field(name="Очки по раундам", value="\n".join(rounds), inline=False)
-
+            embed.add_field(name="Общий счёт", value=f"{stats['score']:,}", inline=False)
+            if stats["zones"]:
+                zone_text = "\n".join([f"{z[0]}: {z[1]:,}" for z in stats["zones"][:10]])
+                embed.add_field(name="Очки по зонам (первые 10)", value=zone_text, inline=False)
             embed.set_footer(text="Данные из последней завершённой ТБ")
             await inter.edit_original_message(embed=embed)
 
