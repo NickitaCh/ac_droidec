@@ -36,7 +36,7 @@ class GuildEvents(commands.Cog):
             print(f"Ошибка получения данных гильдии: {e}")
             return
 
-        # Проверяем ТБ
+        # ТБ
         tb_status = guild.get("territoryBattleStatus", [])
         current_tb = tb_status[0] if tb_status else None
         if current_tb and self.last_tb_status and current_tb.get("status") != self.last_tb_status.get("status"):
@@ -44,7 +44,7 @@ class GuildEvents(commands.Cog):
                 await self.generate_tb_report(guild)
         self.last_tb_status = current_tb
 
-        # Проверяем ТВ (заглушка)
+        # ТВ (заглушка)
         tw_status = guild.get("territoryWarStatus", [])
         current_tw = tw_status[0] if tw_status else None
         if current_tw and self.last_tw_status and current_tw.get("status") != self.last_tw_status.get("status"):
@@ -55,14 +55,14 @@ class GuildEvents(commands.Cog):
     async def generate_tb_report(self, guild):
         result = guild.get("recentTerritoryBattleResult", [])
         if not result:
-            await self.notify_officers("TB_REPORT_NEEDED", "ТБ завершена, но отчёт пуст. Используйте ручной ввод.")
+            await self.notify_officers("ТБ завершена, но отчёт пуст. Используйте ручной ввод.")
             return
 
         members = guild.get("member", [])
         player_names = {m["playerId"]: m["playerName"] for m in members if "playerId" in m and "playerName" in m}
         stats = self._collect_guild_stats(result, player_names)
         if not stats:
-            await self.notify_officers("TB_REPORT_EMPTY", "Нет данных по очкам.")
+            await self.notify_officers("Нет данных по очкам.")
             return
 
         report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
@@ -71,10 +71,10 @@ class GuildEvents(commands.Cog):
             await channel.send(report)
 
     async def generate_tw_report(self, guild):
-        # Аналогично TB – заглушка
+        # Заглушка для ТВ
         pass
 
-    async def notify_officers(self, event_type, message):
+    async def notify_officers(self, message):
         channel = self.bot.get_channel(self.officer_channel_id)
         if channel:
             await channel.send(f"📢 {message}")
@@ -150,7 +150,7 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
-    @commands.has_any_role(1153753506772164629)
+    @commands.has_any_role(1153753506772164629)  # замените на вашу роль
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -210,25 +210,20 @@ class GuildEvents(commands.Cog):
         report = self._format_stats_table("📊 **Итоги последней ТБ (автоотчёт)**", stats)
         await inter.edit_original_message(report)
 
-    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ (выберите из списка)")
+    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ (выбор из базы)")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(
-            description="Имя игрока в базе",
-            autocomplete_callback=lambda inter, user_input: self.autocomplete_player_name(inter, user_input)
-        )
+        name: str = commands.Param(description="Имя игрока (из базы user_mapping)")
     ):
         await inter.response.defer()
-        # Ищем allycode по введённому имени (или части имени)
-        mapping = database.get_user_mapping_by_name(name)
-        if not mapping:
+        # Ищем allycode по имени (полное совпадение или LIKE %name%)
+        row = database.get_user_mapping_by_name(name)
+        if not row:
             await inter.edit_original_message("Игрок не найден. Сначала выполните `/sync_members`.")
             return
 
-        allycode = mapping[0]
-        ingame_name = mapping[1] if len(mapping) > 1 else name
-
+        allycode, ingame_name = row
         try:
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
@@ -271,22 +266,22 @@ class GuildEvents(commands.Cog):
 
             embed.set_footer(text="Данные из последней завершённой ТБ")
             await inter.edit_original_message(embed=embed)
+
         except asyncio.TimeoutError:
             await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
 
-    @staticmethod
-    async def autocomplete_player_name(inter: disnake.ApplicationCommandInteraction, user_input: str):
-        """Автозаполнение имён из таблицы user_mapping."""
+    @tb_player.autocomplete("name")
+    async def autocomplete_player_name(self, inter: disnake.ApplicationCommandInteraction, user_input: str):
+        """Автозаполнение имён из таблицы user_mapping, как в /warn."""
         if not user_input:
             return []
         mappings = database.get_all_user_mappings()  # возвращает список (discord_id, ally_code, ingame_name)
         suggestions = []
-        for disc_id, ally, iname in mappings:
+        for _, _, iname in mappings:
             if iname and user_input.lower() in iname.lower():
                 suggestions.append(iname)
-        # Ограничим число подсказок
         return suggestions[:25] if suggestions else ["Нет совпадений"]
 
     @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам гильдии")
