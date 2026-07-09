@@ -12,6 +12,19 @@ import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# Словари для перевода
+ZONE_NAMES_RU = {
+    "conflict": "Конфликт",
+    "bonus": "Бонус",
+    "covert": "Спецмиссия",
+    "power": "Сила",
+}
+SIDE_MAP = {
+    "light": "Свет",
+    "dark": "Тьма",
+    "mixed": "Смешанная",
+}
+
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -113,29 +126,81 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока ------------------
-    def _extract_zone_name(self, map_stat_id):
-        """Превращает техническое имя зоны в читаемое (например, 'power_zone_tb3_phase03_conflict01' -> 'Конфликт 1')"""
+    def _extract_zone_name_ru(self, map_stat_id):
+        """Возвращает русское название планеты и сторону (Свет/Тьма/Смешанная)."""
         parts = map_stat_id.split("_")
-        # Ищем ключевые слова: conflict, bonus, covert и т.д.
-        for i, part in enumerate(parts):
-            if part in ("conflict", "bonus", "covert", "strike", "power"):
-                suffix = parts[i+1] if i+1 < len(parts) else ""
-                return f"{part.capitalize()} {suffix}"
-        # Если не нашли, возвращаем последний значимый кусок
-        return parts[-1] if parts else map_stat_id
+        side = None
+        for part in parts:
+            if part in SIDE_MAP:
+                side = SIDE_MAP[part]
+                break
+        # Определяем тип планеты (conflict, bonus, covert) и номер
+        for part in parts:
+            if part in ZONE_NAMES_RU:
+                idx = parts.index(part)
+                num = parts[idx+1] if idx+1 < len(parts) else ""
+                base = ZONE_NAMES_RU[part]
+                name = f"{base} {num}" if num else base
+                if side:
+                    name += f" ({side})"
+                return name
+        # Если не нашли, возвращаем последний кусок
+        fallback = parts[-1] if parts else map_stat_id
+        if side:
+            fallback += f" ({side})"
+        return fallback
+
+    def _get_zone_base_id(self, map_stat_id):
+        """Извлекает уникальный идентификатор планеты без суффикса показателя.
+        Например, 'summary_zone_tb3_mixed_phase03_conflict01' -> 'tb3_mixed_phase03_conflict01'."""
+        # Убираем префиксы показателей
+        for prefix in ["summary_zone_", "power_zone_", "strike_encounter_zone_", "strike_attempt_zone_",
+                       "unit_donated_zone_", "covert_complete_mission_", "covert_attempt_mission_",
+                       "covert_round_attempted_mission_", "power_", "summary_"]:
+            if map_stat_id.startswith(prefix):
+                return map_stat_id[len(prefix):]
+        return map_stat_id
 
     def parse_player_stats_detailed(self, tb_result, member_id):
-        """Собирает агрегированные показатели по каждой зоне для одного игрока."""
+        """
+        Собирает полные показатели по каждой планете для одного игрока.
+        Группирует все подзоны (очки, мощь, БМ, деплой, СМ) по базовому идентификатору планеты.
+        Возвращает (total_score, planet_list).
+        """
         total_score = 0
-        zones_data = []
+        planet_data = defaultdict(lambda: {
+            "score": 0, "power": 0,
+            "strike_encounter": 0, "strike_attempt": 0,
+            "unit_donated": 0,
+            "covert_complete": 0, "covert_attempt": 0,
+            "phase": 0, "side": "", "name": ""
+        })
 
         for zone in tb_result[0].get("finalStat", []):
-            map_stat = zone.get("mapStatId", "неизвестная зона")
-            phase_match = re.search(r'phase(\d+)', map_stat)
+            map_stat = zone.get("mapStatId", "неизвестная_зона")
+            # Определяем базовый идентификатор планеты (без префикса показателя)
+            base_id = self._get_zone_base_id(map_stat)
+            # Извлекаем фазу
+            phase_match = re.search(r'phase(\d+)', base_id)
             phase_num = int(phase_match.group(1)) if phase_match else 0
+            if phase_num == 0:   # пропускаем общие итоги
+                continue
 
-            # Инициализируем счётчики для этой зоны
-            zone_stats = defaultdict(int)
+            # Название планеты получим позже, сохраним пока базовый id
+            planet = planet_data[base_id]
+            planet["phase"] = phase_num
+            # Определяем сторону (light/dark/mixed)
+            if "light" in base_id:
+                planet["side"] = "Свет"
+            elif "dark" in base_id:
+                planet["side"] = "Тьма"
+            elif "mixed" in base_id:
+                planet["side"] = "Смешанная"
+            else:
+                planet["side"] = "Неизв."
+            # Имя планеты сформируем позже на основе base_id
+
+            # Собираем все значения для этого игрока в данной зоне
             for ps in zone.get("playerStat", []):
                 if ps.get("memberId") != member_id:
                     continue
@@ -146,59 +211,63 @@ class GuildEvents(commands.Cog):
                         val = int(value)
                     except (ValueError, TypeError):
                         continue
-                    zone_stats[key] += val
+                    # Сопоставляем ключи с нашими показателями
                     if key == "score":
+                        planet["score"] += val
                         total_score += val
+                    elif key == "power":
+                        planet["power"] += val
+                    elif key == "strike_encounter":
+                        planet["strike_encounter"] += val
+                    elif key == "strike_attempt":
+                        planet["strike_attempt"] += val
+                    elif key == "unit_donated":
+                        planet["unit_donated"] += val
+                    elif key == "covert_complete":
+                        planet["covert_complete"] += val
+                    elif key == "covert_attempt":
+                        planet["covert_attempt"] += val
+                    # Остальные ключи (например, summary_zone_...) уже обработаны как score
+                    # но если встретится что-то специфичное, можно добавить
 
-            if not zone_stats:
-                continue
+        # Формируем финальный список планет
+        planets = []
+        for base_id, p in planet_data.items():
+            # Генерируем читаемое имя планеты, используя base_id
+            # Пытаемся вытащить тип и номер
+            name = self._extract_zone_name_ru(base_id)
+            p["name"] = name
+            # Если сторона не определилась, можно оставить как есть
+            planets.append(p)
 
-            # Извлекаем ключевые показатели
-            score = zone_stats.get("score", 0)
-            power = zone_stats.get("power", 0)
-            strike_enc = zone_stats.get("strike_encounter", 0)
-            strike_att = zone_stats.get("strike_attempt", 0)
-            unit_don = zone_stats.get("unit_donated", 0)
-            covert_com = zone_stats.get("covert_complete", 0)
-            covert_att = zone_stats.get("covert_attempt", 0)
+        # Сортируем по фазе, затем по имени
+        planets.sort(key=lambda x: (x["phase"], x["name"]))
+        return total_score, planets
 
-            zone_name = self._extract_zone_name(map_stat)
-            zones_data.append({
-                "phase": phase_num,
-                "name": zone_name,
-                "score": score,
-                "power": power,
-                "strike_encounter": strike_enc,
-                "strike_attempt": strike_att,
-                "unit_donated": unit_don,
-                "covert_complete": covert_com,
-                "covert_attempt": covert_att,
-            })
-
-        return total_score, zones_data
-
-    def format_detailed_report(self, player_name, total_score, zones_data):
-        """Форматирует подробный отчёт в текстовый файл."""
+    def format_detailed_report(self, player_name, total_score, planets):
+        """Форматирует подробный отчёт в текстовый файл с группировкой по фазам."""
         lines = [f"Детальная статистика: {player_name}"]
         lines.append(f"Общий счёт: {total_score:,}")
         lines.append("")
-        lines.append("=" * 70)
 
         by_phase = defaultdict(list)
-        for z in zones_data:
-            by_phase[z["phase"]].append(z)
+        for p in planets:
+            by_phase[p["phase"]].append(p)
 
         for phase_num in sorted(by_phase):
             lines.append(f"Фаза {phase_num}")
-            lines.append("-" * 60)
-            for z in by_phase[phase_num]:
-                bm = f"{z['strike_encounter']}/{z['strike_attempt']}"
-                sm = f"{z['covert_complete']}/{z['covert_attempt']}"
+            lines.append("-" * 100)
+            # Заголовок таблицы
+            header = f"{'Планета':<30} {'Очки':>15} {'Мощь':>12} {'БЗ(усп/поп)':>12} {'Деплой':>7} {'ОЗ(усп/поп)':>12}"
+            lines.append(header)
+            lines.append("-" * 100)
+            for p in by_phase[phase_num]:
+                bz = f"{p['strike_encounter']}/{p['strike_attempt']}" if p['strike_attempt'] else "-"
+                oz = f"{p['covert_complete']}/{p['covert_attempt']}" if p['covert_attempt'] else "-"
                 lines.append(
-                    f"  {z['name']:<20} | Очки: {z['score']:>12,} | Мощь: {z['power']:>10,} | БМ: {bm:<8} | Деплой: {z['unit_donated']:<4} | СМ: {sm}"
+                    f"{p['name']:<30} {p['score']:>15,} {p['power']:>12,} {bz:>12} {p['unit_donated']:>7} {oz:>12}"
                 )
             lines.append("")
-
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
@@ -292,12 +361,12 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            total_score, zones_data = self.parse_player_stats_detailed(result, player_id)
+            total_score, planets = self.parse_player_stats_detailed(result, player_id)
             if total_score == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            report = self.format_detailed_report(name, total_score, zones_data)
+            report = self.format_detailed_report(name, total_score, planets)
             await self.send_as_file(inter.channel, report, f"tb_detail_{name}.txt")
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
             embed.add_field(name="Общий счёт", value=f"{total_score:,}", inline=False)
