@@ -115,20 +115,87 @@ class GuildEvents(commands.Cog):
     # ------------------ Детальная статистика игрока ------------------
     def parse_player_stats_detailed(self, tb_result, member_id):
         """
-        Извлекает агрегированные показатели по фазам 1-6 из общей зоны (phase 0).
-        Возвращает словарь с общими тоталами и словарь по фазам.
+        Собирает показатели по фазам 1-6. Сначала ищет специальную зону с ключом 'summary'
+        (общая агрегированная статистика), затем дополняет разбивку по раундам.
+        Если такой зоны нет – обходит все обычные зоны.
         """
         totals = {
             "summary": 0, "power": 0, "unit_donated": 0,
             "strike_encounter": 0, "strike_attempt": 0,
             "covert_complete": 0, "covert_attempt": 0
         }
-        phases = {i: {} for i in range(1, 7)}  # здесь будут агрегаты по каждой фазе
+        phases = {i: {"points": 0, "power": 0, "deployed": 0,
+                      "combat_attempts": 0, "combat_wins": 0,
+                      "special_attempts": 0, "special_wins": 0}
+                  for i in range(1, 7)}
 
-        # Ищем зону с общими итогами (phase 0)
+        # 1) Ищем "общую" зону, где есть ключ 'summary' для данного игрока
+        summary_zone = None
         for zone in tb_result[0].get("finalStat", []):
-            map_stat = zone.get("mapStatId", "")
-            if "phase" not in map_stat or "phase0" in map_stat:  # phase0 или общая
+            for ps in zone.get("playerStat", []):
+                if ps.get("memberId") == member_id and "summary" in ps:
+                    summary_zone = zone
+                    break
+            if summary_zone:
+                break
+
+        if summary_zone:
+            # Собираем все данные из этой зоны
+            for ps in summary_zone.get("playerStat", []):
+                if ps.get("memberId") != member_id:
+                    continue
+                for key, value in ps.items():
+                    if key == "memberId":
+                        continue
+                    try:
+                        val = int(value)
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Общие тоталы
+                    if key == "summary":
+                        totals["summary"] += val
+                    elif key == "power":
+                        totals["power"] += val
+                    elif key == "unit_donated":
+                        totals["unit_donated"] += val
+                    elif key == "strike_encounter":
+                        totals["strike_encounter"] += val
+                    elif key == "strike_attempt":
+                        totals["strike_attempt"] += val
+                    elif key == "covert_complete":
+                        totals["covert_complete"] += val
+                    elif key == "covert_attempt":
+                        totals["covert_attempt"] += val
+
+                    # По раундам: summary_round_1, power_round_1 и т.д.
+                    round_match = re.search(r'_round_(\d+)$', key)
+                    if round_match:
+                        round_num = int(round_match.group(1))
+                        if 1 <= round_num <= 6:
+                            if "summary_round" in key:
+                                phases[round_num]["points"] += val
+                            elif "power_round" in key:
+                                phases[round_num]["power"] += val
+                            elif "unit_donated_round" in key:
+                                phases[round_num]["deployed"] += val
+                            elif "strike_attempt_round" in key:
+                                phases[round_num]["combat_attempts"] += val
+                            elif "strike_encounter_round" in key:
+                                phases[round_num]["combat_wins"] += val
+                            elif "covert_attempt_round" in key:
+                                phases[round_num]["special_attempts"] += val
+                            elif "covert_complete_round" in key:
+                                phases[round_num]["special_wins"] += val
+        else:
+            # Запасной вариант – собираем из обычных зон
+            for zone in tb_result[0].get("finalStat", []):
+                map_stat = zone.get("mapStatId", "")
+                phase_match = re.search(r'phase(\d+)', map_stat)
+                phase_num = int(phase_match.group(1)) if phase_match else 0
+                if phase_num < 1 or phase_num > 6:
+                    continue
+
                 for ps in zone.get("playerStat", []):
                     if ps.get("memberId") != member_id:
                         continue
@@ -139,29 +206,38 @@ class GuildEvents(commands.Cog):
                             val = int(value)
                         except (ValueError, TypeError):
                             continue
-                        # Общие тоталы
-                        if key in totals:
-                            totals[key] += val
-                        # По раундам: извлекаем номер раунда из ключа
-                        round_match = re.search(r'_round_(\d+)$', key)
-                        if round_match:
-                            round_num = int(round_match.group(1))
-                            if 1 <= round_num <= 6:
-                                # Маппим ключи к нашим показателям
-                                if "summary_round" in key:
-                                    phases[round_num]["points"] = phases[round_num].get("points", 0) + val
-                                elif "power_round" in key:
-                                    phases[round_num]["power"] = phases[round_num].get("power", 0) + val
-                                elif "unit_donated_round" in key:
-                                    phases[round_num]["deployed"] = phases[round_num].get("deployed", 0) + val
-                                elif "strike_attempt_round" in key:
-                                    phases[round_num]["combat_attempts"] = phases[round_num].get("combat_attempts", 0) + val
-                                elif "strike_encounter_round" in key:
-                                    phases[round_num]["combat_wins"] = phases[round_num].get("combat_wins", 0) + val
-                                elif "covert_attempt_round" in key:
-                                    phases[round_num]["special_attempts"] = phases[round_num].get("special_attempts", 0) + val
-                                elif "covert_complete_round" in key:
-                                    phases[round_num]["special_wins"] = phases[round_num].get("special_wins", 0) + val
+
+                        if key == "score":
+                            totals["summary"] += val
+                        elif key == "power":
+                            totals["power"] += val
+                        elif key == "unit_donated":
+                            totals["unit_donated"] += val
+                        elif key == "strike_attempt":
+                            totals["strike_attempt"] += val
+                        elif key == "strike_encounter":
+                            totals["strike_encounter"] += val
+                        elif key == "covert_attempt":
+                            totals["covert_attempt"] += val
+                        elif key == "covert_complete":
+                            totals["covert_complete"] += val
+
+                        # По фазе
+                        if key == "score":
+                            phases[phase_num]["points"] += val
+                        elif key == "power":
+                            phases[phase_num]["power"] += val
+                        elif key == "unit_donated":
+                            phases[phase_num]["deployed"] += val
+                        elif key == "strike_attempt":
+                            phases[phase_num]["combat_attempts"] += val
+                        elif key == "strike_encounter":
+                            phases[phase_num]["combat_wins"] += val
+                        elif key == "covert_attempt":
+                            phases[phase_num]["special_attempts"] += val
+                        elif key == "covert_complete":
+                            phases[phase_num]["special_wins"] += val
+
         return totals, phases
 
     def format_player_report(self, player_name, totals, phases):
