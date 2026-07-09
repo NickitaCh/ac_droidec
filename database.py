@@ -241,3 +241,19 @@ def set_user_mapping(discord_id: str, ally_code: str, ingame_name: str = ""):
     """, (discord_id, ally_code, ingame_name))
     conn.commit()
     conn.close()
+    
+def get_all_user_mappings():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT discord_id, ally_code, ingame_name FROM user_mapping")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_user_mapping_by_name(name: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name LIKE ?", (f"%{name}%",))
+    row = cursor.fetchone()
+    conn.close()
+    return row if row else None

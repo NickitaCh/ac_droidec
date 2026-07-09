@@ -1,3 +1,4 @@
+import asyncio
 import disnake
 from disnake.ext import commands, tasks
 from datetime import datetime
@@ -28,11 +29,14 @@ class GuildEvents(commands.Cog):
     async def monitor_loop(self):
         await self.bot.wait_until_ready()
         try:
-            guild = self.comlink.get_guild(self.guild_id, include_recent_guild_activity_info=True)
+            guild = await asyncio.to_thread(
+                self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
+            )
         except Exception as e:
             print(f"Ошибка получения данных гильдии: {e}")
             return
 
+        # Проверяем ТБ
         tb_status = guild.get("territoryBattleStatus", [])
         current_tb = tb_status[0] if tb_status else None
         if current_tb and self.last_tb_status and current_tb.get("status") != self.last_tb_status.get("status"):
@@ -40,6 +44,7 @@ class GuildEvents(commands.Cog):
                 await self.generate_tb_report(guild)
         self.last_tb_status = current_tb
 
+        # Проверяем ТВ (заглушка)
         tw_status = guild.get("territoryWarStatus", [])
         current_tw = tw_status[0] if tw_status else None
         if current_tw and self.last_tw_status and current_tw.get("status") != self.last_tw_status.get("status"):
@@ -66,7 +71,7 @@ class GuildEvents(commands.Cog):
             await channel.send(report)
 
     async def generate_tw_report(self, guild):
-        # Аналогично TB – можно добавить позже
+        # Аналогично TB – заглушка
         pass
 
     async def notify_officers(self, event_type, message):
@@ -76,8 +81,7 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Вспомогательные функции ------------------
     def _collect_guild_stats(self, tb_result, player_names):
-        """Собирает статистику по всем игрокам из данных ТБ."""
-        stats = {}  # memberId -> dict
+        stats = {}
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
                 member_id = ps.get("memberId")
@@ -104,16 +108,14 @@ class GuildEvents(commands.Cog):
         return stats
 
     def _format_stats_table(self, title, stats):
-        """Форматирует таблицу с показателями."""
         lines = [title]
         lines.append("```")
         header = f"{'Игрок':<20} {'Очки':>15} {'Мощь':>12} {'БМ(усп/поп)':>12} {'Деплой':>7} {'СМ(усп/поп)':>10}"
         lines.append(header)
         lines.append("-" * len(header))
-        # Сортировка по убыванию очков
         sorted_stats = sorted(stats.items(), key=lambda x: x[1]["summary"], reverse=True)
         for member_id, s in sorted_stats:
-            name = s["name"][:19]  # обрезаем длинные имена
+            name = s["name"][:19]
             bm = f"{s['strike_encounter']}/{s['strike_attempt']}"
             sm = f"{s['covert_complete']}/{s['covert_attempt']}"
             lines.append(
@@ -123,7 +125,6 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     def parse_player_stats(self, tb_result, member_id):
-        """Детальная статистика одного игрока."""
         stats = {
             "summary": 0,
             "power": 0,
@@ -181,7 +182,15 @@ class GuildEvents(commands.Cog):
     async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
         try:
-            guild = self.comlink.get_guild(self.guild_id, include_recent_guild_activity_info=True)
+            guild = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
+                ),
+                timeout=15.0
+            )
+        except asyncio.TimeoutError:
+            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени. Попробуйте позже.")
+            return
         except Exception as e:
             await inter.edit_original_message(f"Ошибка получения данных: {e}")
             return
@@ -201,61 +210,90 @@ class GuildEvents(commands.Cog):
         report = self._format_stats_table("📊 **Итоги последней ТБ (автоотчёт)**", stats)
         await inter.edit_original_message(report)
 
-    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ")
-    async def tb_player(self, inter: disnake.ApplicationCommandInteraction, user: disnake.User):
+    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ (выберите из списка)")
+    async def tb_player(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        name: str = commands.Param(
+            description="Имя игрока в базе",
+            autocomplete_callback=lambda inter, user_input: self.autocomplete_player_name(inter, user_input)
+        )
+    ):
         await inter.response.defer()
+        # Ищем allycode по введённому имени (или части имени)
+        mapping = database.get_user_mapping_by_name(name)
+        if not mapping:
+            await inter.edit_original_message("Игрок не найден. Сначала выполните `/sync_members`.")
+            return
+
+        allycode = mapping[0]
+        ingame_name = mapping[1] if len(mapping) > 1 else name
+
         try:
-            guild = self.comlink.get_guild(self.guild_id, include_recent_guild_activity_info=True)
-        except Exception as e:
-            await inter.edit_original_message(f"Ошибка получения данных: {e}")
-            return
+            player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
+            player_id = player.get("playerId")
+            if not player_id:
+                await inter.edit_original_message("Не удалось определить игровой ID.")
+                return
 
-        result = guild.get("recentTerritoryBattleResult", [])
-        if not result:
-            await inter.edit_original_message("Нет данных о последней ТБ.")
-            return
-
-        allycode = database.get_allycode_by_discord_id(str(user.id))
-        if not allycode:
-            await inter.edit_original_message(
-                f"Пользователь {user.mention} не привязан к игре. Сначала выполните `/sync_members`."
+            guild = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
+                ),
+                timeout=15.0
             )
-            return
+            result = guild.get("recentTerritoryBattleResult", [])
+            if not result:
+                await inter.edit_original_message("Нет данных о последней ТБ.")
+                return
 
-        player = self.comlink.get_player(allycode=allycode)
-        player_id = player.get("playerId")
-        if not player_id:
-            await inter.edit_original_message("Не удалось определить игровой ID.")
-            return
+            stats = self.parse_player_stats(result, player_id)
+            if stats["summary"] == 0:
+                await inter.edit_original_message(f"{ingame_name} не участвовал в последней ТБ.")
+                return
 
-        stats = self.parse_player_stats(result, player_id)
-        if stats["summary"] == 0:
-            await inter.edit_original_message(f"{user.mention} не участвовал в последней ТБ.")
-            return
+            embed = disnake.Embed(title=f"📊 Детальная статистика: {ingame_name}", color=0x3498db)
+            embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
+            embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
+            embed.add_field(name="Боевые миссии (усп/поп)",
+                            value=f"{stats['strike_encounter']} / {stats['strike_attempt']}", inline=True)
+            embed.add_field(name="Деплой (юнитов)", value=str(stats['unit_donated']), inline=True)
+            embed.add_field(name="Спецмиссии (усп/поп)",
+                            value=f"{stats['covert_complete']} / {stats['covert_attempt']}", inline=True)
 
-        embed = disnake.Embed(title=f"📊 Детальная статистика: {user.display_name}", color=0x3498db)
-        embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
-        embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
-        embed.add_field(name="Боевые миссии (усп/поп)", value=f"{stats['strike_encounter']} / {stats['strike_attempt']}", inline=True)
-        embed.add_field(name="Деплой (юнитов)", value=str(stats['unit_donated']), inline=True)
-        embed.add_field(name="Спецмиссии (усп/поп)", value=f"{stats['covert_complete']} / {stats['covert_attempt']}", inline=True)
+            rounds = []
+            for r in range(1, 7):
+                key = f"summary_round_{r}"
+                if key in stats["rounds"]:
+                    rounds.append(f"Раунд {r}: {stats['rounds'][key]:,}")
+            if rounds:
+                embed.add_field(name="Очки по раундам", value="\n".join(rounds), inline=False)
 
-        rounds = []
-        for r in range(1, 7):
-            key = f"summary_round_{r}"
-            if key in stats["rounds"]:
-                rounds.append(f"Раунд {r}: {stats['rounds'][key]:,}")
-        if rounds:
-            embed.add_field(name="Очки по раундам", value="\n".join(rounds), inline=False)
+            embed.set_footer(text="Данные из последней завершённой ТБ")
+            await inter.edit_original_message(embed=embed)
+        except asyncio.TimeoutError:
+            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
+        except Exception as e:
+            await inter.edit_original_message(f"Ошибка: {e}")
 
-        embed.set_footer(text="Данные из последней завершённой ТБ")
-        await inter.edit_original_message(embed=embed)
+    @staticmethod
+    async def autocomplete_player_name(inter: disnake.ApplicationCommandInteraction, user_input: str):
+        """Автозаполнение имён из таблицы user_mapping."""
+        if not user_input:
+            return []
+        mappings = database.get_all_user_mappings()  # возвращает список (discord_id, ally_code, ingame_name)
+        suggestions = []
+        for disc_id, ally, iname in mappings:
+            if iname and user_input.lower() in iname.lower():
+                suggestions.append(iname)
+        # Ограничим число подсказок
+        return suggestions[:25] if suggestions else ["Нет совпадений"]
 
     @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам гильдии")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
         try:
-            guild = self.comlink.get_guild(self.guild_id)
+            guild = await asyncio.to_thread(self.comlink.get_guild, self.guild_id)
         except Exception as e:
             await inter.edit_original_message(f"Ошибка получения гильдии: {e}")
             return
@@ -273,16 +311,14 @@ class GuildEvents(commands.Cog):
             player_name = m.get("playerName")
             if not player_id or not player_name:
                 continue
-            # Получаем allycode из профиля
             try:
-                player = self.comlink.get_player(player_id=player_id)
+                player = await asyncio.to_thread(self.comlink.get_player, player_id=player_id)
                 allycode = player.get("allyCode")
                 if not allycode:
                     continue
             except Exception:
                 continue
 
-            # Ищем Discord-пользователя по имени (сравнение без учёта регистра и спецсимволов)
             normalized = re.sub(r'\W+', '', player_name).lower()
             member_found = None
             for discord_member in discord_guild.members:
@@ -293,7 +329,6 @@ class GuildEvents(commands.Cog):
                 not_found.append(player_name)
                 continue
 
-            # Сохраняем в БД
             database.set_user_mapping(str(member_found.id), str(allycode), player_name)
             linked += 1
 
