@@ -7,7 +7,7 @@ from collections import defaultdict
 import re
 import database
 from swgoh_comlink import SwgohComlink
-from cogs.violations import autocomplete_players  # <-- Импорт функции автозаполнения
+from cogs.violations import autocomplete_players
 import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -225,9 +225,14 @@ class GuildEvents(commands.Cog):
         name: str = commands.Param(description="Выберите игрока из списка", autocomplete=autocomplete_players)
     ):
         await inter.response.defer()
-        # В violations.py autocomplete_players возвращает строку вида "Имя (allycode)"
-        # Нужно извлечь allycode
-        allycode = name.split("(")[-1].rstrip(")") if "(" in name else name
+
+        # Получаем allycode из кэша состава гильдии (как в violations.py)
+        cache = self.bot.guild_roster_cache
+        if not cache or name not in cache:
+            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава. Дождитесь загрузки состава.")
+            return
+        allycode = cache[name]
+
         try:
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
