@@ -12,28 +12,6 @@ import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
-# Словарь для перевода технических ключей зон в читаемый вид
-ZONE_KEY_TRANSLATIONS = {
-    "summary_zone": "Очки за зону",
-    "power_zone": "Мощь развёрнутых отрядов",
-    "strike_encounter": "Боевые миссии (успешно)",
-    "strike_attempt": "Боевые миссии (попытки)",
-    "unit_donated": "Юнитов в деплой",
-    "covert_complete": "Спецмиссии (выполнено)",
-    "covert_attempt": "Спецмиссии (попытки)",
-    "covert_round_attempted": "Попыток спецмиссий (раундов)",
-    "covert_round_attempted_mission": "Попыток спецмиссий (миссий)",
-    "strike_attempt_round": "Попыток БМ (раунд)",
-    "strike_encounter_round": "Успешных БМ (раунд)",
-    "unit_donated_round": "Юнитов в деплой (раунд)",
-    "unit_donated_zone": "Юнитов в деплой (зона)",
-    "summary_round": "Очки (раунд)",
-    "power_round": "Мощь (раунд)",
-    "strike_attempt_zone": "Попыток БМ (зона)",
-    "strike_encounter_zone": "Успешных БМ (зона)",
-    "covert_complete_mission": "Спецмиссия выполнена (миссия)",
-}
-
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -135,13 +113,19 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока ------------------
+    def _extract_zone_name(self, map_stat_id):
+        """Превращает техническое имя зоны в читаемое (например, 'power_zone_tb3_phase03_conflict01' -> 'Конфликт 1')"""
+        parts = map_stat_id.split("_")
+        # Ищем ключевые слова: conflict, bonus, covert и т.д.
+        for i, part in enumerate(parts):
+            if part in ("conflict", "bonus", "covert", "strike", "power"):
+                suffix = parts[i+1] if i+1 < len(parts) else ""
+                return f"{part.capitalize()} {suffix}"
+        # Если не нашли, возвращаем последний значимый кусок
+        return parts[-1] if parts else map_stat_id
+
     def parse_player_stats_detailed(self, tb_result, member_id):
-        """
-        Собирает полную информацию по всем зонам для одного игрока.
-        Возвращает кортеж:
-            total_score (int),
-            zones_data (list of dicts: {"mapStatId": ..., "phase": ..., "actions": {русское_описание: значение}})
-        """
+        """Собирает агрегированные показатели по каждой зоне для одного игрока."""
         total_score = 0
         zones_data = []
 
@@ -150,7 +134,8 @@ class GuildEvents(commands.Cog):
             phase_match = re.search(r'phase(\d+)', map_stat)
             phase_num = int(phase_match.group(1)) if phase_match else 0
 
-            actions = defaultdict(int)
+            # Инициализируем счётчики для этой зоны
+            zone_stats = defaultdict(int)
             for ps in zone.get("playerStat", []):
                 if ps.get("memberId") != member_id:
                     continue
@@ -158,21 +143,37 @@ class GuildEvents(commands.Cog):
                     if key == "memberId":
                         continue
                     try:
-                        int_val = int(value)
+                        val = int(value)
                     except (ValueError, TypeError):
                         continue
-                    # Переводим ключ в читаемый вид, если возможно
-                    translated = ZONE_KEY_TRANSLATIONS.get(key, key)
-                    actions[translated] += int_val
+                    zone_stats[key] += val
                     if key == "score":
-                        total_score += int_val
+                        total_score += val
 
-            if actions:
-                zones_data.append({
-                    "mapStatId": map_stat,
-                    "phase": phase_num,
-                    "actions": dict(actions)
-                })
+            if not zone_stats:
+                continue
+
+            # Извлекаем ключевые показатели
+            score = zone_stats.get("score", 0)
+            power = zone_stats.get("power", 0)
+            strike_enc = zone_stats.get("strike_encounter", 0)
+            strike_att = zone_stats.get("strike_attempt", 0)
+            unit_don = zone_stats.get("unit_donated", 0)
+            covert_com = zone_stats.get("covert_complete", 0)
+            covert_att = zone_stats.get("covert_attempt", 0)
+
+            zone_name = self._extract_zone_name(map_stat)
+            zones_data.append({
+                "phase": phase_num,
+                "name": zone_name,
+                "score": score,
+                "power": power,
+                "strike_encounter": strike_enc,
+                "strike_attempt": strike_att,
+                "unit_donated": unit_don,
+                "covert_complete": covert_com,
+                "covert_attempt": covert_att,
+            })
 
         return total_score, zones_data
 
@@ -181,23 +182,23 @@ class GuildEvents(commands.Cog):
         lines = [f"Детальная статистика: {player_name}"]
         lines.append(f"Общий счёт: {total_score:,}")
         lines.append("")
-        lines.append("=" * 60)
+        lines.append("=" * 70)
 
-        # Группируем по фазам
         by_phase = defaultdict(list)
-        for zone in zones_data:
-            by_phase[zone["phase"]].append(zone)
+        for z in zones_data:
+            by_phase[z["phase"]].append(z)
 
         for phase_num in sorted(by_phase):
             lines.append(f"Фаза {phase_num}")
-            lines.append("-" * 40)
-            for zone in by_phase[phase_num]:
-                # Краткое имя зоны: возьмём последний кусок mapStatId (после последнего подчёркивания) или просто обрежем
-                short_name = zone["mapStatId"].split("_")[-1] if "_" in zone["mapStatId"] else zone["mapStatId"]
-                lines.append(f"  {short_name}:")
-                for action, val in sorted(zone["actions"].items()):
-                    lines.append(f"    {action}: {val:,}")
-                lines.append("")
+            lines.append("-" * 60)
+            for z in by_phase[phase_num]:
+                bm = f"{z['strike_encounter']}/{z['strike_attempt']}"
+                sm = f"{z['covert_complete']}/{z['covert_attempt']}"
+                lines.append(
+                    f"  {z['name']:<20} | Очки: {z['score']:>12,} | Мощь: {z['power']:>10,} | БМ: {bm:<8} | Деплой: {z['unit_donated']:<4} | СМ: {sm}"
+                )
+            lines.append("")
+
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
@@ -298,7 +299,6 @@ class GuildEvents(commands.Cog):
 
             report = self.format_detailed_report(name, total_score, zones_data)
             await self.send_as_file(inter.channel, report, f"tb_detail_{name}.txt")
-            # Дополнительно отправим короткий Embed
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
             embed.add_field(name="Общий счёт", value=f"{total_score:,}", inline=False)
             embed.set_footer(text="Полный отчёт отправлен файлом.")
