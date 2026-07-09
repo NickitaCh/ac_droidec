@@ -82,6 +82,7 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Вспомогательные функции ------------------
     def _collect_guild_stats(self, tb_result, player_names):
+        """Собирает только суммарные очки (score) по зонам для каждого игрока."""
         stats = {}
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
@@ -91,37 +92,22 @@ class GuildEvents(commands.Cog):
                 if member_id not in stats:
                     stats[member_id] = {
                         "name": player_names.get(member_id, member_id[:8] + "…"),
-                        "summary": 0,
-                        "power": 0,
-                        "strike_encounter": 0,
-                        "strike_attempt": 0,
-                        "unit_donated": 0,
-                        "covert_complete": 0,
-                        "covert_attempt": 0,
+                        "score": 0,
                     }
-                s = stats[member_id]
-                for key in s:
-                    if key == "name":
-                        continue
-                    val = ps.get(key)
-                    if val is not None:
-                        s[key] += int(val)
+                stats[member_id]["score"] += int(ps.get("score", 0))
         return stats
 
     def _format_stats_table(self, title, stats):
+        """Форматирует таблицу с единственной колонкой 'Очки'."""
         lines = [title]
         lines.append("")
-        header = f"{'Игрок':<20} {'Очки':>15} {'Мощь':>12} {'БМ(усп/поп)':>12} {'Деплой':>7} {'СМ(усп/поп)':>10}"
+        header = f"{'Игрок':<20} {'Очки':>15}"
         lines.append(header)
-        lines.append("-" * len(header))
-        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["summary"], reverse=True)
+        lines.append("-" * 35)
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["score"], reverse=True)
         for member_id, s in sorted_stats:
             name = s["name"][:19]
-            bm = f"{s['strike_encounter']}/{s['strike_attempt']}"
-            sm = f"{s['covert_complete']}/{s['covert_attempt']}"
-            lines.append(
-                f"{name:<20} {s['summary']:>15,} {s['power']:>12,} {bm:>12} {s['unit_donated']:>7} {sm:>10}"
-            )
+            lines.append(f"{name:<20} {s['score']:>15,}")
         return "\n".join(lines)
 
     async def send_as_file(self, channel, content, filename):
@@ -132,6 +118,7 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     def parse_player_stats(self, tb_result, member_id):
+        """Собирает детальную статистику игрока по всем зонам (включая агрегированные поля)."""
         stats = {
             "summary": 0,
             "power": 0,
@@ -226,7 +213,7 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
-        # Получаем allycode из кэша состава гильдии (как в violations.py)
+        # Получаем allycode из кэша состава гильдии
         cache = self.bot.guild_roster_cache
         if not cache or name not in cache:
             await inter.edit_original_message("Ошибка: игрок не найден в кэше состава. Дождитесь загрузки состава.")
@@ -234,12 +221,14 @@ class GuildEvents(commands.Cog):
         allycode = cache[name]
 
         try:
+            # Получаем профиль игрока и его playerId
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
                 return
 
+            # Загружаем гильдию с историей ТБ
             guild = await asyncio.wait_for(
                 asyncio.to_thread(
                     self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
@@ -251,11 +240,23 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            stats = self.parse_player_stats(result, player_id)
+            # Ищем memberId в гильдии, соответствующий playerId (для точного сопоставления)
+            member_id = None
+            for m in guild.get("member", []):
+                if m.get("playerId") == player_id:
+                    member_id = player_id  # используем тот же playerId
+                    break
+            if not member_id:
+                # Если не нашли (редкий случай), берём playerId напрямую
+                member_id = player_id
+
+            # Собираем статистику
+            stats = self.parse_player_stats(result, member_id)
             if stats["summary"] == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
+            # Формируем Embed
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
             embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
             embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
