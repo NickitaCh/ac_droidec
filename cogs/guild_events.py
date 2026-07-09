@@ -12,6 +12,18 @@ import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# Словари для перевода
+SIDE_MAP = {"light": "Свет", "dark": "Тьма", "mixed": "Смешанная"}
+METRIC_LABELS = {
+    "summary": "Очки",
+    "power": "Мощь",
+    "strike_encounter": "БЗ (усп)",
+    "strike_attempt": "БЗ (поп)",
+    "unit_donated": "Деплой",
+    "covert_complete": "ОЗ (усп)",
+    "covert_attempt": "ОЗ (поп)",
+}
+
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -113,11 +125,53 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока ------------------
+    def _extract_planet_info(self, map_stat_id):
+        """Извлекает из mapStatId фазу, сторону и читаемое имя планеты."""
+        phase_match = re.search(r'phase(\d+)', map_stat_id)
+        phase = int(phase_match.group(1)) if phase_match else 0
+        side = "Неизв."
+        for s in SIDE_MAP:
+            if s in map_stat_id:
+                side = SIDE_MAP[s]
+                break
+        # Определяем тип планеты (conflict, bonus, covert)
+        parts = map_stat_id.split("_")
+        planet_type = ""
+        planet_num = ""
+        for i, part in enumerate(parts):
+            if part in ("conflict", "bonus", "covert"):
+                planet_type = part.capitalize()
+                if i+1 < len(parts) and parts[i+1].isdigit():
+                    planet_num = parts[i+1]
+                break
+        name = f"{planet_type} {planet_num}" if planet_num else planet_type
+        if side:
+            name += f" ({side})"
+        return phase, side, name.strip()
+
+    def _get_metric(self, map_stat_id):
+        """Возвращает ключ метрики (summary, power, strike_encounter и т.д.) из mapStatId."""
+        if map_stat_id.startswith("summary_zone"):
+            return "summary"
+        elif map_stat_id.startswith("power_zone"):
+            return "power"
+        elif map_stat_id.startswith("strike_encounter_zone"):
+            return "strike_encounter"
+        elif map_stat_id.startswith("strike_attempt_zone"):
+            return "strike_attempt"
+        elif map_stat_id.startswith("unit_donated_zone"):
+            return "unit_donated"
+        elif map_stat_id.startswith("covert_complete_mission"):
+            return "covert_complete"
+        elif map_stat_id.startswith("covert_round_attempted_mission"):
+            return "covert_attempt"
+        else:
+            # Для зон типа summary, power без _zone (общие) – вернём None
+            return None
+
     def parse_player_stats_detailed(self, tb_result, member_id):
         """
-        Собирает показатели по фазам 1-6. Сначала ищет специальную зону с ключом 'summary'
-        (общая агрегированная статистика), затем дополняет разбивку по раундам.
-        Если такой зоны нет – обходит все обычные зоны.
+        Собирает общие итоги, разбивку по фазам (1-6) и таблицу по планетам.
         """
         totals = {
             "summary": 0, "power": 0, "unit_donated": 0,
@@ -128,120 +182,75 @@ class GuildEvents(commands.Cog):
                       "combat_attempts": 0, "combat_wins": 0,
                       "special_attempts": 0, "special_wins": 0}
                   for i in range(1, 7)}
+        # Планеты: ключ = (фаза, имя_планеты), значение = словарь метрик
+        planets = defaultdict(lambda: {"summary": 0, "power": 0, "strike_encounter": 0,
+                                       "strike_attempt": 0, "unit_donated": 0,
+                                       "covert_complete": 0, "covert_attempt": 0})
 
-        # 1) Ищем "общую" зону, где есть ключ 'summary' для данного игрока
-        summary_zone = None
+        # 1) Собираем общие и раундовые ключи
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
-                if ps.get("memberId") == member_id and "summary" in ps:
-                    summary_zone = zone
-                    break
-            if summary_zone:
-                break
-
-        if summary_zone:
-            # Собираем все данные из этой зоны
-            for ps in summary_zone.get("playerStat", []):
                 if ps.get("memberId") != member_id:
                     continue
+                # Общие ключи (summary, power, ...)
+                for key in totals:
+                    if key in ps:
+                        totals[key] = int(ps[key])
+                # Ключи раундов
                 for key, value in ps.items():
-                    if key == "memberId":
-                        continue
-                    try:
-                        val = int(value)
-                    except (ValueError, TypeError):
-                        continue
-
-                    # Общие тоталы
-                    if key == "summary":
-                        totals["summary"] += val
-                    elif key == "power":
-                        totals["power"] += val
-                    elif key == "unit_donated":
-                        totals["unit_donated"] += val
-                    elif key == "strike_encounter":
-                        totals["strike_encounter"] += val
-                    elif key == "strike_attempt":
-                        totals["strike_attempt"] += val
-                    elif key == "covert_complete":
-                        totals["covert_complete"] += val
-                    elif key == "covert_attempt":
-                        totals["covert_attempt"] += val
-
-                    # По раундам: summary_round_1, power_round_1 и т.д.
                     round_match = re.search(r'_round_(\d+)$', key)
                     if round_match:
                         round_num = int(round_match.group(1))
                         if 1 <= round_num <= 6:
-                            if "summary_round" in key:
-                                phases[round_num]["points"] += val
-                            elif "power_round" in key:
-                                phases[round_num]["power"] += val
-                            elif "unit_donated_round" in key:
-                                phases[round_num]["deployed"] += val
-                            elif "strike_attempt_round" in key:
-                                phases[round_num]["combat_attempts"] += val
-                            elif "strike_encounter_round" in key:
-                                phases[round_num]["combat_wins"] += val
-                            elif "covert_attempt_round" in key:
-                                phases[round_num]["special_attempts"] += val
-                            elif "covert_complete_round" in key:
-                                phases[round_num]["special_wins"] += val
-        else:
-            # Запасной вариант – собираем из обычных зон
-            for zone in tb_result[0].get("finalStat", []):
-                map_stat = zone.get("mapStatId", "")
-                phase_match = re.search(r'phase(\d+)', map_stat)
-                phase_num = int(phase_match.group(1)) if phase_match else 0
-                if phase_num < 1 or phase_num > 6:
-                    continue
-
-                for ps in zone.get("playerStat", []):
-                    if ps.get("memberId") != member_id:
-                        continue
-                    for key, value in ps.items():
-                        if key == "memberId":
-                            continue
-                        try:
                             val = int(value)
-                        except (ValueError, TypeError):
-                            continue
+                            if "summary_round" in key:
+                                phases[round_num]["points"] = val
+                            elif "power_round" in key:
+                                phases[round_num]["power"] = val
+                            elif "unit_donated_round" in key:
+                                phases[round_num]["deployed"] = val
+                            elif "strike_attempt_round" in key:
+                                phases[round_num]["combat_attempts"] = val
+                            elif "strike_encounter_round" in key:
+                                phases[round_num]["combat_wins"] = val
+                            elif "covert_attempt_round" in key:
+                                phases[round_num]["special_attempts"] = val
+                            elif "covert_complete_round" in key:
+                                phases[round_num]["special_wins"] = val
 
-                        if key == "score":
-                            totals["summary"] += val
-                        elif key == "power":
-                            totals["power"] += val
-                        elif key == "unit_donated":
-                            totals["unit_donated"] += val
-                        elif key == "strike_attempt":
-                            totals["strike_attempt"] += val
-                        elif key == "strike_encounter":
-                            totals["strike_encounter"] += val
-                        elif key == "covert_attempt":
-                            totals["covert_attempt"] += val
-                        elif key == "covert_complete":
-                            totals["covert_complete"] += val
+        # 2) Собираем данные по планетам из зон с префиксами _zone, _mission
+        for zone in tb_result[0].get("finalStat", []):
+            map_stat = zone.get("mapStatId", "")
+            metric = self._get_metric(map_stat)
+            if metric is None:
+                continue  # это общая зона, пропускаем
+            phase, side, planet_name = self._extract_planet_info(map_stat)
+            for ps in zone.get("playerStat", []):
+                if ps.get("memberId") != member_id:
+                    continue
+                value = int(ps.get("score", 0))
+                # score в такой зоне означает значение метрики (например, для strike_encounter_zone score = количество успешных БЗ)
+                planets[(phase, planet_name)][metric] += value
 
-                        # По фазе
-                        if key == "score":
-                            phases[phase_num]["points"] += val
-                        elif key == "power":
-                            phases[phase_num]["power"] += val
-                        elif key == "unit_donated":
-                            phases[phase_num]["deployed"] += val
-                        elif key == "strike_attempt":
-                            phases[phase_num]["combat_attempts"] += val
-                        elif key == "strike_encounter":
-                            phases[phase_num]["combat_wins"] += val
-                        elif key == "covert_attempt":
-                            phases[phase_num]["special_attempts"] += val
-                        elif key == "covert_complete":
-                            phases[phase_num]["special_wins"] += val
+        # Преобразуем planets в список для удобства
+        planet_list = []
+        for (phase, name), metrics in planets.items():
+            planet_list.append({
+                "phase": phase,
+                "name": name,
+                "summary": metrics["summary"],
+                "power": metrics["power"],
+                "strike_encounter": metrics["strike_encounter"],
+                "strike_attempt": metrics["strike_attempt"],
+                "unit_donated": metrics["unit_donated"],
+                "covert_complete": metrics["covert_complete"],
+                "covert_attempt": metrics["covert_attempt"],
+            })
 
-        return totals, phases
+        return totals, phases, planet_list
 
-    def format_player_report(self, player_name, totals, phases):
-        """Форматирует детальный отчёт в текстовый файл с общей сводкой и таблицей по фазам."""
+    def format_player_report(self, player_name, totals, phases, planets):
+        """Форматирует полный отчёт в текстовый файл."""
         lines = [
             f"Детальная статистика: {player_name}",
             f"Всего очков: {totals['summary']:,}",
@@ -250,6 +259,7 @@ class GuildEvents(commands.Cog):
             f"ОЗ (усп/поп): {totals['covert_complete']}/{totals['covert_attempt']}",
             f"Мощь отрядов: {totals['power']:,}",
             "",
+            "=== Сводка по фазам ===",
             "Фаза  Очки           Мощь       Деплой  БЗ(усп/поп)  ОЗ(усп/поп)",
             "-" * 70
         ]
@@ -267,6 +277,21 @@ class GuildEvents(commands.Cog):
             lines.append(
                 f"{phase:4}  {points:>13,}  {power:>10,}  {deployed:>6}  {bz_str:>11}  {oz_str:>11}"
             )
+
+        if planets:
+            lines.append("")
+            lines.append("=== Детализация по планетам ===")
+            lines.append(f"{'Планета':<30} {'Фаза':<5} {'Очки':>12} {'Мощь':>10} {'БЗ(усп)':>8} {'БЗ(поп)':>8} {'Деплой':>7} {'ОЗ(усп)':>8} {'ОЗ(поп)':>8}")
+            lines.append("-" * 100)
+            # Сортируем по фазе, затем по имени
+            planets_sorted = sorted(planets, key=lambda x: (x["phase"], x["name"]))
+            for p in planets_sorted:
+                lines.append(
+                    f"{p['name']:<30} {p['phase']:<5} {p['summary']:>12,} {p['power']:>10,} "
+                    f"{p['strike_encounter']:>8} {p['strike_attempt']:>8} {p['unit_donated']:>7} "
+                    f"{p['covert_complete']:>8} {p['covert_attempt']:>8}"
+                )
+
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
@@ -360,12 +385,12 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            totals, phases = self.parse_player_stats_detailed(result, player_id)
+            totals, phases, planets = self.parse_player_stats_detailed(result, player_id)
             if totals["summary"] == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            report = self.format_player_report(name, totals, phases)
+            report = self.format_player_report(name, totals, phases, planets)
             await self.send_as_file(inter.channel, report, f"tb_detail_{name}.txt")
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
             embed.add_field(name="Общий счёт", value=f"{totals['summary']:,}", inline=False)
