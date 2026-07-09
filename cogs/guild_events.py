@@ -118,16 +118,38 @@ class GuildEvents(commands.Cog):
             await channel.send(file=disnake.File(f.name, filename=filename))
 
     def parse_player_stats(self, tb_result, member_id):
-        """Собирает суммарный счёт и разбивку по зонам для одного игрока."""
+        """
+        Агрегирует статистику по фазам и типам действий.
+        Возвращает:
+            total_score: общий счёт,
+            phases: словарь {номер_фазы: {"points": сумма_очков, "missions": количество_БМ, "deploy": количество_юнитов}}
+        """
         total_score = 0
-        zones = []
+        phases = defaultdict(lambda: {"points": 0, "missions": 0, "deploy": 0})
+
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
-                if ps.get("memberId") == member_id:
-                    score = int(ps.get("score", 0))
-                    total_score += score
-                    zones.append((zone.get("mapStatId", "неизвестная зона"), score))
-        return {"score": total_score, "zones": zones}
+                if ps.get("memberId") != member_id:
+                    continue
+                score = int(ps.get("score", 0))
+                total_score += score
+
+                # Извлекаем номер фазы из ключа зоны
+                map_stat = zone.get("mapStatId", "")
+                phase_match = re.search(r'phase(\d+)', map_stat)
+                phase_num = int(phase_match.group(1)) if phase_match else 0
+
+                # Определяем тип действия по имени ключа
+                key = map_stat
+                if "strike_encounter" in key:
+                    phases[phase_num]["missions"] += int(ps.get("strike_encounter", 0))
+                elif "unit_donated" in key:
+                    phases[phase_num]["deploy"] += int(ps.get("unit_donated", 0))
+                else:
+                    # Остальное (power, summary и т.п.) считаем как очки
+                    phases[phase_num]["points"] += score
+
+        return {"total_score": total_score, "phases": dict(phases)}
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
@@ -224,17 +246,20 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            # Используем player_id как member_id
             stats = self.parse_player_stats(result, player_id)
-            if stats["score"] == 0:
+            if stats["total_score"] == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
-            embed.add_field(name="Общий счёт", value=f"{stats['score']:,}", inline=False)
-            if stats["zones"]:
-                zone_text = "\n".join([f"{z[0]}: {z[1]:,}" for z in stats["zones"][:10]])
-                embed.add_field(name="Очки по зонам (первые 10)", value=zone_text, inline=False)
+            embed.add_field(name="Общий счёт", value=f"{stats['total_score']:,}", inline=False)
+
+            # Выводим по фазам (1-6) основные показатели
+            for phase_num in sorted(stats["phases"]):
+                phase_data = stats["phases"][phase_num]
+                value = f"Очки: {phase_data['points']:,}\nБМ: {phase_data['missions']}\nДеплой: {phase_data['deploy']}"
+                embed.add_field(name=f"Фаза {phase_num}", value=value, inline=False)
+
             embed.set_footer(text="Данные из последней завершённой ТБ")
             await inter.edit_original_message(embed=embed)
 
