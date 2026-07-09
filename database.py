@@ -231,3 +231,13 @@ def get_allycode_by_discord_id(discord_id: str) -> str | None:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+def set_user_mapping(discord_id: str, ally_code: str, ingame_name: str = ""):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR REPLACE INTO user_mapping (discord_id, ally_code, ingame_name)
+        VALUES (?, ?, ?)
+    """, (discord_id, ally_code, ingame_name))
+    conn.commit()
+    conn.close()

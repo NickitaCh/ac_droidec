@@ -3,6 +3,7 @@ from disnake.ext import commands, tasks
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+import re
 import database
 from swgoh_comlink import SwgohComlink
 
@@ -22,6 +23,7 @@ class GuildEvents(commands.Cog):
     def cog_unload(self):
         self.monitor_loop.cancel()
 
+    # ------------------ Мониторинг событий ------------------
     @tasks.loop(minutes=5)
     async def monitor_loop(self):
         await self.bot.wait_until_ready()
@@ -31,7 +33,6 @@ class GuildEvents(commands.Cog):
             print(f"Ошибка получения данных гильдии: {e}")
             return
 
-        # Проверяем ТБ
         tb_status = guild.get("territoryBattleStatus", [])
         current_tb = tb_status[0] if tb_status else None
         if current_tb and self.last_tb_status and current_tb.get("status") != self.last_tb_status.get("status"):
@@ -39,7 +40,6 @@ class GuildEvents(commands.Cog):
                 await self.generate_tb_report(guild)
         self.last_tb_status = current_tb
 
-        # Проверяем ТВ (пока заглушка)
         tw_status = guild.get("territoryWarStatus", [])
         current_tw = tw_status[0] if tw_status else None
         if current_tw and self.last_tw_status and current_tw.get("status") != self.last_tw_status.get("status"):
@@ -48,65 +48,82 @@ class GuildEvents(commands.Cog):
         self.last_tw_status = current_tw
 
     async def generate_tb_report(self, guild):
-        """Создаёт автоматический отчёт по завершённой ТБ и отправляет в офицерский канал."""
         result = guild.get("recentTerritoryBattleResult", [])
         if not result:
-            await self.notify_officers(
-                "TB_REPORT_NEEDED",
-                "Территориальная Битва завершена, но автоматический отчёт не сформирован. "
-                "Введите данные вручную через `/tb_report add`."
-            )
+            await self.notify_officers("TB_REPORT_NEEDED", "ТБ завершена, но отчёт пуст. Используйте ручной ввод.")
             return
 
         members = guild.get("member", [])
         player_names = {m["playerId"]: m["playerName"] for m in members if "playerId" in m and "playerName" in m}
-
-        total_scores = defaultdict(int)
-        for zone in result[0].get("finalStat", []):
-            for ps in zone.get("playerStat", []):
-                member_id = ps.get("memberId")
-                if member_id:
-                    total_scores[member_id] += int(ps.get("score", 0))
-
-        if not total_scores:
-            await self.notify_officers("TB_REPORT_EMPTY", "Нет данных по очкам игроков.")
+        stats = self._collect_guild_stats(result, player_names)
+        if not stats:
+            await self.notify_officers("TB_REPORT_EMPTY", "Нет данных по очкам.")
             return
 
-        sorted_scores = sorted(total_scores.items(), key=lambda x: x[1], reverse=True)
-        lines = ["📊 **Итоги Территориальной Битвы (автоматический отчёт)**"]
-        for member_id, score in sorted_scores:
-            name = player_names.get(member_id, member_id[:8] + "…")
-            lines.append(f"{name}: {score} очков")
-
-        report = "\n".join(lines)
+        report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
         channel = self.bot.get_channel(self.officer_channel_id)
         if channel:
             await channel.send(report)
-        else:
-            print("Офицерский канал не найден")
 
     async def generate_tw_report(self, guild):
-        """Аналогично для ТВ (пока заглушка)."""
-        result = guild.get("recentTerritoryWarResult", [])
-        if not result:
-            await self.notify_officers(
-                "TW_REPORT_NEEDED",
-                "Территориальная Война завершена, но автоматический отчёт не сформирован. "
-                "Введите данные вручную через `/tw_report add`."
-            )
-            return
-        report = "Автоматический отчёт по ТВ пока не реализован."
-        channel = self.bot.get_channel(self.officer_channel_id)
-        if channel:
-            await channel.send(report)
+        # Аналогично TB – можно добавить позже
+        pass
 
     async def notify_officers(self, event_type, message):
         channel = self.bot.get_channel(self.officer_channel_id)
         if channel:
             await channel.send(f"📢 {message}")
 
+    # ------------------ Вспомогательные функции ------------------
+    def _collect_guild_stats(self, tb_result, player_names):
+        """Собирает статистику по всем игрокам из данных ТБ."""
+        stats = {}  # memberId -> dict
+        for zone in tb_result[0].get("finalStat", []):
+            for ps in zone.get("playerStat", []):
+                member_id = ps.get("memberId")
+                if not member_id:
+                    continue
+                if member_id not in stats:
+                    stats[member_id] = {
+                        "name": player_names.get(member_id, member_id[:8] + "…"),
+                        "summary": 0,
+                        "power": 0,
+                        "strike_encounter": 0,
+                        "strike_attempt": 0,
+                        "unit_donated": 0,
+                        "covert_complete": 0,
+                        "covert_attempt": 0,
+                    }
+                s = stats[member_id]
+                for key in s:
+                    if key == "name":
+                        continue
+                    val = ps.get(key)
+                    if val is not None:
+                        s[key] += int(val)
+        return stats
+
+    def _format_stats_table(self, title, stats):
+        """Форматирует таблицу с показателями."""
+        lines = [title]
+        lines.append("```")
+        header = f"{'Игрок':<20} {'Очки':>15} {'Мощь':>12} {'БМ(усп/поп)':>12} {'Деплой':>7} {'СМ(усп/поп)':>10}"
+        lines.append(header)
+        lines.append("-" * len(header))
+        # Сортировка по убыванию очков
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["summary"], reverse=True)
+        for member_id, s in sorted_stats:
+            name = s["name"][:19]  # обрезаем длинные имена
+            bm = f"{s['strike_encounter']}/{s['strike_attempt']}"
+            sm = f"{s['covert_complete']}/{s['covert_attempt']}"
+            lines.append(
+                f"{name:<20} {s['summary']:>15,} {s['power']:>12,} {bm:>12} {s['unit_donated']:>7} {sm:>10}"
+            )
+        lines.append("```")
+        return "\n".join(lines)
+
     def parse_player_stats(self, tb_result, member_id):
-        """Собирает агрегированные показатели для одного игрока по всем зонам."""
+        """Детальная статистика одного игрока."""
         stats = {
             "summary": 0,
             "power": 0,
@@ -115,7 +132,7 @@ class GuildEvents(commands.Cog):
             "unit_donated": 0,
             "covert_complete": 0,
             "covert_attempt": 0,
-            "rounds": defaultdict(int),  # "summary_round_N" -> value
+            "rounds": defaultdict(int),
         }
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
@@ -136,23 +153,18 @@ class GuildEvents(commands.Cog):
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
-    @tb_report.sub_command(name="add", description="Добавить результат игрока в ручной отчёт по ТБ")
-    async def tb_add(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        user: disnake.User,
-        score: int = commands.Param(description="Количество очков/миссий")
-    ):
+    @tb_report.sub_command(name="add", description="Добавить результат игрока в ручной отчёт")
+    async def tb_add(self, inter, user: disnake.User, score: int):
         database.add_manual_score("tb", str(user.id), score)
-        await inter.response.send_message(f"✅ {user.mention} добавлен с результатом {score}", ephemeral=True)
+        await inter.response.send_message(f"✅ {user.mention} добавлен с {score} очков", ephemeral=True)
 
-    @tb_report.sub_command(name="post", description="Опубликовать итоговый ручной отчёт по ТБ")
+    @tb_report.sub_command(name="post", description="Опубликовать ручной отчёт")
     async def tb_post(self, inter: disnake.ApplicationCommandInteraction):
         rows = database.get_manual_scores("tb")
         if not rows:
-            await inter.response.send_message("Нет данных для отчёта.", ephemeral=True)
+            await inter.response.send_message("Нет данных для ручного отчёта.", ephemeral=True)
             return
-        report = "📊 **Итоги Территориальной Битвы (ручной ввод):**\n"
+        report = "📊 **Итоги ТБ (ручной ввод):**\n"
         for disc_id, score in rows:
             member = inter.guild.get_member(int(disc_id))
             name = member.display_name if member else disc_id
@@ -165,13 +177,13 @@ class GuildEvents(commands.Cog):
         else:
             await inter.response.send_message("Офицерский канал не найден.", ephemeral=True)
 
-    @tb_report.sub_command(name="last", description="Показать автоматическую сводку за последнюю завершённую ТБ")
+    @tb_report.sub_command(name="last", description="Расширенная сводка последней завершённой ТБ")
     async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
         try:
             guild = self.comlink.get_guild(self.guild_id, include_recent_guild_activity_info=True)
         except Exception as e:
-            await inter.edit_original_message(f"Ошибка получения данных гильдии: {e}")
+            await inter.edit_original_message(f"Ошибка получения данных: {e}")
             return
 
         result = guild.get("recentTerritoryBattleResult", [])
@@ -181,38 +193,21 @@ class GuildEvents(commands.Cog):
 
         members = guild.get("member", [])
         player_names = {m["playerId"]: m["playerName"] for m in members if "playerId" in m and "playerName" in m}
-
-        total_scores = defaultdict(int)
-        for zone in result[0].get("finalStat", []):
-            for ps in zone.get("playerStat", []):
-                member_id = ps.get("memberId")
-                if member_id:
-                    total_scores[member_id] += int(ps.get("score", 0))
-
-        if not total_scores:
+        stats = self._collect_guild_stats(result, player_names)
+        if not stats:
             await inter.edit_original_message("Нет очков в последней ТБ.")
             return
 
-        sorted_scores = sorted(total_scores.items(), key=lambda x: x[1], reverse=True)
-        lines = ["📊 **Итоги последней ТБ (автоматический отчёт)**"]
-        for member_id, score in sorted_scores:
-            name = player_names.get(member_id, member_id[:8] + "…")
-            lines.append(f"{name}: {score} очков")
-
-        report = "\n".join(lines)
+        report = self._format_stats_table("📊 **Итоги последней ТБ (автоотчёт)**", stats)
         await inter.edit_original_message(report)
 
-    @tb_report.sub_command(name="player", description="Детальная статистика по игроку за последнюю ТБ")
-    async def tb_player(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        user: disnake.User = commands.Param(description="Участник гильдии")
-    ):
+    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ")
+    async def tb_player(self, inter: disnake.ApplicationCommandInteraction, user: disnake.User):
         await inter.response.defer()
         try:
             guild = self.comlink.get_guild(self.guild_id, include_recent_guild_activity_info=True)
         except Exception as e:
-            await inter.edit_original_message(f"Ошибка получения данных гильдии: {e}")
+            await inter.edit_original_message(f"Ошибка получения данных: {e}")
             return
 
         result = guild.get("recentTerritoryBattleResult", [])
@@ -220,11 +215,10 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message("Нет данных о последней ТБ.")
             return
 
-        # Получаем allycode из базы
         allycode = database.get_allycode_by_discord_id(str(user.id))
         if not allycode:
             await inter.edit_original_message(
-                f"Пользователь {user.mention} не привязан к игре. Используйте `/register`."
+                f"Пользователь {user.mention} не привязан к игре. Сначала выполните `/sync_members`."
             )
             return
 
@@ -239,30 +233,76 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message(f"{user.mention} не участвовал в последней ТБ.")
             return
 
-        embed = disnake.Embed(
-            title=f"📊 Детальная статистика: {user.display_name}",
-            color=0x3498db
-        )
+        embed = disnake.Embed(title=f"📊 Детальная статистика: {user.display_name}", color=0x3498db)
         embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
-        embed.add_field(name="Мощь развёрнутых отрядов", value=f"{stats['power']:,}", inline=True)
-        embed.add_field(name="Боевые миссии (успешно/попыток)",
-                        value=f"{stats['strike_encounter']} / {stats['strike_attempt']}", inline=True)
-        embed.add_field(name="Юнитов в деплой", value=str(stats['unit_donated']), inline=True)
-        embed.add_field(name="Спецмиссии (выполнено/попыток)",
-                        value=f"{stats['covert_complete']} / {stats['covert_attempt']}", inline=True)
+        embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
+        embed.add_field(name="Боевые миссии (усп/поп)", value=f"{stats['strike_encounter']} / {stats['strike_attempt']}", inline=True)
+        embed.add_field(name="Деплой (юнитов)", value=str(stats['unit_donated']), inline=True)
+        embed.add_field(name="Спецмиссии (усп/поп)", value=f"{stats['covert_complete']} / {stats['covert_attempt']}", inline=True)
 
         rounds = []
         for r in range(1, 7):
             key = f"summary_round_{r}"
             if key in stats["rounds"]:
-                rounds.append(f"**Раунд {r}**: {stats['rounds'][key]:,}")
+                rounds.append(f"Раунд {r}: {stats['rounds'][key]:,}")
         if rounds:
             embed.add_field(name="Очки по раундам", value="\n".join(rounds), inline=False)
 
         embed.set_footer(text="Данные из последней завершённой ТБ")
         await inter.edit_original_message(embed=embed)
 
-    @tb_report.sub_command(name="clear", description="Очистить все ручные записи для ТБ")
+    @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам гильдии")
+    async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+        try:
+            guild = self.comlink.get_guild(self.guild_id)
+        except Exception as e:
+            await inter.edit_original_message(f"Ошибка получения гильдии: {e}")
+            return
+
+        discord_guild = inter.guild
+        if not discord_guild:
+            await inter.edit_original_message("Команда доступна только на сервере.")
+            return
+
+        members = guild.get("member", [])
+        linked = 0
+        not_found = []
+        for m in members:
+            player_id = m.get("playerId")
+            player_name = m.get("playerName")
+            if not player_id or not player_name:
+                continue
+            # Получаем allycode из профиля
+            try:
+                player = self.comlink.get_player(player_id=player_id)
+                allycode = player.get("allyCode")
+                if not allycode:
+                    continue
+            except Exception:
+                continue
+
+            # Ищем Discord-пользователя по имени (сравнение без учёта регистра и спецсимволов)
+            normalized = re.sub(r'\W+', '', player_name).lower()
+            member_found = None
+            for discord_member in discord_guild.members:
+                if re.sub(r'\W+', '', discord_member.display_name).lower() == normalized:
+                    member_found = discord_member
+                    break
+            if not member_found:
+                not_found.append(player_name)
+                continue
+
+            # Сохраняем в БД
+            database.set_user_mapping(str(member_found.id), str(allycode), player_name)
+            linked += 1
+
+        msg = f"✅ Привязано: {linked} игроков."
+        if not_found:
+            msg += f"\nНе найдены на сервере: {', '.join(not_found[:10])}"
+        await inter.edit_original_message(msg)
+
+    @tb_report.sub_command(name="clear", description="Очистить ручные записи для ТБ")
     async def tb_clear(self, inter: disnake.ApplicationCommandInteraction):
         database.clear_manual_scores("tb")
         await inter.response.send_message("Записи очищены.", ephemeral=True)
