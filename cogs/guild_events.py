@@ -12,6 +12,28 @@ import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# Словарь для перевода технических ключей зон в читаемый вид
+ZONE_KEY_TRANSLATIONS = {
+    "summary_zone": "Очки за зону",
+    "power_zone": "Мощь развёрнутых отрядов",
+    "strike_encounter": "Боевые миссии (успешно)",
+    "strike_attempt": "Боевые миссии (попытки)",
+    "unit_donated": "Юнитов в деплой",
+    "covert_complete": "Спецмиссии (выполнено)",
+    "covert_attempt": "Спецмиссии (попытки)",
+    "covert_round_attempted": "Попыток спецмиссий (раундов)",
+    "covert_round_attempted_mission": "Попыток спецмиссий (миссий)",
+    "strike_attempt_round": "Попыток БМ (раунд)",
+    "strike_encounter_round": "Успешных БМ (раунд)",
+    "unit_donated_round": "Юнитов в деплой (раунд)",
+    "unit_donated_zone": "Юнитов в деплой (зона)",
+    "summary_round": "Очки (раунд)",
+    "power_round": "Мощь (раунд)",
+    "strike_attempt_zone": "Попыток БМ (зона)",
+    "strike_encounter_zone": "Успешных БМ (зона)",
+    "covert_complete_mission": "Спецмиссия выполнена (миссия)",
+}
+
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -38,7 +60,6 @@ class GuildEvents(commands.Cog):
             print(f"Ошибка получения данных гильдии: {e}")
             return
 
-        # ТБ
         tb_status = guild.get("territoryBattleStatus", [])
         current_tb = tb_status[0] if tb_status else None
         if current_tb and self.last_tb_status and current_tb.get("status") != self.last_tb_status.get("status"):
@@ -46,7 +67,6 @@ class GuildEvents(commands.Cog):
                 await self.generate_tb_report(guild)
         self.last_tb_status = current_tb
 
-        # ТВ (заглушка)
         tw_status = guild.get("territoryWarStatus", [])
         current_tw = tw_status[0] if tw_status else None
         if current_tw and self.last_tw_status and current_tw.get("status") != self.last_tw_status.get("status"):
@@ -80,9 +100,8 @@ class GuildEvents(commands.Cog):
         if channel:
             await channel.send(f"📢 {message}")
 
-    # ------------------ Вспомогательные функции ------------------
+    # ------------------ Общие вспомогательные функции ------------------
     def _collect_guild_stats(self, tb_result, player_names):
-        """Собирает только суммарные очки (score) по зонам для каждого игрока."""
         stats = {}
         for zone in tb_result[0].get("finalStat", []):
             for ps in zone.get("playerStat", []):
@@ -98,7 +117,6 @@ class GuildEvents(commands.Cog):
         return stats
 
     def _format_stats_table(self, title, stats):
-        """Форматирует таблицу с единственной колонкой 'Очки'."""
         lines = [title]
         lines.append("")
         header = f"{'Игрок':<20} {'Очки':>15}"
@@ -111,45 +129,76 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     async def send_as_file(self, channel, content, filename):
-        """Отправляет длинный текст как файл в канал."""
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
             f.write(content)
             f.flush()
             await channel.send(file=disnake.File(f.name, filename=filename))
 
-    def parse_player_stats(self, tb_result, member_id):
+    # ------------------ Детальная статистика игрока ------------------
+    def parse_player_stats_detailed(self, tb_result, member_id):
         """
-        Агрегирует статистику по фазам и типам действий.
-        Возвращает:
-            total_score: общий счёт,
-            phases: словарь {номер_фазы: {"points": сумма_очков, "missions": количество_БМ, "deploy": количество_юнитов}}
+        Собирает полную информацию по всем зонам для одного игрока.
+        Возвращает кортеж:
+            total_score (int),
+            zones_data (list of dicts: {"mapStatId": ..., "phase": ..., "actions": {русское_описание: значение}})
         """
         total_score = 0
-        phases = defaultdict(lambda: {"points": 0, "missions": 0, "deploy": 0})
+        zones_data = []
 
         for zone in tb_result[0].get("finalStat", []):
+            map_stat = zone.get("mapStatId", "неизвестная зона")
+            phase_match = re.search(r'phase(\d+)', map_stat)
+            phase_num = int(phase_match.group(1)) if phase_match else 0
+
+            actions = defaultdict(int)
             for ps in zone.get("playerStat", []):
                 if ps.get("memberId") != member_id:
                     continue
-                score = int(ps.get("score", 0))
-                total_score += score
+                for key, value in ps.items():
+                    if key == "memberId":
+                        continue
+                    try:
+                        int_val = int(value)
+                    except (ValueError, TypeError):
+                        continue
+                    # Переводим ключ в читаемый вид, если возможно
+                    translated = ZONE_KEY_TRANSLATIONS.get(key, key)
+                    actions[translated] += int_val
+                    if key == "score":
+                        total_score += int_val
 
-                # Извлекаем номер фазы из ключа зоны
-                map_stat = zone.get("mapStatId", "")
-                phase_match = re.search(r'phase(\d+)', map_stat)
-                phase_num = int(phase_match.group(1)) if phase_match else 0
+            if actions:
+                zones_data.append({
+                    "mapStatId": map_stat,
+                    "phase": phase_num,
+                    "actions": dict(actions)
+                })
 
-                # Определяем тип действия по имени ключа
-                key = map_stat
-                if "strike_encounter" in key:
-                    phases[phase_num]["missions"] += int(ps.get("strike_encounter", 0))
-                elif "unit_donated" in key:
-                    phases[phase_num]["deploy"] += int(ps.get("unit_donated", 0))
-                else:
-                    # Остальное (power, summary и т.п.) считаем как очки
-                    phases[phase_num]["points"] += score
+        return total_score, zones_data
 
-        return {"total_score": total_score, "phases": dict(phases)}
+    def format_detailed_report(self, player_name, total_score, zones_data):
+        """Форматирует подробный отчёт в текстовый файл."""
+        lines = [f"Детальная статистика: {player_name}"]
+        lines.append(f"Общий счёт: {total_score:,}")
+        lines.append("")
+        lines.append("=" * 60)
+
+        # Группируем по фазам
+        by_phase = defaultdict(list)
+        for zone in zones_data:
+            by_phase[zone["phase"]].append(zone)
+
+        for phase_num in sorted(by_phase):
+            lines.append(f"Фаза {phase_num}")
+            lines.append("-" * 40)
+            for zone in by_phase[phase_num]:
+                # Краткое имя зоны: возьмём последний кусок mapStatId (после последнего подчёркивания) или просто обрежем
+                short_name = zone["mapStatId"].split("_")[-1] if "_" in zone["mapStatId"] else zone["mapStatId"]
+                lines.append(f"  {short_name}:")
+                for action, val in sorted(zone["actions"].items()):
+                    lines.append(f"    {action}: {val:,}")
+                lines.append("")
+        return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
@@ -181,18 +230,16 @@ class GuildEvents(commands.Cog):
         else:
             await inter.response.send_message("Офицерский канал не найден.", ephemeral=True)
 
-    @tb_report.sub_command(name="last", description="Расширенная сводка последней завершённой ТБ")
+    @tb_report.sub_command(name="last", description="Сводка последней завершённой ТБ")
     async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
         try:
             guild = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
-                ),
+                asyncio.to_thread(self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True),
                 timeout=15.0
             )
         except asyncio.TimeoutError:
-            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени. Попробуйте позже.")
+            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
             return
         except Exception as e:
             await inter.edit_original_message(f"Ошибка получения данных: {e}")
@@ -214,17 +261,17 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, report, "tb_report.txt")
         await inter.edit_original_message("Отчёт отправлен файлом.")
 
-    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ")
+    @tb_report.sub_command(name="player", description="Полная детальная статистика игрока за ТБ")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(description="Выберите игрока из списка", autocomplete=autocomplete_players)
+        name: str = commands.Param(description="Выберите игрока", autocomplete=autocomplete_players)
     ):
         await inter.response.defer()
 
         cache = self.bot.guild_roster_cache
         if not cache or name not in cache:
-            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава. Дождитесь загрузки состава.")
+            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
             return
         allycode = cache[name]
 
@@ -236,9 +283,7 @@ class GuildEvents(commands.Cog):
                 return
 
             guild = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
-                ),
+                asyncio.to_thread(self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True),
                 timeout=15.0
             )
             result = guild.get("recentTerritoryBattleResult", [])
@@ -246,21 +291,17 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            stats = self.parse_player_stats(result, player_id)
-            if stats["total_score"] == 0:
+            total_score, zones_data = self.parse_player_stats_detailed(result, player_id)
+            if total_score == 0:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
+            report = self.format_detailed_report(name, total_score, zones_data)
+            await self.send_as_file(inter.channel, report, f"tb_detail_{name}.txt")
+            # Дополнительно отправим короткий Embed
             embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
-            embed.add_field(name="Общий счёт", value=f"{stats['total_score']:,}", inline=False)
-
-            # Выводим по фазам (1-6) основные показатели
-            for phase_num in sorted(stats["phases"]):
-                phase_data = stats["phases"][phase_num]
-                value = f"Очки: {phase_data['points']:,}\nБМ: {phase_data['missions']}\nДеплой: {phase_data['deploy']}"
-                embed.add_field(name=f"Фаза {phase_num}", value=value, inline=False)
-
-            embed.set_footer(text="Данные из последней завершённой ТБ")
+            embed.add_field(name="Общий счёт", value=f"{total_score:,}", inline=False)
+            embed.set_footer(text="Полный отчёт отправлен файлом.")
             await inter.edit_original_message(embed=embed)
 
         except asyncio.TimeoutError:
@@ -268,7 +309,7 @@ class GuildEvents(commands.Cog):
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
 
-    @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам гильдии")
+    @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
         try:
