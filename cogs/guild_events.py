@@ -7,6 +7,8 @@ from collections import defaultdict
 import re
 import database
 from swgoh_comlink import SwgohComlink
+from cogs.violations import autocomplete_players  # <-- Импорт функции автозаполнения
+import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -68,10 +70,9 @@ class GuildEvents(commands.Cog):
         report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
         channel = self.bot.get_channel(self.officer_channel_id)
         if channel:
-            await channel.send(report)
+            await self.send_as_file(channel, report, "tb_report.txt")
 
     async def generate_tw_report(self, guild):
-        # Заглушка для ТВ
         pass
 
     async def notify_officers(self, message):
@@ -109,7 +110,7 @@ class GuildEvents(commands.Cog):
 
     def _format_stats_table(self, title, stats):
         lines = [title]
-        lines.append("```")
+        lines.append("")
         header = f"{'Игрок':<20} {'Очки':>15} {'Мощь':>12} {'БМ(усп/поп)':>12} {'Деплой':>7} {'СМ(усп/поп)':>10}"
         lines.append(header)
         lines.append("-" * len(header))
@@ -121,8 +122,14 @@ class GuildEvents(commands.Cog):
             lines.append(
                 f"{name:<20} {s['summary']:>15,} {s['power']:>12,} {bm:>12} {s['unit_donated']:>7} {sm:>10}"
             )
-        lines.append("```")
         return "\n".join(lines)
+
+    async def send_as_file(self, channel, content, filename):
+        """Отправляет длинный текст как файл в канал."""
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
+            f.write(content)
+            f.flush()
+            await channel.send(file=disnake.File(f.name, filename=filename))
 
     def parse_player_stats(self, tb_result, member_id):
         stats = {
@@ -150,7 +157,7 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
-    @commands.has_any_role(1153753506772164629)  # замените на вашу роль
+    @commands.has_any_role(1153753506772164629)
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -208,22 +215,19 @@ class GuildEvents(commands.Cog):
             return
 
         report = self._format_stats_table("📊 **Итоги последней ТБ (автоотчёт)**", stats)
-        await inter.edit_original_message(report)
+        await self.send_as_file(inter.channel, report, "tb_report.txt")
+        await inter.edit_original_message("Отчёт отправлен файлом.")
 
-    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ (выбор из базы)")
+    @tb_report.sub_command(name="player", description="Детальная статистика игрока за последнюю ТБ")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(description="Имя игрока (из базы user_mapping)")
+        name: str = commands.Param(description="Выберите игрока из списка", autocomplete=autocomplete_players)
     ):
         await inter.response.defer()
-        # Ищем allycode по имени (полное совпадение или LIKE %name%)
-        row = database.get_user_mapping_by_name(name)
-        if not row:
-            await inter.edit_original_message("Игрок не найден. Сначала выполните `/sync_members`.")
-            return
-
-        allycode, ingame_name = row
+        # В violations.py autocomplete_players возвращает строку вида "Имя (allycode)"
+        # Нужно извлечь allycode
+        allycode = name.split("(")[-1].rstrip(")") if "(" in name else name
         try:
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
@@ -244,10 +248,10 @@ class GuildEvents(commands.Cog):
 
             stats = self.parse_player_stats(result, player_id)
             if stats["summary"] == 0:
-                await inter.edit_original_message(f"{ingame_name} не участвовал в последней ТБ.")
+                await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            embed = disnake.Embed(title=f"📊 Детальная статистика: {ingame_name}", color=0x3498db)
+            embed = disnake.Embed(title=f"📊 Детальная статистика: {name}", color=0x3498db)
             embed.add_field(name="Общий счёт", value=f"{stats['summary']:,}", inline=False)
             embed.add_field(name="Мощь отрядов", value=f"{stats['power']:,}", inline=True)
             embed.add_field(name="Боевые миссии (усп/поп)",
@@ -271,18 +275,6 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
-
-    @tb_player.autocomplete("name")
-    async def autocomplete_player_name(self, inter: disnake.ApplicationCommandInteraction, user_input: str):
-        """Автозаполнение имён из таблицы user_mapping, как в /warn."""
-        if not user_input:
-            return []
-        mappings = database.get_all_user_mappings()  # возвращает список (discord_id, ally_code, ingame_name)
-        suggestions = []
-        for _, _, iname in mappings:
-            if iname and user_input.lower() in iname.lower():
-                suggestions.append(iname)
-        return suggestions[:25] if suggestions else ["Нет совпадений"]
 
     @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам гильдии")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
