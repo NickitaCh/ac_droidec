@@ -12,6 +12,42 @@ import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# ------------------ Декодер сырых ключей ТБ (comlink mapStatId) ------------------
+# Ключи вида "power_zone_tb3_mixed_phase03_conflict01_bonus" разбираются на
+# действие/фазу/планету/бонус/номер ОЗ-миссии. Ключи вида "power_round_3" — это
+# официальные готовые итоги comlink по фазе (совпадают с внешними трекерами вроде
+# HotUtils), а не пересчитанная нами сумма по зонам — используются как основной
+# источник итогов по фазе, зональная разбивка идёт только как детализация.
+TB_ACTION_LABELS = {
+    "power": "ГМ размещено (действия)",
+    "summary": "Очки территории (итог)",
+    "unit_donated": "Юнитов передано во взвод",
+    "strike_encounter": "БЗ: волн встречено",
+    "strike_attempt": "БЗ: начато попыток",
+    "covert_complete": "ОЗ: успешных миссий",
+    "covert_round_attempted": "ОЗ: волн завершено",
+    "covert_attempt": "ОЗ: попыток",
+    "disobey": "Действия изгоя (Rogue)",
+}
+
+TB_CONFLICT_LABELS = {"01": "Light", "02": "Dark", "03": "Mixed"}
+
+TB_KNOWN_GLOBAL_ACTIONS = [
+    "power", "summary", "unit_donated", "strike_encounter", "strike_attempt",
+    "covert_attempt", "covert_complete", "covert_round_attempted", "disobey",
+]
+
+TB_ZONE_RE = re.compile(
+    r"^(?P<action>[a-z_]+?)_(?P<kind>zone|mission)_tb3_mixed_phase(?P<phase>\d+)"
+    r"_conflict(?P<conflict>\d+)(?P<bonus>_bonus)?(?:_covert(?P<covert>\d+))?$"
+)
+TB_ROUND_RE = re.compile(r"^(?P<action>[a-z_]+)_round_(?P<round>\d+)$")
+
+
+def _fmt_num(value) -> str:
+    return f"{int(value):,}".replace(",", " ")
+
+
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -112,18 +148,91 @@ class GuildEvents(commands.Cog):
             f.flush()
             await channel.send(file=disnake.File(f.name, filename=filename))
 
-    # ------------------ Детальная статистика игрока (сырые данные) ------------------
-    def get_raw_player_data(self, tb_result, member_id):
-        """Собирает все ключи для игрока по всем зонам и возвращает текстовый отчёт."""
-        lines = []
+    # ------------------ Детальная статистика игрока (расшифровка по фазам/планетам) ------------------
+    def _decode_tb_stats(self, tb_result, member_id):
+        """
+        Разбирает все mapStatId игрока на три группы:
+        - zone_data[phase][conflict_key][action][entry] — разбивка по планетам/бонус-зонам/ОЗ-миссиям
+        - global_totals[action] — итог за весь ивент
+        - round_totals[round][action] — официальный итог comlink по фазе (round == фаза)
+        """
+        matched = {}
         for zone in tb_result[0].get("finalStat", []):
+            map_id = zone.get("mapStatId")
             for ps in zone.get("playerStat", []):
-                if ps.get("memberId") != member_id:
-                    continue
-                lines.append(f"=== {zone['mapStatId']} ===")
-                for k, v in ps.items():
-                    lines.append(f"{k}: {v}")
-                lines.append("")
+                if ps.get("memberId") == member_id:
+                    matched[map_id] = int(ps.get("score", 0))
+
+        zone_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        global_totals = {}
+        round_totals = defaultdict(dict)
+        unrecognized = {}
+
+        for map_id, score in matched.items():
+            m = TB_ZONE_RE.match(map_id)
+            if m:
+                gd = m.groupdict()
+                phase = str(int(gd["phase"]))  # "01" -> "1", чтобы совпадало с ключом round_totals
+                conflict_key = gd["conflict"] + ("_bonus" if gd["bonus"] else "")
+                entry_key = f"covert{gd['covert']}" if gd["covert"] else "_"
+                zone_data[phase][conflict_key].setdefault(gd["action"], {})[entry_key] = score
+                continue
+
+            if map_id in TB_KNOWN_GLOBAL_ACTIONS:
+                global_totals[map_id] = score
+                continue
+
+            m2 = TB_ROUND_RE.match(map_id)
+            if m2 and m2.group("action") in TB_KNOWN_GLOBAL_ACTIONS:
+                round_totals[str(int(m2.group("round")))][m2.group("action")] = score
+                continue
+
+            unrecognized[map_id] = score
+
+        return zone_data, global_totals, round_totals, unrecognized
+
+    def _format_tb_player_report(self, player_name, zone_data, global_totals, round_totals):
+        """Формирует читаемый отчёт: общее по игроку, затем по фазам (round_N — источник
+        итогов) с вложенной детализацией по планетам/бонус-зонам/ОЗ-миссиям (zone_data)."""
+        lines = [f"📊 Территориальная Битва — {player_name}", ""]
+
+        lines.append("Общее по игроку:")
+        for action in ("summary", "unit_donated", "strike_encounter", "strike_attempt", "covert_attempt", "disobey"):
+            if action in global_totals:
+                lines.append(f"  {TB_ACTION_LABELS.get(action, action)}: {_fmt_num(global_totals[action])}")
+
+        all_phases = sorted(set(round_totals.keys()) | set(zone_data.keys()), key=int)
+
+        def conflict_sort_key(ck):
+            base = ck.split("_")[0]
+            return (base, 1 if "_bonus" in ck else 0)
+
+        for phase in all_phases:
+            rt = round_totals.get(phase, {})
+            lines.append(f"\nФаза {phase}")
+            for action in ("summary", "power", "strike_attempt", "covert_attempt", "strike_encounter", "unit_donated", "disobey"):
+                if action in rt:
+                    lines.append(f"  {TB_ACTION_LABELS.get(action, action)}: {_fmt_num(rt[action])}")
+
+            conflicts = zone_data.get(phase, {})
+            if conflicts:
+                lines.append("  -- Детализация по планетам --")
+                for conflict_key in sorted(conflicts.keys(), key=conflict_sort_key):
+                    base_conflict = conflict_key.split("_")[0]
+                    is_bonus = "_bonus" in conflict_key
+                    label = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+                    lines.append(f"    {label}" + (" [Bonus]" if is_bonus else ""))
+
+                    actions = conflicts[conflict_key]
+                    for action in sorted(actions.keys()):
+                        entries = actions[action]
+                        action_label = TB_ACTION_LABELS.get(action, action)
+                        if list(entries.keys()) == ["_"]:
+                            lines.append(f"      {action_label}: {_fmt_num(entries['_'])}")
+                        else:
+                            for covert_id, val in sorted(entries.items()):
+                                lines.append(f"      {action_label} [{covert_id}]: {_fmt_num(val)}")
+
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
@@ -187,7 +296,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, report, "tb_report.txt")
         await inter.edit_original_message("Отчёт отправлен файлом.")
 
-    @tb_report.sub_command(name="player", description="Полная сырая статистика игрока за последнюю ТБ")
+    @tb_report.sub_command(name="player", description="Статистика игрока за последнюю ТБ по фазам и планетам")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -217,14 +326,19 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            raw = self.get_raw_player_data(result, player_id)
-            if not raw:
+            zone_data, global_totals, round_totals, unrecognized = self._decode_tb_stats(result, player_id)
+            if not zone_data and not round_totals and not global_totals:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            await self.send_as_file(inter.channel, raw, f"tb_raw_{name}.txt")
-            embed = disnake.Embed(title=f"📊 Сырые данные ТБ: {name}", color=0x3498db)
-            embed.set_footer(text="Полный список ключей отправлен файлом.")
+            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals)
+            if unrecognized:
+                report += "\n\nНераспознанные ключи (новая механика?):\n"
+                report += "\n".join(f"  {k}: {v}" for k, v in unrecognized.items())
+
+            await self.send_as_file(inter.channel, report, f"tb_{name}.txt")
+            embed = disnake.Embed(title=f"📊 ТБ по фазам и планетам: {name}", color=0x3498db)
+            embed.set_footer(text="Полная детализация отправлена файлом.")
             await inter.edit_original_message(embed=embed)
 
         except asyncio.TimeoutError:
