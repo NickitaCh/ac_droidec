@@ -225,14 +225,18 @@ class GuildEvents(commands.Cog):
 
                     actions = conflicts[conflict_key]
                     for action in sorted(actions.keys()):
-                        entries = actions[action]
+                        # Несколько ОЗ-миссий на одной планете (covert01, covert02...) —
+                        # это разные независимые миссии, суммируем в одну строку.
+                        total = sum(actions[action].values())
                         action_label = TB_ACTION_LABELS.get(action, action)
-                        if list(entries.keys()) == ["_"]:
-                            lines.append(f"      {action_label}: {_fmt_num(entries['_'])}")
-                        else:
-                            for covert_id, val in sorted(entries.items()):
-                                lines.append(f"      {action_label} [{covert_id}]: {_fmt_num(val)}")
+                        lines.append(f"      {action_label}: {_fmt_num(total)}")
+            elif rt:
+                lines.append("  (детализация по планетам недоступна в comlink для этой фазы)")
 
+        lines.append(
+            "\nПримечание: «ОЗ: попыток» не привязано к планетам — comlink не даёт "
+            "зональной детализации для этого показателя, только итог по фазе/игроку."
+        )
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
