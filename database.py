@@ -282,6 +282,146 @@ def set_bot_state(key: str, value: str):
     conn.close()
 
 
+# =====================================================================
+# ИСТОРИЯ ТБ (последние N событий, для команд compare / player_compare)
+# =====================================================================
+TB_HISTORY_KEEP = 3
+
+def _ensure_tb_history_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fingerprint TEXT UNIQUE NOT NULL,
+            completed_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_player_summary (
+            event_id INTEGER NOT NULL,
+            member_id TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            summary INTEGER NOT NULL,
+            unit_donated INTEGER NOT NULL,
+            covert_attempt INTEGER NOT NULL,
+            strike_encounter INTEGER NOT NULL,
+            strike_attempt INTEGER NOT NULL,
+            PRIMARY KEY (event_id, member_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_player_detail (
+            event_id INTEGER NOT NULL,
+            member_id TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            zone_data_json TEXT NOT NULL,
+            global_totals_json TEXT NOT NULL,
+            round_totals_json TEXT NOT NULL,
+            raw_keys_json TEXT NOT NULL,
+            PRIMARY KEY (event_id, member_id)
+        )
+    """)
+
+def record_tb_event(fingerprint: str) -> int:
+    """Идемпотентно регистрирует ТБ по отпечатку (fingerprint), возвращает event_id."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("SELECT id FROM tb_events WHERE fingerprint = ?", (fingerprint,))
+    row = cursor.fetchone()
+    if row:
+        conn.close()
+        return row[0]
+    cursor.execute(
+        "INSERT INTO tb_events (fingerprint, completed_at) VALUES (?, datetime('now'))",
+        (fingerprint,)
+    )
+    event_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return event_id
+
+def save_tb_player_summary(rows):
+    """rows: [(event_id, member_id, player_name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt), ...]"""
+    if not rows:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.executemany("""
+        INSERT OR REPLACE INTO tb_player_summary
+        (event_id, member_id, player_name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, rows)
+    conn.commit()
+    conn.close()
+
+def save_tb_player_detail(rows):
+    """rows: [(event_id, member_id, player_name, zone_data_json, global_totals_json, round_totals_json, raw_keys_json), ...]"""
+    if not rows:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.executemany("""
+        INSERT OR REPLACE INTO tb_player_detail
+        (event_id, member_id, player_name, zone_data_json, global_totals_json, round_totals_json, raw_keys_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, rows)
+    conn.commit()
+    conn.close()
+
+def prune_tb_events(keep: int = TB_HISTORY_KEEP):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("SELECT id FROM tb_events ORDER BY id DESC LIMIT -1 OFFSET ?", (keep,))
+    old_ids = [r[0] for r in cursor.fetchall()]
+    if old_ids:
+        placeholders = ",".join("?" * len(old_ids))
+        cursor.execute(f"DELETE FROM tb_player_summary WHERE event_id IN ({placeholders})", old_ids)
+        cursor.execute(f"DELETE FROM tb_player_detail WHERE event_id IN ({placeholders})", old_ids)
+        cursor.execute(f"DELETE FROM tb_events WHERE id IN ({placeholders})", old_ids)
+    conn.commit()
+    conn.close()
+
+def get_recent_tb_events(limit: int = TB_HISTORY_KEEP):
+    """Возвращает [(event_id, completed_at), ...] от старых к новым (максимум `limit`)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("SELECT id, completed_at FROM tb_events ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return list(reversed(rows))
+
+def get_tb_player_summary_for_events(event_ids):
+    if not event_ids:
+        return []
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    placeholders = ",".join("?" * len(event_ids))
+    cursor.execute(f"""
+        SELECT event_id, member_id, player_name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt
+        FROM tb_player_summary WHERE event_id IN ({placeholders})
+    """, event_ids)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_tb_player_detail(event_id, member_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("""
+        SELECT zone_data_json, global_totals_json, round_totals_json, raw_keys_json
+        FROM tb_player_detail WHERE event_id = ? AND member_id = ?
+    """, (event_id, member_id))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
 def get_user_mapping_by_name(name: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()

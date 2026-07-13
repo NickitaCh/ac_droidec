@@ -111,7 +111,7 @@ class GuildEvents(commands.Cog):
                 if fingerprint != self.last_reported_tb_fingerprint:
                     self.last_reported_tb_fingerprint = fingerprint
                     database.set_bot_state("last_reported_tb_fingerprint", fingerprint)
-                    await self.generate_tb_report(guild)
+                    await self.generate_tb_report(guild, fingerprint)
         except Exception as e:
             print(f"Ошибка обработки отчёта по ТБ: {e}")
 
@@ -122,7 +122,7 @@ class GuildEvents(commands.Cog):
                 await self.generate_tw_report(guild)
         self.last_tw_status = current_tw
 
-    async def generate_tb_report(self, guild):
+    async def generate_tb_report(self, guild, fingerprint=None):
         result = guild.get("recentTerritoryBattleResult", [])
         if not result:
             await self.notify_officers("ТБ завершена, но отчёт пуст. Используйте ручной ввод.")
@@ -134,6 +134,12 @@ class GuildEvents(commands.Cog):
         if not stats:
             await self.notify_officers("Нет данных по очкам.")
             return
+
+        if fingerprint:
+            try:
+                self._store_tb_history(fingerprint, result, members, player_names, stats)
+            except Exception as e:
+                print(f"Ошибка сохранения истории ТБ: {e}")
 
         report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
         channel = self.bot.get_channel(self.officer_channel_id)
@@ -192,6 +198,86 @@ class GuildEvents(commands.Cog):
             row += "".join(f"{_fmt_num(s[action]):>{w}}" for action, _, w in columns)
             lines.append(row)
         return "\n".join(lines)
+
+    def _format_tb_compare_table(self, events, summary_rows):
+        """events: [(event_id, completed_at), ...] от старых к новым (макс. 3).
+        summary_rows: строки из get_tb_player_summary_for_events."""
+        metrics = [
+            ("summary", "Очки", 11),
+            ("unit_donated", "Юн", 4),
+            ("covert_attempt", "ОЗ", 4),
+            ("strike_encounter", "Волн", 5),
+            ("strike_attempt", "Поп", 4),
+        ]
+        block_width = sum(w for _, _, w in metrics)
+        name_width = 22
+
+        by_member = {}
+        for event_id, member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt in summary_rows:
+            entry = by_member.setdefault(member_id, {"name": name})
+            entry["name"] = name  # берём самое свежее имя из последней встреченной записи
+            entry[event_id] = {
+                "summary": summary, "unit_donated": unit_donated, "covert_attempt": covert_attempt,
+                "strike_encounter": strike_encounter, "strike_attempt": strike_attempt,
+            }
+
+        n = len(events)
+        header1 = f"{'Игрок':<{name_width}}"
+        header2 = " " * name_width
+        for i, (event_id, completed_at) in enumerate(events):
+            label = f"ТБ-{n - i} ({completed_at[:10]})"
+            header1 += " | " + f"{label:^{block_width}}"
+            header2 += " | " + "".join(f"{m_label:>{w}}" for _, m_label, w in metrics)
+
+        lines = [header1, header2, "-" * len(header2)]
+
+        latest_event_id = events[-1][0] if events else None
+
+        def sort_key(item):
+            _, entry = item
+            return entry.get(latest_event_id, {}).get("summary", -1)
+
+        for member_id, entry in sorted(by_member.items(), key=sort_key, reverse=True):
+            row = f"{entry['name'][:name_width - 1]:<{name_width}}"
+            for event_id, _ in events:
+                data = entry.get(event_id)
+                row += " | "
+                if data:
+                    row += "".join(f"{data[action]:>{w}}" for action, _, w in metrics)
+                else:
+                    row += "".join(f"{'-':>{w}}" for _, _, w in metrics)
+            lines.append(row)
+        return "\n".join(lines)
+
+    def _store_tb_history(self, fingerprint, result, members, player_names, stats):
+        """Сохраняет итоги завершённой ТБ (сводку по гильдии + полную расшифровку
+        по каждому игроку) в БД, храним только последние TB_HISTORY_KEEP событий."""
+        event_id = database.record_tb_event(fingerprint)
+
+        summary_rows = [
+            (event_id, member_id, s["name"], s["summary"], s["unit_donated"],
+             s["covert_attempt"], s["strike_encounter"], s["strike_attempt"])
+            for member_id, s in stats.items()
+        ]
+        database.save_tb_player_summary(summary_rows)
+
+        detail_rows = []
+        for m in members:
+            member_id = m.get("playerId")
+            if not member_id:
+                continue
+            name = player_names.get(member_id, member_id[:8] + "…")
+            zone_data, global_totals, round_totals, raw_keys, _ = self._decode_tb_stats(result, member_id)
+            if not zone_data and not round_totals and not global_totals:
+                continue
+            detail_rows.append((
+                event_id, member_id, name,
+                json.dumps(zone_data), json.dumps(global_totals),
+                json.dumps(round_totals), json.dumps(raw_keys),
+            ))
+        database.save_tb_player_detail(detail_rows)
+
+        database.prune_tb_events()
 
     async def send_as_file(self, channel, content, filename):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
@@ -317,6 +403,99 @@ class GuildEvents(commands.Cog):
 
         return "\n".join(lines)
 
+    def _format_tb_player_compare_report(self, player_name, events, per_event):
+        """events: [(event_id, completed_at), ...] от старых к новым (макс. 3).
+        per_event: список той же длины, элемент — dict с zone_data/global_totals/
+        round_totals/raw_keys для игрока в эту ТБ, либо None если данных нет."""
+        n = len(events)
+        labels = [f"ТБ-{n - i} ({events[i][1][:10]})" for i in range(n)]
+        rule = "─" * 70
+        lines = [f"📊 Сравнение по ТБ — {player_name}", rule, "", " | ".join(labels)]
+        hidden_entries = []  # (метка_ТБ, raw_key, value)
+
+        def cmp_line(label, values):
+            parts = ["—" if v is None else _fmt_num(v) for v in values]
+            return f"{label}: " + " | ".join(parts)
+
+        lines.append("")
+        lines.append("ИТОГО ЗА СОБЫТИЕ")
+        for action in ("summary", "unit_donated", "strike_encounter", "strike_attempt", "covert_attempt", "disobey"):
+            values = [e["global_totals"].get(action) if e else None for e in per_event]
+            if all(v is None for v in values):
+                continue
+            lines.append("  " + cmp_line(TB_ACTION_LABELS.get(action, action), values))
+
+        all_phases = sorted(
+            {p for e in per_event if e for p in set(e["round_totals"].keys()) | set(e["zone_data"].keys())},
+            key=int
+        )
+
+        def conflict_sort_key(ck):
+            base = ck.split("_")[0]
+            return (base, 1 if "_bonus" in ck else 0)
+
+        for phase in all_phases:
+            lines.append("")
+            lines.append(rule)
+            lines.append(f"ФАЗА {phase}")
+            for action in ("summary", "power", "strike_attempt", "strike_encounter", "covert_attempt", "unit_donated", "disobey"):
+                values = [(e["round_totals"].get(phase, {}).get(action) if e else None) for e in per_event]
+                if all(v is None for v in values):
+                    continue
+                lines.append("  " + cmp_line(TB_ACTION_LABELS.get(action, action), values))
+
+            conflict_keys = set()
+            for e in per_event:
+                if e:
+                    conflict_keys |= set(e["zone_data"].get(phase, {}).keys())
+
+            if conflict_keys:
+                lines.append("")
+                lines.append("  Планеты:")
+                for conflict_key in sorted(conflict_keys, key=conflict_sort_key):
+                    base_conflict = conflict_key.split("_")[0]
+                    is_bonus = "_bonus" in conflict_key
+                    label = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+                    lines.append(f"    {label}" + (" (бонус)" if is_bonus else ""))
+
+                    action_keys = set()
+                    for e in per_event:
+                        if e:
+                            action_keys |= set(e["zone_data"].get(phase, {}).get(conflict_key, {}).keys())
+
+                    hidden_actions = TB_HIDDEN_ZONE_ACTIONS.get((phase, conflict_key), set())
+                    for action in sorted(action_keys):
+                        values = []
+                        for e in per_event:
+                            if not e:
+                                values.append(None)
+                                continue
+                            entries = e["zone_data"].get(phase, {}).get(conflict_key, {}).get(action)
+                            values.append(sum(entries.values()) if entries else None)
+
+                        if action in hidden_actions:
+                            for idx, e in enumerate(per_event):
+                                if not e or values[idx] is None:
+                                    continue
+                                entries = e["raw_keys"].get(phase, {}).get(conflict_key, {}).get(action, {})
+                                actual_entries = e["zone_data"].get(phase, {}).get(conflict_key, {}).get(action, {})
+                                for entry_key, val in actual_entries.items():
+                                    raw_key = entries.get(entry_key, f"{action}_phase{phase}_conflict{conflict_key}_{entry_key}")
+                                    hidden_entries.append((labels[idx], raw_key, val))
+                            continue
+
+                        action_label = TB_ACTION_LABELS.get(action, action)
+                        lines.append("      " + cmp_line(action_label, values))
+
+        if hidden_entries:
+            lines.append("")
+            lines.append(rule)
+            lines.append("Скрытые параметры по ТБ (недостоверные данные comlink):")
+            for tb_label, raw_key, value in hidden_entries:
+                lines.append(f"  {tb_label}: {raw_key} = {_fmt_num(value)}")
+
+        return "\n".join(lines)
+
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
     @commands.has_any_role(1153753506772164629)
@@ -427,6 +606,78 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
+
+    @tb_report.sub_command(name="compare", description="Сравнение игроков по гильдии за последние 3 ТБ")
+    async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer()
+
+        events = database.get_recent_tb_events()
+        if not events:
+            await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
+            return
+
+        summary_rows = database.get_tb_player_summary_for_events([e[0] for e in events])
+        if not summary_rows:
+            await inter.edit_original_message("Нет сохранённых данных игроков для сравнения.")
+            return
+
+        report = self._format_tb_compare_table(events, summary_rows)
+        title = f"📊 Сравнение по ТБ (последние {len(events)}: " + ", ".join(e[1][:10] for e in events) + ")"
+        await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")
+        await inter.edit_original_message("Отчёт сравнения отправлен файлом.")
+
+    @tb_report.sub_command(name="player_compare", description="Сравнение статистики игрока по фазам за последние 3 ТБ")
+    async def tb_player_compare(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        name: str = commands.Param(description="Выберите игрока", autocomplete=autocomplete_players)
+    ):
+        await inter.response.defer()
+
+        cache = self.bot.guild_roster_cache
+        if not cache or name not in cache:
+            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
+            return
+        allycode = cache[name]
+
+        try:
+            player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
+            player_id = player.get("playerId")
+            if not player_id:
+                await inter.edit_original_message("Не удалось определить игровой ID.")
+                return
+        except Exception as e:
+            await inter.edit_original_message(f"Ошибка: {e}")
+            return
+
+        events = database.get_recent_tb_events()
+        if not events:
+            await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
+            return
+
+        per_event = []
+        for event_id, _ in events:
+            row = database.get_tb_player_detail(event_id, player_id)
+            if row:
+                zone_data_json, global_totals_json, round_totals_json, raw_keys_json = row
+                per_event.append({
+                    "zone_data": json.loads(zone_data_json),
+                    "global_totals": json.loads(global_totals_json),
+                    "round_totals": json.loads(round_totals_json),
+                    "raw_keys": json.loads(raw_keys_json),
+                })
+            else:
+                per_event.append(None)
+
+        if all(e is None for e in per_event):
+            await inter.edit_original_message(f"{name} не участвовал ни в одной из сохранённых последних ТБ.")
+            return
+
+        report = self._format_tb_player_compare_report(name, events, per_event)
+        await self.send_as_file(inter.channel, report, f"tb_compare_{name}.txt")
+        embed = disnake.Embed(title=f"📊 Сравнение по ТБ: {name}", color=0x9b59b6)
+        embed.set_footer(text="Полная детализация отправлена файлом.")
+        await inter.edit_original_message(embed=embed)
 
     @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
