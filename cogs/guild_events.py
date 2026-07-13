@@ -4,6 +4,8 @@ from disnake.ext import commands, tasks
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+import hashlib
+import json
 import re
 import database
 from swgoh_comlink import SwgohComlink
@@ -76,7 +78,8 @@ class GuildEvents(commands.Cog):
         self.guild_id = "-kJhCaGGQqGOjgbWpJFEIg"
         self.officer_channel_id = bot.OFFICER_CHANNEL_ID
         self.allowed_role_id = bot.ALLOWED_OFFICER_ROLE_ID
-        self.last_tb_status = None
+        # Отпечаток последней ОТПРАВЛЕННОЙ ТБ, переживает рестарт бота (см. monitor_loop).
+        self.last_reported_tb_fingerprint = database.get_bot_state("last_reported_tb_fingerprint")
         self.last_tw_status = None
         self.monitor_loop.start()
 
@@ -95,12 +98,22 @@ class GuildEvents(commands.Cog):
             print(f"Ошибка получения данных гильдии: {e}")
             return
 
-        tb_status = guild.get("territoryBattleStatus", [])
-        current_tb = tb_status[0] if tb_status else None
-        if current_tb and self.last_tb_status and current_tb.get("status") != self.last_tb_status.get("status"):
-            if current_tb.get("status") == "completed":
-                await self.generate_tb_report(guild)
-        self.last_tb_status = current_tb
+        # Триггерим не по полю "status" (оно ненадёжно: рестарт бота обнуляет память,
+        # а comlink может проскочить статус "completed" между опросами) — а по факту
+        # изменения содержимого recentTerritoryBattleResult. Отпечаток хранится в БД,
+        # поэтому рестарт бота не приводит ни к повторной, ни к пропущенной отправке.
+        try:
+            result = guild.get("recentTerritoryBattleResult", [])
+            if result:
+                fingerprint = hashlib.sha1(
+                    json.dumps(result, sort_keys=True, default=str).encode()
+                ).hexdigest()
+                if fingerprint != self.last_reported_tb_fingerprint:
+                    self.last_reported_tb_fingerprint = fingerprint
+                    database.set_bot_state("last_reported_tb_fingerprint", fingerprint)
+                    await self.generate_tb_report(guild)
+        except Exception as e:
+            print(f"Ошибка обработки отчёта по ТБ: {e}")
 
         tw_status = guild.get("territoryWarStatus", [])
         current_tw = tw_status[0] if tw_status else None
@@ -137,8 +150,14 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Общие вспомогательные функции ------------------
     def _collect_guild_stats(self, tb_result, player_names):
+        """Собирает итоги за весь ивент по гильдии: только "голые" глобальные ключи
+        (map_id == имя действия, без _round_N и без _zone_...), чтобы не суммировать
+        одни и те же очки повторно вместе с попытками/волнами из зональных ключей."""
         stats = {}
         for zone in tb_result[0].get("finalStat", []):
+            map_id = zone.get("mapStatId")
+            if map_id not in TB_KNOWN_GLOBAL_ACTIONS:
+                continue
             for ps in zone.get("playerStat", []):
                 member_id = ps.get("memberId")
                 if not member_id:
@@ -146,21 +165,32 @@ class GuildEvents(commands.Cog):
                 if member_id not in stats:
                     stats[member_id] = {
                         "name": player_names.get(member_id, member_id[:8] + "…"),
-                        "score": 0,
+                        **{action: 0 for action in TB_KNOWN_GLOBAL_ACTIONS},
                     }
-                stats[member_id]["score"] += int(ps.get("score", 0))
+                stats[member_id][map_id] += int(ps.get("score", 0))
         return stats
 
     def _format_stats_table(self, title, stats):
-        lines = [title]
-        lines.append("")
-        header = f"{'Игрок':<20} {'Очки':>15}"
+        columns = [
+            ("summary", "Очки территории", 16),
+            ("unit_donated", "Юниты во взвод", 15),
+            ("covert_attempt", "ОЗ попытки", 11),
+            ("strike_encounter", "БЗ волн пройдено", 17),
+            ("strike_attempt", "БЗ попыток", 11),
+        ]
+        name_width = 24
+
+        lines = [title, ""]
+        header = f"{'Игрок':<{name_width}}" + "".join(f"{label:>{w}}" for _, label, w in columns)
         lines.append(header)
-        lines.append("-" * 35)
-        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["score"], reverse=True)
+        lines.append("-" * len(header))
+
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["summary"], reverse=True)
         for member_id, s in sorted_stats:
-            name = s["name"][:19]
-            lines.append(f"{name:<20} {s['score']:>15,}")
+            name = s["name"][:name_width - 1]
+            row = f"{name:<{name_width}}"
+            row += "".join(f"{_fmt_num(s[action]):>{w}}" for action, _, w in columns)
+            lines.append(row)
         return "\n".join(lines)
 
     async def send_as_file(self, channel, content, filename):

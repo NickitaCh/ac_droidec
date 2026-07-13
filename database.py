@@ -250,6 +250,38 @@ def get_all_user_mappings():
     conn.close()
     return rows
 
+# =====================================================================
+# ПРОИЗВОЛЬНОЕ СОСТОЯНИЕ БОТА (переживает рестарты, key-value)
+# =====================================================================
+def _ensure_bot_state_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+
+def get_bot_state(key: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_state_table(cursor)
+    cursor.execute("SELECT value FROM bot_state WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def set_bot_state(key: str, value: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_state_table(cursor)
+    cursor.execute("""
+        INSERT OR REPLACE INTO bot_state (key, value)
+        VALUES (?, ?)
+    """, (key, value))
+    conn.commit()
+    conn.close()
+
+
 def get_user_mapping_by_name(name: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
