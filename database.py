@@ -179,49 +179,6 @@ def get_birthday_by_discord_id(discord_id: str):
 
 
 
-def init_manual_event_tables():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS manual_event_scores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type TEXT NOT NULL,  -- 'tw' или 'tb'
-            discord_id TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            timestamp TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def add_manual_score(event_type, discord_id, score):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO manual_event_scores (event_type, discord_id, score)
-        VALUES (?, ?, ?)
-    """, (event_type, discord_id, score))
-    conn.commit()
-    conn.close()
-
-def get_manual_scores(event_type):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT discord_id, score FROM manual_event_scores
-        WHERE event_type = ?
-        ORDER BY score DESC
-    """, (event_type,))
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
-
-def clear_manual_scores(event_type):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM manual_event_scores WHERE event_type = ?", (event_type,))
-    conn.commit()
-    conn.close()
     
     
 def get_allycode_by_discord_id(discord_id: str) -> str | None:

@@ -140,7 +140,7 @@ class Birthday(commands.Cog):
     # -------------------- Slash-команды --------------------
     ALLOWED_ROLE_ID = 1153753506772164629  # Замените на нужную роль
 
-    @commands.slash_command(name="add_birthday", description="Добавить/обновить день рождения")
+    @commands.slash_command(name="др_добавить", description="Добавить/обновить день рождения")
     @commands.has_any_role(ALLOWED_ROLE_ID)
     async def add_birthday(
         self,
@@ -162,7 +162,7 @@ class Birthday(commands.Cog):
             f"✅ День рождения {user.mention} сохранён: {date_str}", ephemeral=True
         )
 
-    @commands.slash_command(name="remove_birthday", description="Удалить день рождения")
+    @commands.slash_command(name="др_удалить", description="Удалить день рождения")
     @commands.has_any_role(ALLOWED_ROLE_ID)
     async def remove_birthday(
         self,
@@ -172,7 +172,7 @@ class Birthday(commands.Cog):
         database.remove_birthday(str(user.id))
         await inter.response.send_message(f"День рождения {user.mention} удалён", ephemeral=True)
 
-    @commands.slash_command(name="birthday_list", description="Список дней рождений гильдии")
+    @commands.slash_command(name="др_список", description="Список дней рождений гильдии")
     @commands.has_any_role(ALLOWED_ROLE_ID)
     async def birthday_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()

@@ -187,7 +187,7 @@ class ViolationsCog(commands.Cog):
                 print(f"❌ Не удалось прочитать БД для аварийного восстановления: {db_err}")
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARN С 3 НАРУШЕНИЯМИ ЗА РАЗ ---
-    @commands.slash_command(description="Зафиксировать нарушение у игрока")
+    @commands.slash_command(name="нарушение", description="Зафиксировать нарушение у игрока")
     async def warn(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -270,7 +270,7 @@ class ViolationsCog(commands.Cog):
         await inter.response.send_message(result_text, ephemeral=False)
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARNS С ТЕКСТОВОЙ ТАБЛИЦЕЙ СТАТИСТИКИ И ЗНАЧКАМИ 🚨 ---
-    @commands.slash_command(description="Просмотр таблицы всех нарушений или досье конкретного игрока")
+    @commands.slash_command(name="нарушения", description="Просмотр таблицы всех нарушений или досье конкретного игрока")
     async def warns(
         self,
         inter: disnake.ApplicationCommandInteraction, 
@@ -363,7 +363,7 @@ class ViolationsCog(commands.Cog):
             await inter.followup.send(f"```text\n{table}\n```", ephemeral=False)
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /UNWARN С ИНТЕРАКТИВНЫМ ВЫБОРОМ ИЗ СПИСКА ---
-    @commands.slash_command(description="Удалить конкретное нарушение у выбранного игрока")
+    @commands.slash_command(name="снять_нарушение", description="Удалить конкретное нарушение у выбранного игрока")
     async def unwarn(
         self,
         inter: disnake.ApplicationCommandInteraction, 

@@ -125,7 +125,7 @@ class GuildEvents(commands.Cog):
     async def generate_tb_report(self, guild, fingerprint=None):
         result = guild.get("recentTerritoryBattleResult", [])
         if not result:
-            await self.notify_officers("ТБ завершена, но отчёт пуст. Используйте ручной ввод.")
+            await self.notify_officers("ТБ завершена, но отчёт пуст.")
             return
 
         members = guild.get("member", [])
@@ -497,36 +497,12 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
-    @commands.slash_command(name="tb_report", description="Управление отчётами по ТБ")
+    @commands.slash_command(name="тб_отчет", description="Управление отчётами по ТБ")
     @commands.has_any_role(1153753506772164629)
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
-    @tb_report.sub_command(name="add", description="Добавить результат игрока в ручной отчёт")
-    async def tb_add(self, inter, user: disnake.User, score: int):
-        database.add_manual_score("tb", str(user.id), score)
-        await inter.response.send_message(f"✅ {user.mention} добавлен с {score} очков", ephemeral=True)
-
-    @tb_report.sub_command(name="post", description="Опубликовать ручной отчёт")
-    async def tb_post(self, inter: disnake.ApplicationCommandInteraction):
-        rows = database.get_manual_scores("tb")
-        if not rows:
-            await inter.response.send_message("Нет данных для ручного отчёта.", ephemeral=True)
-            return
-        report = "📊 **Итоги ТБ (ручной ввод):**\n"
-        for disc_id, score in rows:
-            member = inter.guild.get_member(int(disc_id))
-            name = member.display_name if member else disc_id
-            report += f"{name}: {score} очков\n"
-        channel = self.bot.get_channel(self.officer_channel_id)
-        if channel:
-            await channel.send(report)
-            database.clear_manual_scores("tb")
-            await inter.response.send_message("Отчёт опубликован.", ephemeral=True)
-        else:
-            await inter.response.send_message("Офицерский канал не найден.", ephemeral=True)
-
-    @tb_report.sub_command(name="last", description="Сводка последней завершённой ТБ")
+    @tb_report.sub_command(name="последняя", description="Сводка последней завершённой ТБ")
     async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
         try:
@@ -557,7 +533,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, report, "tb_report.txt")
         await inter.edit_original_message("Отчёт отправлен файлом.")
 
-    @tb_report.sub_command(name="player", description="Статистика игрока за последнюю ТБ по фазам и планетам")
+    @tb_report.sub_command(name="игрок", description="Статистика игрока за последнюю ТБ по фазам и планетам")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -607,7 +583,7 @@ class GuildEvents(commands.Cog):
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
 
-    @tb_report.sub_command(name="compare", description="Сравнение игроков по гильдии за последние 3 ТБ")
+    @tb_report.sub_command(name="сравнение_по_тб", description="Сравнение игроков по гильдии за последние 3 ТБ")
     async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
@@ -626,7 +602,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")
         await inter.edit_original_message("Отчёт сравнения отправлен файлом.")
 
-    @tb_report.sub_command(name="player_compare", description="Сравнение статистики игрока по фазам за последние 3 ТБ")
+    @tb_report.sub_command(name="сравнение_по_игроку", description="Сравнение статистики игрока по фазам за последние 3 ТБ")
     async def tb_player_compare(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -679,7 +655,7 @@ class GuildEvents(commands.Cog):
         embed.set_footer(text="Полная детализация отправлена файлом.")
         await inter.edit_original_message(embed=embed)
 
-    @tb_report.sub_command(name="sync_members", description="Привязать Discord-пользователей к игровым аккаунтам")
+    @tb_report.sub_command(name="синхронизация", description="Привязать Discord-пользователей к игровым аккаунтам")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
         try:
@@ -726,11 +702,6 @@ class GuildEvents(commands.Cog):
         if not_found:
             msg += f"\nНе найдены на сервере: {', '.join(not_found[:10])}"
         await inter.edit_original_message(msg)
-
-    @tb_report.sub_command(name="clear", description="Очистить ручные записи для ТБ")
-    async def tb_clear(self, inter: disnake.ApplicationCommandInteraction):
-        database.clear_manual_scores("tb")
-        await inter.response.send_message("Записи очищены.", ephemeral=True)
 
 
 def setup(bot: commands.Bot):

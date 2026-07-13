@@ -83,8 +83,7 @@ async def on_ready():
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
     database.init_birthday_table()
-    database.init_manual_event_tables()
-    
+
     # 2. Установка статуса бота
     await bot.change_presence(
         status=disnake.Status.online,
