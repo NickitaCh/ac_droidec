@@ -19,18 +19,31 @@ MSK = ZoneInfo("Europe/Moscow")
 # HotUtils), а не пересчитанная нами сумма по зонам — используются как основной
 # источник итогов по фазе, зональная разбивка идёт только как детализация.
 TB_ACTION_LABELS = {
-    "power": "ГМ размещено (действия)",
-    "summary": "Очки территории (итог)",
-    "unit_donated": "Юнитов передано во взвод",
-    "strike_encounter": "БЗ: волн встречено",
-    "strike_attempt": "БЗ: начато попыток",
-    "covert_complete": "ОЗ: успешных миссий",
-    "covert_round_attempted": "ОЗ: волн завершено",
-    "covert_attempt": "ОЗ: попыток",
-    "disobey": "Действия изгоя (Rogue)",
+    "power": "GP развёрнуто",
+    "summary": "Очки территории",
+    "unit_donated": "Юниты во взвод",
+    "strike_encounter": "БЗ: волн пройдено",
+    "strike_attempt": "БЗ: попытки",
+    "covert_complete": "ОЗ: миссий выполнено",
+    "covert_round_attempted": "ОЗ: волны",
+    "covert_attempt": "ОЗ: попытки",
+    "disobey": "Rogue-действия",
 }
 
 TB_CONFLICT_LABELS = {"01": "Light", "02": "Dark", "03": "Mixed"}
+
+TB_VALUE_COL = 30  # позиция, с которой начинается число — единая для всех уровней вложенности
+
+# comlink для этой конкретной ТБ отдаёт заведомо неверные covert_round_attempted
+# в этих зонах (проверено вручную: фаза 1 Mixed показывает 1 при фактических 2 волнах;
+# фаза 3 Light-бонус показывает 3 при максимум возможных 2; фаза 3 Mixed показывает 6
+# вместо фактических 3) — общее для всей гильдии искажение данных за этот ивент,
+# не ошибка нашего парсинга. Прячем из основного вывода, показываем сырым ключом внизу.
+TB_HIDDEN_ZONE_ACTIONS = {
+    ("1", "03"): {"covert_round_attempted"},
+    ("3", "01_bonus"): {"covert_round_attempted"},
+    ("3", "03"): {"covert_round_attempted"},
+}
 
 TB_KNOWN_GLOBAL_ACTIONS = [
     "power", "summary", "unit_donated", "strike_encounter", "strike_attempt",
@@ -46,6 +59,14 @@ TB_ROUND_RE = re.compile(r"^(?P<action>[a-z_]+)_round_(?P<round>\d+)$")
 
 def _fmt_num(value) -> str:
     return f"{int(value):,}".replace(",", " ")
+
+
+def _fmt_line(label, value, indent=0) -> str:
+    prefix = " " * indent + label
+    number = _fmt_num(value)
+    if len(prefix) >= TB_VALUE_COL:
+        return f"{prefix} {number}"
+    return f"{prefix}{' ' * (TB_VALUE_COL - len(prefix))}{number:>12}"
 
 
 class GuildEvents(commands.Cog):
@@ -164,6 +185,7 @@ class GuildEvents(commands.Cog):
                     matched[map_id] = int(ps.get("score", 0))
 
         zone_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+        raw_keys = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
         global_totals = {}
         round_totals = defaultdict(dict)
         unrecognized = {}
@@ -176,6 +198,7 @@ class GuildEvents(commands.Cog):
                 conflict_key = gd["conflict"] + ("_bonus" if gd["bonus"] else "")
                 entry_key = f"covert{gd['covert']}" if gd["covert"] else "_"
                 zone_data[phase][conflict_key].setdefault(gd["action"], {})[entry_key] = score
+                raw_keys[phase][conflict_key].setdefault(gd["action"], {})[entry_key] = map_id
                 continue
 
             if map_id in TB_KNOWN_GLOBAL_ACTIONS:
@@ -189,17 +212,22 @@ class GuildEvents(commands.Cog):
 
             unrecognized[map_id] = score
 
-        return zone_data, global_totals, round_totals, unrecognized
+        return zone_data, global_totals, round_totals, raw_keys, unrecognized
 
-    def _format_tb_player_report(self, player_name, zone_data, global_totals, round_totals):
+    def _format_tb_player_report(self, player_name, zone_data, global_totals, round_totals, raw_keys):
         """Формирует читаемый отчёт: общее по игроку, затем по фазам (round_N — источник
-        итогов) с вложенной детализацией по планетам/бонус-зонам/ОЗ-миссиям (zone_data)."""
-        lines = [f"📊 Территориальная Битва — {player_name}", ""]
+        итогов) с вложенной детализацией по планетам/бонус-зонам/ОЗ-миссиям (zone_data).
+        Показатели из TB_HIDDEN_ZONE_ACTIONS (заведомо недостоверные для этой ТБ) не
+        попадают в основной текст, а выводятся сырым ключом одним блоком в конце."""
+        rule = "─" * 46
+        lines = [f"📊 Территориальная Битва — {player_name}", rule]
+        hidden_entries = []
 
-        lines.append("Общее по игроку:")
+        lines.append("")
+        lines.append("ИТОГО ЗА СОБЫТИЕ")
         for action in ("summary", "unit_donated", "strike_encounter", "strike_attempt", "covert_attempt", "disobey"):
             if action in global_totals:
-                lines.append(f"  {TB_ACTION_LABELS.get(action, action)}: {_fmt_num(global_totals[action])}")
+                lines.append(_fmt_line(TB_ACTION_LABELS.get(action, action), global_totals[action], indent=2))
 
         all_phases = sorted(set(round_totals.keys()) | set(zone_data.keys()), key=int)
 
@@ -209,34 +237,54 @@ class GuildEvents(commands.Cog):
 
         for phase in all_phases:
             rt = round_totals.get(phase, {})
-            lines.append(f"\nФаза {phase}")
-            for action in ("summary", "power", "strike_attempt", "covert_attempt", "strike_encounter", "unit_donated", "disobey"):
+            lines.append("")
+            lines.append(rule)
+            lines.append(f"ФАЗА {phase}")
+            for action in ("summary", "power", "strike_attempt", "strike_encounter", "covert_attempt", "unit_donated", "disobey"):
                 if action in rt:
-                    lines.append(f"  {TB_ACTION_LABELS.get(action, action)}: {_fmt_num(rt[action])}")
+                    lines.append(_fmt_line(TB_ACTION_LABELS.get(action, action), rt[action], indent=2))
 
             conflicts = zone_data.get(phase, {})
             if conflicts:
-                lines.append("  -- Детализация по планетам --")
+                lines.append("")
+                lines.append("  Планеты:")
                 for conflict_key in sorted(conflicts.keys(), key=conflict_sort_key):
                     base_conflict = conflict_key.split("_")[0]
                     is_bonus = "_bonus" in conflict_key
                     label = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
-                    lines.append(f"    {label}" + (" [Bonus]" if is_bonus else ""))
+                    lines.append(f"    {label}" + (" (бонус)" if is_bonus else ""))
 
                     actions = conflicts[conflict_key]
+                    hidden_actions = TB_HIDDEN_ZONE_ACTIONS.get((phase, conflict_key), set())
                     for action in sorted(actions.keys()):
+                        if action in hidden_actions:
+                            entries = raw_keys.get(phase, {}).get(conflict_key, {}).get(action, {})
+                            for entry_key, value in actions[action].items():
+                                raw_key = entries.get(entry_key, f"{action}_phase{phase}_conflict{conflict_key}_{entry_key}")
+                                hidden_entries.append((raw_key, value))
+                            continue
                         # Несколько ОЗ-миссий на одной планете (covert01, covert02...) —
                         # это разные независимые миссии, суммируем в одну строку.
                         total = sum(actions[action].values())
                         action_label = TB_ACTION_LABELS.get(action, action)
-                        lines.append(f"      {action_label}: {_fmt_num(total)}")
+                        lines.append(_fmt_line(action_label, total, indent=6))
             elif rt:
                 lines.append("  (детализация по планетам недоступна в comlink для этой фазы)")
 
+        lines.append("")
+        lines.append(rule)
         lines.append(
-            "\nПримечание: «ОЗ: попыток» не привязано к планетам — comlink не даёт "
+            "Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт "
             "зональной детализации для этого показателя, только итог по фазе/игроку."
         )
+
+        if hidden_entries:
+            lines.append("")
+            lines.append(rule)
+            lines.append("Скрытые параметры (недостоверные данные comlink за эту ТБ):")
+            for raw_key, value in hidden_entries:
+                lines.append(f"  {raw_key} = {_fmt_num(value)}")
+
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
@@ -330,12 +378,12 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Нет данных о последней ТБ.")
                 return
 
-            zone_data, global_totals, round_totals, unrecognized = self._decode_tb_stats(result, player_id)
+            zone_data, global_totals, round_totals, raw_keys, unrecognized = self._decode_tb_stats(result, player_id)
             if not zone_data and not round_totals and not global_totals:
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals)
+            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals, raw_keys)
             if unrecognized:
                 report += "\n\nНераспознанные ключи (новая механика?):\n"
                 report += "\n".join(f"  {k}: {v}" for k, v in unrecognized.items())
