@@ -331,12 +331,14 @@ def prune_tb_events(keep: int = TB_HISTORY_KEEP):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_history_tables(cursor)
+    _ensure_tb_plan_tables(cursor)
     cursor.execute("SELECT id FROM tb_events ORDER BY id DESC LIMIT -1 OFFSET ?", (keep,))
     old_ids = [r[0] for r in cursor.fetchall()]
     if old_ids:
         placeholders = ",".join("?" * len(old_ids))
         cursor.execute(f"DELETE FROM tb_player_summary WHERE event_id IN ({placeholders})", old_ids)
         cursor.execute(f"DELETE FROM tb_player_detail WHERE event_id IN ({placeholders})", old_ids)
+        cursor.execute(f"DELETE FROM tb_event_planet_names WHERE event_id IN ({placeholders})", old_ids)
         cursor.execute(f"DELETE FROM tb_events WHERE id IN ({placeholders})", old_ids)
     conn.commit()
     conn.close()
@@ -377,6 +379,89 @@ def get_tb_player_detail(event_id, member_id):
     row = cursor.fetchone()
     conn.close()
     return row
+
+
+# =====================================================================
+# ПЛАН ТБ: реальные названия планет по фазам/веткам (авто-парсинг анонсов
+# офицеров в #ac-тб-оповещения + ручная команда /тб_отчет план как фолбэк)
+# =====================================================================
+def _ensure_tb_plan_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_planet_names (
+            phase TEXT NOT NULL,
+            conflict_key TEXT NOT NULL,
+            planet_name TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (phase, conflict_key)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_event_planet_names (
+            event_id INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            conflict_key TEXT NOT NULL,
+            planet_name TEXT NOT NULL,
+            PRIMARY KEY (event_id, phase, conflict_key)
+        )
+    """)
+
+def set_tb_planet_name(phase: str, conflict_key: str, planet_name: str, source: str = "manual"):
+    """conflict_key: '01'/'02'/'03' (Light/Dark/Mixed) или 'bonus' для доп. зоны."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_plan_tables(cursor)
+    cursor.execute("""
+        INSERT OR REPLACE INTO tb_planet_names (phase, conflict_key, planet_name, source, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+    """, (phase, conflict_key, planet_name, source))
+    conn.commit()
+    conn.close()
+
+def get_tb_planet_names():
+    """Текущий (живой) план планет — для отчёта по ещё не заснэпшоченной/последней ТБ."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_plan_tables(cursor)
+    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names")
+    rows = cursor.fetchall()
+    conn.close()
+    return {(phase, conflict_key): planet_name for phase, conflict_key, planet_name in rows}
+
+def clear_tb_planet_names():
+    """Вызывается при анонсе 1 этапа новой ТБ, чтобы не тащить названия планет прошлой ТБ."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_plan_tables(cursor)
+    cursor.execute("DELETE FROM tb_planet_names")
+    conn.commit()
+    conn.close()
+
+def snapshot_tb_planet_names(event_id: int):
+    """Копирует текущий живой план планет в историю конкретного завершённого события ТБ."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_plan_tables(cursor)
+    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names")
+    rows = cursor.fetchall()
+    if rows:
+        cursor.executemany("""
+            INSERT OR REPLACE INTO tb_event_planet_names (event_id, phase, conflict_key, planet_name)
+            VALUES (?, ?, ?, ?)
+        """, [(event_id, phase, conflict_key, planet_name) for phase, conflict_key, planet_name in rows])
+    conn.commit()
+    conn.close()
+
+def get_tb_event_planet_names(event_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_plan_tables(cursor)
+    cursor.execute(
+        "SELECT phase, conflict_key, planet_name FROM tb_event_planet_names WHERE event_id = ?", (event_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {(phase, conflict_key): planet_name for phase, conflict_key, planet_name in rows}
 
 
 def get_user_mapping_by_name(name: str):

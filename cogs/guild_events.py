@@ -58,6 +58,17 @@ TB_ZONE_RE = re.compile(
 )
 TB_ROUND_RE = re.compile(r"^(?P<action>[a-z_]+)_round_(?P<round>\d+)$")
 
+# ------------------ Реальные названия планет (из офицерских анонсов) ------------------
+# Comlink не отдаёт название планеты — только фазу и код ветки (01/02/03 = Light/Dark/
+# Mixed). Офицеры перед каждой фазой вручную постят в #ac-тб-оповещения сообщение вида
+# "Восход Империи — N этап" со списком реальных планет по цветным маркерам (порядок
+# всегда Light/Dark/Mixed, любой маркер после третьего — бонусная/ОЗ-зона). Бот слушает
+# это сообщение и сохраняет соответствие (фаза, ветка) -> планета, командой
+# /тб_отчет план можно поправить вручную, если авто-разбор ошибся.
+TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+)\s*этап", re.IGNORECASE)
+TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪🟤"
+TB_PLAN_CONFLICT_ORDER = ["01", "02", "03"]
+
 
 def _fmt_num(value) -> str:
     return f"{int(value):,}".replace(",", " ")
@@ -78,6 +89,7 @@ class GuildEvents(commands.Cog):
         self.guild_id = "-kJhCaGGQqGOjgbWpJFEIg"
         self.officer_channel_id = bot.OFFICER_CHANNEL_ID
         self.allowed_role_id = bot.ALLOWED_OFFICER_ROLE_ID
+        self.tb_plan_channel_id = bot.TB_PLAN_CHANNEL_ID
         # Отпечаток последней ОТПРАВЛЕННОЙ ТБ, переживает рестарт бота (см. monitor_loop).
         self.last_reported_tb_fingerprint = database.get_bot_state("last_reported_tb_fingerprint")
         self.last_tw_status = None
@@ -85,6 +97,64 @@ class GuildEvents(commands.Cog):
 
     def cog_unload(self):
         self.monitor_loop.cancel()
+
+    # ------------------ Авто-разбор плана планет из анонсов офицеров ------------------
+    @commands.Cog.listener()
+    async def on_message(self, message: disnake.Message):
+        if message.author.bot or message.channel.id != self.tb_plan_channel_id:
+            return
+        parsed = self._parse_tb_plan_message(message.content)
+        if not parsed:
+            return
+        phase, mapping = parsed
+        if phase == "1":
+            database.clear_tb_planet_names()
+        for conflict_key, planet_name in mapping.items():
+            database.set_tb_planet_name(phase, conflict_key, planet_name, source="auto")
+
+    def _parse_tb_plan_message(self, content: str):
+        """Разбирает анонс "Восход Империи — N этап" на {conflict_key: planet_name}.
+        Порядок планет-маркеров в сообщении = Light, Dark, Mixed, дальше — "bonus"."""
+        header = TB_PLAN_HEADER_RE.search(content or "")
+        if not header:
+            return None
+        phase = str(int(header.group(1)))
+        mapping = {}
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped[0] not in TB_PLAN_CIRCLE_CHARS:
+                continue
+            name = stripped[1:].strip(" *#")
+            if not name:
+                continue
+            idx = len(mapping)
+            conflict_key = TB_PLAN_CONFLICT_ORDER[idx] if idx < 3 else "bonus"
+            mapping[conflict_key] = name
+        return (phase, mapping) if mapping else None
+
+    def _planet_label(self, phase, conflict_key, planet_map):
+        """Метка планеты для одиночного отчёта: реальное название + ветка в скобках,
+        либо просто ветка (Light/Dark/Mixed), если план для этой фазы ещё не известен."""
+        base_conflict = conflict_key.split("_")[0]
+        is_bonus = "_bonus" in conflict_key
+        fallback = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+        name = planet_map.get((phase, "bonus" if is_bonus else base_conflict))
+        if name:
+            return f"{name} — {fallback}" + (" (бонус)" if is_bonus else "")
+        return fallback + (" (бонус)" if is_bonus else "")
+
+    def _planet_label_compare(self, phase, conflict_key, planet_maps):
+        """То же самое для сравнения по нескольким ТБ: планета могла быть разной
+        от ивента к ивенту на одной и той же ветке, поэтому показываем через "|"."""
+        base_conflict = conflict_key.split("_")[0]
+        is_bonus = "_bonus" in conflict_key
+        fallback = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+        lookup_key = "bonus" if is_bonus else base_conflict
+        names = [pm.get((phase, lookup_key)) if pm else None for pm in planet_maps]
+        if any(names):
+            shown = " | ".join(n if n else "—" for n in names)
+            return f"{shown} ({fallback})" + (", бонус" if is_bonus else "")
+        return fallback + (" (бонус)" if is_bonus else "")
 
     # ------------------ Мониторинг событий ------------------
     @tasks.loop(minutes=5)
@@ -253,6 +323,7 @@ class GuildEvents(commands.Cog):
         """Сохраняет итоги завершённой ТБ (сводку по гильдии + полную расшифровку
         по каждому игроку) в БД, храним только последние TB_HISTORY_KEEP событий."""
         event_id = database.record_tb_event(fingerprint)
+        database.snapshot_tb_planet_names(event_id)
 
         summary_rows = [
             (event_id, member_id, s["name"], s["summary"], s["unit_donated"],
@@ -330,7 +401,7 @@ class GuildEvents(commands.Cog):
 
         return zone_data, global_totals, round_totals, raw_keys, unrecognized
 
-    def _format_tb_player_report(self, player_name, zone_data, global_totals, round_totals, raw_keys):
+    def _format_tb_player_report(self, player_name, zone_data, global_totals, round_totals, raw_keys, planet_map):
         """Формирует читаемый отчёт: общее по игроку, затем по фазам (round_N — источник
         итогов) с вложенной детализацией по планетам/бонус-зонам/ОЗ-миссиям (zone_data).
         Показатели из TB_HIDDEN_ZONE_ACTIONS (заведомо недостоверные для этой ТБ) не
@@ -365,10 +436,7 @@ class GuildEvents(commands.Cog):
                 lines.append("")
                 lines.append("  Планеты:")
                 for conflict_key in sorted(conflicts.keys(), key=conflict_sort_key):
-                    base_conflict = conflict_key.split("_")[0]
-                    is_bonus = "_bonus" in conflict_key
-                    label = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
-                    lines.append(f"    {label}" + (" (бонус)" if is_bonus else ""))
+                    lines.append(f"    {self._planet_label(phase, conflict_key, planet_map)}")
 
                     actions = conflicts[conflict_key]
                     hidden_actions = TB_HIDDEN_ZONE_ACTIONS.get((phase, conflict_key), set())
@@ -403,7 +471,7 @@ class GuildEvents(commands.Cog):
 
         return "\n".join(lines)
 
-    def _format_tb_player_compare_report(self, player_name, events, per_event):
+    def _format_tb_player_compare_report(self, player_name, events, per_event, planet_maps):
         """events: [(event_id, completed_at), ...] от старых к новым (макс. 3).
         per_event: список той же длины, элемент — dict с zone_data/global_totals/
         round_totals/raw_keys для игрока в эту ТБ, либо None если данных нет."""
@@ -453,10 +521,7 @@ class GuildEvents(commands.Cog):
                 lines.append("")
                 lines.append("  Планеты:")
                 for conflict_key in sorted(conflict_keys, key=conflict_sort_key):
-                    base_conflict = conflict_key.split("_")[0]
-                    is_bonus = "_bonus" in conflict_key
-                    label = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
-                    lines.append(f"    {label}" + (" (бонус)" if is_bonus else ""))
+                    lines.append(f"    {self._planet_label_compare(phase, conflict_key, planet_maps)}")
 
                     action_keys = set()
                     for e in per_event:
@@ -568,7 +633,8 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals, raw_keys)
+            planet_map = database.get_tb_planet_names()
+            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals, raw_keys, planet_map)
             if unrecognized:
                 report += "\n\nНераспознанные ключи (новая механика?):\n"
                 report += "\n".join(f"  {k}: {v}" for k, v in unrecognized.items())
@@ -649,11 +715,37 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message(f"{name} не участвовал ни в одной из сохранённых последних ТБ.")
             return
 
-        report = self._format_tb_player_compare_report(name, events, per_event)
+        planet_maps = [database.get_tb_event_planet_names(event_id) for event_id, _ in events]
+        report = self._format_tb_player_compare_report(name, events, per_event, planet_maps)
         await self.send_as_file(inter.channel, report, f"tb_compare_{name}.txt")
         embed = disnake.Embed(title=f"📊 Сравнение по ТБ: {name}", color=0x9b59b6)
         embed.set_footer(text="Полная детализация отправлена файлом.")
         await inter.edit_original_message(embed=embed)
+
+    @tb_report.sub_command(
+        name="план",
+        description="Вручную задать/поправить планету для фазы и ветки текущей ТБ (фолбэк на случай, если авто-разбор анонса ошибся)"
+    )
+    async def tb_set_plan(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        этап: int = commands.Param(description="Номер фазы", ge=1, le=6),
+        ветка: str = commands.Param(
+            description="Ветка",
+            choices={
+                "Light (красная)": "01",
+                "Dark (жёлтая)": "02",
+                "Mixed (синяя)": "03",
+                "Бонус/ОЗ-зона": "bonus",
+            },
+        ),
+        планета: str = commands.Param(description="Название планеты"),
+    ):
+        planet_name = планета.strip()
+        database.set_tb_planet_name(str(этап), ветка, planet_name, source="manual")
+        await inter.response.send_message(
+            f"✅ Этап {этап}: сохранена планета «{planet_name}»", ephemeral=True
+        )
 
     @tb_report.sub_command(name="синхронизация", description="Привязать Discord-пользователей к игровым аккаунтам")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
