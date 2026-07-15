@@ -206,7 +206,9 @@ class GuildEvents(commands.Cog):
     def _extract_tb_order_block(self, full_text: str, phase: str):
         """Вырезает из текста ветки-плана блок конкретного этапа целиком (со всеми
         заметками, ссылками и гайдами) — от заголовка "Восход Империи — N этап" до
-        следующего такого заголовка или до конца текста."""
+        следующего такого заголовка или до конца текста. Блок всегда начинается
+        ровно с текста заголовка, поэтому его можно просто превратить в "## Восход...".
+        """
         matches = list(TB_PLAN_HEADER_RE.finditer(full_text))
         for i, m in enumerate(matches):
             if str(int(m.group(1))) != phase:
@@ -215,6 +217,26 @@ class GuildEvents(commands.Cog):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
             return full_text[start:end].strip()
         return None
+
+    @staticmethod
+    def _chunk_message(text: str, limit: int = 2000):
+        """На случай, если блок этапа однажды перерастёт лимит Discord в 2000
+        символов — режем по строкам, а не обрезаем текст молча."""
+        if len(text) <= limit:
+            return [text]
+        chunks = []
+        current = ""
+        for line in text.split("\n"):
+            candidate = f"{current}\n{line}" if current else line
+            if len(candidate) > limit:
+                if current:
+                    chunks.append(current)
+                current = line
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+        return chunks
 
     @tasks.loop(seconds=30)
     async def tb_order_loop(self):
@@ -246,10 +268,9 @@ class GuildEvents(commands.Cog):
             if not block:
                 print(f"❌ [TBOrder] Не нашёл блок {phase} этапа в ветке-плане")
                 return
-            await self.send_as_file(
-                channel, block, f"order_phase{phase}.txt",
-                message=f"{role.mention} Ордер на {phase} этап"
-            )
+            message_text = f"## {block}\n\n{role.mention}"
+            for chunk in self._chunk_message(message_text):
+                await channel.send(chunk)
             self._tb_order_sent_key = current_key
             print(f"✅ [TBOrder] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
         except Exception as e:
@@ -477,11 +498,11 @@ class GuildEvents(commands.Cog):
 
         database.prune_tb_events()
 
-    async def send_as_file(self, channel, content, filename, message=None):
+    async def send_as_file(self, channel, content, filename):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
             f.write(content)
             f.flush()
-            await channel.send(content=message, file=disnake.File(f.name, filename=filename))
+            await channel.send(file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока (расшифровка по фазам/планетам) ------------------
     def _decode_tb_stats(self, tb_result, member_id):
