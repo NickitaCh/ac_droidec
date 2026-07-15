@@ -208,15 +208,18 @@ class GuildEvents(commands.Cog):
         заметками, ссылками и гайдами) — от заголовка "Восход Империи — N этап" до
         следующего такого заголовка или до конца текста. Блок всегда начинается
         ровно с текста заголовка, поэтому его можно просто превратить в "## Восход...".
-        """
+        Если в ветке несколько планов на один и тот же этап (план от прошлой ТБ не
+        удалили, а просто добавили новый ниже) — берём ПОСЛЕДНЕЕ совпадение, чтобы
+        не нужно было вручную чистить историю канала между ТБ."""
         matches = list(TB_PLAN_HEADER_RE.finditer(full_text))
+        result = None
         for i, m in enumerate(matches):
             if str(int(m.group(1))) != phase:
                 continue
             start = m.start()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
-            return full_text[start:end].strip()
-        return None
+            result = full_text[start:end].strip()
+        return result
 
     @staticmethod
     def _chunk_message(text: str, limit: int = 2000):
