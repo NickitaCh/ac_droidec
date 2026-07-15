@@ -118,13 +118,18 @@ class GuildEvents(commands.Cog):
         self.officer_channel_id = bot.OFFICER_CHANNEL_ID
         self.allowed_role_id = bot.ALLOWED_OFFICER_ROLE_ID
         self.tb_plan_channel_id = bot.TB_PLAN_CHANNEL_ID
+        self.tb_order_source_channel_id = bot.TB_ORDER_SOURCE_CHANNEL_ID
+        self.tb_order_role_id = bot.TB_ORDER_ROLE_ID
         # Отпечаток последней ОТПРАВЛЕННОЙ ТБ, переживает рестарт бота (см. monitor_loop).
         self.last_reported_tb_fingerprint = database.get_bot_state("last_reported_tb_fingerprint")
         self.last_tw_status = None
+        self._tb_order_sent_key = None
         self.monitor_loop.start()
+        self.tb_order_loop.start()
 
     def cog_unload(self):
         self.monitor_loop.cancel()
+        self.tb_order_loop.cancel()
 
     # ------------------ Авто-разбор плана планет из анонсов офицеров ------------------
     @commands.Cog.listener()
@@ -164,6 +169,95 @@ class GuildEvents(commands.Cog):
                 continue
             mapping[conflict_key] = name
         return (phase, mapping) if mapping else None
+
+    # ------------------ Ежедневная публикация ордера на актуальный этап ------------------
+    # Офицеры выкладывают план на все 6 этапов разом, одной веткой (TB_ORDER_SOURCE_
+    # CHANNEL_ID), а не по дням — поэтому бот сам режет её на блоки по заголовкам
+    # "Восход Империи — N этап" и публикует нужный блок каждый день. Какой этап
+    # актуален "сегодня" определяем не по датам ТБ (бот их не знает), а по дню
+    # недели внутри "тегаемой" недели: этап 1 — в тот день, что идёт первым в
+    # расписании "ордер" (bot.PING_SCHEDULE), этап 2 — во второй и т.д. Так публикация
+    # автоматически совпадает с днями, когда RotationPing и так напоминает про
+    # взводы/ордер — отдельного расписания не заводим.
+    def _is_ping_week(self, today_date) -> bool:
+        start_date = datetime.strptime(self.bot.PING_START_DATE, "%Y-%m-%d").date()
+        delta = (today_date - start_date).days
+        return (delta // 7) % 2 == 0
+
+    def _tb_order_phase_for_weekday(self, weekday: int):
+        order_entry = next((e for e in self.bot.PING_SCHEDULE if e.get("text") == "ордер"), None)
+        if not order_entry:
+            return None
+        days = sorted(order_entry.get("days", []))
+        if weekday not in days:
+            return None
+        return str(days.index(weekday) + 1)
+
+    async def _fetch_tb_order_source_text(self) -> str:
+        channel = self.bot.get_channel(self.tb_order_source_channel_id)
+        if channel is None:
+            channel = await self.bot.fetch_channel(self.tb_order_source_channel_id)
+        parts = []
+        async for message in channel.history(limit=None, oldest_first=True):
+            if message.content:
+                parts.append(message.content)
+        return "\n".join(parts)
+
+    def _extract_tb_order_block(self, full_text: str, phase: str):
+        """Вырезает из текста ветки-плана блок конкретного этапа целиком (со всеми
+        заметками, ссылками и гайдами) — от заголовка "Восход Империи — N этап" до
+        следующего такого заголовка или до конца текста."""
+        matches = list(TB_PLAN_HEADER_RE.finditer(full_text))
+        for i, m in enumerate(matches):
+            if str(int(m.group(1))) != phase:
+                continue
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+            return full_text[start:end].strip()
+        return None
+
+    @tasks.loop(seconds=30)
+    async def tb_order_loop(self):
+        now_msk = datetime.now(MSK)
+        if now_msk.hour != 20 or now_msk.minute != 0:
+            return
+        if not self._is_ping_week(now_msk.date()):
+            return
+        phase = self._tb_order_phase_for_weekday(now_msk.weekday())
+        if not phase:
+            return
+
+        current_key = now_msk.strftime("%Y%m%d%H%M")
+        if current_key == self._tb_order_sent_key:
+            return
+
+        channel = self.bot.get_channel(self.tb_plan_channel_id)
+        if channel is None:
+            print(f"❌ [TBOrder] Канал {self.tb_plan_channel_id} не найден")
+            return
+        role = channel.guild.get_role(self.tb_order_role_id) if channel.guild else None
+        if role is None:
+            print(f"❌ [TBOrder] Роль {self.tb_order_role_id} не найдена")
+            return
+
+        try:
+            full_text = await self._fetch_tb_order_source_text()
+            block = self._extract_tb_order_block(full_text, phase)
+            if not block:
+                print(f"❌ [TBOrder] Не нашёл блок {phase} этапа в ветке-плане")
+                return
+            await self.send_as_file(
+                channel, block, f"order_phase{phase}.txt",
+                message=f"{role.mention} Ордер на {phase} этап"
+            )
+            self._tb_order_sent_key = current_key
+            print(f"✅ [TBOrder] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
+        except Exception as e:
+            print(f"❌ [TBOrder] Ошибка отправки ордера: {e}")
+
+    @tb_order_loop.before_loop
+    async def _before_tb_order_loop(self):
+        await self.bot.wait_until_ready()
 
     def _planet_label(self, phase, conflict_key, planet_map):
         """Метка планеты для одиночного отчёта: реальное название + ветка в скобках,
@@ -383,11 +477,11 @@ class GuildEvents(commands.Cog):
 
         database.prune_tb_events()
 
-    async def send_as_file(self, channel, content, filename):
+    async def send_as_file(self, channel, content, filename, message=None):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
             f.write(content)
             f.flush()
-            await channel.send(file=disnake.File(f.name, filename=filename))
+            await channel.send(content=message, file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока (расшифровка по фазам/планетам) ------------------
     def _decode_tb_stats(self, tb_result, member_id):
