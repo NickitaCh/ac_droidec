@@ -389,6 +389,30 @@ def _format_focused_requirement_summary(set_id, character_key, required_level, c
     return f"{_season_label(cache, set_id)}: [Спец] {char_label} — уровень {required_level}+"
 
 
+def _is_valid_season(cache, set_id) -> bool:
+    return bool(cache) and set_id in cache.get("seasons", {})
+
+
+def _is_valid_level_value(cache, set_id, level_num, value) -> bool:
+    # "уровень3/6/9" — текстовый параметр с автодополнением, а не жёсткий choices=,
+    # поэтому Discord не мешает ввести/вставить руками произвольный текст (например,
+    # видимую подпись подсказки вместо реального значения) — проверяем сами, иначе
+    # такое требование молча никогда ни с чем не совпадёт при проверке игрока.
+    if value in (DATACRON_ANY, DATACRON_NONE):
+        return True
+    season_data = cache["seasons"].get(set_id) if cache else None
+    if not season_data:
+        return False
+    return any(ability_id == value for ability_id, _label in season_data[f"level{level_num}"])
+
+
+def _is_valid_focused_character(cache, set_id, character_key) -> bool:
+    season_data = cache["seasons"].get(set_id) if cache else None
+    if not season_data:
+        return False
+    return any(key == character_key for key, _label, _max_tier in season_data.get("focused", []))
+
+
 def _chunk_lines(lines, limit=1900):
     chunks = []
     current = ""
@@ -611,9 +635,16 @@ class DatacronRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Заметка по приоритетным % статам (не проверяется автоматически)"),
     ):
         set_id = _parse_trailing_bracket_int(сезон)
-        if set_id is None:
-            await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+        if set_id is None or not _is_valid_season(self.bot.datacron_cache, set_id):
+            await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
             return
+        for level_num, value in ((3, уровень3), (6, уровень6), (9, уровень9)):
+            if not _is_valid_level_value(self.bot.datacron_cache, set_id, level_num, value):
+                await inter.response.send_message(
+                    f"❌ Некорректное значение уровня {level_num} — выберите вариант из списка автодополнения, не вводите/вставляйте текст вручную.",
+                    ephemeral=True,
+                )
+                return
         if уровень3 == DATACRON_NONE and уровень6 == DATACRON_NONE and уровень9 == DATACRON_NONE:
             await inter.response.send_message("❌ Хотя бы один уровень (3/6/9) должен быть указан, иначе требование бессмысленно.", ephemeral=True)
             return
@@ -632,8 +663,11 @@ class DatacronRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
         set_id = _parse_trailing_bracket_int(сезон)
-        if set_id is None:
-            await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+        if set_id is None or not _is_valid_season(self.bot.datacron_cache, set_id):
+            await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
+            return
+        if not _is_valid_focused_character(self.bot.datacron_cache, set_id, персонаж):
+            await inter.response.send_message("❌ Некорректный персонаж — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
             return
 
         req_id = database.add_datacron_focused_requirement(set_id, персонаж, уровень, комментарий, str(inter.author.id))
@@ -680,8 +714,8 @@ class DatacronRequirementsCog(commands.Cog):
         new_set_id = cur_set_id
         if сезон is not None:
             parsed = _parse_trailing_bracket_int(сезон)
-            if parsed is None:
-                await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+            if parsed is None or not _is_valid_season(self.bot.datacron_cache, parsed):
+                await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
                 return
             new_set_id = parsed
 
@@ -689,6 +723,14 @@ class DatacronRequirementsCog(commands.Cog):
         new_l6 = уровень6 if уровень6 is not None else cur_l6
         new_l9 = уровень9 if уровень9 is not None else cur_l9
         new_comment = комментарий if комментарий is not None else cur_comment
+
+        for level_num, value in ((3, new_l3), (6, new_l6), (9, new_l9)):
+            if not _is_valid_level_value(self.bot.datacron_cache, new_set_id, level_num, value):
+                await inter.response.send_message(
+                    f"❌ Некорректное значение уровня {level_num} — выберите вариант из списка автодополнения, не вводите/вставляйте текст вручную.",
+                    ephemeral=True,
+                )
+                return
 
         database.update_datacron_requirement(req_id, new_set_id, new_l3, new_l6, new_l9, new_comment)
         summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache)
@@ -710,14 +752,18 @@ class DatacronRequirementsCog(commands.Cog):
         new_set_id = cur_set_id
         if сезон is not None:
             parsed = _parse_trailing_bracket_int(сезон)
-            if parsed is None:
-                await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+            if parsed is None or not _is_valid_season(self.bot.datacron_cache, parsed):
+                await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
                 return
             new_set_id = parsed
 
         new_char = персонаж if персонаж is not None else cur_char
         new_level = уровень if уровень is not None else cur_level
         new_comment = комментарий if комментарий is not None else cur_comment
+
+        if not _is_valid_focused_character(self.bot.datacron_cache, new_set_id, new_char):
+            await inter.response.send_message("❌ Некорректный персонаж — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
+            return
 
         database.update_datacron_focused_requirement(req_id, new_set_id, new_char, new_level, new_comment)
         summary = _format_focused_requirement_summary(new_set_id, new_char, new_level, self.bot.datacron_cache)
