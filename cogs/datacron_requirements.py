@@ -114,14 +114,27 @@ async def _fetch_datacron_cache(comlink) -> dict:
             "level3": {},
             "level6": {},
             "level9": {},
+            "focused": {},  # character_key -> (label, max_tier)
         }
 
     for template in game_data.get("datacronTemplate", []):
-        if template.get("focused"):
-            continue
         set_id = template.get("setId")
         if set_id not in seasons:
             continue  # сезон неактивен/просрочен — пропускаем
+
+        if template.get("focused"):
+            tid = str(template.get("id", ""))
+            if tid.endswith("_upgraded"):
+                # Дублирующее определение того же фокусного ДК — не встречается
+                # в реальных данных игроков (templateId там всегда без суффикса).
+                continue
+            prefix = f"datacron_set_{set_id}_focused_"
+            char_key = tid[len(prefix):] if tid.startswith(prefix) else tid
+            char_label = _resolve_target_label(char_key, loc_kv) if char_key else tid
+            max_tier = len(template.get("tier", []))
+            seasons[set_id]["focused"][char_key] = (char_label, max_tier)
+            continue
+
         for tier in template.get("tier", []):
             level = tier.get("id")
             if level not in DATACRON_LEVELS:
@@ -158,6 +171,10 @@ async def _fetch_datacron_cache(comlink) -> dict:
             for branch_label in sorted(data[level_key].keys()):
                 flat.extend(sorted(data[level_key][branch_label].items(), key=lambda kv: kv[1]))
             result_seasons[set_id][level_key] = flat
+        result_seasons[set_id]["focused"] = sorted(
+            [(char_key, label, max_tier) for char_key, (label, max_tier) in data["focused"].items()],
+            key=lambda t: t[1],
+        )
     return {"seasons": result_seasons}
 
 
@@ -175,6 +192,13 @@ def _parse_leading_hash_int(text: str):
     if not text:
         return None
     m = re.match(r"#(\d+)", text.strip())
+    return int(m.group(1)) if m else None
+
+
+def _parse_focused_id(text: str):
+    if not text:
+        return None
+    m = re.match(r"F(\d+)", text.strip())
     return int(m.group(1)) if m else None
 
 
@@ -201,6 +225,20 @@ def _format_requirement_summary(set_id, l3, l6, l9, cache) -> str:
     l6_label = _level_label(season_data["level6"] if season_data else [], l6)
     l9_label = _level_label(season_data["level9"] if season_data else [], l9)
     return f"{_season_label(cache, set_id)}: {l3_label} → {l6_label} → {l9_label}"
+
+
+def _focused_char_label(cache, set_id, character_key) -> str:
+    season_data = cache["seasons"].get(set_id) if cache else None
+    if season_data:
+        for key, label, _max_tier in season_data.get("focused", []):
+            if key == character_key:
+                return label
+    return character_key
+
+
+def _format_focused_requirement_summary(set_id, character_key, required_level, cache) -> str:
+    char_label = _focused_char_label(cache, set_id, character_key)
+    return f"{_season_label(cache, set_id)}: [Спец] {char_label} — уровень {required_level}+"
 
 
 def _chunk_lines(lines, limit=1900):
@@ -234,6 +272,24 @@ def _extract_player_base_datacrons(player_json: dict, set_id: int):
         for level_num, idx in ((3, 2), (6, 5), (9, 8)):
             levels[level_num] = affix[idx].get("abilityId") if len(affix) > idx else None
         result.append({"id": d.get("id"), "levels": levels})
+    return result
+
+
+def _extract_player_focused_datacrons(player_json: dict, set_id: int):
+    """character_key -> сколько уровней сейчас разблокировано (0, если нет такого ДК)."""
+    result = {}
+    prefix = f"datacron_set_{set_id}_focused_"
+    for d in player_json.get("datacron", []) or []:
+        if d.get("setId") != set_id or not d.get("focused"):
+            continue
+        tid = str(d.get("templateId", ""))
+        if not tid.startswith(prefix):
+            continue
+        char_key = tid[len(prefix):]
+        if char_key.endswith("_upgraded"):
+            char_key = char_key[: -len("_upgraded")]
+        current_level = len(d.get("affix", []))
+        result[char_key] = max(result.get(char_key, 0), current_level)
     return result
 
 
@@ -322,18 +378,46 @@ async def autocomplete_datacron_level9(inter, string):
     return await _autocomplete_datacron_level(inter, string, 9)
 
 
+async def autocomplete_datacron_focused_character(inter: disnake.ApplicationCommandInteraction, string: str):
+    cache = inter.bot.datacron_cache
+    if not cache:
+        return ["⏳ Справочник датакронов ещё загружается, подождите..."]
+    set_id = _parse_trailing_bracket_int(inter.filled_options.get("сезон"))
+    if set_id is None:
+        return ["⚠️ СНАЧАЛА выберите сезон!"]
+    season_data = cache["seasons"].get(set_id)
+    if not season_data:
+        return ["❌ Нет данных по этому сезону в справочнике."]
+
+    search = string.lower().strip()
+    options = []
+    for char_key, label, max_tier in season_data.get("focused", []):
+        full_label = f"{label} (макс. уровень {max_tier})"
+        if not search or search in full_label.lower():
+            options.append(disnake.OptionChoice(name=full_label[:100], value=char_key))
+    if not options:
+        return ["❌ В этом сезоне нет фокусных (спец.) датакронов."]
+    return options[:25]
+
+
 async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
-    rows = database.get_all_datacron_requirements()
-    if not rows:
+    base_rows = database.get_all_datacron_requirements()
+    focused_rows = database.get_all_datacron_focused_requirements()
+    if not base_rows and not focused_rows:
         return ["❌ Список требований пуст."]
     cache = inter.bot.datacron_cache
     search = string.lower().strip()
     options = []
-    for row in rows:
+    for row in base_rows:
         req_id, set_id, l3, l6, l9, comment, created_by, created_at = row
         label = f"#{req_id} — {_format_requirement_summary(set_id, l3, l6, l9, cache)}"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=f"#{req_id}"))
+    for row in focused_rows:
+        req_id, set_id, character_key, required_level, comment, created_by, created_at = row
+        label = f"F{req_id} — {_format_focused_requirement_summary(set_id, character_key, required_level, cache)}"
+        if not search or search in label.lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=f"F{req_id}"))
     return options[:25]
 
 
@@ -390,18 +474,45 @@ class DatacronRequirementsCog(commands.Cog):
         summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache)
         await inter.response.send_message(f"✅ Требование #{req_id} добавлено: {summary}", ephemeral=True)
 
-    @datacron_req.sub_command(name="редактировать", description="Изменить требование или удалить его из списка")
+    @datacron_req.sub_command(name="добавить_спец", description="Добавить требование к фокусному (спец.) датакрону в список сезона")
+    async def datacron_req_add_focused(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        сезон: str = commands.Param(description="Сезон датакрона", autocomplete=autocomplete_datacron_season),
+        персонаж: str = commands.Param(description="Персонаж фокусного датакрона", autocomplete=autocomplete_datacron_focused_character),
+        уровень: int = commands.Param(description="Нужный уровень прокачки (обычно 1-9, у некоторых персонажей больше)", ge=1, le=20),
+        комментарий: str = commands.Param(default=None, description="Заметка"),
+    ):
+        set_id = _parse_trailing_bracket_int(сезон)
+        if set_id is None:
+            await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+            return
+
+        req_id = database.add_datacron_focused_requirement(set_id, персонаж, уровень, комментарий, str(inter.author.id))
+        summary = _format_focused_requirement_summary(set_id, персонаж, уровень, self.bot.datacron_cache)
+        await inter.response.send_message(f"✅ Спец. требование F{req_id} добавлено: {summary}", ephemeral=True)
+
+    @datacron_req.sub_command(name="редактировать", description="Изменить требование (обычное или спец.) или удалить его из списка")
     async def datacron_req_edit(
         self,
         inter: disnake.ApplicationCommandInteraction,
         id: str = commands.Param(description="Требование для изменения", autocomplete=autocomplete_datacron_req_id),
         сезон: str = commands.Param(default=None, description="Новый сезон", autocomplete=autocomplete_datacron_season),
-        уровень3: str = commands.Param(default=None, description="Новый бонус 3 уровня", autocomplete=autocomplete_datacron_level3),
-        уровень6: str = commands.Param(default=None, description="Новый бонус 6 уровня", autocomplete=autocomplete_datacron_level6),
-        уровень9: str = commands.Param(default=None, description="Новый бонус 9 уровня", autocomplete=autocomplete_datacron_level9),
+        уровень3: str = commands.Param(default=None, description="[Обычное] новый бонус 3 уровня", autocomplete=autocomplete_datacron_level3),
+        уровень6: str = commands.Param(default=None, description="[Обычное] новый бонус 6 уровня", autocomplete=autocomplete_datacron_level6),
+        уровень9: str = commands.Param(default=None, description="[Обычное] новый бонус 9 уровня", autocomplete=autocomplete_datacron_level9),
+        персонаж: str = commands.Param(default=None, description="[Спец.] новый персонаж", autocomplete=autocomplete_datacron_focused_character),
+        уровень: int = commands.Param(default=None, description="[Спец.] новый нужный уровень прокачки", ge=1, le=20),
         комментарий: str = commands.Param(default=None, description="Новая заметка"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
+        focused_id = _parse_focused_id(id)
+        if focused_id is not None:
+            await self._edit_focused_requirement(
+                inter, focused_id, сезон, персонаж, уровень, комментарий, удалить
+            )
+            return
+
         req_id = _parse_leading_hash_int(id)
         if req_id is None:
             await inter.response.send_message("❌ Некорректный id — выберите вариант из списка автодополнения.", ephemeral=True)
@@ -435,6 +546,35 @@ class DatacronRequirementsCog(commands.Cog):
         summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache)
         await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {summary}", ephemeral=True)
 
+    async def _edit_focused_requirement(self, inter, req_id, сезон, персонаж, уровень, комментарий, удалить):
+        row = database.get_datacron_focused_requirement(req_id)
+        if not row:
+            await inter.response.send_message(f"❌ Спец. требование F{req_id} не найдено.", ephemeral=True)
+            return
+
+        if удалить:
+            database.delete_datacron_focused_requirement(req_id)
+            await inter.response.send_message(f"🗑️ Спец. требование F{req_id} удалено.", ephemeral=True)
+            return
+
+        _, cur_set_id, cur_char, cur_level, cur_comment, _, _ = row
+
+        new_set_id = cur_set_id
+        if сезон is not None:
+            parsed = _parse_trailing_bracket_int(сезон)
+            if parsed is None:
+                await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
+                return
+            new_set_id = parsed
+
+        new_char = персонаж if персонаж is not None else cur_char
+        new_level = уровень if уровень is not None else cur_level
+        new_comment = комментарий if комментарий is not None else cur_comment
+
+        database.update_datacron_focused_requirement(req_id, new_set_id, new_char, new_level, new_comment)
+        summary = _format_focused_requirement_summary(new_set_id, new_char, new_level, self.bot.datacron_cache)
+        await inter.response.send_message(f"✅ Спец. требование F{req_id} обновлено: {summary}", ephemeral=True)
+
     @datacron_req.sub_command(name="очистить_сезон", description="Удалить весь список требований неактивного сезона")
     async def datacron_req_clear_season(
         self,
@@ -448,21 +588,26 @@ class DatacronRequirementsCog(commands.Cog):
             return
 
         season_label = _season_label(self.bot.datacron_cache, set_id)
-        count = database.count_datacron_requirements_by_set(set_id)
-        if count == 0:
+        count_base = database.count_datacron_requirements_by_set(set_id)
+        count_focused = database.count_datacron_focused_requirements_by_set(set_id)
+        if count_base == 0 and count_focused == 0:
             await inter.response.send_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.", ephemeral=True)
             return
 
         if not подтвердить:
             await inter.response.send_message(
-                f"⚠️ Будет удалено требований: {count} ({season_label}). "
+                f"⚠️ Будет удалено требований: {count_base} обычных + {count_focused} спец. ({season_label}). "
                 f"Повторите команду с подтвердить=True, чтобы подтвердить удаление.",
                 ephemeral=True,
             )
             return
 
-        deleted = database.delete_datacron_requirements_by_set(set_id)
-        await inter.response.send_message(f"🗑️ Удалено требований: {deleted} ({season_label}).", ephemeral=True)
+        deleted_base = database.delete_datacron_requirements_by_set(set_id)
+        deleted_focused = database.delete_datacron_focused_requirements_by_set(set_id)
+        await inter.response.send_message(
+            f"🗑️ Удалено требований: {deleted_base} обычных + {deleted_focused} спец. ({season_label}).",
+            ephemeral=True,
+        )
 
     @datacron_req.sub_command(name="проверить", description="Проверить, есть ли у игрока подходящие датакроны под все требования сезона")
     async def datacron_req_check(
@@ -486,7 +631,8 @@ class DatacronRequirementsCog(commands.Cog):
 
         season_label = _season_label(self.bot.datacron_cache, set_id)
         requirements = database.get_datacron_requirements_by_set(set_id)
-        if not requirements:
+        focused_requirements = database.get_datacron_focused_requirements_by_set(set_id)
+        if not requirements and not focused_requirements:
             await inter.edit_original_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.")
             return
 
@@ -502,9 +648,6 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message(f"Ошибка получения данных игрока: {e}")
             return
 
-        owned = _extract_player_base_datacrons(player, set_id)
-        pairs = _match_requirements(requirements, owned)
-
         season_data = self.bot.datacron_cache["seasons"].get(set_id) if self.bot.datacron_cache else None
 
         def level_label(level_num, value):
@@ -512,25 +655,48 @@ class DatacronRequirementsCog(commands.Cog):
             return _level_label(options, value)
 
         lines = [f"📋 Проверка датакронов: **{игрок}** — {season_label}", ""]
-        matched_count = 0
-        for req, match in pairs:
-            req_id, _, l3, l6, l9, comment, _, _ = req
-            header = f"#{req_id}: {level_label(3, l3)} → {level_label(6, l6)} → {level_label(9, l9)}"
-            if comment:
-                header += f" _(заметка: {comment})_"
-            if match:
-                matched_count += 1
-                m = match["levels"]
-                m3 = level_label(3, m[3]) if m[3] else "—"
-                m6 = level_label(6, m[6]) if m[6] else "—"
-                m9 = level_label(9, m[9]) if m[9] else "—"
-                lines.append(f"✅ {header}")
-                lines.append(f"   Закрыто ДК: {m3} → {m6} → {m9}")
-            else:
-                lines.append(f"❌ {header}")
 
-        lines.append("")
-        lines.append(f"Итого: {matched_count} / {len(pairs)} требований закрыто.")
+        if requirements:
+            owned = _extract_player_base_datacrons(player, set_id)
+            pairs = _match_requirements(requirements, owned)
+
+            lines.append("Обычные датакроны:")
+            matched_count = 0
+            for req, match in pairs:
+                req_id, _, l3, l6, l9, comment, _, _ = req
+                header = f"#{req_id}: {level_label(3, l3)} → {level_label(6, l6)} → {level_label(9, l9)}"
+                if comment:
+                    header += f" _(заметка: {comment})_"
+                if match:
+                    matched_count += 1
+                    m = match["levels"]
+                    m3 = level_label(3, m[3]) if m[3] else "—"
+                    m6 = level_label(6, m[6]) if m[6] else "—"
+                    m9 = level_label(9, m[9]) if m[9] else "—"
+                    lines.append(f"✅ {header}")
+                    lines.append(f"   Закрыто ДК: {m3} → {m6} → {m9}")
+                else:
+                    lines.append(f"❌ {header}")
+            lines.append(f"Обычные итого: {matched_count} / {len(pairs)} требований закрыто.")
+
+        if focused_requirements:
+            if requirements:
+                lines.append("")
+            lines.append("Спец. (фокусные) датакроны:")
+            owned_focused = _extract_player_focused_datacrons(player, set_id)
+            matched_focused = 0
+            for req in focused_requirements:
+                req_id, _, character_key, required_level, comment, _, _ = req
+                char_label = _focused_char_label(self.bot.datacron_cache, set_id, character_key)
+                current_level = owned_focused.get(character_key, 0)
+                ok = current_level >= required_level
+                header = f"F{req_id}: {char_label} — нужен уровень {required_level}+, у игрока уровень {current_level}"
+                if comment:
+                    header += f" _(заметка: {comment})_"
+                if ok:
+                    matched_focused += 1
+                lines.append(f"{'✅' if ok else '❌'} {header}")
+            lines.append(f"Спец. итого: {matched_focused} / {len(focused_requirements)} требований закрыто.")
 
         chunks = _chunk_lines(lines)
         await inter.edit_original_message(chunks[0])

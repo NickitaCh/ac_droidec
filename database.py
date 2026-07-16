@@ -593,3 +593,128 @@ def get_all_datacron_requirements():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# =====================================================================
+# ТРЕБОВАНИЯ К СПЕЦ. (ФОКУСНЫМ) ДАТАКРОНАМ: персонаж + нужный уровень
+# прокачки (1-9, у некоторых персонажей больше). У фокусных ДК нет случайных
+# веток — бонус на каждом уровне фиксирован для конкретного персонажа.
+# =====================================================================
+def _ensure_datacron_focused_requirements_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datacron_focused_requirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            set_id INTEGER NOT NULL,
+            character_key TEXT NOT NULL,
+            required_level INTEGER NOT NULL,
+            comment TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_datacron_focused_req_set ON datacron_focused_requirements(set_id)"
+    )
+
+
+def add_datacron_focused_requirement(set_id: int, character_key: str, required_level: int,
+                                      comment: str, created_by: str) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("""
+        INSERT INTO datacron_focused_requirements
+            (set_id, character_key, required_level, comment, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (set_id, character_key, required_level, comment, created_by))
+    conn.commit()
+    req_id = cursor.lastrowid
+    conn.close()
+    return req_id
+
+
+def update_datacron_focused_requirement(req_id: int, set_id: int, character_key: str,
+                                         required_level: int, comment: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("""
+        UPDATE datacron_focused_requirements
+        SET set_id = ?, character_key = ?, required_level = ?, comment = ?
+        WHERE id = ?
+    """, (set_id, character_key, required_level, comment, req_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_datacron_focused_requirement(req_id: int) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("DELETE FROM datacron_focused_requirements WHERE id = ?", (req_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def delete_datacron_focused_requirements_by_set(set_id: int) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("DELETE FROM datacron_focused_requirements WHERE set_id = ?", (set_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return deleted
+
+
+def count_datacron_focused_requirements_by_set(set_id: int) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("SELECT COUNT(*) FROM datacron_focused_requirements WHERE set_id = ?", (set_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_datacron_focused_requirement(req_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, character_key, required_level, comment, created_by, created_at
+        FROM datacron_focused_requirements WHERE id = ?
+    """, (req_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def get_datacron_focused_requirements_by_set(set_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, character_key, required_level, comment, created_by, created_at
+        FROM datacron_focused_requirements WHERE set_id = ? ORDER BY id
+    """, (set_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_datacron_focused_requirements():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_focused_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, character_key, required_level, comment, created_by, created_at
+        FROM datacron_focused_requirements ORDER BY set_id, id
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
