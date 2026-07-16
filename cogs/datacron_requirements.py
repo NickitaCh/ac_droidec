@@ -31,6 +31,119 @@ TARGET_LABEL_OVERRIDES = {
     "ahsokatano_snips": "UNIT_AHSOKATANO_NAME_V2",
 }
 
+# Вручную сокращённые описания способностей (цифры + суть механики, без "воды")
+# для сезонов, активных на момент написания (30/31/32) — проверены на реальных
+# данных comlink. "{0}" сохраняется как плейсхолдер там, где он был в оригинале
+# (фракция/сторона/персонаж-генерик), подстановка происходит после этого шага.
+# Для способностей будущих сезонов, которых здесь ещё нет, используется
+# автоматическое сокращение (см. _auto_shorten) — не такое точное, но не даёт
+# описанию обрываться посреди слова/предложения.
+ABILITY_SHORT_OVERRIDES = {
+    # --- Сезон 32 "Необходимые меры" ---
+    # уровень 3 (текст читается как продолжение "Ветка: ..." — субъект не повторяется)
+    "datacron_faction_generic_018": "лечит другого союзника → оба +5% к обороне/атаке/здоровью/защите (суммируется).",
+    "datacron_faction_generic_024": "1-е падение ХП ниже 50% → неуязвим 1 ход + усиление кражи здоровья 2 хода.",
+    "datacron_faction_generic_029": "в начале боя неуязвимы 2 хода (нельзя скопировать).",
+    "datacron_faction_generic_005": "с 2+ снимаемыми дебаффами в начале хода — 65% шанс снять все.",
+    "datacron_faction_generic_043": "лечит защиту → +2% макс. защиты (суммируется до 150%).",
+    "datacron_faction_generic_023": "в начале боя получают возмездие на 3 хода (нельзя снять).",
+    "datacron_faction_generic_035": "наносит урон → блокировка способностей врагу на 1 ход (если ни у кого нет).",
+    "datacron_faction_generic_040": "при получении крита → 100% антикрит + 100% крит.шанс на 2 хода.",
+    "datacron_faction_generic_008": "в конце хода восст. 50% от того, что вылечили враги за этот ход.",
+    "datacron_faction_generic_014": "снятие дебаффа с врага → +2% эффективности/стойкости (суммируется).",
+    # уровень 6
+    "datacron_faction_generic_025": "с полным ХП/защитой в начале хода → +100% урона в этот ход.",
+    "datacron_faction_generic_007": "накладывает дебафф в свой ход → доп. урон 10% макс.ХП врага (не увернуться).",
+    "datacron_faction_generic_021": "без урона с прошлого хода → +крит.шанс и усиление атаки на 1 ход.",
+    "datacron_faction_generic_016": "крит в свой ход → +10% атаки на 2 хода (суммируется).",
+    "datacron_faction_generic_012": "на 1-м ходу +400% атаки от текущей обороны, затем -50% обороны.",
+    "datacron_faction_generic_034": "убивает врага → доп. ход.",
+    "datacron_faction_generic_015": "в начале боя теряет защиту → столько же здоровья + «живучесть» (меньше урона от % ХП, нельзя снять).",
+    "datacron_faction_generic_022": "оглушает врага → ускорение+атака на 2 хода, врагу уязвимость 2 хода (не увернуться).",
+    "datacron_faction_generic_011": "в конце хода восст. 50% защиты, если получил 5+ дебаффов за ход.",
+    "datacron_faction_generic_013": "лечит ХП → столько же защиты (1 раз/ход, не при полном ХП).",
+    # уровень 9 (для именных персонажей текст читается как продолжение "Имя: ...")
+    "datacron_character_cobbvanth_001": "весь состав констебли/джавы/таскены: метка на констеблей поддержки до общего хода; 1-й «Час расплаты» по врагу — метка разбойника; по разбойнику — перезарядка -3.",
+    "datacron_character_princesskneesaa_002": "атака вне очереди даёт +10% крит.урона/атаки (до 200%, до гибели); без Легенд ещё +15%, игнор защиты, чистый урон. Особая → 1 заряд DoT врагу.",
+    "datacron_character_batchers3_001": "неуязвима к ошеломлению/оглушению. Урон врагу → забирает у него 15% ШХ себе (без Легенд враги не получают ШХ). «Плен» союзника Бракованной партии → сброс перезарядок, снятие дебаффов, доп. ход.",
+    "datacron_character_jarjar_001": "дебафф на/от него → +10% ШХ. Помощь гунгана → потрясение или «подавленность» врагу. Весь состав гунганы: уворот → врагу +1 перезарядка, союзнику -1.",
+    "datacron_character_chiefnebit_002": "призыв на помощь: +10% ХП/защиты себе за помощника, +5% другим джавам. Термальный детонатор на враге → 50% доп. детонатор на 2 хода.",
+    "datacron_character_tarfful_002": "без Легенд: атака вне очереди/крит/уворот/потеря провокации → вукам 1 заряд «оплота» на 1 ход.",
+    "datacron_character_ugnaught_002": "только с Хондо+Эзрой: заряды «выкупа» (до 50) → +25% обороны/атаки всем; Эзра на помощь — баффы; осн.способность — снятие дебаффов+6 помощей; в атаке — увертывание 50%(+50% без Легенд).",
+    "datacron_character_tuskenshaman_001": "1-й дебафф за ход → 5 зарядов лечения себе + 2 заряда DoT врагу. Потеря заряда «импульса» → новый заряд + 2 лечения + активация всех зарядов лечения/урона.",
+    "datacron_character_paploo_001": "провокация 2 хода в начале боя (нельзя снять; без Легенд игнор провокации). Особая → +50% обороны/атаки (до 300%) + 25% ХП/защиты. «Стимул» → перезарядки эвокам -2.",
+    "datacron_character_talia_001": "особая по врагу с чумой → др. Сёстры ночи на помощь + 1 заряд чумы + перезарядка «Живой воды» -1. С Матерью Талзин лидером — метка заражённым врагам каждый ход.",
+
+    # --- Сезон 31 "Старые добрые времена" ---
+    # уровень 3
+    "datacron_alignment_generic_025": "усиление защиты 20% на 2 хода в начале боя.",
+    "datacron_alignment_generic_020": "накладывает DoT → заряд усиления защиты 5% (суммируется).",
+    "datacron_alignment_generic_031": "в начале боя +15% макс.ХП/защиты за каждого другого союзника той же ветки.",
+    "datacron_alignment_generic_022": "сопротивляется дебаффу → восст. 2% ХП/защиты.",
+    "datacron_alignment_generic_018": "крит по врагу → восст. 2% ХП.",
+    "datacron_alignment_generic_032": "даёт баф союзнику → +5% ШХ тому союзнику (1 раз/ход).",
+    "datacron_alignment_generic_003": "оглушает/ошеломляет врага → восст. 10% ХП/защиты.",
+    "datacron_alignment_generic_016": "1-я гибель союзника → выжившие +15% атаки, +20 скорости (суммируется).",
+    "datacron_alignment_generic_002": "получает баф → восст. 2% ХП/защиты.",
+    "datacron_alignment_generic_024": "в начале хода +25% шанс снять все дебаффы.",
+    # уровень 6
+    "datacron_faction_generic_030": "оглушение → 50% ШХ + восст. 25% ХП/защиты.",
+    "datacron_faction_generic_038": "ХП < 100% → доп. ход (1 раз за бой на персонажа).",
+    "datacron_faction_generic_031": "не-Легенды с ШХ ≥50% → урон по ним -75% до конца хода.",
+    "datacron_faction_generic_040": "при получении крита → 100% антикрит + 100% крит.шанс на 2 хода.",
+    "datacron_faction_generic_020": "оживает → длит. защита 25% на 2 хода + 25% ШХ + перезарядки -1.",
+    "datacron_faction_separatist_001": "неуязвимы к ошеломлению. «Грабёж» на враге -100% крит/эффективность. Не-дроид исп. особую → рипост 1 ход.",
+    "datacron_faction_separatist_002": "захват цели случайному врагу каждый ход (не увернуться). Прибавка ШХ при <100% → +3% крит.урона. Особая по цели с захватом → +3% макс.ХП (суммируется).",
+    # уровень 9
+    "datacron_character_generic_013": "ход врага → доп. ход с +100% урона (не срабатывает на врагах).",
+    "datacron_character_trench_001": "не-дроид сепаратисты: тактическое превосходство 2 хода в начале боя. DoT-заряд → +5% крит.урона (до +200%). Защита-заряд → +5% обороны (до +200%). Осн.способность → все с рипостом на помощь. Потрясение врагу → усиление защиты 25% на 1 ход себе.",
+    "datacron_character_generic_045": "+25% урона за каждый уровень усилителя реликвий у союзников.",
+    "datacron_character_generic_033": "крит по врагу → неуязвим 1 ход (нельзя скопировать), +25% ШХ, слепота врагу 1 ход (не увернуться). При захвате цели — ещё усиление защиты 100%, возмездие, ускорение 2 хода.",
+    "datacron_character_generic_022": "блокирует способности → +10% ШХ.",
+    "datacron_character_jangofett_001": "горение → слабость всем врагам 2 хода; снятие горения → невосприимчивость к лечению 1 ход. Лидер: плата охотникам +300% обороны; после платы особая → +25% атаки (до 125%); крит охотника → доп. атака.",
+    "datacron_character_carthonasi_001": "+100% макс.ХП/защиты/эффективности; ход другого перса → +15% ШХ. Осн.способность → доп. атака x2. Снятие ошеломления → +15% ШХ. Гибель врага → +25% атаки/крит.урона (суммируется), перезарядки сброшены, +100% ШХ.",
+    "datacron_character_bastilashan_001": "в начале боя: +15% ШХ + усиление защиты 200% (нельзя снять) старореспубл. союзникам, танкам провокация 1 ход. Пока есть усиление защиты — +150% стойкости, +35% урона.",
+    "datacron_character_zaalbar_002": "провокация танкам 1 ход в начале своего хода, пока жив — неуязвимость к оглушению/снятию бафов на них. Рваная броня врагу → на всех врагов (1 раз/ход).",
+    "datacron_character_sateleshan_001": "только со Старой Республикой: 1-я потеря защиты → +100% защиты. В начале боя провокация 2 хода, невосприимчивость к снятию ШХ джедаям. Атака по защите врага → -2% макс.защиты врагу (до 20%), +5% макс.защиты союзникам (до 50%). Снятие метки → следующая осн.способность накладывает метку (нельзя снять/увернуться).",
+    "datacron_character_sunfac_001": "+100% контрудар, неуязвим к ошеломлению/оглушению. Атака вне очереди → снимает свои дебаффы + чистый урон 15% макс.ХП. За каждый снятый дебафф — джеонозийцам +5% обороны/ХП/защиты.",
+
+    # --- Сезон 30 "Мир и Сила" ---
+    # уровень 3
+    "datacron_alignment_generic_033": "+100% крит.шанс при атаке вне очереди.",
+    "datacron_alignment_generic_014": "накладывает дебафф → +2% крит.шанса (суммируется) на 3 хода.",
+    "datacron_alignment_generic_003": "оглушает/ошеломляет врага → восст. 10% ХП/защиты.",
+    "datacron_alignment_generic_009": "накладывает дебафф → доп. урон 2% макс.ХП врага.",
+    "datacron_alignment_generic_030": "исп. осн.способность → ускорение 2 хода.",
+    "datacron_alignment_generic_019": "исп. особую способность → 15% ШХ.",
+    "datacron_alignment_generic_018": "крит по врагу → восст. 2% ХП.",
+    "datacron_alignment_generic_031": "в начале боя +15% макс.ХП/защиты за каждого другого союзника той же ветки.",
+    "datacron_alignment_generic_025": "усиление защиты 20% на 2 хода в начале боя.",
+    # уровень 6
+    "datacron_faction_generic_002": "накладывает немощность/оглушение → доп.урон 35% макс.ХП врага (не увернуться).",
+    "datacron_faction_generic_009": "урон врагу в начале его хода → +2% ШХ.",
+    "datacron_faction_generic_038": "ХП < 100% → доп. ход (1 раз за бой на персонажа).",
+    "datacron_faction_generic_029": "неуязвимы 2 хода в начале боя (нельзя скопировать).",
+    "datacron_faction_sith_001": "страх/боль/потрясение на враге → +5% атаки (суммируется).",
+    "datacron_faction_generic_027": "атакует вне очереди → 25% шанс снять 10% ШХ у цели.",
+    "datacron_faction_generic_013": "лечит ХП → столько же защиты (1 раз/ход, не при полном ХП).",
+    "datacron_faction_galacticrepublic_003": "без Легенд: помощь союзника с усилением защиты → отключение защиты врагу (нельзя снять/увернуться/сопротивляться). Пока есть усиление защиты — +50% точность/контрудар/крит.шанс/крит.урон, игнор провокации.",
+    "datacron_faction_galacticrepublic_001": "крит → восст. 12% ХП.",
+    # уровень 9
+    "datacron_character_generic_036": "получает скрытность → перезарядки особых способностей -1.",
+    "datacron_character_macewindu_001": "получение ШХ → +5% макс.ХП (до 200%). «Твёрдая оборона»+снятие «точки раскола» → точка раскола случайному врагу. Точка раскола на враге → восст. 10% ХП. Способность по оглушённому → перезарядка «Удара наповал» -1.",
+    "datacron_character_palpatine_emperor_001": "1-е поражение: враг с финальным ударом получает доп.ход и гибнет. Спадание потрясения/оглушения с врага → всем врагам невосприимчивость к бафам + 1 заряд DoT + невосприимчивость к лечению на 1 ход.",
+    "datacron_character_darthmaul_001": "лидер Мол → +200% атаки. Ситхи в скрытности → +100% крит.шанс/урон + восст. 30% ХП/защиты. Способность союзного Ситха → приходит на помощь.",
+    "datacron_character_ahsokatano_snips_001": "с Падме лидером: способность вне очереди → усиление защиты ГР 30% на 3 хода (суммируется); снятие дебаффа с себя → усиление защиты ГР 10% на 2 хода.",
+    "datacron_character_countdooku_002": "снятие рипоста → отключение защиты слабейшему врагу на 2 хода. С сепаратистом-скрытником/ситхом в составе: +30 скорости, +50% урона в свой ход, +100% урона вне очереди.",
+    "datacron_character_anakinknight_001": "доп.ход → все восст. 25% ХП/защиты + перезарядки сброшены. Осн.способность при блокировке способностей → снимает с себя и накладывает врагу на 1 ход.",
+    "datacron_character_depabilaba_001": "способность → заряд «расследования» врагу на 2 хода; заряд → +5% атаки (до 150%). Враг под «раскрытием» исп. особую → блокировка себе на 2 хода (не сопротивляться).",
+    "datacron_character_fosithtrooper_001": "крит по врагу → скрытность 1 ход. Потеря скрытности → +30% преодоления обороны, +50% атаки на 1 ход.",
+    "datacron_character_generic_011": "атакует вне очереди → восст. 20% ХП/защиты.",
+
+    # генерик-способность без ручной записи выше вызывала фоллбэк — добавлена явно
+    "datacron_character_generic_004": "накладывает дебафф → восст. 25% макс.ХП/защиты (не более раза за ход).",
+}
+
 
 # =====================================================================
 # Построение справочника датакронов (game data + локализация) — тяжёлое,
@@ -53,7 +166,39 @@ def _resolve_ability_desc(ability_id: str, loc_kv: dict):
         candidate = loc_kv.get(f"{prefix}_V{v}")
         if candidate is not None:
             best = candidate
-    return best
+    if best is not None:
+        return best
+    # Иногда номер варианта способности в abilityId не совпадает с номером
+    # в ключе локализации (расхождение в данных EA — встречалось у Небита:
+    # id оканчивается на _002, а описание есть только под _001, и наоборот
+    # у Паплу). Для именных (не generic) персонажных шаблонов ищем ЛЮБОЙ
+    # номер той же способности по имени персонажа.
+    m = re.match(r"datacron_character_(?!generic)([a-z0-9]+)_\d+$", ability_id)
+    if m:
+        char_name = m.group(1).upper()
+        base_pattern = re.compile(rf"^DATACRON_CHARACTER_{char_name}_\d+_DESC$")
+        fallback_bases = sorted(k for k in loc_kv if base_pattern.match(k))
+        if fallback_bases:
+            fallback_prefix = fallback_bases[0]
+            best = loc_kv.get(fallback_prefix)
+            for v in range(2, 8):
+                candidate = loc_kv.get(f"{fallback_prefix}_V{v}")
+                if candidate is not None:
+                    best = candidate
+            return best
+    return None
+
+
+def _auto_shorten(text: str, limit: int = 200) -> str:
+    """Фоллбэк-сокращение для способностей без ручной записи в ABILITY_SHORT_OVERRIDES
+    (например, будущих сезонов) — берёт первое предложение вместо обрыва посреди текста."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    if len(first_sentence) <= limit:
+        return first_sentence
+    return first_sentence[:limit].rstrip(" ,;:") + "…"
 
 
 def _resolve_target_label(target_key: str, loc_kv: dict) -> str:
@@ -82,12 +227,15 @@ def _clean_ability_text(text: str) -> str:
 
 
 def _build_ability_desc(ability_id: str, target_rule: str, loc_kv: dict, target_label: str) -> str:
-    desc = _resolve_ability_desc(ability_id, loc_kv)
-    if desc is None:
-        return ability_id
-    if "{0}" in desc:
-        desc = desc.replace("{0}", target_label)
-    return _clean_ability_text(desc)
+    template = ABILITY_SHORT_OVERRIDES.get(ability_id)
+    if template is None:
+        desc = _resolve_ability_desc(ability_id, loc_kv)
+        if desc is None:
+            return ability_id
+        template = _auto_shorten(_clean_ability_text(desc))
+    if "{0}" in template:
+        template = template.replace("{0}", target_label)
+    return template
 
 
 async def _fetch_datacron_cache(comlink) -> dict:
@@ -697,6 +845,53 @@ class DatacronRequirementsCog(commands.Cog):
                     matched_focused += 1
                 lines.append(f"{'✅' if ok else '❌'} {header}")
             lines.append(f"Спец. итого: {matched_focused} / {len(focused_requirements)} требований закрыто.")
+
+        chunks = _chunk_lines(lines)
+        await inter.edit_original_message(chunks[0])
+        for chunk in chunks[1:]:
+            await inter.followup.send(chunk, ephemeral=True)
+
+    @datacron_req.sub_command(name="список", description="Показать весь список требуемых датакронов по активным сезонам")
+    async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+
+        cache = self.bot.datacron_cache
+        if not cache:
+            await inter.edit_original_message("⏳ Справочник датакронов ещё загружается, подождите...")
+            return
+
+        lines = ["📋 Список требований по активным сезонам ТБ", ""]
+        any_found = False
+        for set_id in sorted(cache["seasons"].keys(), reverse=True):
+            season_data = cache["seasons"][set_id]
+            base_reqs = database.get_datacron_requirements_by_set(set_id)
+            focused_reqs = database.get_datacron_focused_requirements_by_set(set_id)
+            if not base_reqs and not focused_reqs:
+                continue
+            any_found = True
+
+            lines.append(f"== {season_data['display_name']} [{set_id}] ==")
+            for row in base_reqs:
+                req_id, _, l3, l6, l9, comment, _, _ = row
+                l3_lbl = _level_label(season_data["level3"], l3)
+                l6_lbl = _level_label(season_data["level6"], l6)
+                l9_lbl = _level_label(season_data["level9"], l9)
+                line = f"  #{req_id}: {l3_lbl} → {l6_lbl} → {l9_lbl}"
+                if comment:
+                    line += f" _({comment})_"
+                lines.append(line)
+            for row in focused_reqs:
+                req_id, _, character_key, required_level, comment, _, _ = row
+                char_label = _focused_char_label(cache, set_id, character_key)
+                line = f"  F{req_id}: [Спец] {char_label} — уровень {required_level}+"
+                if comment:
+                    line += f" _({comment})_"
+                lines.append(line)
+            lines.append("")
+
+        if not any_found:
+            await inter.edit_original_message("ℹ️ Ни у одного активного сезона нет сохранённых требований.")
+            return
 
         chunks = _chunk_lines(lines)
         await inter.edit_original_message(chunks[0])
