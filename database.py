@@ -471,3 +471,125 @@ def get_user_mapping_by_name(name: str):
     row = cursor.fetchone()
     conn.close()
     return row if row else None
+
+
+# =====================================================================
+# ТРЕБОВАНИЯ К ДАТАКРОНАМ: список нужных билдов (уровни 3/6/9) по сезонам
+# =====================================================================
+def _ensure_datacron_requirements_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datacron_requirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            set_id INTEGER NOT NULL,
+            level3_value TEXT NOT NULL,
+            level6_value TEXT NOT NULL,
+            level9_value TEXT NOT NULL,
+            comment TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_set ON datacron_requirements(set_id)")
+
+
+def add_datacron_requirement(set_id: int, level3_value: str, level6_value: str, level9_value: str,
+                              comment: str, created_by: str) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("""
+        INSERT INTO datacron_requirements
+            (set_id, level3_value, level6_value, level9_value, comment, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (set_id, level3_value, level6_value, level9_value, comment, created_by))
+    conn.commit()
+    req_id = cursor.lastrowid
+    conn.close()
+    return req_id
+
+
+def update_datacron_requirement(req_id: int, set_id: int, level3_value: str, level6_value: str,
+                                 level9_value: str, comment: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("""
+        UPDATE datacron_requirements
+        SET set_id = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?
+        WHERE id = ?
+    """, (set_id, level3_value, level6_value, level9_value, comment, req_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_datacron_requirement(req_id: int) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("DELETE FROM datacron_requirements WHERE id = ?", (req_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def delete_datacron_requirements_by_set(set_id: int) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("DELETE FROM datacron_requirements WHERE set_id = ?", (set_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return deleted
+
+
+def count_datacron_requirements_by_set(set_id: int) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("SELECT COUNT(*) FROM datacron_requirements WHERE set_id = ?", (set_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_datacron_requirement(req_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, level3_value, level6_value, level9_value, comment, created_by, created_at
+        FROM datacron_requirements WHERE id = ?
+    """, (req_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def get_datacron_requirements_by_set(set_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, level3_value, level6_value, level9_value, comment, created_by, created_at
+        FROM datacron_requirements WHERE set_id = ? ORDER BY id
+    """, (set_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_datacron_requirements():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, set_id, level3_value, level6_value, level9_value, comment, created_by, created_at
+        FROM datacron_requirements ORDER BY set_id, id
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
