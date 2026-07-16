@@ -596,6 +596,29 @@ async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteract
 
 
 # =====================================================================
+# Кнопка «Показать всем» на скрытом (ephemeral) отчёте /дк_требования проверить —
+# публикует те же чанки отчёта в канал открытым сообщением по нажатию.
+# =====================================================================
+class DatacronCheckRevealView(disnake.ui.View):
+    def __init__(self, chunks):
+        super().__init__(timeout=1800)
+        self.chunks = chunks
+        self.revealed = False
+
+    @disnake.ui.button(label="Показать всем", emoji="🔓", style=disnake.ButtonStyle.secondary)
+    async def reveal(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if self.revealed:
+            await interaction.response.defer()
+            return
+        self.revealed = True
+        button.disabled = True
+        button.label = "Показано всем"
+        await interaction.response.edit_message(view=self)
+        for chunk in self.chunks:
+            await interaction.channel.send(chunk)
+
+
+# =====================================================================
 #                    ОСНОВНОЙ МОДУЛЬ ТРЕБОВАНИЙ К ДАТАКРОНАМ
 # =====================================================================
 class DatacronRequirementsCog(commands.Cog):
@@ -902,13 +925,14 @@ class DatacronRequirementsCog(commands.Cog):
             lines.append(f"Спец. итого: {matched_focused} / {len(focused_requirements)} требований закрыто.")
 
         chunks = _chunk_lines(lines)
-        await inter.edit_original_message(chunks[0])
+        view = DatacronCheckRevealView(chunks)
+        await inter.edit_original_message(content=chunks[0], view=view)
         for chunk in chunks[1:]:
             await inter.followup.send(chunk, ephemeral=True)
 
     @datacron_req.sub_command(name="список", description="Показать весь список требуемых датакронов по активным сезонам")
     async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer(ephemeral=True)
+        await inter.response.defer(ephemeral=False)
 
         cache = self.bot.datacron_cache
         if not cache:
@@ -927,20 +951,20 @@ class DatacronRequirementsCog(commands.Cog):
 
             lines.append(f"== {season_data['display_name']} [{set_id}] ==")
             for row in base_reqs:
-                req_id, _, pack, l3, l6, l9, comment, _, _ = row
+                _, _, pack, l3, l6, l9, comment, _, _ = row
                 pack_prefix = f"{pack}: " if pack else ""
                 l3_lbl = _level_label(season_data["level3"], l3)
                 l6_lbl = _level_label(season_data["level6"], l6)
                 l9_lbl = _level_label(season_data["level9"], l9)
-                line = f"  #{req_id}: {pack_prefix}{l3_lbl} → {l6_lbl} → {l9_lbl}"
+                line = f"  {pack_prefix}{l3_lbl} → {l6_lbl} → {l9_lbl}"
                 if comment:
                     line += f" ({comment})"
                 lines.append(line)
             for row in focused_reqs:
-                req_id, _, pack, character_key, required_level, comment, _, _ = row
+                _, _, pack, character_key, required_level, comment, _, _ = row
                 pack_prefix = f"{pack}: " if pack else ""
                 char_label = _focused_char_label(cache, set_id, character_key)
-                line = f"  F{req_id}: [Спец] {pack_prefix}{char_label} — уровень {required_level}+"
+                line = f"  [Спец] {pack_prefix}{char_label} — уровень {required_level}+"
                 if comment:
                     line += f" ({comment})"
                 lines.append(line)
@@ -953,7 +977,7 @@ class DatacronRequirementsCog(commands.Cog):
         chunks = _chunk_lines(lines)
         await inter.edit_original_message(chunks[0])
         for chunk in chunks[1:]:
-            await inter.followup.send(chunk, ephemeral=True)
+            await inter.followup.send(chunk, ephemeral=False)
 
 
 def setup(bot):
