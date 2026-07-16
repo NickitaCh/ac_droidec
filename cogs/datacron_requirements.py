@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 
 import disnake
 from disnake.ext import commands, tasks
@@ -16,12 +17,18 @@ DATACRON_NONE = "NONE"
 DATACRON_ANY_LABEL = "Любой (тир разблокирован, бонус неважен)"
 DATACRON_NONE_LABEL = "- (не проверять этот уровень)"
 
-# Ключи локализации для подстановки {0} в тексты способностей уровней 3/6 —
-# darkside/lightside используют отдельный ключ ForceAlignment_*, остальные —
-# CATEGORY_<TAG>_DESC (фракции/стороны) или CATEGORY_ROLE<TAG>_DESC (роли: танк/поддержка/...).
+# Ключи локализации для подстановки {0} в тексты способностей уровней 3/6/9 —
+# darkside/lightside используют отдельный ключ ForceAlignment_*, персонажи обычно
+# резолвятся через UNIT_<TARGET_KEY>_NAME (см. _resolve_target_label), но у части
+# персонажей внутренний ключ датакрона не совпадает с реальным baseId юнита —
+# такие случаи прописаны здесь явно (найдено эмпирически на реальных данных).
 TARGET_LABEL_OVERRIDES = {
     "darkside": "ForceAlignment_Dark",
     "lightside": "ForceAlignment_Light",
+    "darthmaul": "UNIT_MAUL_NAME",
+    "generalgrievous": "UNIT_GRIEVOUS_NAME",
+    "t3-m4": "UNIT_T3_M4_NAME",
+    "ahsokatano_snips": "UNIT_AHSOKATANO_NAME_V2",
 }
 
 
@@ -55,23 +62,32 @@ def _resolve_target_label(target_key: str, loc_kv: dict) -> str:
     override_key = TARGET_LABEL_OVERRIDES.get(target_key)
     if override_key and override_key in loc_kv:
         return loc_kv[override_key]
-    for key in (f"CATEGORY_{target_key.upper()}_DESC", f"CATEGORY_ROLE{target_key.upper()}_DESC"):
+    # Порядок важен: сперва категории стороны/фракции/роли, затем — персонажи
+    # (UNIT_<BASEID>_NAME; ключ найден эмпирически на реальных данных comlink).
+    for key in (
+        f"CATEGORY_{target_key.upper()}_DESC",
+        f"CATEGORY_ROLE{target_key.upper()}_DESC",
+        f"UNIT_{target_key.upper()}_NAME",
+    ):
         if key in loc_kv:
             return loc_kv[key]
     return target_key
 
 
-def _build_ability_label(ability_id: str, target_rule: str, loc_kv: dict) -> str:
+def _clean_ability_text(text: str) -> str:
+    # В сырых текстах способностей встречаются буквальные "\n" (маркер переноса строки
+    # для игрового клиента) — схлопываем в пробелы, чтобы текст был однострочным
+    # (обязательно для опций автокомплита) и читаемым в финальном отчёте.
+    return text.replace("\\n\\n", " ").replace("\\n", " ")
+
+
+def _build_ability_desc(ability_id: str, target_rule: str, loc_kv: dict, target_label: str) -> str:
     desc = _resolve_ability_desc(ability_id, loc_kv)
     if desc is None:
         return ability_id
     if "{0}" in desc:
-        target_key = target_rule[len("target_datacron_"):] if target_rule.startswith("target_datacron_") else ""
-        desc = desc.replace("{0}", _resolve_target_label(target_key, loc_kv))
-    # В сырых текстах способностей встречаются буквальные "\n" (маркер переноса строки
-    # для игрового клиента) — схлопываем в пробелы, чтобы метка была однострочной
-    # (обязательно для опций автокомплита) и читаемой в финальном отчёте.
-    return desc.replace("\\n\\n", " ").replace("\\n", " ")
+        desc = desc.replace("{0}", target_label)
+    return _clean_ability_text(desc)
 
 
 async def _fetch_datacron_cache(comlink) -> dict:
@@ -81,11 +97,20 @@ async def _fetch_datacron_cache(comlink) -> dict:
 
     affix_sets = {a["id"]: a for a in game_data.get("datacronAffixTemplateSet", [])}
 
+    now_ms = int(time.time() * 1000)
     seasons = {}
     for dset in game_data.get("datacronSet", []):
         set_id = dset.get("id")
+        try:
+            expiration_ms = int(dset.get("expirationTimeMs", 0))
+        except (TypeError, ValueError):
+            expiration_ms = 0
+        if expiration_ms < now_ms:
+            continue  # сезон уже завершился — не показываем в списке
         seasons[set_id] = {
             "display_name": loc_kv.get(dset.get("displayName", ""), f"Сезон {set_id}"),
+            # branch_label -> {ability_id: label}; группировка по фракции/роли/персонажу,
+            # чтобы все варианты одной ветки (напр. все "Танк") шли подряд в списке.
             "level3": {},
             "level6": {},
             "level9": {},
@@ -96,7 +121,7 @@ async def _fetch_datacron_cache(comlink) -> dict:
             continue
         set_id = template.get("setId")
         if set_id not in seasons:
-            seasons[set_id] = {"display_name": f"Сезон {set_id}", "level3": {}, "level6": {}, "level9": {}}
+            continue  # сезон неактивен/просрочен — пропускаем
         for tier in template.get("tier", []):
             level = tier.get("id")
             if level not in DATACRON_LEVELS:
@@ -106,21 +131,33 @@ async def _fetch_datacron_cache(comlink) -> dict:
                 affix_set = affix_sets.get(affix_set_id)
                 if not affix_set:
                     continue
-                for affix in affix_set.get("affix", []):
+                affixes = affix_set.get("affix", [])
+                if not affixes:
+                    continue
+                # Все affix одного affixTemplateSetId (одной ветки) делят один targetRule.
+                branch_target_rule = affixes[0].get("targetRule", "")
+                branch_key = (
+                    branch_target_rule[len("target_datacron_"):]
+                    if branch_target_rule.startswith("target_datacron_")
+                    else ""
+                )
+                branch_label = _resolve_target_label(branch_key, loc_kv) if branch_key else affix_set_id
+                branch_bucket = seasons[set_id][level_key].setdefault(branch_label, {})
+                for affix in affixes:
                     ability_id = affix.get("abilityId")
                     if not ability_id:
                         continue
-                    label = _build_ability_label(ability_id, affix.get("targetRule", ""), loc_kv)
-                    seasons[set_id][level_key][ability_id] = label
+                    desc = _build_ability_desc(ability_id, affix.get("targetRule", ""), loc_kv, branch_label)
+                    branch_bucket[ability_id] = f"{branch_label}: {desc}"
 
     result_seasons = {}
     for set_id, data in seasons.items():
-        result_seasons[set_id] = {
-            "display_name": data["display_name"],
-            "level3": sorted(data["level3"].items(), key=lambda kv: kv[1]),
-            "level6": sorted(data["level6"].items(), key=lambda kv: kv[1]),
-            "level9": sorted(data["level9"].items(), key=lambda kv: kv[1]),
-        }
+        result_seasons[set_id] = {"display_name": data["display_name"]}
+        for level_key in ("level3", "level6", "level9"):
+            flat = []
+            for branch_label in sorted(data[level_key].keys()):
+                flat.extend(sorted(data[level_key][branch_label].items(), key=lambda kv: kv[1]))
+            result_seasons[set_id][level_key] = flat
     return {"seasons": result_seasons}
 
 
