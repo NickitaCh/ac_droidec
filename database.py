@@ -493,19 +493,23 @@ def _ensure_datacron_requirements_table(cursor):
         cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN pack TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN priority TEXT NOT NULL DEFAULT 'required'")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_set ON datacron_requirements(set_id)")
 
 
 def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_value: str, level9_value: str,
-                              comment: str, created_by: str) -> int:
+                              comment: str, created_by: str, priority: str = "required") -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO datacron_requirements
-            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by))
+            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, priority))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -513,15 +517,15 @@ def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_v
 
 
 def update_datacron_requirement(req_id: int, set_id: int, pack: str, level3_value: str, level6_value: str,
-                                 level9_value: str, comment: str) -> bool:
+                                 level9_value: str, comment: str, priority: str) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         UPDATE datacron_requirements
-        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?
+        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?, priority = ?
         WHERE id = ?
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, req_id))
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, priority, req_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
@@ -565,7 +569,7 @@ def get_datacron_requirement(req_id: int):
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
         FROM datacron_requirements WHERE id = ?
     """, (req_id,))
     row = cursor.fetchone()
@@ -578,7 +582,7 @@ def get_datacron_requirements_by_set(set_id: int):
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
         FROM datacron_requirements WHERE set_id = ? ORDER BY id
     """, (set_id,))
     rows = cursor.fetchall()
@@ -591,7 +595,7 @@ def get_all_datacron_requirements():
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
         FROM datacron_requirements ORDER BY set_id, id
     """)
     rows = cursor.fetchall()
@@ -620,21 +624,25 @@ def _ensure_datacron_focused_requirements_table(cursor):
         cursor.execute("ALTER TABLE datacron_focused_requirements ADD COLUMN pack TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE datacron_focused_requirements ADD COLUMN priority TEXT NOT NULL DEFAULT 'required'")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_datacron_focused_req_set ON datacron_focused_requirements(set_id)"
     )
 
 
 def add_datacron_focused_requirement(set_id: int, pack: str, character_key: str, required_level: int,
-                                      comment: str, created_by: str) -> int:
+                                      comment: str, created_by: str, priority: str = "required") -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_focused_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO datacron_focused_requirements
-            (set_id, pack, character_key, required_level, comment, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (set_id, pack, character_key, required_level, comment, created_by))
+            (set_id, pack, character_key, required_level, comment, created_by, created_at, priority)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    """, (set_id, pack, character_key, required_level, comment, created_by, priority))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -642,15 +650,15 @@ def add_datacron_focused_requirement(set_id: int, pack: str, character_key: str,
 
 
 def update_datacron_focused_requirement(req_id: int, set_id: int, pack: str, character_key: str,
-                                         required_level: int, comment: str) -> bool:
+                                         required_level: int, comment: str, priority: str) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_focused_requirements_table(cursor)
     cursor.execute("""
         UPDATE datacron_focused_requirements
-        SET set_id = ?, pack = ?, character_key = ?, required_level = ?, comment = ?
+        SET set_id = ?, pack = ?, character_key = ?, required_level = ?, comment = ?, priority = ?
         WHERE id = ?
-    """, (set_id, pack, character_key, required_level, comment, req_id))
+    """, (set_id, pack, character_key, required_level, comment, priority, req_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
@@ -694,7 +702,7 @@ def get_datacron_focused_requirement(req_id: int):
     cursor = conn.cursor()
     _ensure_datacron_focused_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at
+        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at, priority
         FROM datacron_focused_requirements WHERE id = ?
     """, (req_id,))
     row = cursor.fetchone()
@@ -707,7 +715,7 @@ def get_datacron_focused_requirements_by_set(set_id: int):
     cursor = conn.cursor()
     _ensure_datacron_focused_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at
+        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at, priority
         FROM datacron_focused_requirements WHERE set_id = ? ORDER BY id
     """, (set_id,))
     rows = cursor.fetchall()
@@ -720,7 +728,7 @@ def get_all_datacron_focused_requirements():
     cursor = conn.cursor()
     _ensure_datacron_focused_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at
+        SELECT id, set_id, pack, character_key, required_level, comment, created_by, created_at, priority
         FROM datacron_focused_requirements ORDER BY set_id, id
     """)
     rows = cursor.fetchall()
