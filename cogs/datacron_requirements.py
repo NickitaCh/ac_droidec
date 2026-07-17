@@ -529,10 +529,9 @@ def _build_priority_description(priority_items, footer_totals=None) -> list:
     return lines
 
 
-def _build_priority_embeds(title, color, priority_items, footer_totals=None):
-    """Разбивает markdown-описание на несколько embed'ов, если превышен лимит
-    Discord в 4096 символов на embed.description."""
-    lines = _build_priority_description(priority_items, footer_totals)
+def _lines_to_embeds(title, color, lines):
+    """Разбивает список строк markdown на несколько embed'ов, если превышен
+    лимит Discord в 4096 символов на embed.description."""
     if not lines:
         return []
 
@@ -553,6 +552,35 @@ def _build_priority_embeds(title, color, priority_items, footer_totals=None):
         t = title if i == 0 else f"{title} (продолжение {i + 1})"
         embeds.append(disnake.Embed(title=t[:256], description=desc[:4096], color=color))
     return embeds
+
+
+def _build_priority_embeds(title, color, priority_items, footer_totals=None):
+    lines = _build_priority_description(priority_items, footer_totals)
+    return _lines_to_embeds(title, color, lines)
+
+
+def _match_counts(player_json, set_id, requirements, focused_requirements) -> dict:
+    """Только счётчики matched/total по приоритету — для сводного гильд-отчёта,
+    без построения текста полей (в отличие от полного /дк_требования проверить)."""
+    counts = {p: {"matched": 0, "total": 0} for p in PRIORITY_ORDER}
+    if requirements:
+        owned = _extract_player_base_datacrons(player_json, set_id)
+        pairs = _match_requirements(requirements, owned)
+        for req, match in pairs:
+            priority = req[9]
+            bucket = counts.get(priority, counts[PRIORITY_REQUIRED])
+            bucket["total"] += 1
+            if match:
+                bucket["matched"] += 1
+    if focused_requirements:
+        owned_focused = _extract_player_focused_datacrons(player_json, set_id)
+        for req in focused_requirements:
+            _, _, _, character_key, required_level, _, _, _, priority = req
+            bucket = counts.get(priority, counts[PRIORITY_REQUIRED])
+            bucket["total"] += 1
+            if owned_focused.get(character_key, 0) >= required_level:
+                bucket["matched"] += 1
+    return counts
 
 
 # =====================================================================
@@ -962,12 +990,79 @@ class DatacronRequirementsCog(commands.Cog):
             ephemeral=True,
         )
 
-    @datacron_req.sub_command(name="проверить", description="Проверить, есть ли у игрока подходящие датакроны под все требования сезона")
+    async def _build_guild_datacron_report(self, set_id, season_label, requirements, focused_requirements):
+        """Сводный отчёт по всей гильдии: кто не закрыл "Обязательно" (с разбивкой по
+        приоритетам) — отдельно, кто закрыл всё "Обязательно" — компактным списком имён."""
+        roster = self.bot.guild_roster_cache
+        if not roster:
+            return None
+
+        semaphore = asyncio.Semaphore(6)
+
+        async def fetch_one(name, allycode):
+            async with semaphore:
+                try:
+                    player = await asyncio.wait_for(
+                        asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode),
+                        timeout=15.0,
+                    )
+                except Exception:
+                    return name, None
+                return name, player
+
+        results = await asyncio.gather(*(fetch_one(name, allycode) for name, allycode in roster.items()))
+
+        missing_required = []
+        fully_compliant = []
+        failed = []
+        for name, player in results:
+            if player is None:
+                failed.append(name)
+                continue
+            counts = _match_counts(player, set_id, requirements, focused_requirements)
+            required = counts[PRIORITY_REQUIRED]
+            if required["total"] > 0 and required["matched"] < required["total"]:
+                parts = [
+                    f"{PRIORITY_LABELS[p]}: {counts[p]['matched']}/{counts[p]['total']}"
+                    for p in PRIORITY_ORDER if counts[p]["total"] > 0
+                ]
+                missing_required.append((name, ", ".join(parts)))
+            else:
+                fully_compliant.append(name)
+
+        missing_required.sort(key=lambda t: t[0].lower())
+        fully_compliant.sort(key=lambda s: s.lower())
+
+        lines = [f"# ❌ Не закрыли «Обязательно» ({len(missing_required)})"]
+        if missing_required:
+            for name, detail in missing_required:
+                lines.append(f"**{name}** — {detail}")
+        else:
+            lines.append("Все закрыли все обязательные требования! 🎉")
+
+        lines.append("")
+        lines.append(f"# ✅ Закрыли всё «Обязательно» ({len(fully_compliant)})")
+        lines.append(", ".join(fully_compliant) if fully_compliant else "—")
+
+        if failed:
+            lines.append("")
+            lines.append(f"⚠️ Не удалось получить данные: {', '.join(failed)}")
+
+        if not missing_required:
+            color = DATACRON_CHECK_COLOR_FULL
+        elif len(missing_required) < len(results):
+            color = DATACRON_CHECK_COLOR_PARTIAL
+        else:
+            color = DATACRON_CHECK_COLOR_NONE
+        title = f"📋 Проверка датакронов по гильдии — {season_label}"
+        return _lines_to_embeds(title, color, lines)
+
+    @datacron_req.sub_command(name="проверить", description="Проверить датакроны игрока, либо (без игрока) сводный отчёт по всей гильдии")
     async def datacron_req_check(
         self,
         inter: disnake.ApplicationCommandInteraction,
         сезон: str = commands.Param(description="Сезон для проверки", autocomplete=autocomplete_datacron_season),
-        игрок: str = commands.Param(description="Выберите игрока", autocomplete=autocomplete_players),
+        игрок: str = commands.Param(default=None, description="Оставьте пустым для отчёта по всей гильдии", autocomplete=autocomplete_players),
     ):
         await inter.response.defer(ephemeral=True)
 
@@ -976,18 +1071,30 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.")
             return
 
-        cache = self.bot.guild_roster_cache
-        if not cache or игрок not in cache:
-            await inter.edit_original_message("❌ Игрок не найден в кэше состава.")
-            return
-        allycode = cache[игрок]
-
         season_label = _season_label(self.bot.datacron_cache, set_id)
         requirements = database.get_datacron_requirements_by_set(set_id)
         focused_requirements = database.get_datacron_focused_requirements_by_set(set_id)
         if not requirements and not focused_requirements:
             await inter.edit_original_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.")
             return
+
+        if игрок is None:
+            await inter.edit_original_message(f"⏳ Собираю данные по всей гильдии ({season_label})...")
+            embeds = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements)
+            if embeds is None:
+                await inter.edit_original_message("❌ Кэш состава гильдии пуст — подождите обновления или попробуйте позже.")
+                return
+            view = DatacronCheckRevealView(embeds)
+            await inter.edit_original_message(content=None, embed=embeds[0], view=view)
+            for e in embeds[1:]:
+                await inter.followup.send(embed=e, ephemeral=True)
+            return
+
+        cache = self.bot.guild_roster_cache
+        if not cache or игрок not in cache:
+            await inter.edit_original_message("❌ Игрок не найден в кэше состава.")
+            return
+        allycode = cache[игрок]
 
         try:
             player = await asyncio.wait_for(
