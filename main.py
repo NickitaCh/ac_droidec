@@ -103,12 +103,19 @@ async def on_ready():
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
-async def _check_allowed_role(author, guild) -> bool:
+def _check_allowed_role(author, guild_id) -> bool:
     if author.id in bot.allowed_user_ids:
         return True
-    if not guild:
+    if guild_id is None:
         return False
-    user_role_ids = [role.id for role in author.roles]
+    # Берём сырые id ролей (author._roles) вместо author.roles: это свойство
+    # само резолвит роли через author.guild.get_role(...), а Interaction.guild
+    # может вернуть None даже когда взаимодействие реально пришло из гильдии
+    # (см. disnake docs: "This will only return a full Guild for cached guilds").
+    # _roles заполняется напрямую из пейлоада интеракции и от кэша не зависит.
+    user_role_ids = getattr(author, "_roles", None)
+    if user_role_ids is None:
+        user_role_ids = [role.id for role in getattr(author, "roles", [])]
     has_permission = any(role_id in bot.allowed_role_ids for role_id in user_role_ids)
     if not has_permission:
         raise commands.MissingAnyRole(bot.allowed_role_ids)
@@ -119,21 +126,28 @@ async def _check_allowed_role(author, guild) -> bool:
 # apply to application commands."). Нужен отдельный @bot.slash_command_check.
 @bot.check
 async def check_guild_roles(ctx):
-    return await _check_allowed_role(ctx.author, ctx.guild)
+    return _check_allowed_role(ctx.author, ctx.guild.id if ctx.guild else None)
 
 @bot.slash_command_check
 async def check_guild_roles_slash(inter):
-    return await _check_allowed_role(inter.author, inter.guild)
+    return _check_allowed_role(inter.author, inter.guild_id)
 
 @bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
     if hasattr(error, "original"):
         error = error.original
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole, commands.CheckFailure)):
-        await inter.response.send_message(
-            "🛑 **Доступ заблокирован:** У вас нет прав для использования этого бота", 
-            ephemeral=True  
-        )
+        try:
+            role_ids = list(getattr(inter.author, "_roles", []))
+            cmd_name = inter.application_command.qualified_name if inter.application_command else "?"
+            print(f"🛑 [Доступ] {inter.author} ({inter.author.id}) роли={role_ids} команда=/{cmd_name}: {error}")
+        except Exception as log_err:
+            print(f"🛑 [Доступ] (не удалось залогировать детали: {log_err}): {error}")
+        if not inter.response.is_done():
+            await inter.response.send_message(
+                "🛑 **Доступ заблокирован:** У вас нет прав для использования этого бота",
+                ephemeral=True
+            )
     else:
         print(f"❌ Непредвиденная ошибка при выполнении команды: {error}")
 
