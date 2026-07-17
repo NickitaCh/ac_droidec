@@ -38,8 +38,7 @@ DATACRON_CHECK_COLOR_FULL = 0x2ECC71
 DATACRON_CHECK_COLOR_PARTIAL = 0xF1C40F
 DATACRON_CHECK_COLOR_NONE = 0xE74C3C
 
-EMBED_FIELD_LIMIT = 24  # держим запас от жёсткого лимита Discord в 25 полей на embed
-EMBED_CHAR_BUDGET = 5700  # запас от жёсткого лимита Discord в 6000 символов на embed
+DESCRIPTION_CHAR_BUDGET = 3800  # запас от жёсткого лимита Discord в 4096 символов на embed.description
 
 # Ключи локализации для подстановки {0} в тексты способностей уровней 3/6/9 —
 # darkside/lightside используют отдельный ключ ForceAlignment_*, персонажи обычно
@@ -463,76 +462,46 @@ def _requirement_value_lines(l3_label, l6_label, l9_label, comment) -> list:
     return lines
 
 
-def _pack_heading(label: str) -> str:
-    # "### " — markdown-заголовок внутри имени поля embed'а, крупнее обычного
-    # жирного текста названия поля — выделяет пак/персонажа, под которым расписан ДК.
-    return f"### {label}"
-
-
 def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment):
-    label = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
+    name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
     value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment)) or "​"
-    return _pack_heading(label)[:256], value[:1024]
+    return name, value
 
 
 def _focused_requirement_field(pack, char_label, required_level, comment):
-    label = pack if pack else char_label
+    name = pack if pack else char_label
     lines = [f"**Спец. датакрон:** {char_label} — уровень {required_level}+"]
     if comment:
         lines.append(f"💠 *{comment}*")
-    return _pack_heading(label)[:256], "\n".join(lines)[:1024]
+    return name, "\n".join(lines)
 
 
 def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels):
     status = "✅" if matched else "❌"
-    label = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
-    name = f"### {status} {label}"
+    name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
     lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment)
     if matched and closed_levels:
         closed_parts = [v for v in closed_levels if v != "—"]
         lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
-    return name[:256], ("\n".join(lines) or "​")[:1024]
+    return name, "\n".join(lines) or "​"
 
 
 def _focused_check_field(pack, char_label, required_level, current_level, comment, ok):
     status = "✅" if ok else "❌"
-    label = pack if pack else char_label
-    name = f"### {status} {label}"
+    name = f"{status} {pack if pack else char_label}"
     lines = [f"**Спец:** {char_label} — нужен уровень {required_level}+, у игрока {current_level}"]
     if comment:
         lines.append(f"💠 *{comment}*")
-    return name[:256], "\n".join(lines)[:1024]
+    return name, "\n".join(lines)
 
 
-def _build_priority_embeds(title, color, priority_items, footer_totals=None):
-    """priority_items: {priority: [(field_name, field_value), ...]}, в порядке PRIORITY_ORDER.
-    Заголовок категории вклеивается первой строкой в имя первого поля группы (без
-    отдельной пустой строки под ним), а между группами вставляется пустое поле-разделитель.
-    Разбивает на несколько embed'ов, если превышен лимит Discord на поля/символы."""
-    embeds = []
-    part = [1]
-
-    def make_embed():
-        t = title if part[0] == 1 else f"{title} (продолжение {part[0]})"
-        return disnake.Embed(title=t[:256], color=color)
-
-    embed = make_embed()
-    char_budget = len(embed.title)
-    field_count = 0
-
-    def add_entry(name, value):
-        nonlocal embed, char_budget, field_count
-        entry_len = len(name) + len(value)
-        if field_count >= EMBED_FIELD_LIMIT or char_budget + entry_len > EMBED_CHAR_BUDGET:
-            embeds.append(embed)
-            part[0] += 1
-            embed = make_embed()
-            char_budget = len(embed.title)
-            field_count = 0
-        embed.add_field(name=name, value=value, inline=False)
-        field_count += 1
-        char_budget += entry_len
-
+def _build_priority_description(priority_items, footer_totals=None) -> list:
+    """priority_items: {priority: [(name, value), ...]}, в порядке PRIORITY_ORDER.
+    Embed-поля (fields) в Discord не поддерживают markdown-заголовки (## text
+    рендерится буквально), поэтому текст собирается как markdown для embed.description,
+    где ## Пак — настоящий крупный заголовок. Пустая строка перед новой категорией,
+    без пустой строки сразу под заголовком категории (первая строка — уже пак)."""
+    lines = []
     any_group_emitted = False
     for priority in PRIORITY_ORDER:
         items = priority_items.get(priority)
@@ -540,21 +509,56 @@ def _build_priority_embeds(title, color, priority_items, footer_totals=None):
             continue
 
         if any_group_emitted:
-            add_entry("​", "​")  # пустая строка-разделитель перед новой категорией
+            lines.append("")  # пустая строка-разделитель перед новой категорией
         any_group_emitted = True
 
-        header_label = f"{PRIORITY_EMOJI[priority]} {PRIORITY_LABELS[priority]}"
+        header = f"{PRIORITY_EMOJI[priority]} **{PRIORITY_LABELS[priority]}**"
         totals = (footer_totals or {}).get(priority)
         if totals:
-            header_label = f"{header_label} — {totals}"
+            header += f" — {totals}"
+        lines.append(header)
 
-        first_name, first_value = items[0]
-        add_entry(f"{header_label}\n{first_name}"[:256], first_value)
-        for name, value in items[1:]:
-            add_entry(name, value)
+        for name, value in items:
+            lines.append(f"## {name}")
+            lines.extend(value.split("\n"))
+            lines.append("")
 
-    embeds.append(embed)
-    return [e for e in embeds if len(e.fields) > 0]
+    deduped = []
+    for line in lines:
+        if line == "" and deduped and deduped[-1] == "":
+            continue
+        deduped.append(line)
+    while deduped and deduped[0] == "":
+        deduped.pop(0)
+    while deduped and deduped[-1] == "":
+        deduped.pop()
+    return deduped
+
+
+def _build_priority_embeds(title, color, priority_items, footer_totals=None):
+    """Разбивает markdown-описание на несколько embed'ов, если превышен лимит
+    Discord в 4096 символов на embed.description."""
+    lines = _build_priority_description(priority_items, footer_totals)
+    if not lines:
+        return []
+
+    chunks = []
+    current, current_len = [], 0
+    for line in lines:
+        add_len = len(line) + 1
+        if current and current_len + add_len > DESCRIPTION_CHAR_BUDGET:
+            chunks.append("\n".join(current))
+            current, current_len = [], 0
+        current.append(line)
+        current_len += add_len
+    if current:
+        chunks.append("\n".join(current))
+
+    embeds = []
+    for i, desc in enumerate(chunks):
+        t = title if i == 0 else f"{title} (продолжение {i + 1})"
+        embeds.append(disnake.Embed(title=t[:256], description=desc[:4096], color=color))
+    return embeds
 
 
 # =====================================================================
