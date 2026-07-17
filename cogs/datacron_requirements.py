@@ -463,23 +463,30 @@ def _requirement_value_lines(l3_label, l6_label, l9_label, comment) -> list:
     return lines
 
 
+def _pack_heading(label: str) -> str:
+    # "### " — markdown-заголовок внутри имени поля embed'а, крупнее обычного
+    # жирного текста названия поля — выделяет пак/персонажа, под которым расписан ДК.
+    return f"### {label}"
+
+
 def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment):
-    name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
+    label = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
     value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment)) or "​"
-    return name[:256], value[:1024]
+    return _pack_heading(label)[:256], value[:1024]
 
 
 def _focused_requirement_field(pack, char_label, required_level, comment):
-    name = pack if pack else char_label
+    label = pack if pack else char_label
     lines = [f"**Спец. датакрон:** {char_label} — уровень {required_level}+"]
     if comment:
         lines.append(f"💠 *{comment}*")
-    return name[:256], "\n".join(lines)[:1024]
+    return _pack_heading(label)[:256], "\n".join(lines)[:1024]
 
 
 def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels):
     status = "✅" if matched else "❌"
-    name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
+    label = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
+    name = f"### {status} {label}"
     lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment)
     if matched and closed_levels:
         closed_parts = [v for v in closed_levels if v != "—"]
@@ -489,7 +496,8 @@ def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, clos
 
 def _focused_check_field(pack, char_label, required_level, current_level, comment, ok):
     status = "✅" if ok else "❌"
-    name = f"{status} {pack if pack else char_label}"
+    label = pack if pack else char_label
+    name = f"### {status} {label}"
     lines = [f"**Спец:** {char_label} — нужен уровень {required_level}+, у игрока {current_level}"]
     if comment:
         lines.append(f"💠 *{comment}*")
@@ -498,6 +506,8 @@ def _focused_check_field(pack, char_label, required_level, current_level, commen
 
 def _build_priority_embeds(title, color, priority_items, footer_totals=None):
     """priority_items: {priority: [(field_name, field_value), ...]}, в порядке PRIORITY_ORDER.
+    Заголовок категории вклеивается первой строкой в имя первого поля группы (без
+    отдельной пустой строки под ним), а между группами вставляется пустое поле-разделитель.
     Разбивает на несколько embed'ов, если превышен лимит Discord на поля/символы."""
     embeds = []
     part = [1]
@@ -510,23 +520,38 @@ def _build_priority_embeds(title, color, priority_items, footer_totals=None):
     char_budget = len(embed.title)
     field_count = 0
 
+    def add_entry(name, value):
+        nonlocal embed, char_budget, field_count
+        entry_len = len(name) + len(value)
+        if field_count >= EMBED_FIELD_LIMIT or char_budget + entry_len > EMBED_CHAR_BUDGET:
+            embeds.append(embed)
+            part[0] += 1
+            embed = make_embed()
+            char_budget = len(embed.title)
+            field_count = 0
+        embed.add_field(name=name, value=value, inline=False)
+        field_count += 1
+        char_budget += entry_len
+
+    any_group_emitted = False
     for priority in PRIORITY_ORDER:
         items = priority_items.get(priority)
         if not items:
             continue
-        header_value = (footer_totals or {}).get(priority, "​")
-        entries = [(f"{PRIORITY_EMOJI[priority]} {PRIORITY_LABELS[priority]}", header_value)] + list(items)
-        for name, value in entries:
-            entry_len = len(name) + len(value)
-            if field_count >= EMBED_FIELD_LIMIT or char_budget + entry_len > EMBED_CHAR_BUDGET:
-                embeds.append(embed)
-                part[0] += 1
-                embed = make_embed()
-                char_budget = len(embed.title)
-                field_count = 0
-            embed.add_field(name=name, value=value, inline=False)
-            field_count += 1
-            char_budget += entry_len
+
+        if any_group_emitted:
+            add_entry("​", "​")  # пустая строка-разделитель перед новой категорией
+        any_group_emitted = True
+
+        header_label = f"{PRIORITY_EMOJI[priority]} {PRIORITY_LABELS[priority]}"
+        totals = (footer_totals or {}).get(priority)
+        if totals:
+            header_label = f"{header_label} — {totals}"
+
+        first_name, first_value = items[0]
+        add_entry(f"{header_label}\n{first_name}"[:256], first_value)
+        for name, value in items[1:]:
+            add_entry(name, value)
 
     embeds.append(embed)
     return [e for e in embeds if len(e.fields) > 0]
@@ -1021,7 +1046,7 @@ class DatacronRequirementsCog(commands.Cog):
 
         priority_items = {p: groups[p]["items"] for p in PRIORITY_ORDER}
         footer_totals = {
-            p: f"*{groups[p]['matched']} / {groups[p]['total']} требований закрыто*"
+            p: f"{groups[p]['matched']}/{groups[p]['total']} закрыто"
             for p in PRIORITY_ORDER if groups[p]["total"] > 0
         }
         total_matched = sum(g["matched"] for g in groups.values())
