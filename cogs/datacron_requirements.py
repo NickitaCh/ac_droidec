@@ -27,6 +27,19 @@ PRIORITY_LABELS = {
     PRIORITY_USEFUL: "Полезные",
 }
 PRIORITY_CHOICES = [disnake.OptionChoice(name=label, value=key) for key, label in PRIORITY_LABELS.items()]
+PRIORITY_EMOJI = {
+    PRIORITY_REQUIRED: "🔴",
+    PRIORITY_OPTIONAL: "🟡",
+    PRIORITY_USEFUL: "🟢",
+}
+
+DATACRON_LIST_COLOR = 0x3498DB
+DATACRON_CHECK_COLOR_FULL = 0x2ECC71
+DATACRON_CHECK_COLOR_PARTIAL = 0xF1C40F
+DATACRON_CHECK_COLOR_NONE = 0xE74C3C
+
+EMBED_FIELD_LIMIT = 24  # держим запас от жёсткого лимита Discord в 25 полей на embed
+EMBED_CHAR_BUDGET = 5700  # запас от жёсткого лимита Discord в 6000 символов на embed
 
 # Ключи локализации для подстановки {0} в тексты способностей уровней 3/6/9 —
 # darkside/lightside используют отдельный ключ ForceAlignment_*, персонажи обычно
@@ -426,20 +439,97 @@ def _is_valid_focused_character(cache, set_id, character_key) -> bool:
     return any(key == character_key for key, _label, _max_tier in season_data.get("focused", []))
 
 
-def _chunk_lines(lines, limit=1900):
-    chunks = []
-    current = ""
-    for line in lines:
-        candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > limit:
-            if current:
-                chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
+# =====================================================================
+# Построение красиво оформленных embed'ов для /дк_требования список и проверить —
+# группировка по приоритету (заголовок-разделитель + по одному полю на требование).
+# =====================================================================
+def _branch_fallback_name(l3_label, l6_label, l9_label) -> str:
+    # Без указанного "пака" используем название ветки (до ": ") как заголовок поля —
+    # так у "Полезные" (без пака) отображается что-то осмысленное, а не пустота.
+    for label in (l6_label, l3_label, l9_label):
+        if label and label != "-" and ": " in label:
+            return label.split(": ", 1)[0]
+    return "Без пака"
+
+
+def _requirement_value_lines(l3_label, l6_label, l9_label, comment) -> list:
+    lines = []
+    for tier, label in ((3, l3_label), (6, l6_label), (9, l9_label)):
+        if label == "-":
+            continue
+        lines.append(f"**{tier} ур.:** {label}")
+    if comment:
+        lines.append(f"💠 *{comment}*")
+    return lines
+
+
+def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment):
+    name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
+    value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment)) or "​"
+    return name[:256], value[:1024]
+
+
+def _focused_requirement_field(pack, char_label, required_level, comment):
+    name = pack if pack else char_label
+    lines = [f"**Спец. датакрон:** {char_label} — уровень {required_level}+"]
+    if comment:
+        lines.append(f"💠 *{comment}*")
+    return name[:256], "\n".join(lines)[:1024]
+
+
+def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels):
+    status = "✅" if matched else "❌"
+    name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
+    lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment)
+    if matched and closed_levels:
+        closed_parts = [v for v in closed_levels if v != "—"]
+        lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
+    return name[:256], ("\n".join(lines) or "​")[:1024]
+
+
+def _focused_check_field(pack, char_label, required_level, current_level, comment, ok):
+    status = "✅" if ok else "❌"
+    name = f"{status} {pack if pack else char_label}"
+    lines = [f"**Спец:** {char_label} — нужен уровень {required_level}+, у игрока {current_level}"]
+    if comment:
+        lines.append(f"💠 *{comment}*")
+    return name[:256], "\n".join(lines)[:1024]
+
+
+def _build_priority_embeds(title, color, priority_items, footer_totals=None):
+    """priority_items: {priority: [(field_name, field_value), ...]}, в порядке PRIORITY_ORDER.
+    Разбивает на несколько embed'ов, если превышен лимит Discord на поля/символы."""
+    embeds = []
+    part = [1]
+
+    def make_embed():
+        t = title if part[0] == 1 else f"{title} (продолжение {part[0]})"
+        return disnake.Embed(title=t[:256], color=color)
+
+    embed = make_embed()
+    char_budget = len(embed.title)
+    field_count = 0
+
+    for priority in PRIORITY_ORDER:
+        items = priority_items.get(priority)
+        if not items:
+            continue
+        header_value = (footer_totals or {}).get(priority, "​")
+        entries = [(f"{PRIORITY_EMOJI[priority]} {PRIORITY_LABELS[priority]}", header_value)] + list(items)
+        for name, value in entries:
+            entry_len = len(name) + len(value)
+            if field_count >= EMBED_FIELD_LIMIT or char_budget + entry_len > EMBED_CHAR_BUDGET:
+                embeds.append(embed)
+                part[0] += 1
+                embed = make_embed()
+                char_budget = len(embed.title)
+                field_count = 0
+            embed.add_field(name=name, value=value, inline=False)
+            field_count += 1
+            char_budget += entry_len
+
+    embeds.append(embed)
+    return [e for e in embeds if len(e.fields) > 0]
 
 
 # =====================================================================
@@ -608,12 +698,12 @@ async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteract
 
 # =====================================================================
 # Кнопка «Показать всем» на скрытом (ephemeral) отчёте /дк_требования проверить —
-# публикует те же чанки отчёта в канал открытым сообщением по нажатию.
+# публикует те же embed'ы отчёта в канал открытым сообщением по нажатию.
 # =====================================================================
 class DatacronCheckRevealView(disnake.ui.View):
-    def __init__(self, chunks):
+    def __init__(self, embeds):
         super().__init__(timeout=1800)
-        self.chunks = chunks
+        self.embeds = embeds
         self.revealed = False
 
     @disnake.ui.button(label="Показать всем", emoji="🔓", style=disnake.ButtonStyle.secondary)
@@ -625,8 +715,8 @@ class DatacronCheckRevealView(disnake.ui.View):
         button.disabled = True
         button.label = "Показано всем"
         await interaction.response.edit_message(view=self)
-        for chunk in self.chunks:
-            await interaction.channel.send(chunk)
+        for e in self.embeds:
+            await interaction.channel.send(embed=e)
 
 
 # =====================================================================
@@ -894,64 +984,61 @@ class DatacronRequirementsCog(commands.Cog):
             options = season_data[f"level{level_num}"] if season_data else []
             return _level_label(options, value)
 
-        groups = {p: {"lines": [], "matched": 0, "total": 0} for p in PRIORITY_ORDER}
+        groups = {p: {"items": [], "matched": 0, "total": 0} for p in PRIORITY_ORDER}
 
         if requirements:
             owned = _extract_player_base_datacrons(player, set_id)
             pairs = _match_requirements(requirements, owned)
             for req, match in pairs:
-                req_id, _, pack, l3, l6, l9, comment, _, _, priority = req
+                _, _, pack, l3, l6, l9, comment, _, _, priority = req
                 group = groups.get(priority, groups[PRIORITY_REQUIRED])
-                pack_prefix = f"{pack}: " if pack else ""
-                header = f"#{req_id}: {pack_prefix}{level_label(3, l3)} → {level_label(6, l6)} → {level_label(9, l9)}"
-                if comment:
-                    header += f" ({comment})"
+                l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
+                closed_levels = None
+                if match:
+                    m = match["levels"]
+                    closed_levels = (
+                        level_label(3, m[3]) if m[3] else "—",
+                        level_label(6, m[6]) if m[6] else "—",
+                        level_label(9, m[9]) if m[9] else "—",
+                    )
+                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels))
                 group["total"] += 1
                 if match:
                     group["matched"] += 1
-                    m = match["levels"]
-                    m3 = level_label(3, m[3]) if m[3] else "—"
-                    m6 = level_label(6, m[6]) if m[6] else "—"
-                    m9 = level_label(9, m[9]) if m[9] else "—"
-                    group["lines"].append(f"✅ {header}")
-                    group["lines"].append(f"   Закрыто ДК: {m3} → {m6} → {m9}")
-                else:
-                    group["lines"].append(f"❌ {header}")
 
         if focused_requirements:
             owned_focused = _extract_player_focused_datacrons(player, set_id)
             for req in focused_requirements:
-                req_id, _, pack, character_key, required_level, comment, _, _, priority = req
+                _, _, pack, character_key, required_level, comment, _, _, priority = req
                 group = groups.get(priority, groups[PRIORITY_REQUIRED])
-                pack_prefix = f"{pack}: " if pack else ""
                 char_label = _focused_char_label(self.bot.datacron_cache, set_id, character_key)
                 current_level = owned_focused.get(character_key, 0)
                 ok = current_level >= required_level
-                header = f"F{req_id}: {pack_prefix}{char_label} — нужен уровень {required_level}+, у игрока уровень {current_level}"
-                if comment:
-                    header += f" ({comment})"
+                group["items"].append(_focused_check_field(pack, char_label, required_level, current_level, comment, ok))
                 group["total"] += 1
                 if ok:
                     group["matched"] += 1
-                group["lines"].append(f"{'✅' if ok else '❌'} {header}")
 
-        lines = [f"📋 Проверка датакронов: **{игрок}** — {season_label}", ""]
-        for priority in PRIORITY_ORDER:
-            group = groups[priority]
-            if group["total"] == 0:
-                continue
-            lines.append(f"{PRIORITY_LABELS[priority]}:")
-            lines.extend(group["lines"])
-            lines.append(f"{PRIORITY_LABELS[priority]} итого: {group['matched']} / {group['total']} требований закрыто.")
-            lines.append("")
-        if lines and lines[-1] == "":
-            lines.pop()
+        priority_items = {p: groups[p]["items"] for p in PRIORITY_ORDER}
+        footer_totals = {
+            p: f"*{groups[p]['matched']} / {groups[p]['total']} требований закрыто*"
+            for p in PRIORITY_ORDER if groups[p]["total"] > 0
+        }
+        total_matched = sum(g["matched"] for g in groups.values())
+        total_all = sum(g["total"] for g in groups.values())
+        if total_all and total_matched == total_all:
+            color = DATACRON_CHECK_COLOR_FULL
+        elif total_matched:
+            color = DATACRON_CHECK_COLOR_PARTIAL
+        else:
+            color = DATACRON_CHECK_COLOR_NONE
+        title = f"📋 Проверка датакронов: {игрок} — {season_label} ({total_matched}/{total_all})"
+        embeds = _build_priority_embeds(title, color, priority_items, footer_totals=footer_totals)
 
-        chunks = _chunk_lines(lines)
-        view = DatacronCheckRevealView(chunks)
-        await inter.edit_original_message(content=chunks[0], view=view)
-        for chunk in chunks[1:]:
-            await inter.followup.send(chunk, ephemeral=True)
+        view = DatacronCheckRevealView(embeds)
+        await inter.edit_original_message(content=None, embed=embeds[0], view=view)
+        for e in embeds[1:]:
+            await inter.followup.send(embed=e, ephemeral=True)
 
     @datacron_req.sub_command(name="список", description="Показать весь список требуемых датакронов по активным сезонам")
     async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
@@ -962,7 +1049,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message("⏳ Справочник датакронов ещё загружается, подождите...")
             return
 
-        lines = ["📋 Список требований по активным сезонам ТБ", ""]
+        all_embeds = []
         any_found = False
         for set_id in sorted(cache["seasons"].keys(), reverse=True):
             season_data = cache["seasons"][set_id]
@@ -972,44 +1059,30 @@ class DatacronRequirementsCog(commands.Cog):
                 continue
             any_found = True
 
-            lines.append(f"== {season_data['display_name']} [{set_id}] ==")
-
-            priority_lines = {p: [] for p in PRIORITY_ORDER}
+            priority_items = {p: [] for p in PRIORITY_ORDER}
             for row in base_reqs:
                 _, _, pack, l3, l6, l9, comment, _, _, priority = row
-                pack_prefix = f"{pack}: " if pack else ""
                 l3_lbl = _level_label(season_data["level3"], l3)
                 l6_lbl = _level_label(season_data["level6"], l6)
                 l9_lbl = _level_label(season_data["level9"], l9)
-                line = f"  {pack_prefix}{l3_lbl} → {l6_lbl} → {l9_lbl}"
-                if comment:
-                    line += f" ({comment})"
-                priority_lines.get(priority, priority_lines[PRIORITY_REQUIRED]).append(line)
+                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment)
+                priority_items.get(priority, priority_items[PRIORITY_REQUIRED]).append(field)
             for row in focused_reqs:
                 _, _, pack, character_key, required_level, comment, _, _, priority = row
-                pack_prefix = f"{pack}: " if pack else ""
                 char_label = _focused_char_label(cache, set_id, character_key)
-                line = f"  [Спец] {pack_prefix}{char_label} — уровень {required_level}+"
-                if comment:
-                    line += f" ({comment})"
-                priority_lines.get(priority, priority_lines[PRIORITY_REQUIRED]).append(line)
+                field = _focused_requirement_field(pack, char_label, required_level, comment)
+                priority_items.get(priority, priority_items[PRIORITY_REQUIRED]).append(field)
 
-            for priority in PRIORITY_ORDER:
-                group_lines = priority_lines[priority]
-                if not group_lines:
-                    continue
-                lines.append(f"-- {PRIORITY_LABELS[priority]} --")
-                lines.extend(group_lines)
-            lines.append("")
+            title = f"📋 {season_data['display_name']} · сезон {set_id}"
+            all_embeds.extend(_build_priority_embeds(title, DATACRON_LIST_COLOR, priority_items))
 
         if not any_found:
             await inter.edit_original_message("ℹ️ Ни у одного активного сезона нет сохранённых требований.")
             return
 
-        chunks = _chunk_lines(lines)
-        await inter.edit_original_message(chunks[0])
-        for chunk in chunks[1:]:
-            await inter.followup.send(chunk, ephemeral=False)
+        await inter.edit_original_message(content=None, embed=all_embeds[0])
+        for e in all_embeds[1:]:
+            await inter.followup.send(embed=e, ephemeral=False)
 
 
 def setup(bot):
