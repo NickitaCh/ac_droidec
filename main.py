@@ -103,17 +103,27 @@ async def on_ready():
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
-@bot.check
-async def check_guild_roles(ctx):
-    if ctx.author.id in bot.allowed_user_ids:
+async def _check_allowed_role(author, guild) -> bool:
+    if author.id in bot.allowed_user_ids:
         return True
-    if not ctx.guild:
+    if not guild:
         return False
-    user_role_ids = [role.id for role in ctx.author.roles]
+    user_role_ids = [role.id for role in author.roles]
     has_permission = any(role_id in bot.allowed_role_ids for role_id in user_role_ids)
     if not has_permission:
         raise commands.MissingAnyRole(bot.allowed_role_ids)
     return True
+
+# @bot.check — только для текстовых (!) команд, слэш-команды не проверяет
+# (см. disnake BotBase.check: "This is for text commands only, and doesn't
+# apply to application commands."). Нужен отдельный @bot.slash_command_check.
+@bot.check
+async def check_guild_roles(ctx):
+    return await _check_allowed_role(ctx.author, ctx.guild)
+
+@bot.slash_command_check
+async def check_guild_roles_slash(inter):
+    return await _check_allowed_role(inter.author, inter.guild)
 
 @bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
