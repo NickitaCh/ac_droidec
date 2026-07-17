@@ -498,9 +498,10 @@ def _focused_check_field(pack, char_label, required_level, current_level, commen
 def _build_priority_description(priority_items, footer_totals=None) -> list:
     """priority_items: {priority: [(name, value), ...]}, в порядке PRIORITY_ORDER.
     Embed-поля (fields) в Discord не поддерживают markdown-заголовки (## text
-    рендерится буквально), поэтому текст собирается как markdown для embed.description,
-    где ## Пак — настоящий крупный заголовок. Пустая строка перед новой категорией,
-    без пустой строки сразу под заголовком категории (первая строка — уже пак)."""
+    рендерится буквально), поэтому текст собирается как markdown для embed.description.
+    # Категория приоритета — самый крупный заголовок (H1), ## Пак — крупный, но
+    поменьше (H2). Двойной отступ между категориями, без пустой строки сразу под
+    заголовком категории (следом сразу первый пак)."""
     lines = []
     any_group_emitted = False
     for priority in PRIORITY_ORDER:
@@ -509,30 +510,23 @@ def _build_priority_description(priority_items, footer_totals=None) -> list:
             continue
 
         if any_group_emitted:
-            lines.append("")  # пустая строка-разделитель перед новой категорией
+            lines.append("")
+            lines.append("")  # двойной отступ-разделитель перед новой категорией
         any_group_emitted = True
 
-        header = f"{PRIORITY_EMOJI[priority]} **{PRIORITY_LABELS[priority]}**"
+        header = f"# {PRIORITY_EMOJI[priority]} {PRIORITY_LABELS[priority]}"
         totals = (footer_totals or {}).get(priority)
         if totals:
             header += f" — {totals}"
         lines.append(header)
 
-        for name, value in items:
+        for idx, (name, value) in enumerate(items):
             lines.append(f"## {name}")
             lines.extend(value.split("\n"))
-            lines.append("")
+            if idx != len(items) - 1:
+                lines.append("")  # пустая строка между паками внутри одной категории
 
-    deduped = []
-    for line in lines:
-        if line == "" and deduped and deduped[-1] == "":
-            continue
-        deduped.append(line)
-    while deduped and deduped[0] == "":
-        deduped.pop(0)
-    while deduped and deduped[-1] == "":
-        deduped.pop()
-    return deduped
+    return lines
 
 
 def _build_priority_embeds(title, color, priority_items, footer_totals=None):
