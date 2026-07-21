@@ -219,6 +219,12 @@ class GuildEvents(commands.Cog):
             start = m.start()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
             result = full_text[start:end].strip()
+            # TB_PLAN_HEADER_RE матчит только сам текст "Восход Империи — N этап",
+            # без markdown-префикса "#" — если следующий этап в исходной ветке
+            # тоже оформлен как "# Восход...", этот "#" повисает в хвосте текущего
+            # блока прямо перед пингом роли. Одинокий "#" перед пингом заставляет
+            # Discord отрисовать сам тег огромным шрифтом — вырезаем его.
+            result = re.sub(r"#+\s*$", "", result).strip()
         return result
 
     @staticmethod
@@ -271,7 +277,7 @@ class GuildEvents(commands.Cog):
             if not block:
                 print(f"❌ [TBOrder] Не нашёл блок {phase} этапа в ветке-плане")
                 return
-            message_text = f"## {block}\n\n{role.mention}"
+            message_text = f"## {block}\n\n\n{role.mention}"
             for chunk in self._chunk_message(message_text):
                 await channel.send(chunk)
             self._tb_order_sent_key = current_key
