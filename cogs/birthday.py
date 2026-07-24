@@ -8,20 +8,21 @@ MSK = ZoneInfo("Europe/Moscow")
 
 def parse_birthday(date_str: str):
     """Парсит строку в формате ДД-ММ-ГГГГ или ДД-ММ.
-    Возвращает (day, month, year). Если год не указан, подставляется 2000."""
+    Возвращает (day, month, year). Если год не указан, year = None."""
     for fmt in ("%d-%m-%Y", "%d-%m"):
         try:
             dt = datetime.strptime(date_str, fmt)
         except ValueError:
             continue
         # strptime без года в формате сам подставляет 1900 (особенность модуля
-        # time/_strptime), а не 2000, который используется по всему коду как
-        # признак "год не указан" — без этого 1900 просачивался в отображение.
-        year = dt.year if fmt == "%d-%m-%Y" else 2000
+        # time/_strptime) — это не настоящий год, поэтому отбрасываем его и
+        # явно возвращаем None вместо магического числа, которое могло бы
+        # случайно совпасть с чьим-то настоящим годом рождения.
+        year = dt.year if fmt == "%d-%m-%Y" else None
         return dt.day, dt.month, year
     raise ValueError("Неверный формат даты. Используйте ДД-ММ-ГГГГ или ДД-ММ")
 
-def next_birthday(day: int, month: int, year: int, today: date):
+def next_birthday(day: int, month: int, year: int | None, today: date):
     """Вычисляет ближайший день рождения (date) после или равный today."""
     try:
         bday_this_year = date(today.year, month, day)
@@ -160,7 +161,7 @@ class Birthday(commands.Cog):
 
         database.add_birthday(str(user.id), day, month, year)
         date_str = f"{day:02d}-{month:02d}"
-        if year != 2000:
+        if year is not None:
             date_str += f"-{year}"
         await inter.response.send_message(
             f"✅ День рождения {user.mention} сохранён: {date_str}", ephemeral=True
@@ -199,7 +200,7 @@ class Birthday(commands.Cog):
             if member is None:
                 continue
             date_str = f"{day:02d}.{month:02d}"
-            if year != 2000:
+            if year is not None:
                 date_str += f".{year}"
             lines.append(f"• {member.mention} — {date_str}")
 

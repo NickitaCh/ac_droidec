@@ -138,13 +138,13 @@ def init_birthday_table():
             discord_id TEXT PRIMARY KEY,
             day INTEGER NOT NULL,
             month INTEGER NOT NULL,
-            year INTEGER DEFAULT 2000
+            year INTEGER
         )
     """)
     conn.commit()
     conn.close()
 
-def add_birthday(discord_id: str, day: int, month: int, year: int = 2000):
+def add_birthday(discord_id: str, day: int, month: int, year: int = None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
