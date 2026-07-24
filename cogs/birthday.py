@@ -12,9 +12,13 @@ def parse_birthday(date_str: str):
     for fmt in ("%d-%m-%Y", "%d-%m"):
         try:
             dt = datetime.strptime(date_str, fmt)
-            return dt.day, dt.month, dt.year
         except ValueError:
             continue
+        # strptime без года в формате сам подставляет 1900 (особенность модуля
+        # time/_strptime), а не 2000, который используется по всему коду как
+        # признак "год не указан" — без этого 1900 просачивался в отображение.
+        year = dt.year if fmt == "%d-%m-%Y" else 2000
+        return dt.day, dt.month, year
     raise ValueError("Неверный формат даты. Используйте ДД-ММ-ГГГГ или ДД-ММ")
 
 def next_birthday(day: int, month: int, year: int, today: date):
