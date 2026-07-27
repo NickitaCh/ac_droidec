@@ -193,7 +193,7 @@ class GuildEvents(commands.Cog):
             return None
         return str(days.index(weekday) + 1)
 
-    async def _fetch_tb_order_source_text(self) -> str:
+    async def _fetch_tb_order_source_messages(self) -> list:
         channel = self.bot.get_channel(self.tb_order_source_channel_id)
         if channel is None:
             channel = await self.bot.fetch_channel(self.tb_order_source_channel_id)
@@ -201,36 +201,42 @@ class GuildEvents(commands.Cog):
         async for message in channel.history(limit=None, oldest_first=True):
             if message.content:
                 parts.append(message.content)
-        return "\n".join(parts)
+        return parts
 
-    def _extract_tb_order_block(self, full_text: str, phase: str):
-        """Вырезает из текста ветки-плана блок конкретного этапа целиком (со всеми
-        заметками, ссылками и гайдами) — от заголовка "Восход Империи — N этап" до
-        следующего такого заголовка или до конца текста. Блок всегда начинается
-        ровно с текста заголовка, поэтому его можно просто превратить в "## Восход...".
-        Если в ветке несколько планов на один и тот же этап (план от прошлой ТБ не
-        удалили, а просто добавили новый ниже) — берём ПОСЛЕДНЕЕ совпадение, чтобы
-        не нужно было вручную чистить историю канала между ТБ."""
-        matches = list(TB_PLAN_HEADER_RE.finditer(full_text))
+    def _extract_tb_order_block(self, messages: list, phase: str):
+        """Ищет блок конкретного этапа среди сообщений ветки-плана, где офицеры
+        выкладывают план на все 6 этапов разом. Заголовок "Восход Империи — N этап"
+        и сам ордер под ним всегда оформляются ОДНИМ сообщением (один этап = одно
+        сообщение) — поэтому ищем заголовок внутри каждого сообщения по отдельности
+        и берём блок ДО КОНЦА ЭТОГО ЖЕ сообщения, а не до следующего заголовка по
+        всей истории канала. Так посторонняя переписка офицеров между постами планов
+        (обсуждения, правки, "проверьте пожалуйста" и т.п.) никогда не попадёт в
+        текст ордера, даже если её написали до следующего заголовка. Если план на
+        этот этап публиковали несколько раз (план от прошлой ТБ не удалили, а
+        добавили новый отдельным сообщением) — берём ПОСЛЕДНЕЕ по времени сообщение,
+        чтобы не нужно было вручную чистить историю канала между ТБ."""
         result = None
-        for i, m in enumerate(matches):
-            if str(int(m.group(1))) != phase:
+        for content in messages:
+            match = TB_PLAN_HEADER_RE.search(content)
+            if not match or str(int(match.group(1))) != phase:
                 continue
-            start = m.start()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
-            result = full_text[start:end].strip()
+            block = content[match.start():].strip()
             # TB_PLAN_HEADER_RE матчит только сам текст "Восход Империи — N этап",
-            # без markdown-префикса "#" — если следующий этап в исходной ветке
-            # тоже оформлен как "# Восход...", этот "#" повисает в хвосте текущего
-            # блока прямо перед пингом роли. Одинокий "#" перед пингом заставляет
-            # Discord отрисовать сам тег огромным шрифтом — вырезаем его.
-            result = re.sub(r"#+\s*$", "", result).strip()
-            # В исходной ветке план каждого этапа оформлен построчной цитатой
-            # ("> ..."), и перед следующим заголовком часто остаётся пустая
-            # строка-цитата ("> " без текста) как визуальный отступ. При нарезке
-            # по границе заголовка она повисает в хвосте текущего блока прямо
-            # перед пингом роли — вырезаем такие пустые хвостовые строки-цитаты.
-            result = re.sub(r"(?:\n>[ \t]*)+$", "", result).strip()
+            # без markdown-префикса "#" — если сообщение тоже оформлено как
+            # "# Восход...", этот "#" повисает в хвосте блока прямо перед пингом
+            # роли. Одинокий "#" перед пингом заставляет Discord отрисовать сам
+            # тег огромным шрифтом — вырезаем его.
+            block = re.sub(r"#+\s*$", "", block).strip()
+            # Ордер оформлен построчной цитатой ("> ..."), и в конце сообщения
+            # часто остаётся пустая строка-цитата ("> " без текста) как визуальный
+            # отступ. Она повисает в хвосте блока прямо перед пингом роли —
+            # вырезаем такие пустые хвостовые строки-цитаты.
+            block = re.sub(r"(?:\n>[ \t]*)+$", "", block).strip()
+            # Аналогично — пустые строки-цитаты сразу ПОСЛЕ заголовка, перед первой
+            # планетой, тоже только визуальный отступ в исходнике, но Discord рисует
+            # их как пустой блок цитаты с большим отступом. Вырезаем и их.
+            block = re.sub(r"^(.*)\n(?:>[ \t]*\n)+", r"\1\n", block, count=1)
+            result = block
         return result
 
     @staticmethod
@@ -278,8 +284,8 @@ class GuildEvents(commands.Cog):
             return
 
         try:
-            full_text = await self._fetch_tb_order_source_text()
-            block = self._extract_tb_order_block(full_text, phase)
+            messages = await self._fetch_tb_order_source_messages()
+            block = self._extract_tb_order_block(messages, phase)
             if not block:
                 print(f"❌ [TBOrder] Не нашёл блок {phase} этапа в ветке-плане")
                 return
