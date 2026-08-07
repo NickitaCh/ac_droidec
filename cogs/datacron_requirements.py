@@ -384,6 +384,9 @@ def _level_label(level_options, value) -> str:
         return "Любой"
     if value == DATACRON_NONE:
         return "-"
+    parts = value.split(",")
+    if len(parts) > 1:
+        return " ИЛИ ".join(_level_label(level_options, part) for part in parts)
     for ability_id, label in level_options or []:
         if ability_id == value:
             return label
@@ -428,7 +431,8 @@ def _is_valid_level_value(cache, set_id, level_num, value) -> bool:
     season_data = cache["seasons"].get(set_id) if cache else None
     if not season_data:
         return False
-    return any(ability_id == value for ability_id, _label in season_data[f"level{level_num}"])
+    valid_ids = {ability_id for ability_id, _label in season_data[f"level{level_num}"]}
+    return all(part in valid_ids for part in value.split(","))
 
 
 def _is_valid_focused_character(cache, set_id, character_key) -> bool:
@@ -624,7 +628,7 @@ def _level_matches(requirement_value, owned_ability_id) -> bool:
         return True
     if requirement_value == DATACRON_ANY:
         return owned_ability_id is not None
-    return owned_ability_id == requirement_value
+    return owned_ability_id in requirement_value.split(",")
 
 
 def _requirement_specificity(row) -> int:
@@ -681,14 +685,27 @@ async def _autocomplete_datacron_level(inter: disnake.ApplicationCommandInteract
     if not season_data:
         return ["❌ Нет данных по этому сезону в справочнике."]
 
-    options = [
-        disnake.OptionChoice(name=DATACRON_ANY_LABEL, value=DATACRON_ANY),
-        disnake.OptionChoice(name=DATACRON_NONE_LABEL, value=DATACRON_NONE),
-    ]
-    search = string.lower().strip()
+    # Несколько допустимых бонусов ("любой из") на один уровень задаются через запятую:
+    # автодополнение донабирает вариант после последней запятой, не стирая уже выбранные
+    # (значение получившегося OptionChoice — это уже выбранный префикс + новый ability_id).
+    prefix = ""
+    tail = string
+    if "," in string:
+        prefix, _, tail = string.rpartition(",")
+        prefix += ","
+    already_chosen = set(prefix.rstrip(",").split(",")) if prefix else set()
+
+    options = []
+    if not prefix:
+        options.append(disnake.OptionChoice(name=DATACRON_ANY_LABEL, value=DATACRON_ANY))
+        options.append(disnake.OptionChoice(name=DATACRON_NONE_LABEL, value=DATACRON_NONE))
+    search = tail.lower().strip()
     for ability_id, label in season_data[f"level{level_num}"]:
+        if ability_id in already_chosen:
+            continue
         if not search or search in label.lower():
-            options.append(disnake.OptionChoice(name=label[:100], value=ability_id))
+            display = f"+ {label}" if prefix else label
+            options.append(disnake.OptionChoice(name=display[:100], value=f"{prefix}{ability_id}"))
     return options[:25]
 
 
@@ -808,9 +825,9 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон датакрона", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         пак: str = commands.Param(default=None, description="На какой пак/персонажа этот датакрон (справочно, не проверяется)"),
-        уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня", autocomplete=autocomplete_datacron_level3),
-        уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня", autocomplete=autocomplete_datacron_level6),
-        уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня", autocomplete=autocomplete_datacron_level9),
+        уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level3),
+        уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level6),
+        уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level9),
         комментарий: str = commands.Param(default=None, description="Заметка по приоритетным % статам (не проверяется автоматически)"),
     ):
         set_id = _parse_trailing_bracket_int(сезон)
