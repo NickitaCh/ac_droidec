@@ -685,27 +685,14 @@ async def _autocomplete_datacron_level(inter: disnake.ApplicationCommandInteract
     if not season_data:
         return ["❌ Нет данных по этому сезону в справочнике."]
 
-    # Несколько допустимых бонусов ("любой из") на один уровень задаются через запятую:
-    # автодополнение донабирает вариант после последней запятой, не стирая уже выбранные
-    # (значение получившегося OptionChoice — это уже выбранный префикс + новый ability_id).
-    prefix = ""
-    tail = string
-    if "," in string:
-        prefix, _, tail = string.rpartition(",")
-        prefix += ","
-    already_chosen = set(prefix.rstrip(",").split(",")) if prefix else set()
-
-    options = []
-    if not prefix:
-        options.append(disnake.OptionChoice(name=DATACRON_ANY_LABEL, value=DATACRON_ANY))
-        options.append(disnake.OptionChoice(name=DATACRON_NONE_LABEL, value=DATACRON_NONE))
-    search = tail.lower().strip()
+    options = [
+        disnake.OptionChoice(name=DATACRON_ANY_LABEL, value=DATACRON_ANY),
+        disnake.OptionChoice(name=DATACRON_NONE_LABEL, value=DATACRON_NONE),
+    ]
+    search = string.lower().strip()
     for ability_id, label in season_data[f"level{level_num}"]:
-        if ability_id in already_chosen:
-            continue
         if not search or search in label.lower():
-            display = f"+ {label}" if prefix else label
-            options.append(disnake.OptionChoice(name=display[:100], value=f"{prefix}{ability_id}"))
+            options.append(disnake.OptionChoice(name=label[:100], value=ability_id))
     return options[:25]
 
 
@@ -719,6 +706,37 @@ async def autocomplete_datacron_level6(inter, string):
 
 async def autocomplete_datacron_level9(inter, string):
     return await _autocomplete_datacron_level(inter, string, 9)
+
+
+async def autocomplete_datacron_alt_value(inter: disnake.ApplicationCommandInteraction, string: str):
+    cache = inter.bot.datacron_cache
+    if not cache:
+        return ["⏳ Справочник датакронов ещё загружается, подождите..."]
+    req_id = _parse_leading_hash_int(inter.filled_options.get("id"))
+    level_num = inter.filled_options.get("уровень")
+    if req_id is None or level_num is None:
+        return ["⚠️ СНАЧАЛА выберите требование и уровень!"]
+    row = database.get_datacron_requirement(req_id)
+    if not row:
+        return ["❌ Требование не найдено."]
+    _, set_id, _pack, l3, l6, l9, *_ = row
+    season_data = cache["seasons"].get(set_id)
+    if not season_data:
+        return ["❌ Нет данных по этому сезону в справочнике."]
+
+    current = {3: l3, 6: l6, 9: l9}.get(level_num, DATACRON_NONE)
+    if current == DATACRON_ANY:
+        return ["❌ У этого уровня уже стоит \"Любой\" — добавлять альтернативы некуда."]
+    already_chosen = set(current.split(",")) if current != DATACRON_NONE else set()
+
+    search = string.lower().strip()
+    options = []
+    for ability_id, label in season_data[f"level{level_num}"]:
+        if ability_id in already_chosen:
+            continue
+        if not search or search in label.lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=ability_id))
+    return options[:25]
 
 
 async def autocomplete_datacron_focused_character(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -825,9 +843,9 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон датакрона", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         пак: str = commands.Param(default=None, description="На какой пак/персонажа этот датакрон (справочно, не проверяется)"),
-        уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level3),
-        уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level6),
-        уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (выбрав вариант, допишите запятую и выберите ещё — подойдёт любой из них)", autocomplete=autocomplete_datacron_level9),
+        уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level3),
+        уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level6),
+        уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level9),
         комментарий: str = commands.Param(default=None, description="Заметка по приоритетным % статам (не проверяется автоматически)"),
     ):
         set_id = _parse_trailing_bracket_int(сезон)
@@ -848,6 +866,52 @@ class DatacronRequirementsCog(commands.Cog):
         req_id = database.add_datacron_requirement(set_id, пак, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет)
         summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=пак)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
+
+    @datacron_req.sub_command(
+        name="добавить_альтернативу",
+        description="Добавить ещё один допустимый бонус к уровню требования (подойдёт любой из них)",
+    )
+    async def datacron_req_add_alt(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        id: str = commands.Param(description="Требование, к которому добавить альтернативу", autocomplete=autocomplete_datacron_req_id),
+        уровень: int = commands.Param(description="Какой уровень дополнить", choices=[3, 6, 9]),
+        вариант: str = commands.Param(description="Ещё один допустимый бонус для этого уровня", autocomplete=autocomplete_datacron_alt_value),
+    ):
+        req_id = _parse_leading_hash_int(id)
+        if req_id is None:
+            await inter.response.send_message("❌ Альтернативы можно добавлять только к обычным (не спец.) требованиям — выберите вариант из списка автодополнения.", ephemeral=True)
+            return
+        row = database.get_datacron_requirement(req_id)
+        if not row:
+            await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
+            return
+
+        _, set_id, pack, l3, l6, l9, comment, _, _, priority = row
+        current = {3: l3, 6: l6, 9: l9}.get(уровень, DATACRON_NONE)
+        if not _is_valid_level_value(self.bot.datacron_cache, set_id, уровень, вариант):
+            await inter.response.send_message("❌ Некорректный вариант — выберите из списка автодополнения, не вводите текст вручную.", ephemeral=True)
+            return
+        if current == DATACRON_ANY:
+            await inter.response.send_message("❌ У этого уровня уже стоит \"Любой\" — добавлять альтернативы некуда.", ephemeral=True)
+            return
+        existing_parts = current.split(",") if current != DATACRON_NONE else []
+        if вариант in existing_parts:
+            await inter.response.send_message("ℹ️ Этот вариант уже указан в требовании.", ephemeral=True)
+            return
+
+        new_value = вариант if current == DATACRON_NONE else f"{current},{вариант}"
+        new_l3, new_l6, new_l9 = l3, l6, l9
+        if уровень == 3:
+            new_l3 = new_value
+        elif уровень == 6:
+            new_l6 = new_value
+        else:
+            new_l9 = new_value
+
+        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority)
+        summary = _format_requirement_summary(set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=pack)
+        await inter.response.send_message(f"✅ Требование #{req_id} дополнено: {summary}", ephemeral=True)
 
     @datacron_req.sub_command(name="добавить_спец", description="Добавить требование к фокусному (спец.) датакрону в список сезона")
     async def datacron_req_add_focused(
