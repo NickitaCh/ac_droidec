@@ -186,6 +186,10 @@ class ViolationsCog(commands.Cog):
             except Exception as db_err:
                 print(f"❌ Не удалось прочитать БД для аварийного восстановления: {db_err}")
 
+    @update_roster_cache.before_loop
+    async def before_loop(self):
+        await self.bot.wait_until_ready()
+
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARN С 3 НАРУШЕНИЯМИ ЗА РАЗ ---
     @commands.slash_command(name="нарушение", description="Зафиксировать нарушение у игрока")
     async def warn(
