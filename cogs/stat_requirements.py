@@ -136,9 +136,30 @@ async def _get_unit_for_player(bot, ally_code: str, base_id: str, force_refresh:
     return None, None
 
 
+def _build_table(headers: list, table_rows: list) -> str:
+    """Моноширинная таблица в code-block'е (Discord embed'ы не умеют настоящие таблицы)."""
+    widths = [len(h) for h in headers]
+    for row in table_rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def fmt_row(cells):
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(cells))
+
+    lines = [fmt_row(headers), fmt_row(["-" * w for w in widths])]
+    lines.extend(fmt_row(row) for row in table_rows)
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def _stat_label(stat_name: str, priority: str) -> str:
+    label = "Реликвия" if stat_name == "Relic" else stat_name
+    return f"(опц.) {label}" if priority == "optional" else label
+
+
 async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, relic_param, player_label):
-    """Возвращает (char_name, lines, matched, total, updated_at) для одного персонажа плейта,
-    либо None, если для него нет сохранённых требований (персонаж пропускается в отчёте)."""
+    """Возвращает (char_name, block, matched, total, updated_at) для одного персонажа плейта —
+    block уже отформатирован как таблица (моноширинный code-block), готовая к вставке в embed.
+    Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
     rows = database.get_stat_requirements(plate_name, base_id)
     if not rows:
         return None
@@ -147,53 +168,82 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
     relic_reqs = [r for r in rows if r[3] == "Relic"]
     required_relic = int(relic_reqs[0][5]) if relic_reqs else None
     updated_at = None
+    matched = 0
+    total = 0
+    comments = [r[8] for r in rows if r[8]]
 
     if ally_code is not None:
         unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
         if not unit:
-            return char_name, [f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"], 0, 0, None
+            block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
+            return char_name, block, 0, 0, None
 
         current_relic = stat_engine.get_current_relic_level(unit)
         current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
         current_values["Relic"] = current_relic
 
-        target_relic = required_relic if (required_relic is not None and required_relic > current_relic) else current_relic
+        show_projection = required_relic is not None and required_relic > current_relic
+        target_relic = required_relic if show_projection else current_relic
         projected_values = None
-        if target_relic != current_relic:
+        if show_projection:
             projected_unit = stat_engine.project_unit_relic(unit, target_relic)
             projected_values = dict(stat_engine.calc_final_stats(bot.stat_calc, projected_unit))
             projected_values["Relic"] = target_relic
+
+        caption = f"Релик игрока: {current_relic}" + (f" → цель по плейту: {target_relic}" if show_projection else "")
+        headers = ["Стат", "У игрока", f"На релике {target_relic}" if show_projection else "На цели", "Плейт"]
+
+        table_rows = []
+        for row in rows:
+            _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
+            label = _stat_label(stat_name, priority)
+            req_cell = f"{operator} {_fmt_value(threshold)}"
+            cur_val = current_values.get(stat_name)
+            if cur_val is None:
+                table_rows.append([label, "нет данных", "—", req_cell])
+                continue
+            total += 1
+            cur_ok = _compare(cur_val, operator, threshold)
+            if cur_ok:
+                matched += 1
+            cur_cell = f"{_fmt_value(cur_val)} {'✅' if cur_ok else '❌'}"
+            proj_cell = "—"
+            if show_projection and stat_name != "Relic":
+                proj_val = projected_values.get(stat_name) if projected_values else None
+                if proj_val is not None:
+                    proj_ok = _compare(proj_val, operator, threshold)
+                    proj_cell = f"{_fmt_value(proj_val)} {'✅' if proj_ok else '❌'}"
+            table_rows.append([label, cur_cell, proj_cell, req_cell])
+
+        block = caption + "\n" + _build_table(headers, table_rows)
     else:
         unit = _build_synthetic_unit(base_id, relic_param)
         current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
         current_values["Relic"] = relic_param
-        projected_values = None
-        target_relic = relic_param
 
-    lines = []
-    matched = 0
-    total = 0
-    for row in rows:
-        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
-        cur_val = current_values.get(stat_name)
-        if cur_val is None:
-            lines.append(f"⚠️ {PRIORITY_EMOJI.get(priority, '')} {stat_name}: нет данных для расчёта")
-            continue
-        total += 1
-        cur_ok = _compare(cur_val, operator, threshold)
-        if cur_ok:
-            matched += 1
-        line = f"{'✅' if cur_ok else '❌'} {PRIORITY_EMOJI.get(priority, '')} {stat_name} [{_fmt_value(cur_val)}] {operator} {_fmt_value(threshold)}"
-        if not cur_ok and projected_values is not None and stat_name != "Relic":
-            proj_val = projected_values.get(stat_name)
-            if proj_val is not None:
-                proj_ok = _compare(proj_val, operator, threshold)
-                line += f"\n　➜ при реликвии {target_relic}: {'✅' if proj_ok else '❌'} [{_fmt_value(proj_val)}]"
-        if comment:
-            line += f"\n💠 _{comment}_"
-        lines.append(line)
+        headers = ["Стат", f"Расчёт (релик {relic_param})", "Плейт"]
+        table_rows = []
+        for row in rows:
+            _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
+            label = _stat_label(stat_name, priority)
+            req_cell = f"{operator} {_fmt_value(threshold)}"
+            cur_val = current_values.get(stat_name)
+            if cur_val is None:
+                table_rows.append([label, "нет данных", req_cell])
+                continue
+            total += 1
+            cur_ok = _compare(cur_val, operator, threshold)
+            if cur_ok:
+                matched += 1
+            cur_cell = f"{_fmt_value(cur_val)} {'✅' if cur_ok else '❌'}"
+            table_rows.append([label, cur_cell, req_cell])
 
-    return char_name, lines, matched, total, updated_at
+        block = "⚠️ без модов/шмота игрока (только база + реликвия)\n" + _build_table(headers, table_rows)
+
+    if comments:
+        block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
+
+    return char_name, block, matched, total, updated_at
 
 
 # =====================================================================
@@ -425,10 +475,10 @@ class StatRequirementsCog(commands.Cog):
             result = await _evaluate_character(self.bot, плейт, base_id, ally_code, обновить, релик, игрок)
             if result is None:
                 continue
-            char_name, char_lines, matched, total, updated_at = result
+            char_name, block, matched, total, updated_at = result
             any_char_shown = True
             lines.append(f"## {char_name}")
-            lines.extend(char_lines)
+            lines.append(block)
             matched_total += matched
             rows_total += total
             if updated_at:
