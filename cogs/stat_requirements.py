@@ -25,6 +25,11 @@ from cogs.datacron_requirements import (
 # Полный список названий статов у StatCalc (swgoh_comlink/helpers/_stat_data.py, таблица
 # STATS) шире — здесь только те, что реально фигурируют в гильдийских билд-требованиях.
 # "Relic" — не настоящий стат StatCalc, спец-значение для требования к уровню реликвии.
+# ВАЖНО: "обобщённые" статы без Physical/Special (Critical Chance, Critical Avoidance,
+# Accuracy, Offense, Defense) в финальном расчёте StatCalc НЕ существуют — final-словарь
+# отдаёт только расщеплённые Physical.../Special... варианты, генерик-ключи всегда None
+# (проверено эмпирически на реальном игроке). Такие пункты сюда не добавлять — требование
+# с ними навсегда останется "нет данных".
 STAT_CHOICES = [
     disnake.OptionChoice(name="Relic (уровень реликвии)", value="Relic"),
     disnake.OptionChoice(name="Health", value="Health"),
@@ -39,15 +44,11 @@ STAT_CHOICES = [
     disnake.OptionChoice(name="Critical Damage", value="Critical Damage"),
     disnake.OptionChoice(name="Physical Critical Chance", value="Physical Critical Chance"),
     disnake.OptionChoice(name="Special Critical Chance", value="Special Critical Chance"),
-    disnake.OptionChoice(name="Critical Avoidance", value="Critical Avoidance"),
     disnake.OptionChoice(name="Physical Critical Avoidance", value="Physical Critical Avoidance"),
     disnake.OptionChoice(name="Special Critical Avoidance", value="Special Critical Avoidance"),
-    disnake.OptionChoice(name="Accuracy", value="Accuracy"),
     disnake.OptionChoice(name="Physical Accuracy", value="Physical Accuracy"),
     disnake.OptionChoice(name="Special Accuracy", value="Special Accuracy"),
     disnake.OptionChoice(name="Health Steal", value="Health Steal"),
-    disnake.OptionChoice(name="Offense", value="Offense"),
-    disnake.OptionChoice(name="Defense", value="Defense"),
 ]
 
 OPERATOR_CHOICES = [
