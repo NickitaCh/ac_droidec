@@ -113,14 +113,20 @@ def _fmt_value(value: float) -> str:
 
 def _fmt_compact(value: float) -> str:
     """Сокращённая запись для ширины таблицы: 8472 -> '8,4к' (отбрасывание, не округление),
-    8000 -> '8к'. Значения меньше 1000 (релик, скорость, потенция...) не сокращаются."""
-    if abs(value) < 1000:
-        return _fmt_value(value)
-    truncated = math.trunc(value / 100) / 10
-    text = f"{truncated:.1f}".replace(".", ",")
-    if text.endswith(",0"):
-        text = text[:-2]
-    return text + "к"
+    8000 -> '8к'. Значения меньше 1000 (релик, скорость, статы-проценты...) не сокращаются
+    буквой "к", но тоже режутся до 1 знака после запятой без округления — иначе проценты
+    вроде Potency/Armor вылезают как "106.509"/"72.2766" (StatCalc считает их с большой
+    точностью, см. PERCENT_STATS в stat_engine.py)."""
+    if abs(value) >= 1000:
+        truncated = math.trunc(value / 100) / 10
+        text = f"{truncated:.1f}".replace(".", ",")
+        if text.endswith(",0"):
+            text = text[:-2]
+        return text + "к"
+    truncated = math.trunc(value * 10) / 10
+    if truncated == math.trunc(truncated):
+        return str(int(truncated))
+    return f"{truncated:.1f}".replace(".", ",")
 
 
 def _compare(current: float, operator: str, threshold: float) -> bool:
