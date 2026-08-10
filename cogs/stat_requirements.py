@@ -504,7 +504,7 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         игрок: str = commands.Param(default=None, description="Игрок гильдии — статы посчитаются с его реальными модами/шмотом", autocomplete=autocomplete_players),
-        релик: int = commands.Param(default=None, description="Целевой уровень реликвии (обязателен, если «игрок» не указан)", ge=0, le=9),
+        релик: int = commands.Param(default=None, description="Целевой уровень реликвии (обязателен, если «игрок» не указан)", ge=0, le=10),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом (только вместе с «игрок»)"),
     ):
         await inter.response.defer()
