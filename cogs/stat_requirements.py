@@ -136,6 +136,66 @@ async def _get_unit_for_player(bot, ally_code: str, base_id: str, force_refresh:
     return None, None
 
 
+async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, relic_param, player_label):
+    """Возвращает (char_name, lines, matched, total, updated_at) для одного персонажа плейта,
+    либо None, если для него нет сохранённых требований (персонаж пропускается в отчёте)."""
+    rows = database.get_stat_requirements(plate_name, base_id)
+    if not rows:
+        return None
+
+    char_name = _unit_display_name(base_id)
+    relic_reqs = [r for r in rows if r[3] == "Relic"]
+    required_relic = int(relic_reqs[0][5]) if relic_reqs else None
+    updated_at = None
+
+    if ally_code is not None:
+        unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
+        if not unit:
+            return char_name, [f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"], 0, 0, None
+
+        current_relic = stat_engine.get_current_relic_level(unit)
+        current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
+        current_values["Relic"] = current_relic
+
+        target_relic = required_relic if (required_relic is not None and required_relic > current_relic) else current_relic
+        projected_values = None
+        if target_relic != current_relic:
+            projected_unit = stat_engine.project_unit_relic(unit, target_relic)
+            projected_values = dict(stat_engine.calc_final_stats(bot.stat_calc, projected_unit))
+            projected_values["Relic"] = target_relic
+    else:
+        unit = _build_synthetic_unit(base_id, relic_param)
+        current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
+        current_values["Relic"] = relic_param
+        projected_values = None
+        target_relic = relic_param
+
+    lines = []
+    matched = 0
+    total = 0
+    for row in rows:
+        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
+        cur_val = current_values.get(stat_name)
+        if cur_val is None:
+            lines.append(f"⚠️ {PRIORITY_EMOJI.get(priority, '')} {stat_name}: нет данных для расчёта")
+            continue
+        total += 1
+        cur_ok = _compare(cur_val, operator, threshold)
+        if cur_ok:
+            matched += 1
+        line = f"{'✅' if cur_ok else '❌'} {PRIORITY_EMOJI.get(priority, '')} {stat_name} [{_fmt_value(cur_val)}] {operator} {_fmt_value(threshold)}"
+        if not cur_ok and projected_values is not None and stat_name != "Relic":
+            proj_val = projected_values.get(stat_name)
+            if proj_val is not None:
+                proj_ok = _compare(proj_val, operator, threshold)
+                line += f"\n　➜ при реликвии {target_relic}: {'✅' if proj_ok else '❌'} [{_fmt_value(proj_val)}]"
+        if comment:
+            line += f"\n💠 _{comment}_"
+        lines.append(line)
+
+    return char_name, lines, matched, total, updated_at
+
+
 # =====================================================================
 # Автокомплиты (модульные функции — как autocomplete_players/autocomplete_datacron_*)
 # =====================================================================
@@ -322,23 +382,17 @@ class StatRequirementsCog(commands.Cog):
             await inter.followup.send(embed=e, ephemeral=True)
 
     # ------------------ /статы (открытая команда) ------------------
-    @commands.slash_command(name="статы", description="Прогноз статов персонажа на другой релик относительно требований плейта")
+    @commands.slash_command(name="статы", description="Прогноз статов персонажа(ей) на другой релик относительно требований плейта")
     async def stats_check(
         self,
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
-        персонаж: str = commands.Param(description="Персонаж из плейта", autocomplete=autocomplete_stat_character),
+        персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         игрок: str = commands.Param(default=None, description="Игрок гильдии — статы посчитаются с его реальными модами/шмотом", autocomplete=autocomplete_players),
         релик: int = commands.Param(default=None, description="Целевой уровень реликвии (обязателен, если «игрок» не указан)", ge=0, le=9),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом (только вместе с «игрок»)"),
     ):
         await inter.response.defer()
-
-        base_id = _parse_bracket_id(персонаж)
-        rows = database.get_stat_requirements(плейт, base_id)
-        if not rows:
-            await inter.edit_original_response("❌ Нет сохранённых требований для этого персонажа в этом плейте.")
-            return
 
         if игрок is None and релик is None:
             await inter.edit_original_response(
@@ -350,78 +404,60 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
-        relic_reqs = [r for r in rows if r[3] == "Relic"]
-        required_relic = int(relic_reqs[0][5]) if relic_reqs else None
-        char_name = _unit_display_name(base_id)
+        char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт)
+        if not char_keys:
+            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+            return
 
-        updated_at = None
+        ally_code = None
         if игрок is not None:
             ally_code = self.bot.guild_roster_cache.get(игрок) if self.bot.guild_roster_cache else None
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
-            unit, updated_at = await _get_unit_for_player(self.bot, ally_code, base_id, обновить)
-            if not unit:
-                await inter.edit_original_response(
-                    f"❌ У игрока «{игрок}» нет юнита {char_name} в кэше — либо юнит не открыт, "
-                    f"либо данные ещё не синхронизированы (попробуйте с «обновить: True»)."
-                )
-                return
-
-            current_relic = stat_engine.get_current_relic_level(unit)
-            current_values = dict(stat_engine.calc_final_stats(self.bot.stat_calc, unit))
-            current_values["Relic"] = current_relic
-
-            target_relic = required_relic if (required_relic is not None and required_relic > current_relic) else current_relic
-            projected_values = None
-            if target_relic != current_relic:
-                projected_unit = stat_engine.project_unit_relic(unit, target_relic)
-                projected_values = dict(stat_engine.calc_final_stats(self.bot.stat_calc, projected_unit))
-                projected_values["Relic"] = target_relic
-        else:
-            unit = _build_synthetic_unit(base_id, релик)
-            current_values = dict(stat_engine.calc_final_stats(self.bot.stat_calc, unit))
-            current_values["Relic"] = релик
-            projected_values = None
-            target_relic = релик
 
         lines = []
-        matched = 0
-        for row in rows:
-            _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
-            cur_val = current_values.get(stat_name)
-            if cur_val is None:
-                lines.append(f"⚠️ {PRIORITY_EMOJI.get(priority, '')} {stat_name}: нет данных для расчёта")
+        matched_total = 0
+        rows_total = 0
+        updated_ats = []
+        any_char_shown = False
+        for base_id in char_keys:
+            result = await _evaluate_character(self.bot, плейт, base_id, ally_code, обновить, релик, игрок)
+            if result is None:
                 continue
-            cur_ok = _compare(cur_val, operator, threshold)
-            if cur_ok:
-                matched += 1
-            line = f"{'✅' if cur_ok else '❌'} {PRIORITY_EMOJI.get(priority, '')} {stat_name} [{_fmt_value(cur_val)}] {operator} {_fmt_value(threshold)}"
-            if not cur_ok and projected_values is not None and stat_name != "Relic":
-                proj_val = projected_values.get(stat_name)
-                if proj_val is not None:
-                    proj_ok = _compare(proj_val, operator, threshold)
-                    line += f"\n　➜ при реликвии {target_relic}: {'✅' if proj_ok else '❌'} [{_fmt_value(proj_val)}]"
-            if comment:
-                line += f"\n💠 _{comment}_"
-            lines.append(line)
+            char_name, char_lines, matched, total, updated_at = result
+            any_char_shown = True
+            lines.append(f"## {char_name}")
+            lines.extend(char_lines)
+            matched_total += matched
+            rows_total += total
+            if updated_at:
+                updated_ats.append(updated_at)
 
-        total = len([r for r in rows])
-        if total and matched == total:
+        if not any_char_shown:
+            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+            return
+
+        if rows_total and matched_total == rows_total:
             color = DATACRON_CHECK_COLOR_FULL
-        elif matched == 0:
+        elif matched_total == 0:
             color = DATACRON_CHECK_COLOR_NONE
         else:
             color = DATACRON_CHECK_COLOR_PARTIAL
 
         subtitle = f"игрок: {игрок}" if игрок is not None else "без учёта модов/шмота игрока"
-        title = f"📋 {char_name} — {плейт} ({subtitle})"
+        title = f"📋 {плейт} ({subtitle})"
         embeds = _lines_to_embeds(title, color, lines)
         if not embeds:
             await inter.edit_original_response("❌ Нечего показать.")
             return
 
-        footer = f"Данные игрока обновлены: {updated_at}" if updated_at else "⚠️ Синтетический расчёт — без модов/шмота конкретного игрока"
+        if updated_ats:
+            footer = f"Данные игрока обновлены: {updated_ats[0]}"
+        elif ally_code is None:
+            footer = "⚠️ Синтетический расчёт — без модов/шмота конкретного игрока"
+        else:
+            footer = "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
         embeds[-1].set_footer(text=footer)
 
         await inter.edit_original_response(embed=embeds[0])
