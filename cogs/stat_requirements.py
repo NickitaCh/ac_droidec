@@ -56,6 +56,30 @@ OPERATOR_CHOICES = [
     disnake.OptionChoice(name="=", value="="),
 ]
 
+# Короткие подписи для колонки "Стат" в таблице /статы — полные названия (особенно
+# Physical/Special Damage, Critical Chance/Avoidance) не влезают в ширину на мобильных.
+# Health/Speed/Armor/Potency и т.п. уже достаточно короткие — оставлены как есть (fallback).
+STAT_LABEL_SHORT = {
+    "Relic": "Реликвия",
+    "Protection": "Защита",
+    "Physical Damage": "Атк.Ф",
+    "Special Damage": "Атк.О",
+    "Critical Chance": "КШ",
+    "Physical Critical Chance": "КШ.Ф",
+    "Special Critical Chance": "КШ.О",
+    "Critical Damage": "КУ",
+    "Critical Avoidance": "АКШ",
+    "Physical Critical Avoidance": "АКШ.Ф",
+    "Special Critical Avoidance": "АКШ.О",
+    "Accuracy": "Точность",
+    "Physical Accuracy": "Точн.Ф",
+    "Special Accuracy": "Точн.О",
+    "Health Steal": "Вампиризм",
+    "Tenacity": "Стойкость",
+    "Offense": "Атака",
+    "Defense": "Оборона",
+}
+
 
 # =====================================================================
 # Мелкие хелперы (парсинг "Имя [BASE_ID]", форматирование, сравнение) —
@@ -165,8 +189,8 @@ def _build_table(headers: list, table_rows: list) -> str:
 
 
 def _stat_label(stat_name: str, priority: str) -> str:
-    label = "Реликвия" if stat_name == "Relic" else stat_name
-    return f"(опц.) {label}" if priority == "optional" else label
+    label = STAT_LABEL_SHORT.get(stat_name, stat_name)
+    return f"{label}*" if priority == "optional" else label
 
 
 async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, relic_param, player_label):
@@ -184,6 +208,7 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
     matched = 0
     total = 0
     comments = [r[8] for r in rows if r[8]]
+    legend = " · * опционально" if any(r[6] == "optional" for r in rows) else ""
 
     if ally_code is not None:
         unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
@@ -203,7 +228,7 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
             projected_values = dict(stat_engine.calc_final_stats(bot.stat_calc, projected_unit))
             projected_values["Relic"] = target_relic
 
-        caption = f"Релик игрока: {current_relic}" + (f" → цель по плейту: {target_relic}" if show_projection else "")
+        caption = f"Релик игрока: {current_relic}" + (f" → цель по плейту: {target_relic}" if show_projection else "") + legend
         if show_projection:
             headers = ["Стат", "Сейчас", "Нужно", f"Релик {target_relic}", "Норма"]
         else:
@@ -268,7 +293,7 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
             cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
             table_rows.append([label, cur_cell, req_cell])
 
-        block = "⚠️ без модов/шмота игрока (только база + реликвия)\n" + _build_table(headers, table_rows)
+        block = "⚠️ без модов/шмота игрока (только база + реликвия)" + legend + "\n" + _build_table(headers, table_rows)
 
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
