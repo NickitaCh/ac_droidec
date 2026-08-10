@@ -52,6 +52,10 @@ TB_ORDER_SOURCE_CHANNEL_ID = 1523597487934541834
 # Роль, которую тегаем при ежедневной публикации ордера на актуальный этап
 TB_ORDER_ROLE_ID = 1153753562254426192
 
+# Раз во сколько часов фоново обновлять кэш полного ростера юнитов игроков
+# (моды/шмот/реликвия) для /статы — см. cogs/stat_requirements.py
+PLAYER_STATS_SYNC_HOURS = 6
+
 comlink = SwgohComlink(url=COMLINK_URL)
 
 intents = disnake.Intents.default()
@@ -87,6 +91,8 @@ class GuildManagerBot(commands.Bot):
         self.TB_PLAN_CHANNEL_ID = TB_PLAN_CHANNEL_ID
         self.TB_ORDER_SOURCE_CHANNEL_ID = TB_ORDER_SOURCE_CHANNEL_ID
         self.TB_ORDER_ROLE_ID = TB_ORDER_ROLE_ID
+
+        self.PLAYER_STATS_SYNC_HOURS = PLAYER_STATS_SYNC_HOURS
 
 bot = GuildManagerBot()
 

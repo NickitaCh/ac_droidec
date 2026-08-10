@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 DB_NAME = "guild_management.db"
@@ -734,3 +735,184 @@ def get_all_datacron_focused_requirements():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# =====================================================================
+# ТРЕБОВАНИЯ К СТАТАМ: пороги по HotUtils-плейтам (плейт + персонаж + стат
+# + порог). 'Relic' — специальное значение stat_name для требования к уровню
+# реликвии самому по себе (используется /статы как целевой релик для прогноза).
+# =====================================================================
+def _ensure_stat_requirements_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_requirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate_name TEXT NOT NULL,
+            character_key TEXT NOT NULL,
+            stat_name TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            threshold_value REAL NOT NULL,
+            priority TEXT NOT NULL DEFAULT 'required',
+            raw_text TEXT,
+            comment TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_stat_req_plate_char ON stat_requirements(plate_name, character_key)"
+    )
+
+
+def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
+                          threshold_value: float, priority: str, raw_text: str, comment: str,
+                          created_by: str) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("""
+        INSERT INTO stat_requirements
+            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by))
+    conn.commit()
+    req_id = cursor.lastrowid
+    conn.close()
+    return req_id
+
+
+def update_stat_requirement(req_id: int, plate_name: str, character_key: str, stat_name: str, operator: str,
+                             threshold_value: float, priority: str, comment: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("""
+        UPDATE stat_requirements
+        SET plate_name = ?, character_key = ?, stat_name = ?, operator = ?, threshold_value = ?, priority = ?, comment = ?
+        WHERE id = ?
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, comment, req_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_stat_requirement(req_id: int) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("DELETE FROM stat_requirements WHERE id = ?", (req_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def get_stat_requirement(req_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        FROM stat_requirements WHERE id = ?
+    """, (req_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def get_stat_requirements(plate_name: str, character_key: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        FROM stat_requirements WHERE plate_name = ? AND character_key = ? ORDER BY id
+    """, (plate_name, character_key))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_stat_requirement_plates():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("SELECT DISTINCT plate_name FROM stat_requirements ORDER BY plate_name")
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_stat_requirement_characters(plate_name: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute(
+        "SELECT DISTINCT character_key FROM stat_requirements WHERE plate_name = ? ORDER BY character_key",
+        (plate_name,)
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_all_stat_requirements():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("""
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        FROM stat_requirements ORDER BY plate_name, character_key, id
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+# =====================================================================
+# КЭШ ЮНИТОВ ИГРОКОВ: сырой rosterUnit из comlink.get_player (для локального
+# расчёта статов через StatCalc — хранится как есть, без разбора по колонкам,
+# т.к. StatCalc.calc_char_stats принимает этот формат напрямую, см. cogs/stat_engine.py).
+# =====================================================================
+def _ensure_player_unit_cache_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS player_unit_cache (
+            ally_code TEXT NOT NULL,
+            base_id TEXT NOT NULL,
+            unit_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (ally_code, base_id)
+        )
+    """)
+
+
+def upsert_player_units(ally_code: str, units: dict):
+    """units: {base_id: сырой rosterUnit-словарь из comlink.get_player}"""
+    if not units:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    rows = [(ally_code, base_id, json.dumps(unit_dict)) for base_id, unit_dict in units.items()]
+    cursor.executemany("""
+        INSERT OR REPLACE INTO player_unit_cache (ally_code, base_id, unit_json, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+    """, rows)
+    conn.commit()
+    conn.close()
+
+
+def get_player_unit(ally_code: str, base_id: str):
+    """Возвращает (unit_dict, updated_at) либо None, если юнита нет в кэше."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    cursor.execute(
+        "SELECT unit_json, updated_at FROM player_unit_cache WHERE ally_code = ? AND base_id = ?",
+        (ally_code, base_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return json.loads(row[0]), row[1]
