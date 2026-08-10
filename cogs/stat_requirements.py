@@ -1,4 +1,5 @@
 import asyncio
+import math
 import re
 import sqlite3
 
@@ -83,6 +84,18 @@ def _unit_display_name(base_id: str) -> str:
 
 def _fmt_value(value: float) -> str:
     return f"{value:g}"
+
+
+def _fmt_compact(value: float) -> str:
+    """Сокращённая запись для ширины таблицы: 8472 -> '8,4к' (отбрасывание, не округление),
+    8000 -> '8к'. Значения меньше 1000 (релик, скорость, потенция...) не сокращаются."""
+    if abs(value) < 1000:
+        return _fmt_value(value)
+    truncated = math.trunc(value / 100) / 10
+    text = f"{truncated:.1f}".replace(".", ",")
+    if text.endswith(",0"):
+        text = text[:-2]
+    return text + "к"
 
 
 def _compare(current: float, operator: str, threshold: float) -> bool:
@@ -191,29 +204,46 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
             projected_values["Relic"] = target_relic
 
         caption = f"Релик игрока: {current_relic}" + (f" → цель по плейту: {target_relic}" if show_projection else "")
-        headers = ["Стат", "У игрока", f"На релике {target_relic}" if show_projection else "На цели", "Плейт"]
+        if show_projection:
+            headers = ["Стат", "Сейчас", "Нужно", f"Релик {target_relic}", "Норма"]
+        else:
+            headers = ["Стат", "Сейчас", "Норма"]
 
         table_rows = []
         for row in rows:
             _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
             label = _stat_label(stat_name, priority)
-            req_cell = f"{operator} {_fmt_value(threshold)}"
+            req_cell = f"{operator} {_fmt_compact(threshold)}"
             cur_val = current_values.get(stat_name)
             if cur_val is None:
-                table_rows.append([label, "нет данных", "—", req_cell])
+                table_rows.append([label, "нет данных", "—", "—", req_cell] if show_projection else [label, "нет данных", req_cell])
                 continue
             total += 1
             cur_ok = _compare(cur_val, operator, threshold)
             if cur_ok:
                 matched += 1
-            cur_cell = f"{_fmt_value(cur_val)} {'✅' if cur_ok else '❌'}"
+            cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
+
+            if not show_projection:
+                table_rows.append([label, cur_cell, req_cell])
+                continue
+
+            needed_cell = "—"
             proj_cell = "—"
-            if show_projection and stat_name != "Relic":
+            if stat_name != "Relic":
                 proj_val = projected_values.get(stat_name) if projected_values else None
                 if proj_val is not None:
                     proj_ok = _compare(proj_val, operator, threshold)
-                    proj_cell = f"{_fmt_value(proj_val)} {'✅' if proj_ok else '❌'}"
-            table_rows.append([label, cur_cell, proj_cell, req_cell])
+                    proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
+                    # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
+                    # при тех же модах/шмоте, не зависит от текущего значения (см. план фичи).
+                    # needed = порог минус этот рост = сколько нужно ИМЕННО СЕЙЧАС, чтобы после
+                    # апа реликвии стат дотянул до нормы плейта.
+                    delta = proj_val - cur_val
+                    needed_now = threshold - delta
+                    needed_ok = _compare(cur_val, operator, needed_now)
+                    needed_cell = f"{_fmt_compact(needed_now)} {'✅' if needed_ok else '❌'}"
+            table_rows.append([label, cur_cell, needed_cell, proj_cell, req_cell])
 
         block = caption + "\n" + _build_table(headers, table_rows)
     else:
@@ -221,12 +251,12 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
         current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
         current_values["Relic"] = relic_param
 
-        headers = ["Стат", f"Расчёт (релик {relic_param})", "Плейт"]
+        headers = ["Стат", f"Релик {relic_param}", "Норма"]
         table_rows = []
         for row in rows:
             _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
             label = _stat_label(stat_name, priority)
-            req_cell = f"{operator} {_fmt_value(threshold)}"
+            req_cell = f"{operator} {_fmt_compact(threshold)}"
             cur_val = current_values.get(stat_name)
             if cur_val is None:
                 table_rows.append([label, "нет данных", req_cell])
@@ -235,7 +265,7 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
             cur_ok = _compare(cur_val, operator, threshold)
             if cur_ok:
                 matched += 1
-            cur_cell = f"{_fmt_value(cur_val)} {'✅' if cur_ok else '❌'}"
+            cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
             table_rows.append([label, cur_cell, req_cell])
 
         block = "⚠️ без модов/шмота игрока (только база + реликвия)\n" + _build_table(headers, table_rows)
