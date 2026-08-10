@@ -220,7 +220,11 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
         current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
         current_values["Relic"] = current_relic
 
-        show_projection = required_relic is not None and required_relic > current_relic
+        # Показываем прогноз не только вверх (у игрока релик ниже требуемого), но и вниз
+        # (у игрока уже выше — интересно, каким был бы стат ровно на уровне плейта).
+        # Формула "Нужно" (порог минус дельта) не зависит от направления: дельта от релика
+        # к релику при тех же модах/шмоте фиксирована в обе стороны.
+        show_projection = required_relic is not None and required_relic != current_relic
         target_relic = required_relic if show_projection else current_relic
         projected_values = None
         if show_projection:
@@ -228,7 +232,13 @@ async def _evaluate_character(bot, plate_name: str, base_id: str, ally_code, for
             projected_values = dict(stat_engine.calc_final_stats(bot.stat_calc, projected_unit))
             projected_values["Relic"] = target_relic
 
-        caption = f"Релик игрока: {current_relic}" + (f" → цель по плейту: {target_relic}" if show_projection else "") + legend
+        caption = f"Релик игрока: {current_relic}"
+        if show_projection:
+            if target_relic > current_relic:
+                caption += f" → цель по плейту: {target_relic}"
+            else:
+                caption += f" → плейт требует {target_relic} (у игрока выше)"
+        caption += legend
         if show_projection:
             headers = ["Стат", "Сейчас", "Нужно", f"Релик {target_relic}", "Норма"]
         else:
