@@ -476,7 +476,7 @@ class StatRequirementsCog(commands.Cog):
     async def stat_req_add(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        плейт: str = commands.Param(description="Название плейта (как в HotUtils, например AC_ALL)", autocomplete=autocomplete_stat_plate),
+        плейт: str = commands.Param(description="Плейт (как в HotUtils, например AC_ALL)", autocomplete=autocomplete_stat_plate),
         персонаж: str = commands.Param(description="Персонаж", autocomplete=units_autocomplete),
         стат: str = commands.Param(description="Какой стат проверяем (или Relic для уровня реликвии)", choices=STAT_CHOICES),
         оператор: str = commands.Param(description="Оператор сравнения", choices=OPERATOR_CHOICES),
@@ -484,6 +484,13 @@ class StatRequirementsCog(commands.Cog):
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
+        if плейт not in database.get_all_stat_requirement_plates():
+            await inter.response.send_message(
+                f"❌ Плейт «{плейт}» не найден — выберите вариант из списка автодополнения либо создайте его сначала через /статы_требования создать.",
+                ephemeral=True,
+            )
+            return
+
         base_id = _parse_bracket_id(персонаж)
         char_name = _unit_display_name(base_id)
         raw_text = f"{char_name} {стат} {оператор} {_fmt_value(значение)}"
@@ -558,6 +565,77 @@ class StatRequirementsCog(commands.Cog):
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:
             await inter.followup.send(embed=e, ephemeral=True)
+
+    @stat_req.sub_command(name="создать", description="Зарегистрировать новый плейт (набор норм статов)")
+    async def stat_req_create_plate(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Название нового плейта (как в HotUtils, например AC_ALL)"),
+        описание: str = commands.Param(default=None, description="Заметка о плейте"),
+    ):
+        created = database.create_stat_plate(плейт, описание, str(inter.author.id))
+        if not created:
+            await inter.response.send_message(f"❌ Плейт «{плейт}» уже существует.", ephemeral=True)
+            return
+        suffix = f" · _{описание}_" if описание else ""
+        await inter.response.send_message(f"✅ Плейт «{плейт}» создан.{suffix}", ephemeral=True)
+
+    @stat_req.sub_command(name="плейты", description="Показать список всех плейтов")
+    async def stat_req_list_plates(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+        rows = database.get_all_stat_plates_detailed()
+        if not rows:
+            await inter.edit_original_response("❌ Плейтов пока нет — создайте через /статы_требования создать.")
+            return
+
+        lines = []
+        for name, description, char_count, req_count in rows:
+            desc_part = f" — _{description}_" if description else ""
+            lines.append(f"`{name}`{desc_part} · персонажей: {char_count}, требований: {req_count}")
+
+        embeds = _lines_to_embeds("📋 Плейты", DATACRON_LIST_COLOR, lines)
+        await inter.edit_original_response(embed=embeds[0])
+        for e in embeds[1:]:
+            await inter.followup.send(embed=e, ephemeral=True)
+
+    @stat_req.sub_command(name="переименовать", description="Переименовать плейт")
+    async def stat_req_rename_plate(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Плейт для переименования", autocomplete=autocomplete_stat_plate),
+        новое_имя: str = commands.Param(description="Новое название плейта"),
+    ):
+        ok = database.rename_stat_plate(плейт, новое_имя)
+        if not ok:
+            await inter.response.send_message(
+                f"❌ Не удалось переименовать: плейт «{плейт}» не найден либо «{новое_имя}» уже занято другим плейтом.",
+                ephemeral=True,
+            )
+            return
+        await inter.response.send_message(f"✅ Плейт «{плейт}» переименован в «{новое_имя}».", ephemeral=True)
+
+    @stat_req.sub_command(name="удалить_плейт", description="Удалить плейт целиком со всеми его требованиями")
+    async def stat_req_delete_plate(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Плейт для удаления", autocomplete=autocomplete_stat_plate),
+        подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
+    ):
+        count = database.count_stat_requirements_by_plate(плейт)
+        if database.get_stat_plate(плейт) is None and count == 0:
+            await inter.response.send_message(f"❌ Плейт «{плейт}» не найден.", ephemeral=True)
+            return
+
+        if not подтвердить:
+            await inter.response.send_message(
+                f"⚠️ Будет удалён плейт «{плейт}» и его требований: {count}. "
+                f"Повторите команду с подтвердить=True, чтобы подтвердить удаление.",
+                ephemeral=True,
+            )
+            return
+
+        deleted = database.delete_stat_plate(плейт)
+        await inter.response.send_message(f"🗑️ Плейт «{плейт}» удалён вместе с требованиями: {deleted}.", ephemeral=True)
 
     # ------------------ /статы (открытая команда) ------------------
     @commands.slash_command(name="статы", description="Прогноз статов персонажа(ей) игрока на релик плейта относительно требований")

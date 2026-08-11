@@ -764,6 +764,122 @@ def _ensure_stat_requirements_table(cursor):
     )
 
 
+def _ensure_stat_plates_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_plates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    # Плейты изначально создавались неявно — первым /статы_требования добавить с новым
+    # именем. Подтягиваем такие "исторические" плейты в таблицу, иначе они не попадут
+    # в список/переименование/удаление, хоть и продолжат работать в автодополнении.
+    cursor.execute("""
+        INSERT OR IGNORE INTO stat_plates (name, description, created_by, created_at)
+        SELECT DISTINCT plate_name, NULL, NULL, datetime('now') FROM stat_requirements
+    """)
+
+
+def create_stat_plate(name: str, description: str, created_by: str) -> bool:
+    """Возвращает False, если плейт с таким именем уже существует."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    try:
+        cursor.execute(
+            "INSERT INTO stat_plates (name, description, created_by, created_at) VALUES (?, ?, ?, datetime('now'))",
+            (name, description, created_by),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def rename_stat_plate(old_name: str, new_name: str) -> bool:
+    """Возвращает False, если old_name не найден либо new_name уже занят другим плейтом."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    try:
+        cursor.execute("UPDATE stat_plates SET name = ? WHERE name = ?", (new_name, old_name))
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return False
+        cursor.execute("UPDATE stat_requirements SET plate_name = ? WHERE plate_name = ?", (new_name, old_name))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def count_stat_requirements_by_plate(plate_name: str) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("SELECT COUNT(*) FROM stat_requirements WHERE plate_name = ?", (plate_name,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def delete_stat_plate(name: str) -> int:
+    """Удаляет плейт и все его требования, возвращает количество удалённых требований."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    cursor.execute("DELETE FROM stat_requirements WHERE plate_name = ?", (name,))
+    deleted = cursor.rowcount
+    cursor.execute("DELETE FROM stat_plates WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def get_stat_plate(name: str):
+    """Возвращает (name, description, created_by, created_at) либо None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    cursor.execute("SELECT name, description, created_by, created_at FROM stat_plates WHERE name = ?", (name,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def get_all_stat_plates_detailed():
+    """Возвращает список (name, description, character_count, requirement_count) по всем плейтам,
+    включая пустые (без единого требования), отсортированный по имени."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    cursor.execute("""
+        SELECT p.name, p.description,
+               COUNT(DISTINCT r.character_key) AS char_count,
+               COUNT(r.id) AS req_count
+        FROM stat_plates p
+        LEFT JOIN stat_requirements r ON r.plate_name = p.name
+        GROUP BY p.name
+        ORDER BY p.name
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
                           created_by: str) -> int:
@@ -835,10 +951,18 @@ def get_stat_requirements(plate_name: str, character_key: str):
 
 
 def get_all_stat_requirement_plates():
+    """Все известные плейты — и зарегистрированные через /статы_требования создать
+    (даже пустые), и "исторические" (существующие только как plate_name у требований)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
-    cursor.execute("SELECT DISTINCT plate_name FROM stat_requirements ORDER BY plate_name")
+    _ensure_stat_plates_table(cursor)
+    cursor.execute("""
+        SELECT name FROM stat_plates
+        UNION
+        SELECT DISTINCT plate_name FROM stat_requirements
+        ORDER BY 1
+    """)
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
