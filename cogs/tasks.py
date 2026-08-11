@@ -1,12 +1,16 @@
 import disnake
 from disnake.ext import commands, tasks
+import asyncio
 import sqlite3
 import re
 from datetime import datetime, timedelta
 import database
-import aiohttp
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
-from cogs.violations import autocomplete_players  
+from cogs.violations import autocomplete_players
+
+# 'UnitDefinitions' — бит из comlink.get_enums()["GameDataItemsEnum"], тот же приём,
+# что DATACRON_DEFINITIONS_FLAG в datacron_requirements.py.
+UNIT_DEFINITIONS_FLAG = 137438953472
 
 # =====================================================================
 # АВТОКОМПЛИТЫ ДЛЯ КОМАНДЫ ПОСТАНОВКИ ЗАДАЧ (ВНЕ КЛАССА)
@@ -39,107 +43,47 @@ class TasksCog(commands.Cog):
         self.tasks_audit_loop.cancel()
 
     # =====================================================================
-    # СИНХРОНИЗАЦИЯ ПО API COMLINK 0.40.0 (POST /data)
+    # СИНХРОНИЗАЦИЯ СПРАВОЧНИКА ЮНИТОВ (get_game_data + русская локализация)
     # =====================================================================
     async def _do_units_synchronization(self) -> int:
-        """Стягивает справочник юнитов напрямую из Comlink через HTTP POST /data.
-        Использует минималистичный payload для исключения внутренних ошибок сервера.
+        """Стягивает справочник юнитов через comlink.get_game_data(items=UnitDefinitions) —
+        тот же приём, что _fetch_datacron_cache в datacron_requirements.py. Старый вариант
+        через сырой aiohttp POST /data с минимальным payload молча отдавал пустой 'units'
+        (воспроизведено вживую) — library-метод отдаёт полный список без этой проблемы.
+        Имена берём из RUS_RU локализации, а не из nameKey — то же, что делает datacron-кэш.
         """
-        comlink_url = "http://localhost:3000"  # Дефолтное значение
-        for attr in ['url', 'base_url', 'host', '_url']:
-            if hasattr(self.bot.comlink, attr):
-                val = getattr(self.bot.comlink, attr)
-                if isinstance(val, str) and val.startswith('http'):
-                    comlink_url = val
-                    break
-        
-        # Получаем актуальную версию gamedata
-        raw_version = None
-        try:
-            metadata = self.bot.comlink.get_metadata()
-            raw_version = metadata.get('latestGamedataVersion')
-        except Exception as e:
-            print(f"⚠️ Не удалось получить версию через библиотеку: {e}. Пробуем HTTP...")
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{comlink_url.rstrip('/')}/metadata", timeout=10) as m_resp:
-                        if m_resp.status == 200:
-                            m_data = await m_resp.json()
-                            raw_version = m_data.get('latestGamedataVersion')
-            except Exception as http_err:
-                print(f"❌ Ошибка получения метаданных через HTTP: {http_err}")
-
-        if not raw_version:
-            raise Exception("Не удалось определить актуальную версию игры (version) для Comlink API.")
-
-        endpoint = f"{comlink_url.rstrip('/')}/data"
-        game_data = None
-        
-        # Перебираем два варианта версии: полный (0.40.1:ХЭШ) и чистый (только ХЭШ)
-        versions_to_try = [raw_version]
-        if ":" in raw_version:
-            versions_to_try.append(raw_version.split(":", 1)[1])
-
-        async with aiohttp.ClientSession() as session:
-            for v in versions_to_try:
-                print(f"📦 [Comlink API] Пробуем POST-запрос на {endpoint} с версией: {v}...")
-                
-                # Абсолютно чистый и минимальный payload, требуемый новой спецификацией
-                payload = {
-                    "enums": False,
-                    "payload": {
-                        "version": v
-                    }
-                }
-                
-                try:
-                    async with session.post(endpoint, json=payload, timeout=60) as resp:
-                        if resp.status == 200:
-                            game_data = await resp.json()
-                            print("✅ Справочник данных успешно получен от Comlink!")
-                            break
-                        else:
-                            print(f"⚠️ Попытка с версией {v} вернула статус {resp.status}")
-                except Exception as req_err:
-                    print(f"⚠️ Ошибка запроса с версией {v}: {req_err}")
-
-        if not game_data:
-            raise Exception("Comlink API отклонил все варианты структуры запроса.")
-
-        # Поддерживаем оба возможных формата ответа (новый 'units' и старый 'unitsList')
-        units_list = game_data.get('units') or game_data.get('unitsList') or []
+        game_data = await asyncio.to_thread(self.bot.comlink.get_game_data, items=str(UNIT_DEFINITIONS_FLAG))
+        units_list = game_data.get('units') or []
         if not units_list:
-            raise Exception("В полученных данных отсутствует массив персонажей ('units'/'unitsList').")
+            raise Exception("В полученных данных отсутствует массив персонажей ('units').")
 
-        # Обработка системных ключей в читаемые имена
+        loc = await asyncio.to_thread(self.bot.comlink.get_localization, locale="RUS_RU", unzip=True)
+        loc_text = loc.get("Loc_RUS_RU.txt", "")
+        loc_kv = {}
+        for line in loc_text.split("\n"):
+            if "|" not in line:
+                continue
+            k, _, v = line.partition("|")
+            loc_kv[k.strip()] = v.strip()
+
         units_to_db = {}
         for unit in units_list:
-            if unit.get('baseId'):
-                bid = unit['baseId']
-                raw_name = unit.get('nameKey', bid)
-                
-                # Очищаем системные префиксы и суффиксы
-                name = raw_name
-                for prefix in ["UNIT_", "SHIP_"]:
-                    if name.startswith(prefix):
-                        name = name.replace(prefix, "")
-                if name.endswith("_NAME"):
-                    name = name.replace("_NAME", "")
-                
-                # Форматируем в нормальный вид: DARTH_VADER -> Darth Vader
-                clean_name = name.replace("_", " ").title().strip()
-                units_to_db[bid] = clean_name
+            bid = unit.get('baseId')
+            if not bid:
+                continue
+            name_key = unit.get('nameKey', bid)
+            units_to_db[bid] = loc_kv.get(name_key, name_key)
 
         # Записываем всё собранное в базу данных SQLite
         conn = sqlite3.connect(database.DB_NAME)
         cursor = conn.cursor()
-        
+
         for bid, name in units_to_db.items():
             cursor.execute("""
                 INSERT OR REPLACE INTO game_units (base_id, cached_name)
                 VALUES (?, ?)
             """, (bid, name))
-            
+
         conn.commit()
         conn.close()
         return len(units_to_db)
