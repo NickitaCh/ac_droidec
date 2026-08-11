@@ -51,6 +51,20 @@ STAT_CHOICES = [
     disnake.OptionChoice(name="Health Steal", value="Health Steal"),
 ]
 
+# Плоская (не растущая с реликвией) часть порога для /статы_релик — значения и сама модель
+# взяты из гильдийской Google-таблицы (лист TEST, формула BASESTAT(...)*MODMULT(...)+flat):
+# порог считается как flat_offset (роллы с модов, не масштабируются) + остаток порога,
+# который масштабируется пропорционально росту голой базы стата между релик-уровнями.
+# Статов без записи здесь (Speed, Potency, Tenacity, крит-статы и т.п.) в таблице тоже нет —
+# для них норма при пересчёте остаётся как есть, без масштабирования.
+RELIC_PROJECTION_FLAT_OFFSET = {
+    "Health": 1500,
+    "Protection": 3000,
+    "Physical Damage": 100,
+    "Special Damage": 100,
+    "Armor": 20,
+}
+
 OPERATOR_CHOICES = [
     disnake.OptionChoice(name=">=", value=">="),
     disnake.OptionChoice(name="<=", value="<="),
@@ -304,11 +318,14 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
 
 async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int):
     """Возвращает (char_name, block) — пересчёт уже заданных в плейте норм на другой релик.
-    Пороги в плейте (например Health >= 95000 на релике 8) заданы вручную под какие-то моды/
-    шмот, которых мы не знаем — поэтому НЕ пересчитываем их с нуля от голой базы. Вместо этого
-    берём чистую "прибавку от релика" (дельта между двумя безмодовыми синтетическими юнитами на
-    исходном и целевом релике — она не зависит от модов, т.к. они одинаковы по обе стороны
-    вычитания) и прибавляем её к уже заданному в требовании числу.
+    Модель — та же, что в гильдийской Google-таблице (BASESTAT*MODMULT+flat): порог на
+    исходном релике раскладывается на плоскую часть (RELIC_PROJECTION_FLAT_OFFSET — роллы
+    с модов, не растут с базой) и оставшуюся часть, которая масштабируется пропорционально
+    голой безмодовой базе стата. Множитель находится из уже заданного порога:
+        multiplier = (threshold − flat) / base(исходный релик)
+        projected  = base(целевой релик) × multiplier + flat
+    Для статов без записи в RELIC_PROJECTION_FLAT_OFFSET (Speed, Potency, крит-статы и т.п.)
+    норма не пересчитывается — как и в самой таблице, она просто переносится как есть.
     Возвращает None, если для этого персонажа нет сохранённых требований в плейте."""
     loaded = _load_char_rows(plate_name, base_id)
     if loaded is None:
@@ -335,17 +352,22 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
             table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(target_relic)}"])
             continue
 
+        flat = RELIC_PROJECTION_FLAT_OFFSET.get(stat_name)
+        if flat is None:
+            table_rows.append([label, orig_cell, orig_cell])
+            continue
+
         ref_val = ref_values.get(stat_name)
         tgt_val = target_values.get(stat_name)
-        if ref_val is None or tgt_val is None:
+        if not ref_val or tgt_val is None:
             table_rows.append([label, orig_cell, "нет данных"])
             continue
 
-        delta = tgt_val - ref_val
-        projected = threshold + delta
+        multiplier = (threshold - flat) / ref_val
+        projected = tgt_val * multiplier + flat
         table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(projected)}"])
 
-    block = f"Прибавка релика {required_relic} → {target_relic} добавлена к норме из плейта" + legend + "\n" + _build_table(headers, table_rows)
+    block = f"Норма пересчитана с релика {required_relic} на {target_relic} (плоская часть + пропорциональный рост базы)" + legend + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
@@ -633,7 +655,7 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("❌ Нечего показать.")
             return
 
-        embeds[-1].set_footer(text="Прибавка от релика посчитана без модов/шмота — как в самом плейте, число уже заданного порога сохранено")
+        embeds[-1].set_footer(text="Модель: плоская часть порога (роллы модов) не растёт, остальное масштабируется вместе с базой персонажа")
 
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:
