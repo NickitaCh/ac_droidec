@@ -72,17 +72,19 @@ class TasksCog(commands.Cog):
             if not bid:
                 continue
             name_key = unit.get('nameKey', bid)
-            units_to_db[bid] = loc_kv.get(name_key, name_key)
+            name = loc_kv.get(name_key, name_key)
+            unit_type = "ship" if unit.get("combatType") == 2 else "character"
+            units_to_db[bid] = (name, unit_type)
 
         # Записываем всё собранное в базу данных SQLite
         conn = sqlite3.connect(database.DB_NAME)
         cursor = conn.cursor()
 
-        for bid, name in units_to_db.items():
+        for bid, (name, unit_type) in units_to_db.items():
             cursor.execute("""
-                INSERT OR REPLACE INTO game_units (base_id, cached_name)
-                VALUES (?, ?)
-            """, (bid, name))
+                INSERT OR REPLACE INTO game_units (base_id, cached_name, unit_type)
+                VALUES (?, ?, ?)
+            """, (bid, name, unit_type))
 
         conn.commit()
         conn.close()

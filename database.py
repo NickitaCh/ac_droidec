@@ -51,7 +51,8 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_units (
             base_id TEXT PRIMARY KEY,
-            cached_name TEXT NOT NULL
+            cached_name TEXT NOT NULL,
+            unit_type TEXT NOT NULL DEFAULT 'character'
         )
     """)
 
