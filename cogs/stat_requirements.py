@@ -302,43 +302,54 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     return char_name, block, matched, total, updated_at
 
 
-async def _evaluate_character_relic(bot, plate_name: str, base_id: str, relic_level: int):
-    """Возвращает (char_name, block, matched, total) для одного персонажа плейта — синтетический
-    юнит (только база + бонус реликвии, без модов/шмота конкретного игрока) на заданный релик.
-    Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
+async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int):
+    """Возвращает (char_name, block) — пересчёт уже заданных в плейте норм на другой релик.
+    Пороги в плейте (например Health >= 95000 на релике 8) заданы вручную под какие-то моды/
+    шмот, которых мы не знаем — поэтому НЕ пересчитываем их с нуля от голой базы. Вместо этого
+    берём чистую "прибавку от релика" (дельта между двумя безмодовыми синтетическими юнитами на
+    исходном и целевом релике — она не зависит от модов, т.к. они одинаковы по обе стороны
+    вычитания) и прибавляем её к уже заданному в требовании числу.
+    Возвращает None, если для этого персонажа нет сохранённых требований в плейте."""
     loaded = _load_char_rows(plate_name, base_id)
     if loaded is None:
         return None
-    rows, char_name, _required_relic, comments, legend = loaded
-    matched = 0
-    total = 0
+    rows, char_name, required_relic, comments, legend = loaded
 
-    unit = _build_synthetic_unit(base_id, relic_level)
-    current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
-    current_values["Relic"] = relic_level
+    if required_relic is None:
+        block = "⚠️ В требованиях плейта нет строки Relic — не от чего считать прибавку."
+        return char_name, block
 
-    headers = ["Стат", f"Релик {relic_level}", "Норма"]
+    ref_unit = _build_synthetic_unit(base_id, required_relic)
+    target_unit = _build_synthetic_unit(base_id, target_relic)
+    ref_values = dict(stat_engine.calc_final_stats(bot.stat_calc, ref_unit))
+    target_values = dict(stat_engine.calc_final_stats(bot.stat_calc, target_unit))
+
+    headers = ["Стат", f"Норма Р{required_relic}", f"Норма Р{target_relic}"]
     table_rows = []
     for row in rows:
         _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
         label = _stat_label(stat_name, priority)
-        req_cell = f"{operator} {_fmt_compact(threshold)}"
-        cur_val = current_values.get(stat_name)
-        if cur_val is None:
-            table_rows.append([label, "нет данных", req_cell])
-            continue
-        total += 1
-        cur_ok = _compare(cur_val, operator, threshold)
-        if cur_ok:
-            matched += 1
-        cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
-        table_rows.append([label, cur_cell, req_cell])
+        orig_cell = f"{operator} {_fmt_compact(threshold)}"
 
-    block = "⚠️ без модов/шмота игрока (только база + реликвия)" + legend + "\n" + _build_table(headers, table_rows)
+        if stat_name == "Relic":
+            table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(target_relic)}"])
+            continue
+
+        ref_val = ref_values.get(stat_name)
+        tgt_val = target_values.get(stat_name)
+        if ref_val is None or tgt_val is None:
+            table_rows.append([label, orig_cell, "нет данных"])
+            continue
+
+        delta = tgt_val - ref_val
+        projected = threshold + delta
+        table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(projected)}"])
+
+    block = f"Прибавка релика {required_relic} → {target_relic} добавлена к норме из плейта" + legend + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total
+    return char_name, block
 
 
 # =====================================================================
@@ -594,14 +605,14 @@ class StatRequirementsCog(commands.Cog):
         for e in embeds[1:]:
             await inter.followup.send(embed=e)
 
-    # ------------------ /статы_релик (открытая команда, без игрока) ------------------
-    @commands.slash_command(name="статы_релик", description="Расчёт статов персонажа(ей) плейта на заданный релик без привязки к игроку")
+    # ------------------ /статы_релик (пересчёт нормы плейта на другой релик) ------------------
+    @commands.slash_command(name="статы_релик", description="Пересчитать уже заданную в плейте норму персонажа на другой релик")
     async def stats_relic_check(
         self,
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(description="Персонаж из плейта", autocomplete=autocomplete_stat_character),
         релик: int = commands.Param(description="Целевой уровень реликвии", ge=0, le=10),
-        персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
     ):
         await inter.response.defer()
 
@@ -609,44 +620,20 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
-        char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт)
-        if not char_keys:
-            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+        base_id = _parse_bracket_id(персонаж)
+        result = await _project_character_relic(self.bot, плейт, base_id, релик)
+        if result is None:
+            await inter.edit_original_response("❌ Нет сохранённых требований для этого персонажа в плейте.")
             return
 
-        lines = []
-        matched_total = 0
-        rows_total = 0
-        any_char_shown = False
-        for base_id in char_keys:
-            result = await _evaluate_character_relic(self.bot, плейт, base_id, релик)
-            if result is None:
-                continue
-            char_name, block, matched, total = result
-            any_char_shown = True
-            lines.append(f"## {char_name}")
-            lines.append(block)
-            matched_total += matched
-            rows_total += total
-
-        if not any_char_shown:
-            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
-            return
-
-        if rows_total and matched_total == rows_total:
-            color = DATACRON_CHECK_COLOR_FULL
-        elif matched_total == 0:
-            color = DATACRON_CHECK_COLOR_NONE
-        else:
-            color = DATACRON_CHECK_COLOR_PARTIAL
-
-        title = f"📋 {плейт} (релик {релик}, без учёта модов/шмота игрока)"
-        embeds = _lines_to_embeds(title, color, lines)
+        char_name, block = result
+        title = f"📋 {плейт}: {char_name} → релик {релик}"
+        embeds = _lines_to_embeds(title, DATACRON_LIST_COLOR, [block])
         if not embeds:
             await inter.edit_original_response("❌ Нечего показать.")
             return
 
-        embeds[-1].set_footer(text="⚠️ Синтетический расчёт — без модов/шмота конкретного игрока")
+        embeds[-1].set_footer(text="Прибавка от релика посчитана без модов/шмота — как в самом плейте, число уже заданного порога сохранено")
 
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:
