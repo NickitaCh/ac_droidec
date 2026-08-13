@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}AC Droidec{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/">AC Droidec</a>
+        <nav>
+            {% if user %}
+                <a href="/registration">Регистрация</a>
+                <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
+                <a href="/logout">Выйти</a>
+            {% else %}
+                <a href="/login">Войти через Discord</a>
+            {% endif %}
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
