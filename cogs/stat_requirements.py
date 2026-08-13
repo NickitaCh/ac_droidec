@@ -1,12 +1,12 @@
 import asyncio
 import math
 import re
-import sqlite3
 
 import disnake
 from disnake.ext import commands, tasks
 
 import database
+import guild_resolver
 import stat_engine
 from cogs.violations import autocomplete_players
 from cogs.tasks import units_autocomplete
@@ -113,12 +113,7 @@ def _parse_req_id(text: str):
 
 
 def _unit_display_name(base_id: str) -> str:
-    conn = sqlite3.connect(database.DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT cached_name FROM game_units WHERE base_id = ?", (base_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row else base_id
+    return database.get_game_unit_name(base_id) or base_id
 
 
 def _fmt_value(value: float) -> str:
@@ -214,11 +209,11 @@ def _stat_label(stat_name: str, priority: str) -> str:
     return f"{label}*" if priority == "optional" else label
 
 
-def _load_char_rows(plate_name: str, base_id: str):
+def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     """Общий префикс для обоих режимов расчёта: сохранённые требования персонажа в плейте,
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
     Возвращает None, если для этого персонажа нет сохранённых требований."""
-    rows = database.get_stat_requirements(plate_name, base_id)
+    rows = database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
     if not rows:
         return None
     char_name = _unit_display_name(base_id)
@@ -229,11 +224,11 @@ def _load_char_rows(plate_name: str, base_id: str):
     return rows, char_name, required_relic, comments, legend
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label):
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1):
     """Возвращает (char_name, block, matched, total, updated_at) для одного персонажа плейта
     у конкретного игрока — статы берутся из его реальных модов/шмота, прогноз на релик плейта.
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
-    loaded = _load_char_rows(plate_name, base_id)
+    loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
         return None
     rows, char_name, required_relic, comments, legend = loaded
@@ -316,7 +311,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     return char_name, block, matched, total, updated_at
 
 
-async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int):
+async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1):
     """Возвращает (char_name, block) — пересчёт уже заданных в плейте норм на другой релик.
     Модель — та же, что в гильдийской Google-таблице (BASESTAT*MODMULT+flat): порог на
     исходном релике раскладывается на плоскую часть (RELIC_PROJECTION_FLAT_OFFSET — роллы
@@ -327,7 +322,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
     Для статов без записи в RELIC_PROJECTION_FLAT_OFFSET (Speed, Potency, крит-статы и т.п.)
     норма не пересчитывается — как и в самой таблице, она просто переносится как есть.
     Возвращает None, если для этого персонажа нет сохранённых требований в плейте."""
-    loaded = _load_char_rows(plate_name, base_id)
+    loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
         return None
     rows, char_name, required_relic, comments, legend = loaded
@@ -378,7 +373,10 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
 # Автокомплиты (модульные функции — как autocomplete_players/autocomplete_datacron_*)
 # =====================================================================
 async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, string: str):
-    plates = database.get_all_stat_requirement_plates()
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     if not plates:
         return ["❌ Список плейтов пуст."]
     search = string.lower().strip()
@@ -386,10 +384,13 @@ async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, 
 
 
 async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteraction, string: str):
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
     plate = inter.filled_options.get("плейт")
     if not plate:
         return ["⚠️ СНАЧАЛА выберите плейт!"]
-    char_keys = database.get_stat_requirement_characters(plate)
+    char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
     if not char_keys:
         return ["❌ У этого плейта нет сохранённых требований."]
     search = string.lower().strip()
@@ -402,7 +403,10 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
 
 
 async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
-    rows = database.get_all_stat_requirements()
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    rows = database.get_all_stat_requirements(guild_id=guild_id)
     if not rows:
         return ["❌ Список требований пуст."]
     search = string.lower().strip()
@@ -446,9 +450,16 @@ class StatRequirementsCog(commands.Cog):
 
     @tasks.loop(hours=6)
     async def player_units_sync_loop(self):
-        if not self.bot.guild_roster_cache:
+        # player_unit_cache — не per-guild (ключ ally_code глобально уникален), поэтому
+        # синхронизируем объединённый ростер по всем зарегистрированным гильдиям сразу.
+        if not self.bot.guild_roster_caches:
             return
-        ally_codes = list(self.bot.guild_roster_cache.values())
+        ally_codes = set()
+        for cache in self.bot.guild_roster_caches.values():
+            ally_codes.update(cache.values())
+        ally_codes = list(ally_codes)
+        if not ally_codes:
+            return
         print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
         synced = 0
         for ally_code in ally_codes:
@@ -468,7 +479,7 @@ class StatRequirementsCog(commands.Cog):
 
     # ------------------ /статы_требования (офицеры) ------------------
     @commands.slash_command(name="статы_требования", description="Управление требованиями к статам персонажей по плейтам")
-    @commands.has_any_role(1153753506772164629)
+    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def stat_req(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -484,7 +495,12 @@ class StatRequirementsCog(commands.Cog):
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
-        if плейт not in database.get_all_stat_requirement_plates():
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
+        if плейт not in database.get_all_stat_requirement_plates(guild_id=guild_id):
             await inter.response.send_message(
                 f"❌ Плейт «{плейт}» не найден — выберите вариант из списка автодополнения либо создайте его сначала через /статы_требования создать.",
                 ephemeral=True,
@@ -495,7 +511,7 @@ class StatRequirementsCog(commands.Cog):
         char_name = _unit_display_name(base_id)
         raw_text = f"{char_name} {стат} {оператор} {_fmt_value(значение)}"
         req_id = database.add_stat_requirement(
-            плейт, base_id, стат, оператор, значение, приоритет, raw_text, комментарий, str(inter.author.id)
+            плейт, base_id, стат, оператор, значение, приоритет, raw_text, комментарий, str(inter.author.id), guild_id=guild_id
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
@@ -510,17 +526,22 @@ class StatRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Новый комментарий"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         req_id = _parse_req_id(id)
         if req_id is None:
             await inter.response.send_message("❌ Некорректный id — выберите вариант из списка автодополнения.", ephemeral=True)
             return
-        row = database.get_stat_requirement(req_id)
+        row = database.get_stat_requirement(req_id, guild_id=guild_id)
         if not row:
             await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
             return
 
         if удалить:
-            database.delete_stat_requirement(req_id)
+            database.delete_stat_requirement(req_id, guild_id=guild_id)
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
@@ -531,7 +552,7 @@ class StatRequirementsCog(commands.Cog):
         new_comment = комментарий if комментарий is not None else cur_comment
         char_name = _unit_display_name(character_key)
         new_raw_text = f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
-        database.update_stat_requirement(req_id, plate_name, character_key, stat_name, new_operator, new_threshold, new_priority, new_comment)
+        database.update_stat_requirement(req_id, plate_name, character_key, stat_name, new_operator, new_threshold, new_priority, new_comment, guild_id=guild_id)
         await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {new_raw_text}", ephemeral=True)
 
     @stat_req.sub_command(name="список", description="Показать сохранённые требования по плейту (и опционально персонажу)")
@@ -542,14 +563,19 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
     ):
         await inter.response.defer(ephemeral=True)
-        char_keys = [_parse_bracket_id(персонаж)] if персонаж else database.get_stat_requirement_characters(плейт)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        char_keys = [_parse_bracket_id(персонаж)] if персонаж else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
         if not char_keys:
             await inter.edit_original_response("❌ Нет требований для этого плейта.")
             return
 
         lines = []
         for base_id in char_keys:
-            rows = database.get_stat_requirements(плейт, base_id)
+            rows = database.get_stat_requirements(плейт, base_id, guild_id=guild_id)
             if not rows:
                 continue
             lines.append(f"## {_unit_display_name(base_id)}")
@@ -573,7 +599,12 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Название нового плейта (как в HotUtils, например AC_ALL)"),
         описание: str = commands.Param(default=None, description="Заметка о плейте"),
     ):
-        created = database.create_stat_plate(плейт, описание, str(inter.author.id))
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
+        created = database.create_stat_plate(плейт, описание, str(inter.author.id), guild_id=guild_id)
         if not created:
             await inter.response.send_message(f"❌ Плейт «{плейт}» уже существует.", ephemeral=True)
             return
@@ -583,7 +614,12 @@ class StatRequirementsCog(commands.Cog):
     @stat_req.sub_command(name="плейты", description="Показать список всех плейтов")
     async def stat_req_list_plates(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
-        rows = database.get_all_stat_plates_detailed()
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        rows = database.get_all_stat_plates_detailed(guild_id=guild_id)
         if not rows:
             await inter.edit_original_response("❌ Плейтов пока нет — создайте через /статы_требования создать.")
             return
@@ -605,7 +641,12 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт для переименования", autocomplete=autocomplete_stat_plate),
         новое_имя: str = commands.Param(description="Новое название плейта"),
     ):
-        ok = database.rename_stat_plate(плейт, новое_имя)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
+        ok = database.rename_stat_plate(плейт, новое_имя, guild_id=guild_id)
         if not ok:
             await inter.response.send_message(
                 f"❌ Не удалось переименовать: плейт «{плейт}» не найден либо «{новое_имя}» уже занято другим плейтом.",
@@ -621,8 +662,13 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт для удаления", autocomplete=autocomplete_stat_plate),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
-        count = database.count_stat_requirements_by_plate(плейт)
-        if database.get_stat_plate(плейт) is None and count == 0:
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
+        count = database.count_stat_requirements_by_plate(плейт, guild_id=guild_id)
+        if database.get_stat_plate(плейт, guild_id=guild_id) is None and count == 0:
             await inter.response.send_message(f"❌ Плейт «{плейт}» не найден.", ephemeral=True)
             return
 
@@ -634,7 +680,7 @@ class StatRequirementsCog(commands.Cog):
             )
             return
 
-        deleted = database.delete_stat_plate(плейт)
+        deleted = database.delete_stat_plate(плейт, guild_id=guild_id)
         await inter.response.send_message(f"🗑️ Плейт «{плейт}» удалён вместе с требованиями: {deleted}.", ephemeral=True)
 
     # ------------------ /статы (открытая команда) ------------------
@@ -649,11 +695,16 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
         if not self.bot.stat_calc:
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
-        char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт)
+        char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
         if not char_keys:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
@@ -667,7 +718,8 @@ class StatRequirementsCog(commands.Cog):
                 return
             ally_code, игрок = registration
         else:
-            ally_code = self.bot.guild_roster_cache.get(игрок) if self.bot.guild_roster_cache else None
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            ally_code = cache.get(игрок)
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
@@ -678,7 +730,7 @@ class StatRequirementsCog(commands.Cog):
         updated_ats = []
         any_char_shown = False
         for base_id in char_keys:
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок)
+            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id)
             if result is None:
                 continue
             char_name, block, matched, total, updated_at = result
@@ -725,12 +777,17 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
         if not self.bot.stat_calc:
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
         base_id = _parse_bracket_id(персонаж)
-        result = await _project_character_relic(self.bot, плейт, base_id, релик)
+        result = await _project_character_relic(self.bot, плейт, base_id, релик, guild_id=guild_id)
         if result is None:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого персонажа в плейте.")
             return

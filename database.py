@@ -110,6 +110,9 @@ def _migrate_user_mapping_guild_id(cursor):
         SELECT 1, discord_id, ally_code, ingame_name FROM user_mapping_old
     """)
     cursor.execute("DROP TABLE user_mapping_old")
+    # Коммитим внутри миграции, а не полагаемся на вызывающую функцию — см. подробное
+    # объяснение (и то, чем это грозит) в _ensure_user_registration_table.
+    cursor.connection.commit()
 
 # =====================================================================
 # РЕЕСТР ГИЛЬДИЙ (мультитенантность): какие SWGOH-гильдии обслуживает бот,
@@ -517,6 +520,13 @@ def _ensure_user_registration_table(cursor):
             SELECT discord_id, ally_code, ingame_name, 1, registered_at FROM user_registration_old
         """)
         cursor.execute("DROP TABLE user_registration_old")
+        # КРИТИЧНО: INSERT — это DML, а не DDL. Многие вызывающие функции здесь
+        # read-only и никогда не делают conn.commit() перед conn.close() — без
+        # явного commit тут скопированные строки тихо откатываются при закрытии
+        # соединения (DROP TABLE ниже — DDL и НЕ коммитит предыдущий INSERT сам
+        # по себе, проверено эмпирически). Коммитим прямо внутри миграции, не
+        # полагаясь на вызывающую функцию.
+        cursor.connection.commit()
 
 
 def set_user_registration(discord_id: str, ally_code: str, ingame_name: str = "", is_main: bool = True):
@@ -1151,8 +1161,12 @@ def _ensure_stat_requirements_table(cursor):
             created_at TEXT NOT NULL
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE stat_requirements ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_stat_req_plate_char ON stat_requirements(plate_name, character_key)"
+        "CREATE INDEX IF NOT EXISTS idx_stat_req_guild_plate_char ON stat_requirements(guild_id, plate_name, character_key)"
     )
 
 
@@ -1160,31 +1174,63 @@ def _ensure_stat_plates_table(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stat_plates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
             description TEXT,
             created_by TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            UNIQUE (guild_id, name)
         )
     """)
+    # Миграция с версии до мультитенантности (UNIQUE был только по name, без guild_id).
+    cursor.execute("PRAGMA table_info(stat_plates)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if cols and "guild_id" not in cols:
+        cursor.execute("ALTER TABLE stat_plates RENAME TO stat_plates_old")
+        cursor.execute("""
+            CREATE TABLE stat_plates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                description TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (guild_id, name)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO stat_plates (guild_id, name, description, created_by, created_at)
+            SELECT 1, name, description, created_by, created_at FROM stat_plates_old
+        """)
+        cursor.execute("DROP TABLE stat_plates_old")
     # Плейты изначально создавались неявно — первым /статы_требования добавить с новым
     # именем. Подтягиваем такие "исторические" плейты в таблицу, иначе они не попадут
     # в список/переименование/удаление, хоть и продолжат работать в автодополнении.
+    # (stat_requirements уже должна быть мигрирована на guild_id к этому моменту —
+    # см. порядок вызовов _ensure_stat_requirements_table перед _ensure_stat_plates_table.)
     cursor.execute("""
-        INSERT OR IGNORE INTO stat_plates (name, description, created_by, created_at)
-        SELECT DISTINCT plate_name, NULL, NULL, datetime('now') FROM stat_requirements
+        INSERT OR IGNORE INTO stat_plates (guild_id, name, description, created_by, created_at)
+        SELECT DISTINCT guild_id, plate_name, NULL, NULL, datetime('now') FROM stat_requirements
     """)
+    # КРИТИЧНО: оба INSERT выше — DML, не DDL. Большинство вызывающих функций здесь
+    # read-only и не делают conn.commit() перед conn.close() — без явного commit тут
+    # эти строки тихо откатываются при закрытии соединения (проверено эмпирически:
+    # DROP TABLE — DDL и не коммитит предыдущий INSERT сам по себе). Коммитим прямо
+    # внутри миграции, не полагаясь на вызывающую функцию — см. тот же фикс в
+    # _ensure_user_registration_table.
+    cursor.connection.commit()
 
 
-def create_stat_plate(name: str, description: str, created_by: str) -> bool:
-    """Возвращает False, если плейт с таким именем уже существует."""
+def create_stat_plate(name: str, description: str, created_by: str, guild_id: int = 1) -> bool:
+    """Возвращает False, если плейт с таким именем уже существует в этой гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
     try:
         cursor.execute(
-            "INSERT INTO stat_plates (name, description, created_by, created_at) VALUES (?, ?, ?, datetime('now'))",
-            (name, description, created_by),
+            "INSERT INTO stat_plates (guild_id, name, description, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+            (guild_id, name, description, created_by),
         )
         conn.commit()
         return True
@@ -1194,18 +1240,21 @@ def create_stat_plate(name: str, description: str, created_by: str) -> bool:
         conn.close()
 
 
-def rename_stat_plate(old_name: str, new_name: str) -> bool:
-    """Возвращает False, если old_name не найден либо new_name уже занят другим плейтом."""
+def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
+    """Возвращает False, если old_name не найден либо new_name уже занят другим плейтом этой гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
     try:
-        cursor.execute("UPDATE stat_plates SET name = ? WHERE name = ?", (new_name, old_name))
+        cursor.execute("UPDATE stat_plates SET name = ? WHERE guild_id = ? AND name = ?", (new_name, guild_id, old_name))
         if cursor.rowcount == 0:
             conn.rollback()
             return False
-        cursor.execute("UPDATE stat_requirements SET plate_name = ? WHERE plate_name = ?", (new_name, old_name))
+        cursor.execute(
+            "UPDATE stat_requirements SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
+            (new_name, guild_id, old_name)
+        )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -1215,45 +1264,48 @@ def rename_stat_plate(old_name: str, new_name: str) -> bool:
         conn.close()
 
 
-def count_stat_requirements_by_plate(plate_name: str) -> int:
+def count_stat_requirements_by_plate(plate_name: str, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
-    cursor.execute("SELECT COUNT(*) FROM stat_requirements WHERE plate_name = ?", (plate_name,))
+    cursor.execute("SELECT COUNT(*) FROM stat_requirements WHERE guild_id = ? AND plate_name = ?", (guild_id, plate_name))
     count = cursor.fetchone()[0]
     conn.close()
     return count
 
 
-def delete_stat_plate(name: str) -> int:
-    """Удаляет плейт и все его требования, возвращает количество удалённых требований."""
+def delete_stat_plate(name: str, guild_id: int = 1) -> int:
+    """Удаляет плейт и все его требования (в пределах гильдии), возвращает количество удалённых требований."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
-    cursor.execute("DELETE FROM stat_requirements WHERE plate_name = ?", (name,))
+    cursor.execute("DELETE FROM stat_requirements WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     deleted = cursor.rowcount
-    cursor.execute("DELETE FROM stat_plates WHERE name = ?", (name,))
+    cursor.execute("DELETE FROM stat_plates WHERE guild_id = ? AND name = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted
 
 
-def get_stat_plate(name: str):
+def get_stat_plate(name: str, guild_id: int = 1):
     """Возвращает (name, description, created_by, created_at) либо None."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
-    cursor.execute("SELECT name, description, created_by, created_at FROM stat_plates WHERE name = ?", (name,))
+    cursor.execute(
+        "SELECT name, description, created_by, created_at FROM stat_plates WHERE guild_id = ? AND name = ?",
+        (guild_id, name)
+    )
     row = cursor.fetchone()
     conn.close()
     return row
 
 
-def get_all_stat_plates_detailed():
-    """Возвращает список (name, description, character_count, requirement_count) по всем плейтам,
-    включая пустые (без единого требования), отсортированный по имени."""
+def get_all_stat_plates_detailed(guild_id: int = 1):
+    """Возвращает список (name, description, character_count, requirement_count) по всем плейтам
+    гильдии, включая пустые (без единого требования), отсортированный по имени."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
@@ -1263,10 +1315,11 @@ def get_all_stat_plates_detailed():
                COUNT(DISTINCT r.character_key) AS char_count,
                COUNT(r.id) AS req_count
         FROM stat_plates p
-        LEFT JOIN stat_requirements r ON r.plate_name = p.name
+        LEFT JOIN stat_requirements r ON r.plate_name = p.name AND r.guild_id = p.guild_id
+        WHERE p.guild_id = ?
         GROUP BY p.name
         ORDER BY p.name
-    """)
+    """, (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -1274,15 +1327,15 @@ def get_all_stat_plates_detailed():
 
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
-                          created_by: str) -> int:
+                          created_by: str, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO stat_requirements
-            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by))
+            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -1290,97 +1343,99 @@ def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, op
 
 
 def update_stat_requirement(req_id: int, plate_name: str, character_key: str, stat_name: str, operator: str,
-                             threshold_value: float, priority: str, comment: str) -> bool:
+                             threshold_value: float, priority: str, comment: str, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         UPDATE stat_requirements
         SET plate_name = ?, character_key = ?, stat_name = ?, operator = ?, threshold_value = ?, priority = ?, comment = ?
-        WHERE id = ?
-    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, comment, req_id))
+        WHERE id = ? AND guild_id = ?
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, comment, req_id, guild_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
     return updated
 
 
-def delete_stat_requirement(req_id: int) -> bool:
+def delete_stat_requirement(req_id: int, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
-    cursor.execute("DELETE FROM stat_requirements WHERE id = ?", (req_id,))
+    cursor.execute("DELETE FROM stat_requirements WHERE id = ? AND guild_id = ?", (req_id, guild_id))
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()
     return deleted
 
 
-def get_stat_requirement(req_id: int):
+def get_stat_requirement(req_id: int, guild_id: int = 1):
+    """Требование по id — только если оно принадлежит указанной гильдии (предотвращает
+    просмотр/редактирование чужого требования по угаданному числовому id)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
-        FROM stat_requirements WHERE id = ?
-    """, (req_id,))
+        FROM stat_requirements WHERE id = ? AND guild_id = ?
+    """, (req_id, guild_id))
     row = cursor.fetchone()
     conn.close()
     return row
 
 
-def get_stat_requirements(plate_name: str, character_key: str):
+def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
-        FROM stat_requirements WHERE plate_name = ? AND character_key = ? ORDER BY id
-    """, (plate_name, character_key))
+        FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
+    """, (guild_id, plate_name, character_key))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 
-def get_all_stat_requirement_plates():
-    """Все известные плейты — и зарегистрированные через /статы_требования создать
+def get_all_stat_requirement_plates(guild_id: int = 1):
+    """Все известные плейты гильдии — и зарегистрированные через /статы_требования создать
     (даже пустые), и "исторические" (существующие только как plate_name у требований)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
     cursor.execute("""
-        SELECT name FROM stat_plates
+        SELECT name FROM stat_plates WHERE guild_id = ?
         UNION
-        SELECT DISTINCT plate_name FROM stat_requirements
+        SELECT DISTINCT plate_name FROM stat_requirements WHERE guild_id = ?
         ORDER BY 1
-    """)
+    """, (guild_id, guild_id))
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
 
 
-def get_stat_requirement_characters(plate_name: str):
+def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute(
-        "SELECT DISTINCT character_key FROM stat_requirements WHERE plate_name = ? ORDER BY character_key",
-        (plate_name,)
+        "SELECT DISTINCT character_key FROM stat_requirements WHERE guild_id = ? AND plate_name = ? ORDER BY character_key",
+        (guild_id, plate_name)
     )
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
 
 
-def get_all_stat_requirements():
+def get_all_stat_requirements(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
-        FROM stat_requirements ORDER BY plate_name, character_key, id
-    """)
+        FROM stat_requirements WHERE guild_id = ? ORDER BY plate_name, character_key, id
+    """, (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
