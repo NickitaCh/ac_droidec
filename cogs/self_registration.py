@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 
 import disnake
 from disnake.ext import commands
@@ -84,6 +85,53 @@ class SelfRegistrationCog(commands.Cog):
             embed.add_field(name="Все привязанные аккаунты", value="\n".join(lines), inline=False)
 
         await inter.edit_original_response(embed=embed)
+
+    @commands.slash_command(
+        name="регистрация_отчёт",
+        description="📋 Кто из гильдии привязал Discord к аликоду, а кто ещё нет"
+    )
+    async def registration_report(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer()
+
+        cache = self.bot.guild_roster_cache
+        if not cache:
+            await inter.edit_original_response("⏳ Состав гильдии ещё загружается, попробуйте через минуту.")
+            return
+
+        registered_by_ally = {
+            str(ally_code): discord_id
+            for discord_id, ally_code, _ in database.get_all_main_registrations()
+        }
+
+        registered_lines = []
+        missing_lines = []
+        for name in sorted(cache.keys()):
+            ally_code = str(cache[name])
+            discord_id = registered_by_ally.get(ally_code)
+            if discord_id:
+                registered_lines.append(f"<@{discord_id}> — {name} (`{ally_code}`)")
+            else:
+                missing_lines.append(f"{name} (`{ally_code}`)")
+
+        total = len(cache)
+        text_parts = [f"✅ **Зарегистрировано: {len(registered_lines)}/{total}**", ""]
+        text_parts.extend(registered_lines or ["— никого —"])
+        text_parts.append("")
+        text_parts.append(f"❌ **Не зарегистрированы ({len(missing_lines)}):**")
+        text_parts.extend(missing_lines or ["— все зарегистрированы —"])
+        text = "\n".join(text_parts)
+
+        if len(text) <= 4000:
+            embed = disnake.Embed(title="📋 Регистрация по гильдии", description=text, color=disnake.Color.blurple())
+            await inter.edit_original_response(embed=embed)
+        else:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
+                f.write(text)
+                fname = f.name
+            await inter.edit_original_response(
+                content=f"📋 Зарегистрировано {len(registered_lines)}/{total} — полный список слишком длинный для сообщения, файлом:"
+            )
+            await inter.channel.send(file=disnake.File(fname, filename="registration_report.txt"))
 
 
 def setup(bot):

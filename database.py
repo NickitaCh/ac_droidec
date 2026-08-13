@@ -305,6 +305,18 @@ def get_user_registrations(discord_id: str):
     return rows
 
 
+def get_all_main_registrations():
+    """Возвращает [(discord_id, ally_code, ingame_name), ...] по всем основным
+    (is_main=1) регистрациям — для отчёта "кто зарегистрирован по гильдии"."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute("SELECT discord_id, ally_code, ingame_name FROM user_registration WHERE is_main = 1")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 # =====================================================================
 # ПРОИЗВОЛЬНОЕ СОСТОЯНИЕ БОТА (переживает рестарты, key-value)
 # =====================================================================
