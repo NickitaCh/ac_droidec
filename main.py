@@ -117,6 +117,25 @@ async def on_ready():
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
+    # ВРЕМЕННАЯ ДИАГНОСТИКА: список слэш-команд, которые бот реально держит в памяти,
+    # плюс список того, что реально зарегистрировано в Discord по каждой test_guild —
+    # чтобы понять, почему /регистрация не долетает до Discord через обычный docker logs.
+    try:
+        with open("/app/cmd_dump.txt", "w", encoding="utf-8") as f:
+            f.write("LOCAL bot.all_slash_commands keys:\n")
+            for name in sorted(bot.all_slash_commands.keys()):
+                f.write(f"  {name}\n")
+            for gid in test_guilds_list:
+                try:
+                    remote = await bot.fetch_guild_commands(gid)
+                    f.write(f"\nDISCORD guild {gid} ({len(remote)}):\n")
+                    for c in sorted(remote, key=lambda x: x.name):
+                        f.write(f"  {c.name}\n")
+                except Exception as ge:
+                    f.write(f"\nDISCORD guild {gid}: ERROR {ge}\n")
+    except Exception as dump_err:
+        print(f"⚠️ cmd_dump failed: {dump_err}")
+
 def _check_allowed_role(author, guild_id) -> bool:
     if author.id in bot.allowed_user_ids:
         return True
