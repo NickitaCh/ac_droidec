@@ -7,6 +7,20 @@ from disnake.ext import commands
 import database
 
 
+OFFICER_ROLE_ID = 1153753506772164629
+
+
+def _is_officer(inter: disnake.ApplicationCommandInteraction) -> bool:
+    """Та же логика, что и в главном ролевом чеке main.py (_check_allowed_role):
+    читаем сырые author._roles, а не author.roles — Interaction.guild может быть
+    None для незакэшированных гильдий, а _roles заполняется прямо из пейлоада."""
+    author = inter.author
+    role_ids = getattr(author, "_roles", None)
+    if role_ids is None:
+        role_ids = [role.id for role in getattr(author, "roles", [])]
+    return OFFICER_ROLE_ID in role_ids
+
+
 def _resolve_display_name(inter: disnake.ApplicationCommandInteraction, discord_id: str) -> str:
     """Имя участника, полученное из собственного кэша бота (intents.members),
     а не через <@id>-упоминание — рендер упоминания в клиенте Discord зависит
@@ -88,13 +102,17 @@ class SelfRegistrationCog(commands.Cog):
 
     @commands.slash_command(
         name="регистрация",
-        description="🔗 Привязать себя к своему коду союзника SWGOH — для команд вида «мой персонаж»"
+        description="🔗 Привязать себя (или, для офицеров, другого участника) к коду союзника SWGOH"
     )
     async def registration(
         self,
         inter: disnake.ApplicationCommandInteraction,
         ally_code: str = commands.Param(
-            desc="Ваш 9-значный код союзника (только цифры, без дефисов)"
+            desc="9-значный код союзника (только цифры, без дефисов)"
+        ),
+        участник: disnake.User = commands.Param(
+            default=None,
+            description="[Офицер] Зарегистрировать другого участника вместо себя"
         ),
         альт: bool = commands.Param(
             default=False,
@@ -102,25 +120,18 @@ class SelfRegistrationCog(commands.Cog):
         )
     ):
         await inter.response.defer(ephemeral=True)
-        await self._do_registration(inter, inter.author, ally_code, альт)
 
-    @commands.slash_command(
-        name="регистрация_офицер",
-        description="👮 [Офицер] Привязать Discord другого участника к его коду союзника"
-    )
-    @commands.has_any_role(1153753506772164629)
-    async def registration_officer(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        участник: disnake.User = commands.Param(description="Кого привязать"),
-        ally_code: str = commands.Param(description="Его 9-значный код союзника (только цифры, без дефисов)"),
-        альт: bool = commands.Param(
-            default=False,
-            description="Добавить как второй аккаунт (альт), не заменяя основной"
-        )
-    ):
-        await inter.response.defer(ephemeral=True)
-        await self._do_registration(inter, участник, ally_code, альт)
+        if участник is not None and участник.id != inter.author.id:
+            if not _is_officer(inter):
+                await inter.edit_original_response(
+                    content="❌ Регистрировать других участников могут только офицеры."
+                )
+                return
+            target_user = участник
+        else:
+            target_user = inter.author
+
+        await self._do_registration(inter, target_user, ally_code, альт)
 
     @commands.slash_command(
         name="регистрация_отчёт",
