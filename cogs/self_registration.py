@@ -150,15 +150,15 @@ class SelfRegistrationCog(commands.Cog):
             (main_lines if is_main else alt_lines).append(line)
 
         total = len(cache)
-        text_parts = [f"✅ **Основной аккаунт: {len(main_lines)}/{total}**", ""]
+        text_parts = [f"❌ **Не привязаны ({len(missing_lines)}):**"]
+        text_parts.extend(missing_lines or ["— все привязаны —"])
+        text_parts.append("")
+        text_parts.append(f"✅ **Основной аккаунт: {len(main_lines)}/{total}**")
         text_parts.extend(main_lines or ["— никого —"])
         if alt_lines:
             text_parts.append("")
             text_parts.append(f"🔸 **Привязаны как альт ({len(alt_lines)}):**")
             text_parts.extend(alt_lines)
-        text_parts.append("")
-        text_parts.append(f"❌ **Не привязаны ({len(missing_lines)}):**")
-        text_parts.extend(missing_lines or ["— все привязаны —"])
         text = "\n".join(text_parts)
 
         if len(text) <= 4000:
