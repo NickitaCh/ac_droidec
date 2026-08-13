@@ -6,6 +6,7 @@ import disnake
 from disnake.ext import commands, tasks
 
 import database
+import guild_resolver
 from cogs.violations import autocomplete_players
 
 # 'DatacronDefinitions' — бит из comlink.get_enums()["GameDataItemsEnum"], проверено вживую.
@@ -712,11 +713,14 @@ async def autocomplete_datacron_alt_value(inter: disnake.ApplicationCommandInter
     cache = inter.bot.datacron_cache
     if not cache:
         return ["⏳ Справочник датакронов ещё загружается, подождите..."]
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
     req_id = _parse_leading_hash_int(inter.filled_options.get("id"))
     level_num = inter.filled_options.get("уровень")
     if req_id is None or level_num is None:
         return ["⚠️ СНАЧАЛА выберите требование и уровень!"]
-    row = database.get_datacron_requirement(req_id)
+    row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return ["❌ Требование не найдено."]
     _, set_id, _pack, l3, l6, l9, *_ = row
@@ -762,8 +766,11 @@ async def autocomplete_datacron_focused_character(inter: disnake.ApplicationComm
 
 
 async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
-    base_rows = database.get_all_datacron_requirements()
-    focused_rows = database.get_all_datacron_focused_requirements()
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    base_rows = database.get_all_datacron_requirements(guild_id=guild_id)
+    focused_rows = database.get_all_datacron_focused_requirements(guild_id=guild_id)
     if not base_rows and not focused_rows:
         return ["❌ Список требований пуст."]
     cache = inter.bot.datacron_cache
@@ -832,7 +839,7 @@ class DatacronRequirementsCog(commands.Cog):
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="дк_требования", description="Управление требованиями к датакронам по сезонам ТБ")
-    @commands.has_any_role(1153753506772164629)
+    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def datacron_req(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -848,6 +855,11 @@ class DatacronRequirementsCog(commands.Cog):
         уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level9),
         комментарий: str = commands.Param(default=None, description="Заметка по приоритетным % статам (не проверяется автоматически)"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         set_id = _parse_trailing_bracket_int(сезон)
         if set_id is None or not _is_valid_season(self.bot.datacron_cache, set_id):
             await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
@@ -863,7 +875,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message("❌ Хотя бы один уровень (3/6/9) должен быть указан, иначе требование бессмысленно.", ephemeral=True)
             return
 
-        req_id = database.add_datacron_requirement(set_id, пак, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет)
+        req_id = database.add_datacron_requirement(set_id, пак, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id)
         summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=пак)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
@@ -878,11 +890,16 @@ class DatacronRequirementsCog(commands.Cog):
         уровень: int = commands.Param(description="Какой уровень дополнить", choices=[3, 6, 9]),
         вариант: str = commands.Param(description="Ещё один допустимый бонус для этого уровня", autocomplete=autocomplete_datacron_alt_value),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         req_id = _parse_leading_hash_int(id)
         if req_id is None:
             await inter.response.send_message("❌ Альтернативы можно добавлять только к обычным (не спец.) требованиям — выберите вариант из списка автодополнения.", ephemeral=True)
             return
-        row = database.get_datacron_requirement(req_id)
+        row = database.get_datacron_requirement(req_id, guild_id=guild_id)
         if not row:
             await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
             return
@@ -909,7 +926,7 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             new_l9 = new_value
 
-        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority)
+        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id)
         summary = _format_requirement_summary(set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=pack)
         await inter.response.send_message(f"✅ Требование #{req_id} дополнено: {summary}", ephemeral=True)
 
@@ -924,6 +941,11 @@ class DatacronRequirementsCog(commands.Cog):
         пак: str = commands.Param(default=None, description="На какой пак/персонажа этот датакрон (справочно, не проверяется)"),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         set_id = _parse_trailing_bracket_int(сезон)
         if set_id is None or not _is_valid_season(self.bot.datacron_cache, set_id):
             await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
@@ -932,7 +954,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message("❌ Некорректный персонаж — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
             return
 
-        req_id = database.add_datacron_focused_requirement(set_id, пак, персонаж, уровень, комментарий, str(inter.author.id), приоритет)
+        req_id = database.add_datacron_focused_requirement(set_id, пак, персонаж, уровень, комментарий, str(inter.author.id), приоритет, guild_id=guild_id)
         summary = _format_focused_requirement_summary(set_id, персонаж, уровень, self.bot.datacron_cache, pack=пак)
         await inter.response.send_message(f"✅ Спец. требование F{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
@@ -952,10 +974,15 @@ class DatacronRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Новая заметка"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         focused_id = _parse_focused_id(id)
         if focused_id is not None:
             await self._edit_focused_requirement(
-                inter, focused_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить
+                inter, focused_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить, guild_id
             )
             return
 
@@ -963,13 +990,13 @@ class DatacronRequirementsCog(commands.Cog):
         if req_id is None:
             await inter.response.send_message("❌ Некорректный id — выберите вариант из списка автодополнения.", ephemeral=True)
             return
-        row = database.get_datacron_requirement(req_id)
+        row = database.get_datacron_requirement(req_id, guild_id=guild_id)
         if not row:
             await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
             return
 
         if удалить:
-            database.delete_datacron_requirement(req_id)
+            database.delete_datacron_requirement(req_id, guild_id=guild_id)
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
@@ -998,18 +1025,18 @@ class DatacronRequirementsCog(commands.Cog):
                 )
                 return
 
-        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority)
+        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id)
         summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=new_pack)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS.get(new_priority, new_priority)}] обновлено: {summary}", ephemeral=True)
 
-    async def _edit_focused_requirement(self, inter, req_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить):
-        row = database.get_datacron_focused_requirement(req_id)
+    async def _edit_focused_requirement(self, inter, req_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить, guild_id=1):
+        row = database.get_datacron_focused_requirement(req_id, guild_id=guild_id)
         if not row:
             await inter.response.send_message(f"❌ Спец. требование F{req_id} не найдено.", ephemeral=True)
             return
 
         if удалить:
-            database.delete_datacron_focused_requirement(req_id)
+            database.delete_datacron_focused_requirement(req_id, guild_id=guild_id)
             await inter.response.send_message(f"🗑️ Спец. требование F{req_id} удалено.", ephemeral=True)
             return
 
@@ -1033,7 +1060,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message("❌ Некорректный персонаж — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
             return
 
-        database.update_datacron_focused_requirement(req_id, new_set_id, new_pack, new_char, new_level, new_comment, new_priority)
+        database.update_datacron_focused_requirement(req_id, new_set_id, new_pack, new_char, new_level, new_comment, new_priority, guild_id=guild_id)
         summary = _format_focused_requirement_summary(new_set_id, new_char, new_level, self.bot.datacron_cache, pack=new_pack)
         await inter.response.send_message(f"✅ Спец. требование F{req_id} [{PRIORITY_LABELS.get(new_priority, new_priority)}] обновлено: {summary}", ephemeral=True)
 
@@ -1044,14 +1071,19 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон для очистки", autocomplete=autocomplete_datacron_season),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         set_id = _parse_trailing_bracket_int(сезон)
         if set_id is None:
             await inter.response.send_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.", ephemeral=True)
             return
 
         season_label = _season_label(self.bot.datacron_cache, set_id)
-        count_base = database.count_datacron_requirements_by_set(set_id)
-        count_focused = database.count_datacron_focused_requirements_by_set(set_id)
+        count_base = database.count_datacron_requirements_by_set(set_id, guild_id=guild_id)
+        count_focused = database.count_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
         if count_base == 0 and count_focused == 0:
             await inter.response.send_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.", ephemeral=True)
             return
@@ -1064,17 +1096,17 @@ class DatacronRequirementsCog(commands.Cog):
             )
             return
 
-        deleted_base = database.delete_datacron_requirements_by_set(set_id)
-        deleted_focused = database.delete_datacron_focused_requirements_by_set(set_id)
+        deleted_base = database.delete_datacron_requirements_by_set(set_id, guild_id=guild_id)
+        deleted_focused = database.delete_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
         await inter.response.send_message(
             f"🗑️ Удалено требований: {deleted_base} обычных + {deleted_focused} спец. ({season_label}).",
             ephemeral=True,
         )
 
-    async def _build_guild_datacron_report(self, set_id, season_label, requirements, focused_requirements):
+    async def _build_guild_datacron_report(self, set_id, season_label, requirements, focused_requirements, guild_id=1):
         """Сводный отчёт по всей гильдии: кто не закрыл "Обязательно" (с разбивкой по
         приоритетам) — отдельно, кто закрыл всё "Обязательно" — компактным списком имён."""
-        roster = self.bot.guild_roster_cache
+        roster = self.bot.guild_roster_caches.get(guild_id, {})
         if not roster:
             return None
 
@@ -1148,21 +1180,26 @@ class DatacronRequirementsCog(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
         set_id = _parse_trailing_bracket_int(сезон)
         if set_id is None:
             await inter.edit_original_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.")
             return
 
         season_label = _season_label(self.bot.datacron_cache, set_id)
-        requirements = database.get_datacron_requirements_by_set(set_id)
-        focused_requirements = database.get_datacron_focused_requirements_by_set(set_id)
+        requirements = database.get_datacron_requirements_by_set(set_id, guild_id=guild_id)
+        focused_requirements = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
         if not requirements and not focused_requirements:
             await inter.edit_original_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.")
             return
 
         if игрок is None and гильдия:
             await inter.edit_original_message(f"⏳ Собираю данные по всей гильдии ({season_label})...")
-            embeds = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements)
+            embeds = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements, guild_id=guild_id)
             if embeds is None:
                 await inter.edit_original_message("❌ Кэш состава гильдии пуст — подождите обновления или попробуйте позже.")
                 return
@@ -1182,7 +1219,7 @@ class DatacronRequirementsCog(commands.Cog):
                 return
             allycode, игрок = registration
         else:
-            cache = self.bot.guild_roster_cache
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
             if not cache or игрок not in cache:
                 await inter.edit_original_message("❌ Игрок не найден в кэше состава.")
                 return
@@ -1266,6 +1303,11 @@ class DatacronRequirementsCog(commands.Cog):
     async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=False)
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
         cache = self.bot.datacron_cache
         if not cache:
             await inter.edit_original_message("⏳ Справочник датакронов ещё загружается, подождите...")
@@ -1275,8 +1317,8 @@ class DatacronRequirementsCog(commands.Cog):
         any_found = False
         for set_id in sorted(cache["seasons"].keys(), reverse=True):
             season_data = cache["seasons"][set_id]
-            base_reqs = database.get_datacron_requirements_by_set(set_id)
-            focused_reqs = database.get_datacron_focused_requirements_by_set(set_id)
+            base_reqs = database.get_datacron_requirements_by_set(set_id, guild_id=guild_id)
+            focused_reqs = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
             if not base_reqs and not focused_reqs:
                 continue
             any_found = True
