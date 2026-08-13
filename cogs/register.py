@@ -1,7 +1,7 @@
 import disnake
 from disnake.ext import commands
-import sqlite3
 import database
+import guild_resolver
 
 class RegisterCog(commands.Cog):
     def __init__(self, bot):
@@ -23,6 +23,11 @@ class RegisterCog(commands.Cog):
     ):
         # Отправляем боту сигнал, что мы обрабатываем запрос (чтобы Дискорд не выдал таймаут за 3 секунды)
         await inter.response.defer()
+
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response(content="❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
 
         # Очищаем код от возможных случайных пробелов или дефисов
         clean_code = "".join(filter(str.isdigit, ally_code))
@@ -48,20 +53,10 @@ class RegisterCog(commands.Cog):
             )
             return
 
-        # Записываем привязку в единую базу данных
+        # Записываем привязку в единую базу данных (перезаписывает старую связь этого
+        # Discord ID в пределах гильдии, если уже была)
         try:
-            conn = sqlite3.connect(database.DB_NAME)
-            cursor = conn.cursor()
-            
-            # Если этот Discord ID или этот Ally Code уже были привязаны, новая запись перезапишет старую связь
-            cursor.execute("""
-                INSERT INTO user_mapping (discord_id, ally_code, ingame_name)
-                VALUES (?, ?, ?)
-                ON CONFLICT(discord_id) DO UPDATE SET ally_code=excluded.ally_code, ingame_name=excluded.ingame_name
-            """, (str(discord_user.id), clean_code, ingame_name))
-            
-            conn.commit()
-            conn.close()
+            database.set_user_mapping(str(discord_user.id), clean_code, ingame_name, guild_id=guild_id)
         except Exception as e:
             await inter.edit_original_response(
                 content=f"❌ **Ошибка БД:** Не удалось сохранить данные в базу: {e}"
