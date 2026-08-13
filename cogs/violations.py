@@ -234,7 +234,7 @@ class ViolationsCog(commands.Cog):
                 final_date = дата
 
         if тег is not None:
-            registration = database.get_user_registration(str(тег.id))
+            registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
             if not registration:
                 await inter.response.send_message(
                     f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
@@ -323,7 +323,7 @@ class ViolationsCog(commands.Cog):
 
         if тег is not None or игрок:
             if тег is not None:
-                registration = database.get_user_registration(str(тег.id))
+                registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
                 if not registration:
                     await inter.followup.send(
                         f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
@@ -425,7 +425,7 @@ class ViolationsCog(commands.Cog):
             return
 
         if тег is not None:
-            registration = database.get_user_registration(str(тег.id))
+            registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
             if not registration:
                 await inter.response.send_message(
                     f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",

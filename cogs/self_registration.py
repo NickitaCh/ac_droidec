@@ -5,27 +5,14 @@ import disnake
 from disnake.ext import commands
 
 import database
-
-
-OFFICER_ROLE_ID = 1153753506772164629
-
-
-def _is_officer(inter: disnake.ApplicationCommandInteraction) -> bool:
-    """Та же логика, что и в главном ролевом чеке main.py (_check_allowed_role):
-    читаем сырые author._roles, а не author.roles — Interaction.guild может быть
-    None для незакэшированных гильдий, а _roles заполняется прямо из пейлоада."""
-    author = inter.author
-    role_ids = getattr(author, "_roles", None)
-    if role_ids is None:
-        role_ids = [role.id for role in getattr(author, "roles", [])]
-    return OFFICER_ROLE_ID in role_ids
+import guild_resolver
 
 
 class SelfRegistrationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def _do_registration(self, inter, target_user, ally_code, альт):
+    async def _do_registration(self, inter, target_user, ally_code, альт, guild_id):
         clean_code = "".join(filter(str.isdigit, ally_code))
         if len(clean_code) != 9:
             await inter.edit_original_response(
@@ -48,20 +35,20 @@ class SelfRegistrationCog(commands.Cog):
             )
             return
 
-        # Первая регистрация всегда основная, даже если попросили альт — иначе
-        # получится аккаунт без единого основного.
-        has_existing = bool(database.get_user_registrations(str(target_user.id)))
+        # Первая регистрация в этой гильдии всегда основная, даже если попросили
+        # альт — иначе получится аккаунт без единого основного.
+        has_existing = bool(database.get_user_registrations(str(target_user.id), guild_id=guild_id))
         is_main = (not альт) or (not has_existing)
 
         try:
-            database.set_user_registration(str(target_user.id), clean_code, ingame_name, is_main=is_main)
+            database.set_user_registration(str(target_user.id), clean_code, ingame_name, is_main=is_main, guild_id=guild_id)
         except Exception as e:
             await inter.edit_original_response(
                 content=f"❌ **Ошибка БД:** Не удалось сохранить регистрацию: {e}"
             )
             return
 
-        accounts = database.get_user_registrations(str(target_user.id))
+        accounts = database.get_user_registrations(str(target_user.id), guild_id=guild_id)
 
         embed = disnake.Embed(
             title="🔗 Регистрация выполнена",
@@ -106,8 +93,13 @@ class SelfRegistrationCog(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response(content="❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
         if участник is not None and участник.id != inter.author.id:
-            if not _is_officer(inter):
+            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
                 await inter.edit_original_response(
                     content="❌ Регистрировать других участников могут только офицеры."
                 )
@@ -116,7 +108,7 @@ class SelfRegistrationCog(commands.Cog):
         else:
             target_user = inter.author
 
-        await self._do_registration(inter, target_user, ally_code, альт)
+        await self._do_registration(inter, target_user, ally_code, альт, guild_id)
 
     @commands.slash_command(
         name="регистрация_отчёт",
@@ -125,7 +117,12 @@ class SelfRegistrationCog(commands.Cog):
     async def registration_report(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        cache = self.bot.guild_roster_cache
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        cache = self.bot.guild_roster_caches.get(guild_id)
         if not cache:
             await inter.edit_original_response("⏳ Состав гильдии ещё загружается, попробуйте через минуту.")
             return
@@ -133,7 +130,7 @@ class SelfRegistrationCog(commands.Cog):
         # discord_id и is_main по каждому привязанному ally_code (и основные, и альты)
         by_ally = {
             str(ally_code): (discord_id, bool(is_main))
-            for discord_id, ally_code, _, is_main in database.get_all_registrations()
+            for discord_id, ally_code, _, is_main in database.get_all_registrations(guild_id=guild_id)
         }
 
         main_lines = []

@@ -710,7 +710,7 @@ class StatRequirementsCog(commands.Cog):
             return
 
         if игрок is None:
-            registration = database.get_user_registration(str(inter.author.id))
+            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_response(
                     "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."

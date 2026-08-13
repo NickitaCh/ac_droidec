@@ -1210,7 +1210,7 @@ class DatacronRequirementsCog(commands.Cog):
             return
 
         if игрок is None:
-            registration = database.get_user_registration(str(inter.author.id))
+            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_message(
                     "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно, "
