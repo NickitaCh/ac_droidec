@@ -195,9 +195,10 @@ class ViolationsCog(commands.Cog):
     async def warn(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(description="Выберите игрока из списка состава гильдии", autocomplete=autocomplete_players),
         режим: str = commands.Param(description="Игровое событие, в котором произошло нарушение", choices=["ТБ", "ВГ", "Рейд"]),
         нарушение_1: str = commands.Param(description="Выберите основное нарушение", autocomplete=autocomplete_violations),
+        игрок: str = commands.Param(default=None, description="Игрок из состава гильдии (или укажите тег ниже)", autocomplete=autocomplete_players),
+        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
         комментарий_1: str = commands.Param(description="Детали для первого нарушения (опционально)", default=None),
         нарушение_2: str = commands.Param(description="Второе нарушение (опционально)", default=None, autocomplete=autocomplete_violations),
         комментарий_2: str = commands.Param(description="Детали для второго нарушения (опционально)", default=None),
@@ -209,16 +210,28 @@ class ViolationsCog(commands.Cog):
             final_date = datetime.now().strftime("%d.%m.%Y")
         else:
             дата = дата.strip()
-            if len(дата) <= 5: 
+            if len(дата) <= 5:
                 final_date = f"{дата}.{datetime.now().year}"
-            else: 
+            else:
                 final_date = дата
 
-        if игрок not in self.bot.guild_roster_cache:
-            await inter.response.send_message("❌ Ошибка: Игрок не найден в составе гильдии.", ephemeral=True)
+        if тег is not None:
+            registration = database.get_user_registration(str(тег.id))
+            if not registration:
+                await inter.response.send_message(
+                    f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
+                    ephemeral=True,
+                )
+                return
+            ally_code, игрок = registration
+        elif игрок:
+            if игрок not in self.bot.guild_roster_cache:
+                await inter.response.send_message("❌ Ошибка: Игрок не найден в составе гильдии.", ephemeral=True)
+                return
+            ally_code = self.bot.guild_roster_cache[игрок]
+        else:
+            await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
             return
-            
-        ally_code = self.bot.guild_roster_cache[игрок]
 
         pairs = [
             {"violation": нарушение_1, "comment": комментарий_1},
@@ -277,24 +290,35 @@ class ViolationsCog(commands.Cog):
     @commands.slash_command(name="нарушения", description="Просмотр таблицы всех нарушений или досье конкретного игрока")
     async def warns(
         self,
-        inter: disnake.ApplicationCommandInteraction, 
-        игрок: str = commands.Param(description="Оставьте пустым для общей таблицы или выберите игрока для детального досье", default=None, autocomplete=autocomplete_players)
+        inter: disnake.ApplicationCommandInteraction,
+        игрок: str = commands.Param(description="Оставьте пустым для общей таблицы или выберите игрока для детального досье", default=None, autocomplete=autocomplete_players),
+        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
     ):
         await inter.response.defer(ephemeral=False)
         three_months_ago = datetime.now() - timedelta(days=90)
 
-        if игрок:
-            conn = sqlite3.connect(database.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name = ?', (игрок,))
-            row = cursor.fetchone()
-            conn.close()
+        if тег is not None or игрок:
+            if тег is not None:
+                registration = database.get_user_registration(str(тег.id))
+                if not registration:
+                    await inter.followup.send(
+                        f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
+                        ephemeral=True,
+                    )
+                    return
+                ally_code, actual_name = registration
+            else:
+                conn = sqlite3.connect(database.DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name = ?', (игрок,))
+                row = cursor.fetchone()
+                conn.close()
 
-            if not row:
-                await inter.followup.send(f"❌ Игрок '{игрок}' не найден.", ephemeral=True)
-                return
+                if not row:
+                    await inter.followup.send(f"❌ Игрок '{игрок}' не найден.", ephemeral=True)
+                    return
 
-            ally_code, actual_name = row
+                ally_code, actual_name = row
             rows = database.get_player_warns(ally_code)
 
             if not rows:
@@ -370,20 +394,35 @@ class ViolationsCog(commands.Cog):
     @commands.slash_command(name="снять_нарушение", description="Удалить конкретное нарушение у выбранного игрока")
     async def unwarn(
         self,
-        inter: disnake.ApplicationCommandInteraction, 
-        игрок: str = commands.Param(description="Выберите игрока, у которого хотите аннулировать нарушение", autocomplete=autocomplete_players)
+        inter: disnake.ApplicationCommandInteraction,
+        игрок: str = commands.Param(default=None, description="Игрок, у которого хотите аннулировать нарушение (или укажите тег ниже)", autocomplete=autocomplete_players),
+        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
     ):
-        conn = sqlite3.connect(database.DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name LIKE ?', (игрок,))
-        row = cursor.fetchone()
-        conn.close()
+        if тег is not None:
+            registration = database.get_user_registration(str(тег.id))
+            if not registration:
+                await inter.response.send_message(
+                    f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
+                    ephemeral=True,
+                )
+                return
+            ally_code, actual_name = registration
+        elif игрок:
+            conn = sqlite3.connect(database.DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name LIKE ?', (игрок,))
+            row = cursor.fetchone()
+            conn.close()
 
-        if not row:
-            await inter.response.send_message("Игрок не найден в базе данных", ephemeral=True)
+            if not row:
+                await inter.response.send_message("Игрок не найден в базе данных", ephemeral=True)
+                return
+
+            ally_code, actual_name = row
+        else:
+            await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
             return
 
-        ally_code, actual_name = row
         player_warns = database.get_player_warns(ally_code)
 
         if not player_warns:
