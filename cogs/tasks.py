@@ -1,10 +1,10 @@
 import disnake
 from disnake.ext import commands, tasks
 import asyncio
-import sqlite3
 import re
 from datetime import datetime, timedelta
 import database
+import guild_resolver
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
 
@@ -16,20 +16,8 @@ UNIT_DEFINITIONS_FLAG = 137438953472
 # АВТОКОМПЛИТЫ ДЛЯ КОМАНДЫ ПОСТАНОВКИ ЗАДАЧ (ВНЕ КЛАССА)
 # =====================================================================
 async def units_autocomplete(inter: disnake.ApplicationCommandInteraction, string: str):
-    """Ищет персонажей/корабли в локальном справочнике game_units"""
-    string = string.lower()
-    conn = sqlite3.connect(database.DB_NAME)
-    cursor = conn.cursor()
-    
-    # Ищем совпадения по названию или по BaseID персонажа
-    cursor.execute("""
-        SELECT base_id, cached_name FROM game_units 
-        WHERE LOWER(cached_name) LIKE ? OR LOWER(base_id) LIKE ? 
-        LIMIT 25
-    """, (f"%{string}%", f"%{string}%"))
-    rows = cursor.fetchall()
-    conn.close()
-    
+    """Ищет персонажей/корабли в локальном справочнике game_units (глобальный, не per-guild)"""
+    rows = database.search_game_units(string)
     return [f"{name} [{bid}]" for bid, name in rows]
 
 
@@ -76,18 +64,7 @@ class TasksCog(commands.Cog):
             unit_type = "ship" if unit.get("combatType") == 2 else "character"
             units_to_db[bid] = (name, unit_type)
 
-        # Записываем всё собранное в базу данных SQLite
-        conn = sqlite3.connect(database.DB_NAME)
-        cursor = conn.cursor()
-
-        for bid, (name, unit_type) in units_to_db.items():
-            cursor.execute("""
-                INSERT OR REPLACE INTO game_units (base_id, cached_name, unit_type)
-                VALUES (?, ?, ?)
-            """, (bid, name, unit_type))
-
-        conn.commit()
-        conn.close()
+        database.upsert_game_units(units_to_db)
         return len(units_to_db)
 
     # =====================================================================
@@ -95,89 +72,81 @@ class TasksCog(commands.Cog):
     # =====================================================================
     @tasks.loop(hours=1)
     async def tasks_audit_loop(self):
-        """Ежечасная автоматическая проверка выполнения задач через Comlink"""
+        """Ежечасная автоматическая проверка выполнения задач через Comlink —
+        по каждой зарегистрированной гильдии отдельно (у фонового цикла нет
+        интеракции, чтобы резолвить гильдию через guild_resolver)."""
         print("🔍 Запуск ежечасного аудита задач на прокачку...")
-        
-        conn = sqlite3.connect(database.DB_NAME)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT task_id, ally_code, base_id, target_type, target_value, deadline 
-            FROM tasks 
-            WHERE status = 'ACTIVE'
-        """)
-        active_tasks = cursor.fetchall()
-        
-        print(f"📊 Аудит: нашел в базе {len(active_tasks)} active tasks.")
-
-        if not active_tasks:
-            conn.close()
-            return
-
         now = datetime.now()
 
-        for task in active_tasks:
-            task_id, ally_code, base_id, target_type, target_value, deadline_str = task
-            
-            try:
-                deadline = datetime.strptime(deadline_str, "%Y-%m-%d")
-            except ValueError:
+        for guild_cfg in database.get_all_guild_configs():
+            gid = guild_cfg["id"]
+            gname = guild_cfg["name"]
+            active_tasks = database.get_active_tasks(gid)
+            print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
+
+            if not active_tasks:
                 continue
 
-            if now.date() > deadline.date():
-                cursor.execute("UPDATE tasks SET status = 'FAILED' WHERE task_id = ?", (task_id,))
-                conn.commit()
-                player_name = self.bot.guild_roster_cache.get(ally_code, f"Игрок [{ally_code}]")
-                print(f"⏰ Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
-                continue
+            cache = self.bot.guild_roster_caches.get(gid, {})
 
-            try:
-                player_data = self.bot.comlink.get_player(ally_code)
-                roster = player_data.get('rosterUnit') or player_data.get('roster')
-                if not roster:
+            for task in active_tasks:
+                task_id, ally_code, base_id, target_type, target_value, deadline_str = task
+
+                try:
+                    deadline = datetime.strptime(deadline_str, "%Y-%m-%d")
+                except ValueError:
                     continue
-            except Exception as e:
-                print(f"⚠️ Аудит не смог достучаться до Comlink для {ally_code}: {e}")
-                continue
 
-            unit_data = None
-            for u in roster:
-                u_id = u.get('baseId') or u.get('definitionId', '').split(':')[0]
-                if u_id == base_id:
-                    unit_data = u
-                    break
+                if now.date() > deadline.date():
+                    database.update_task_status(task_id, "FAILED")
+                    player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
+                    print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
+                    continue
 
-            if not unit_data:
-                continue
+                try:
+                    player_data = self.bot.comlink.get_player(ally_code)
+                    roster = player_data.get('rosterUnit') or player_data.get('roster')
+                    if not roster:
+                        continue
+                except Exception as e:
+                    print(f"⚠️ [{gname}] Аудит не смог достучаться до Comlink для {ally_code}: {e}")
+                    continue
 
-            is_completed = False
-            target_val_int = int(target_value)
+                unit_data = None
+                for u in roster:
+                    u_id = u.get('baseId') or u.get('definitionId', '').split(':')[0]
+                    if u_id == base_id:
+                        unit_data = u
+                        break
 
-            if target_type == 'stars':
-                if unit_data.get('currentRarity', 0) >= target_val_int:
-                    is_completed = True
+                if not unit_data:
+                    continue
 
-            elif target_type == 'relic':
-                relic_data = unit_data.get('relic', {})
-                current_relic_tier = relic_data.get('currentTier', 0)
-                required_tier = target_val_int + 2 if target_val_int > 0 else 0
-                
-                if current_relic_tier >= required_tier:
-                    is_completed = True
+                is_completed = False
+                target_val_int = int(target_value)
 
-            elif target_type == 'omicron':
-                skills = unit_data.get('skills', [])
-                for skill in skills:
-                    if skill.get('tier', 0) >= 8:
+                if target_type == 'stars':
+                    if unit_data.get('currentRarity', 0) >= target_val_int:
                         is_completed = True
 
-            if is_completed:
-                cursor.execute("UPDATE tasks SET status = 'COMPLETED' WHERE task_id = ?", (task_id,))
-                conn.commit()
-                player_name = self.bot.guild_roster_cache.get(ally_code, f"Игрок [{ally_code}]")
-                print(f"🎉 Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
+                elif target_type == 'relic':
+                    relic_data = unit_data.get('relic', {})
+                    current_relic_tier = relic_data.get('currentTier', 0)
+                    required_tier = target_val_int + 2 if target_val_int > 0 else 0
 
-        conn.close()
+                    if current_relic_tier >= required_tier:
+                        is_completed = True
+
+                elif target_type == 'omicron':
+                    skills = unit_data.get('skills', [])
+                    for skill in skills:
+                        if skill.get('tier', 0) >= 8:
+                            is_completed = True
+
+                if is_completed:
+                    database.update_task_status(task_id, "COMPLETED")
+                    player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
+                    print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
 
     @tasks_audit_loop.before_loop
     async def before_tasks_audit(self):
@@ -225,51 +194,36 @@ class TasksCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        if not self.bot.guild_roster_cache:
-            ally_code = None
-        else:
-            ally_code = self.bot.guild_roster_cache.get(player)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        cache = self.bot.guild_roster_caches.get(guild_id, {})
+        ally_code = cache.get(player)
 
         if not ally_code:
-            conn = sqlite3.connect(database.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute('SELECT ally_code FROM user_mapping WHERE ingame_name = ?', (player,))
-            row = cursor.fetchone()
-            conn.close()
+            row = database.get_user_mapping_for_name(guild_id, player)
             if row:
                 ally_code = row[0]
 
         if not ally_code:
             await inter.edit_original_response("❌ Ошибка: Не удалось определить Ally Code выбранного игрока.")
             return
-            
-        player_name = self.bot.guild_roster_cache.get(ally_code, player) if self.bot.guild_roster_cache else player
+
+        player_name = cache.get(ally_code, player)
 
         unit_match = re.search(r"\[(.*?)\]", unit)
         base_id = unit_match.group(1) if unit_match else unit.strip().upper()
 
-        conn = sqlite3.connect(database.DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT cached_name FROM game_units WHERE base_id = ?", (base_id,))
-        unit_row = cursor.fetchone()
-        
-        if not unit_row:
-            conn.close()
+        unit_name = database.get_game_unit_name(base_id)
+        if not unit_name:
             await inter.edit_original_response(f"❌ Юнит `{base_id}` не найден в справочнике.")
             return
-            
-        unit_name = unit_row[0]
 
         deadline_date = (datetime.now() + timedelta(days=days_to_complete)).strftime("%Y-%m-%d")
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        cursor.execute("""
-            INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by, date_created)
-            VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
-        """, (ally_code, base_id, target_type, target_value, deadline_date, inter.author.id, created_at))
-        
-        conn.commit()
-        conn.close()
+        database.add_task(ally_code, base_id, target_type, target_value, deadline_date, str(inter.author.id), guild_id=guild_id)
 
         readable_types = {"stars": "Звёзды ⭐", "relic": "Реликвия ♦️", "omicron": "Омикрон 🧬"}
         embed = disnake.Embed(

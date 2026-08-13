@@ -61,8 +61,13 @@ def init_db():
             FOREIGN KEY (base_id) REFERENCES game_units(base_id)
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
-    # 4. Справочник игровых юнитов (Персонажи и Корабли)
+    # 4. Справочник игровых юнитов (Персонажи и Корабли) — глобальный, общий
+    #    для всех гильдий (игровой каталог SWGOH, не привязан к guild_id).
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_units (
             base_id TEXT PRIMARY KEY,
@@ -75,6 +80,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_ally ON tasks(ally_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_guild_status ON tasks(guild_id, status)")
 
     conn.commit()
     conn.close()
@@ -289,11 +295,82 @@ def populate_initial_units(units_dict):
         INSERT OR IGNORE INTO game_units (base_id, cached_name)
         VALUES (?, ?)
     """, data)
-    
+
     conn.commit()
     conn.close()
-    
-    
+
+
+def upsert_game_units(units_dict):
+    """units_dict: {base_id: (cached_name, unit_type)} — INSERT OR REPLACE, в отличие
+    от populate_initial_units обновляет имя/тип при повторной синхронизации."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    data = [(base_id, name, unit_type) for base_id, (name, unit_type) in units_dict.items()]
+    cursor.executemany("""
+        INSERT OR REPLACE INTO game_units (base_id, cached_name, unit_type)
+        VALUES (?, ?, ?)
+    """, data)
+    conn.commit()
+    conn.close()
+
+
+def search_game_units(query: str, limit: int = 25):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    like = f"%{query.lower()}%"
+    cursor.execute("""
+        SELECT base_id, cached_name FROM game_units
+        WHERE LOWER(cached_name) LIKE ? OR LOWER(base_id) LIKE ?
+        LIMIT ?
+    """, (like, like, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_game_unit_name(base_id: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT cached_name FROM game_units WHERE base_id = ?", (base_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+# =====================================================================
+# ЗАДАЧИ НА ПРОКАЧКУ (/task_add + часовой аудит выполнения через Comlink)
+# =====================================================================
+def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by, date_created, guild_id)
+        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?)
+    """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id))
+    conn.commit()
+    task_id = cursor.lastrowid
+    conn.close()
+    return task_id
+
+
+def get_active_tasks(guild_id: int = 1):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline
+        FROM tasks WHERE status = 'ACTIVE' AND guild_id = ?
+    """, (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def update_task_status(task_id, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tasks SET status = ? WHERE task_id = ?", (status, task_id))
+    conn.commit()
+    conn.close()
+
 # ================== Дни рождения ==================
 
 def init_birthday_table():
