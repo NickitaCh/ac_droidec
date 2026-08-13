@@ -1,4 +1,3 @@
-import asyncio
 import tempfile
 
 import disnake
@@ -6,6 +5,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
+from services.registration import register_player
 
 
 class SelfRegistrationCog(commands.Cog):
@@ -13,42 +13,10 @@ class SelfRegistrationCog(commands.Cog):
         self.bot = bot
 
     async def _do_registration(self, inter, target_user, ally_code, альт, guild_id):
-        clean_code = "".join(filter(str.isdigit, ally_code))
-        if len(clean_code) != 9:
-            await inter.edit_original_response(
-                content="❌ **Ошибка:** Код союзника должен состоять ровно из 9 цифр!"
-            )
+        result = await register_player(self.bot.comlink, guild_id, str(target_user.id), ally_code, is_alt=альт)
+        if not result.ok:
+            await inter.edit_original_response(content=f"❌ **Ошибка:** {result.error}")
             return
-
-        try:
-            player_data = await asyncio.to_thread(self.bot.comlink.get_player, clean_code)
-            if not player_data or "name" not in player_data:
-                await inter.edit_original_response(
-                    content=f"❌ **Ошибка:** Игрок с кодом союзника `{clean_code}` не найден на серверах EA/CG. Проверьте цифры."
-                )
-                return
-
-            ingame_name = player_data["name"]
-        except Exception as e:
-            await inter.edit_original_response(
-                content=f"⚠️ **Ошибка Comlink:** Не удалось проверить код из-за сбоя связи с сервером. Ошибка: {e}"
-            )
-            return
-
-        # Первая регистрация в этой гильдии всегда основная, даже если попросили
-        # альт — иначе получится аккаунт без единого основного.
-        has_existing = bool(database.get_user_registrations(str(target_user.id), guild_id=guild_id))
-        is_main = (not альт) or (not has_existing)
-
-        try:
-            database.set_user_registration(str(target_user.id), clean_code, ingame_name, is_main=is_main, guild_id=guild_id)
-        except Exception as e:
-            await inter.edit_original_response(
-                content=f"❌ **Ошибка БД:** Не удалось сохранить регистрацию: {e}"
-            )
-            return
-
-        accounts = database.get_user_registrations(str(target_user.id), guild_id=guild_id)
 
         embed = disnake.Embed(
             title="🔗 Регистрация выполнена",
@@ -59,14 +27,14 @@ class SelfRegistrationCog(commands.Cog):
             color=disnake.Color.green()
         )
         embed.add_field(name="👤 Discord", value=target_user.mention, inline=True)
-        embed.add_field(name="🎮 Игровой ник SWGOH", value=ingame_name, inline=True)
-        embed.add_field(name="🔢 Код союзника", value=f"`{clean_code}`", inline=True)
-        embed.add_field(name="⭐ Статус", value="Основной" if is_main else "Альт", inline=True)
+        embed.add_field(name="🎮 Игровой ник SWGOH", value=result.ingame_name, inline=True)
+        embed.add_field(name="🔢 Код союзника", value=f"`{result.ally_code}`", inline=True)
+        embed.add_field(name="⭐ Статус", value="Основной" if result.is_main else "Альт", inline=True)
 
-        if len(accounts) > 1:
+        if len(result.accounts) > 1:
             lines = [
                 f"{'⭐' if row_is_main else '•'} {name} (`{code}`)"
-                for code, name, row_is_main in accounts
+                for code, name, row_is_main in result.accounts
             ]
             embed.add_field(name="Все привязанные аккаунты", value="\n".join(lines), inline=False)
 

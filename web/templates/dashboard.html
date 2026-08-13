@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — AC Droidec{% endblock %}
+{% block content %}
+    {% if error %}
+        <p class="error">Ошибка входа: {{ error }}</p>
+    {% endif %}
+
+    {% if not user %}
+        <h1>AC Droidec</h1>
+        <p>Веб-дашборд гильдии SWGOH — войдите через Discord, чтобы увидеть свою регистрацию и гильдию.</p>
+        <a class="button" href="/login">Войти через Discord</a>
+    {% elif not guild_cfg %}
+        <h1>Привет, {{ user.username }}</h1>
+        <p class="error">Не удалось определить вашу гильдию — у вас нет роли участника ни в одной зарегистрированной гильдии.</p>
+    {% else %}
+        <h1>{{ guild_cfg.name }}</h1>
+        <ul class="menu">
+            <li><a href="/registration">Моя регистрация (Discord ↔ код союзника)</a></li>
+        </ul>
+    {% endif %}
+{% endblock %}
