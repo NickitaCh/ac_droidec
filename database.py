@@ -214,45 +214,95 @@ def get_all_user_mappings():
 # отдельно от user_mapping — ту таблицу каждый час полностью перезаписывает
 # ViolationsCog.update_roster_cache (см. cogs/violations.py), так что реальная
 # привязка к Discord ID там не переживёт следующий проход ростер-кэша.
+# Один Discord-аккаунт может иметь несколько связанных ally_code (альты) —
+# is_main отмечает, какой из них берётся по умолчанию командами вида "мой персонаж".
 # =====================================================================
 def _ensure_user_registration_table(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_registration (
-            discord_id TEXT PRIMARY KEY,
+            discord_id TEXT NOT NULL,
             ally_code TEXT NOT NULL,
             ingame_name TEXT,
-            registered_at TEXT NOT NULL
+            is_main INTEGER NOT NULL DEFAULT 1,
+            registered_at TEXT NOT NULL,
+            PRIMARY KEY (discord_id, ally_code)
         )
     """)
+    # Миграция с первой версии таблицы (2026-08-13, один ally_code на discord_id,
+    # PRIMARY KEY только по discord_id) — переносим существующие записи как основные.
+    cursor.execute("PRAGMA table_info(user_registration)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if "is_main" not in cols:
+        cursor.execute("ALTER TABLE user_registration RENAME TO user_registration_old")
+        cursor.execute("""
+            CREATE TABLE user_registration (
+                discord_id TEXT NOT NULL,
+                ally_code TEXT NOT NULL,
+                ingame_name TEXT,
+                is_main INTEGER NOT NULL DEFAULT 1,
+                registered_at TEXT NOT NULL,
+                PRIMARY KEY (discord_id, ally_code)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO user_registration (discord_id, ally_code, ingame_name, is_main, registered_at)
+            SELECT discord_id, ally_code, ingame_name, 1, registered_at FROM user_registration_old
+        """)
+        cursor.execute("DROP TABLE user_registration_old")
 
 
-def set_user_registration(discord_id: str, ally_code: str, ingame_name: str = ""):
+def set_user_registration(discord_id: str, ally_code: str, ingame_name: str = "", is_main: bool = True):
+    """Привязывает ally_code к discord_id. Если is_main=True, снимает флаг "основной"
+    со всех остальных аккаунтов этого discord_id (основной может быть только один)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_user_registration_table(cursor)
+    if is_main:
+        cursor.execute(
+            "UPDATE user_registration SET is_main = 0 WHERE discord_id = ? AND ally_code != ?",
+            (discord_id, ally_code),
+        )
     cursor.execute("""
-        INSERT INTO user_registration (discord_id, ally_code, ingame_name, registered_at)
-        VALUES (?, ?, ?, datetime('now'))
-        ON CONFLICT(discord_id) DO UPDATE SET
-            ally_code = excluded.ally_code,
+        INSERT INTO user_registration (discord_id, ally_code, ingame_name, is_main, registered_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(discord_id, ally_code) DO UPDATE SET
             ingame_name = excluded.ingame_name,
+            is_main = excluded.is_main,
             registered_at = excluded.registered_at
-    """, (discord_id, ally_code, ingame_name))
+    """, (discord_id, ally_code, ingame_name, 1 if is_main else 0))
     conn.commit()
     conn.close()
 
 
 def get_user_registration(discord_id: str):
-    """Возвращает (ally_code, ingame_name) либо None, если игрок не регистрировался."""
+    """Возвращает (ally_code, ingame_name) ОСНОВНОГО аккаунта либо None, если игрок
+    не регистрировался. Если основной почему-то не отмечен (не должно случаться),
+    берёт любую привязанную запись, чтобы не отказывать без необходимости."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_user_registration_table(cursor)
     cursor.execute(
-        "SELECT ally_code, ingame_name FROM user_registration WHERE discord_id = ?", (discord_id,)
+        "SELECT ally_code, ingame_name FROM user_registration WHERE discord_id = ? ORDER BY is_main DESC LIMIT 1",
+        (discord_id,)
     )
     row = cursor.fetchone()
     conn.close()
     return row if row else None
+
+
+def get_user_registrations(discord_id: str):
+    """Возвращает все привязанные аккаунты: [(ally_code, ingame_name, is_main), ...],
+    основной — первым."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT ally_code, ingame_name, is_main FROM user_registration WHERE discord_id = ? ORDER BY is_main DESC, registered_at",
+        (discord_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 
 # =====================================================================

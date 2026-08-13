@@ -19,6 +19,10 @@ class SelfRegistrationCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         ally_code: str = commands.Param(
             desc="Ваш 9-значный код союзника (только цифры, без дефисов)"
+        ),
+        альт: bool = commands.Param(
+            default=False,
+            description="Добавить как второй аккаунт (альт), не заменяя основной"
         )
     ):
         await inter.response.defer(ephemeral=True)
@@ -45,24 +49,39 @@ class SelfRegistrationCog(commands.Cog):
             )
             return
 
+        # Первая регистрация всегда основная, даже если попросили альт — иначе
+        # получится аккаунт без единого основного.
+        has_existing = bool(database.get_user_registrations(str(inter.author.id)))
+        is_main = (not альт) or (not has_existing)
+
         try:
-            database.set_user_registration(str(inter.author.id), clean_code, ingame_name)
+            database.set_user_registration(str(inter.author.id), clean_code, ingame_name, is_main=is_main)
         except Exception as e:
             await inter.edit_original_response(
                 content=f"❌ **Ошибка БД:** Не удалось сохранить регистрацию: {e}"
             )
             return
 
+        accounts = database.get_user_registrations(str(inter.author.id))
+
         embed = disnake.Embed(
             title="🔗 Регистрация выполнена",
             description=(
                 "Теперь команды, где можно не указывать игрока (например `/статы`), "
-                "по умолчанию будут брать именно ваш аккаунт."
+                "по умолчанию будут брать ваш основной аккаунт."
             ),
             color=disnake.Color.green()
         )
         embed.add_field(name="🎮 Игровой ник SWGOH", value=ingame_name, inline=True)
         embed.add_field(name="🔢 Код союзника", value=f"`{clean_code}`", inline=True)
+        embed.add_field(name="⭐ Статус", value="Основной" if is_main else "Альт", inline=True)
+
+        if len(accounts) > 1:
+            lines = [
+                f"{'⭐' if row_is_main else '•'} {name} (`{code}`)"
+                for code, name, row_is_main in accounts
+            ]
+            embed.add_field(name="Все привязанные аккаунты", value="\n".join(lines), inline=False)
 
         await inter.edit_original_response(embed=embed)
 
