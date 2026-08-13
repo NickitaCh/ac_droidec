@@ -74,8 +74,7 @@ class GuildManagerBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
-            test_guilds=test_guilds_list,
-            sync_commands_debug=True
+            test_guilds=test_guilds_list
         )
         self.comlink = comlink
         self.ally_code = ALLY_CODE
@@ -116,35 +115,6 @@ async def on_ready():
         activity=disnake.Activity(type=disnake.ActivityType.watching, name="Следит за игроками AC")
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
-
-    # ВРЕМЕННАЯ ДИАГНОСТИКА: список слэш-команд, которые бот реально держит в памяти,
-    # плюс список того, что реально зарегистрировано в Discord по каждой test_guild —
-    # чтобы понять, почему /регистрация не долетает до Discord через обычный docker logs.
-    try:
-        with open("/app/cmd_dump.txt", "w", encoding="utf-8") as f:
-            f.write("LOCAL bot.all_slash_commands keys:\n")
-            for name in sorted(bot.all_slash_commands.keys()):
-                f.write(f"  {name}\n")
-
-            f.write("\nFORCING _sync_application_commands()...\n")
-            try:
-                await bot._sync_application_commands()
-                f.write("sync call returned without raising\n")
-            except Exception as sync_err:
-                import traceback
-                f.write(f"sync call RAISED: {sync_err!r}\n")
-                f.write(traceback.format_exc())
-
-            for gid in test_guilds_list:
-                try:
-                    remote = await bot.fetch_guild_commands(gid)
-                    f.write(f"\nDISCORD guild {gid} ({len(remote)}):\n")
-                    for c in sorted(remote, key=lambda x: x.name):
-                        f.write(f"  {c.name}\n")
-                except Exception as ge:
-                    f.write(f"\nDISCORD guild {gid}: ERROR {ge}\n")
-    except Exception as dump_err:
-        print(f"⚠️ cmd_dump failed: {dump_err}")
 
 def _check_allowed_role(author, guild_id) -> bool:
     if author.id in bot.allowed_user_ids:
