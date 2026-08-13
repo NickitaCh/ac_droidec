@@ -13,14 +13,19 @@ def init_db():
     #    без деплоя (через будущий веб-дашборд). См. CLAUDE.md.
     _ensure_guilds_table(cursor)
 
-    # 1. Таблица маппинга пользователей (Discord <-> SWGOH)
+    # 1. Таблица маппинга пользователей (Discord <-> SWGOH). guild_id — какой
+    #    гильдии принадлежит эта строка (роster-кэш ведётся отдельно на гильдию).
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_mapping (
-            discord_id TEXT PRIMARY KEY,
-            ally_code TEXT UNIQUE NOT NULL,
-            ingame_name TEXT
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            discord_id TEXT NOT NULL,
+            ally_code TEXT NOT NULL,
+            ingame_name TEXT,
+            PRIMARY KEY (guild_id, discord_id),
+            UNIQUE (guild_id, ally_code)
         )
     """)
+    _migrate_user_mapping_guild_id(cursor)
 
     # 2. Таблица нарушений
     cursor.execute("""
@@ -34,6 +39,11 @@ def init_db():
             FOREIGN KEY (ally_code) REFERENCES user_mapping(ally_code)
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE position_warns ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_guild_ally ON position_warns(guild_id, ally_code)")
 
     # 3. Таблица задач на прокачку
     cursor.execute("""
@@ -69,6 +79,31 @@ def init_db():
     conn.commit()
     conn.close()
     print("📋 [БД] Инициализация структуры базы данных успешно завершена.")
+
+
+def _migrate_user_mapping_guild_id(cursor):
+    """Миграция с версии таблицы до мультитенантности (PRIMARY KEY только по
+    discord_id, без guild_id) — переносим существующие строки в гильдию id=1."""
+    cursor.execute("PRAGMA table_info(user_mapping)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if not cols or "guild_id" in cols:
+        return
+    cursor.execute("ALTER TABLE user_mapping RENAME TO user_mapping_old")
+    cursor.execute("""
+        CREATE TABLE user_mapping (
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            discord_id TEXT NOT NULL,
+            ally_code TEXT NOT NULL,
+            ingame_name TEXT,
+            PRIMARY KEY (guild_id, discord_id),
+            UNIQUE (guild_id, ally_code)
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO user_mapping (guild_id, discord_id, ally_code, ingame_name)
+        SELECT 1, discord_id, ally_code, ingame_name FROM user_mapping_old
+    """)
+    cursor.execute("DROP TABLE user_mapping_old")
 
 # =====================================================================
 # РЕЕСТР ГИЛЬДИЙ (мультитенантность): какие SWGOH-гильдии обслуживает бот,
@@ -197,44 +232,44 @@ def seed_default_guild(**fields) -> int | None:
 # =====================================================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С НАРУШЕНИЯМИ (WARNS)
 # =====================================================================
-def add_warn(ally_code, category, subcategory, date_str, comment=None):
+def add_warn(ally_code, category, subcategory, date_str, comment=None, guild_id=1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO position_warns (ally_code, category, subcategory, date_str, comment)
-        VALUES (?, ?, ?, ?, ?)
-    """, (ally_code, category, subcategory, date_str, comment))
+        INSERT INTO position_warns (ally_code, category, subcategory, date_str, comment, guild_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (ally_code, category, subcategory, date_str, comment, guild_id))
     conn.commit()
     conn.close()
 
-def get_player_warns(ally_code):
+def get_player_warns(ally_code, guild_id=1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT category, subcategory, date_str, comment 
-        FROM position_warns 
-        WHERE ally_code = ? 
+        SELECT category, subcategory, date_str, comment
+        FROM position_warns
+        WHERE ally_code = ? AND guild_id = ?
         ORDER BY id DESC
-    """, (ally_code,))
+    """, (ally_code, guild_id))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
-def remove_warn(ally_code, category, subcategory, date_str):
+def remove_warn(ally_code, category, subcategory, date_str, guild_id=1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        DELETE FROM position_warns 
-        WHERE ally_code = ? AND category = ? AND subcategory = ? AND date_str = ?
-    """, (ally_code, category, subcategory, date_str))
+        DELETE FROM position_warns
+        WHERE ally_code = ? AND category = ? AND subcategory = ? AND date_str = ? AND guild_id = ?
+    """, (ally_code, category, subcategory, date_str, guild_id))
     conn.commit()
     conn.close()
 
-def get_all_warns():
+def get_all_warns(guild_id=1):
     """Возвращает список всех нарушений гильдии для построения общей текстовой таблицы"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT ally_code, category, date_str FROM position_warns")
+    cursor.execute("SELECT ally_code, category, date_str FROM position_warns WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows    
@@ -312,31 +347,58 @@ def get_birthday_by_discord_id(discord_id: str):
 
     
     
-def get_allycode_by_discord_id(discord_id: str) -> str | None:
+def get_allycode_by_discord_id(discord_id: str, guild_id: int = 1) -> str | None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT ally_code FROM user_mapping WHERE discord_id = ?", (discord_id,))
+    cursor.execute("SELECT ally_code FROM user_mapping WHERE discord_id = ? AND guild_id = ?", (discord_id, guild_id))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
 
-def set_user_mapping(discord_id: str, ally_code: str, ingame_name: str = ""):
+def set_user_mapping(discord_id: str, ally_code: str, ingame_name: str = "", guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR REPLACE INTO user_mapping (discord_id, ally_code, ingame_name)
-        VALUES (?, ?, ?)
-    """, (discord_id, ally_code, ingame_name))
+        INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name)
+        VALUES (?, ?, ?, ?)
+    """, (guild_id, discord_id, ally_code, ingame_name))
     conn.commit()
     conn.close()
-    
-def get_all_user_mappings():
+
+def get_all_user_mappings(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT discord_id, ally_code, ingame_name FROM user_mapping")
+    cursor.execute("SELECT discord_id, ally_code, ingame_name FROM user_mapping WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+def sync_guild_roster(guild_id: int, roster_rows):
+    """Полная замена состава гильдии guild_id в user_mapping: roster_rows —
+    [(discord_id, ally_code, ingame_name), ...]. Используется часовым рефрешем
+    ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("DELETE FROM user_mapping WHERE guild_id = ?", (guild_id,))
+    cursor.executemany(
+        "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name) VALUES (?, ?, ?, ?)",
+        [(guild_id, discord_id, ally_code, ingame_name) for discord_id, ally_code, ingame_name in roster_rows]
+    )
+    conn.commit()
+    conn.close()
+
+def get_user_mapping_for_name(guild_id: int, name: str):
+    """Точное совпадение по ingame_name в пределах гильдии — (ally_code, ingame_name) или None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT ally_code, ingame_name FROM user_mapping WHERE guild_id = ? AND ingame_name = ?",
+        (guild_id, name)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 # =====================================================================
 # САМОСТОЯТЕЛЬНАЯ РЕГИСТРАЦИЯ ИГРОКОВ (/регистрация): discord_id -> ally_code,
@@ -716,10 +778,13 @@ def get_tb_event_planet_names(event_id: int):
     return {(phase, conflict_key): planet_name for phase, conflict_key, planet_name in rows}
 
 
-def get_user_mapping_by_name(name: str):
+def get_user_mapping_by_name(name: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name LIKE ?", (f"%{name}%",))
+    cursor.execute(
+        "SELECT ally_code, ingame_name FROM user_mapping WHERE guild_id = ? AND ingame_name LIKE ?",
+        (guild_id, f"%{name}%")
+    )
     row = cursor.fetchone()
     conn.close()
     return row if row else None

@@ -1,9 +1,9 @@
 import disnake
 from disnake.ext import commands, tasks
 from datetime import datetime, timedelta
-import sqlite3
 import asyncio
 import database
+import guild_resolver
 
 # Твоя оригинальная структура нарушений
 WARNS_STRUCTURE = {
@@ -31,7 +31,10 @@ class HybridCache(dict):
 
 # --- ФУНКЦИИ АВТОЗАПОЛНЕНИЯ (AUTOCOMPLETE) ---
 async def autocomplete_players(inter: disnake.ApplicationCommandInteraction, string: str):
-    cache = inter.bot.guild_roster_cache
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    cache = inter.bot.guild_roster_caches.get(guild_id)
     if not cache:
         return ["⏳ Состав еще загружается, подождите..."]
     string = string.lower()
@@ -55,7 +58,7 @@ async def autocomplete_violations(inter: disnake.ApplicationCommandInteraction, 
 
 # --- КОМПОНЕНТЫ ИНТЕРАКТИВНОГО МЕНЮ УДАЛЕНИЯ ДЛЯ /UNWARN ---
 class UnwarnSelectView(disnake.ui.View):
-    def __init__(self, ally_code, player_name, warns_list):
+    def __init__(self, ally_code, player_name, warns_list, guild_id=1):
         super().__init__(timeout=60)
         options = []
         for i, (cat, subcat, d_str, comment) in enumerate(warns_list[:25]):
@@ -63,21 +66,22 @@ class UnwarnSelectView(disnake.ui.View):
                 label = f"{d_str} - {cat}: {subcat} ({comment})"[:100]
             else:
                 label = f"{d_str} - {cat}: {subcat}"[:100]
-                
+
             value = f"{i}|{cat}|{subcat}|{d_str}"
             options.append(disnake.SelectOption(label=label, value=value))
-        self.add_item(UnwarnSelect(options, ally_code, player_name, warns_list))
+        self.add_item(UnwarnSelect(options, ally_code, player_name, warns_list, guild_id))
 
 class UnwarnSelect(disnake.ui.Select):
-    def __init__(self, options, ally_code, player_name, warns_list):
+    def __init__(self, options, ally_code, player_name, warns_list, guild_id=1):
         self.ally_code = ally_code
-        self.player_name = player_name  
+        self.player_name = player_name
+        self.guild_id = guild_id
         super().__init__(placeholder="Выберите конкретное нарушение для удаления...", options=options)
 
     async def callback(self, inter: disnake.MessageInteraction):
         _, cat, subcat, d_str = self.values[0].split("|", 3)
-        database.remove_warn(self.ally_code, cat, subcat, d_str)
-        
+        database.remove_warn(self.ally_code, cat, subcat, d_str, guild_id=self.guild_id)
+
         await inter.response.edit_message(content="🔄 Изменения вносятся...", view=None)
         await inter.followup.send(f"🗑️ Нарушение за {d_str} ({cat}: {subcat}) у игрока **{self.player_name}** успешно удалено", ephemeral=False)
 
@@ -94,97 +98,106 @@ class ViolationsCog(commands.Cog):
     def cog_unload(self):
         self.update_roster_cache.cancel()
 
-    # --- ТВОЯ ФОНОВАЯ ЗАДАЧА С ДИНАМИЧЕСКИМ ИНТЕРВАЛОМ И СТАТУСОМ [КЕШ] ---
+    # --- ФОНОВАЯ ЗАДАЧА С ДИНАМИЧЕСКИМ ИНТЕРВАЛОМ И СТАТУСОМ [КЕШ] ---
+    # Обновляет ростер КАЖДОЙ зарегистрированной гильдии по очереди, каждую —
+    # в своём try/except (сбой Comlink для одной гильдии не должен срывать
+    # обновление остальных). guild_roster_cache (легаси, без guild_id) держим
+    # зеркалом гильдии id=1 — на неё пока завязаны не переведённые cogs.
     @tasks.loop(hours=1)
     async def update_roster_cache(self):
-        print("🔄 Запуск безопасного обновления состава...")
-        try:
-            print(f"🔎 Шаг 1: Запрос профиля игрока для Ally Code: {self.bot.ally_code}...")
-            player_data = self.bot.comlink.get_player(allycode=str(self.bot.ally_code)) 
-            
-            guild_id = player_data.get("guildId")
-            if not guild_id:
-                print("⚠️ Шаг 2 ФЕЙЛ: У игрока-зацепки нет guildId (он не состоит в гильдии)")
-                return
-            print(f"✅ Шаг 2: Guild ID успешно получен: {guild_id}")
+        guild_configs = database.get_all_guild_configs()
+        if not guild_configs:
+            print("⚠️ [Ростер] В реестре guilds нет ни одной гильдии — нечего обновлять")
+            return
 
-            print("🔎 Шаг 3: Запрос данных гильдии из comlink...")
-            guild = self.bot.comlink.get_guild(guild_id=guild_id)
-            members = guild.get("guild", guild).get("member", [])
-            print(f"✅ Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
-            
-            print("🌐 Сбор детальных профилей игроков из сети...")
-            temp_roster_data = []
-            new_cache = {}
+        any_success = False
+        any_failure = False
 
-            for member in members:
-                p_id = member.get("playerId")
-                p_name = member.get("playerName", f"Игрок {p_id[:8]}")
-                a_code = str(member.get("allyCode", p_id))
-                
-                try:
-                    prof = self.bot.comlink.get_player(player_id=p_id)
-                    p_name = prof.get("name", p_name)
-                    a_code = str(prof.get("allyCode", a_code))
-                except:
-                    pass 
-                
-                new_cache[p_name] = a_code
-                temp_roster_data.append((a_code, a_code, p_name))
-                await asyncio.sleep(0.1)
-
-            print("💾 Шаг 4: Мгновенное сохранение профилей в базу данных...")
-            conn = sqlite3.connect(database.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute('PRAGMA journal_mode=WAL;')
-            cursor.execute('DELETE FROM user_mapping')
-            cursor.executemany(
-                'INSERT OR REPLACE INTO user_mapping (discord_id, ally_code, ingame_name) VALUES (?, ?, ?)',
-                temp_roster_data
-            )
-            conn.commit()
-            conn.close()
-            
-            # Сохраняем в умный гибридный кеш бота
-            self.bot.guild_roster_cache = HybridCache(new_cache)
-            print(f"✅ Синхронизировано {len(new_cache)} игроков.")
-            
-            if self.update_roster_cache.hours != 1:
-                print("⚙️ Сеть восстановлена. Устанавливаем штатный интервал обновления: 1 час")
-                self.update_roster_cache.change_interval(hours=1, minutes=0)
-
-            await self.bot.change_presence(activity=disnake.Activity(
-                type=disnake.ActivityType.watching, 
-                name="Следит за игроками AC"
-            ))
-            
-        except Exception as e:
-            print(f"❌ Критическая ошибка на этапе выполнения функции: {e}")
-            print("🚨 Аварийный режим: Попытка восстановить состав из локальной базы данных...")
+        for guild_cfg in guild_configs:
+            gid = guild_cfg["id"]
+            gname = guild_cfg["name"]
+            print(f"🔄 [{gname}] Запуск безопасного обновления состава...")
             try:
-                conn = sqlite3.connect(database.DB_NAME)
-                cursor = conn.cursor()
-                cursor.execute('SELECT ingame_name, ally_code FROM user_mapping')
-                rows = cursor.fetchall()
-                conn.close()
-                
-                if rows:
-                    cached_dict = {name: code for name, code in rows}
-                    self.bot.guild_roster_cache = HybridCache(cached_dict)
-                    print(f"⚠️ Восстановлено {len(cached_dict)} игроков из кеша БД. Бот продолжит работать на старых данных!")
-                    
-                    if self.update_roster_cache.minutes != 5:
-                        print("⚙️ Включен аварийный режим. Устанавливаем частый интервал проверки сети: 5 минут")
-                        self.update_roster_cache.change_interval(hours=0, minutes=5)
+                print(f"🔎 [{gname}] Шаг 1: Запрос профиля игрока для Ally Code: {guild_cfg['ally_code']}...")
+                player_data = self.bot.comlink.get_player(allycode=str(guild_cfg["ally_code"]))
 
-                    await self.bot.change_presence(activity=disnake.Activity(
-                        type=disnake.ActivityType.watching, 
-                        name="Следит за игроками AC [кеш]"
-                    ))
-                else:
-                    print("❌ Локальная база данных пуста. Восстановление невозможно.")
-            except Exception as db_err:
-                print(f"❌ Не удалось прочитать БД для аварийного восстановления: {db_err}")
+                swgoh_guild_id = player_data.get("guildId")
+                if not swgoh_guild_id:
+                    print(f"⚠️ [{gname}] Шаг 2 ФЕЙЛ: У игрока-зацепки нет guildId (он не состоит в гильдии)")
+                    any_failure = True
+                    continue
+                print(f"✅ [{gname}] Шаг 2: Guild ID успешно получен: {swgoh_guild_id}")
+
+                print(f"🔎 [{gname}] Шаг 3: Запрос данных гильдии из comlink...")
+                guild = self.bot.comlink.get_guild(guild_id=swgoh_guild_id)
+                members = guild.get("guild", guild).get("member", [])
+                print(f"✅ [{gname}] Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
+
+                print(f"🌐 [{gname}] Сбор детальных профилей игроков из сети...")
+                temp_roster_data = []
+                new_cache = {}
+
+                for member in members:
+                    p_id = member.get("playerId")
+                    p_name = member.get("playerName", f"Игрок {p_id[:8]}")
+                    a_code = str(member.get("allyCode", p_id))
+
+                    try:
+                        prof = self.bot.comlink.get_player(player_id=p_id)
+                        p_name = prof.get("name", p_name)
+                        a_code = str(prof.get("allyCode", a_code))
+                    except:
+                        pass
+
+                    new_cache[p_name] = a_code
+                    temp_roster_data.append((a_code, a_code, p_name))
+                    await asyncio.sleep(0.1)
+
+                print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
+                database.sync_guild_roster(gid, temp_roster_data)
+
+                hybrid_cache = HybridCache(new_cache)
+                self.bot.guild_roster_caches[gid] = hybrid_cache
+                if gid == 1:
+                    self.bot.guild_roster_cache = hybrid_cache  # легаси-зеркало, см. комментарий выше
+                print(f"✅ [{gname}] Синхронизировано {len(new_cache)} игроков.")
+                any_success = True
+
+            except Exception as e:
+                print(f"❌ [{gname}] Критическая ошибка на этапе выполнения функции: {e}")
+                print(f"🚨 [{gname}] Аварийный режим: Попытка восстановить состав из локальной базы данных...")
+                any_failure = True
+                try:
+                    rows = database.get_all_user_mappings(gid)
+                    if rows:
+                        cached_dict = {name: code for _, code, name in rows}
+                        hybrid_cache = HybridCache(cached_dict)
+                        self.bot.guild_roster_caches[gid] = hybrid_cache
+                        if gid == 1:
+                            self.bot.guild_roster_cache = hybrid_cache
+                        print(f"⚠️ [{gname}] Восстановлено {len(cached_dict)} игроков из кеша БД. Бот продолжит работать на старых данных!")
+                    else:
+                        print(f"❌ [{gname}] Локальная база данных пуста. Восстановление невозможно.")
+                except Exception as db_err:
+                    print(f"❌ [{gname}] Не удалось прочитать БД для аварийного восстановления: {db_err}")
+
+        if any_failure:
+            if self.update_roster_cache.minutes != 5:
+                print("⚙️ Есть гильдии со сбоем сети. Устанавливаем частый интервал проверки: 5 минут")
+                self.update_roster_cache.change_interval(hours=0, minutes=5)
+            await self.bot.change_presence(activity=disnake.Activity(
+                type=disnake.ActivityType.watching,
+                name="Следит за игроками AC [кеш]"
+            ))
+        else:
+            if self.update_roster_cache.hours != 1:
+                print("⚙️ Сеть восстановлена для всех гильдий. Устанавливаем штатный интервал обновления: 1 час")
+                self.update_roster_cache.change_interval(hours=1, minutes=0)
+            if any_success:
+                await self.bot.change_presence(activity=disnake.Activity(
+                    type=disnake.ActivityType.watching,
+                    name="Следит за игроками AC"
+                ))
 
     @update_roster_cache.before_loop
     async def before_loop(self):
@@ -206,6 +219,11 @@ class ViolationsCog(commands.Cog):
         комментарий_3: str = commands.Param(description="Детали для третьего нарушения (опционально)", default=None),
         дата: str = commands.Param(description="Формат: ДД.ММ или ДД.ММ.ГГГГ. По умолчанию — сегодня", default=None)
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         if дата is None:
             final_date = datetime.now().strftime("%d.%m.%Y")
         else:
@@ -225,10 +243,11 @@ class ViolationsCog(commands.Cog):
                 return
             ally_code, игрок = registration
         elif игрок:
-            if игрок not in self.bot.guild_roster_cache:
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            if игрок not in cache:
                 await inter.response.send_message("❌ Ошибка: Игрок не найден в составе гильдии.", ephemeral=True)
                 return
-            ally_code = self.bot.guild_roster_cache[игрок]
+            ally_code = cache[игрок]
         else:
             await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
             return
@@ -264,7 +283,7 @@ class ViolationsCog(commands.Cog):
         for pair in unique_pairs:
             v = pair["violation"]
             c = pair["comment"].strip() if pair["comment"] else None
-            database.add_warn(ally_code, режим, v, final_date, c)
+            database.add_warn(ally_code, режим, v, final_date, c, guild_id=guild_id)
 
         result_text = (
             f"{duplicate_warning}✅ **Нарушение успешно зафиксировано!**\n"
@@ -297,6 +316,11 @@ class ViolationsCog(commands.Cog):
         await inter.response.defer(ephemeral=False)
         three_months_ago = datetime.now() - timedelta(days=90)
 
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.followup.send("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         if тег is not None or игрок:
             if тег is not None:
                 registration = database.get_user_registration(str(тег.id))
@@ -308,18 +332,14 @@ class ViolationsCog(commands.Cog):
                     return
                 ally_code, actual_name = registration
             else:
-                conn = sqlite3.connect(database.DB_NAME)
-                cursor = conn.cursor()
-                cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name = ?', (игрок,))
-                row = cursor.fetchone()
-                conn.close()
+                row = database.get_user_mapping_for_name(guild_id, игрок)
 
                 if not row:
                     await inter.followup.send(f"❌ Игрок '{игрок}' не найден.", ephemeral=True)
                     return
 
                 ally_code, actual_name = row
-            rows = database.get_player_warns(ally_code)
+            rows = database.get_player_warns(ally_code, guild_id=guild_id)
 
             if not rows:
                 await inter.followup.send(f"😇 У игрока **{actual_name}** нет нарушений", ephemeral=False)
@@ -345,13 +365,14 @@ class ViolationsCog(commands.Cog):
             await inter.followup.send(embed=embed, ephemeral=False)
 
         else:
-            if not self.bot.guild_roster_cache:
+            cache = self.bot.guild_roster_caches.get(guild_id)
+            if not cache:
                 await inter.followup.send("❌ Состав еще загружается. Попробуйте через минуту", ephemeral=True)
                 return
 
-            all_warns = database.get_all_warns()
-            stats = {name: {"ТБ": 0, "ВГ": 0, "Рейд": 0, "Recent": 0} for name in self.bot.guild_roster_cache.keys()}
-            ally_map = {str(code): name for name, code in self.bot.guild_roster_cache.items()}
+            all_warns = database.get_all_warns(guild_id=guild_id)
+            stats = {name: {"ТБ": 0, "ВГ": 0, "Рейд": 0, "Recent": 0} for name in cache.keys()}
+            ally_map = {str(code): name for name, code in cache.items()}
 
             for ally_code, cat, d_str in all_warns:
                 name = ally_map.get(str(ally_code))
@@ -398,6 +419,11 @@ class ViolationsCog(commands.Cog):
         игрок: str = commands.Param(default=None, description="Игрок, у которого хотите аннулировать нарушение (или укажите тег ниже)", autocomplete=autocomplete_players),
         тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         if тег is not None:
             registration = database.get_user_registration(str(тег.id))
             if not registration:
@@ -408,11 +434,7 @@ class ViolationsCog(commands.Cog):
                 return
             ally_code, actual_name = registration
         elif игрок:
-            conn = sqlite3.connect(database.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute('SELECT ally_code, ingame_name FROM user_mapping WHERE ingame_name LIKE ?', (игрок,))
-            row = cursor.fetchone()
-            conn.close()
+            row = database.get_user_mapping_for_name(guild_id, игрок)
 
             if not row:
                 await inter.response.send_message("Игрок не найден в базе данных", ephemeral=True)
@@ -423,13 +445,13 @@ class ViolationsCog(commands.Cog):
             await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
             return
 
-        player_warns = database.get_player_warns(ally_code)
+        player_warns = database.get_player_warns(ally_code, guild_id=guild_id)
 
         if not player_warns:
             await inter.response.send_message(f"У игрока **{actual_name}** нет нарушений для удаления", ephemeral=True)
             return
 
-        view = UnwarnSelectView(ally_code, actual_name, player_warns)
+        view = UnwarnSelectView(ally_code, actual_name, player_warns, guild_id=guild_id)
         await inter.response.send_message(f"Выберите, какое нарушение игрока **{actual_name}** нужно удалить:", view=view, ephemeral=True)
 
 def setup(bot):

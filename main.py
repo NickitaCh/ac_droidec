@@ -89,7 +89,12 @@ class GuildManagerBot(commands.Bot):
         self.n_limit = N_LIMIT
         self.allowed_user_ids = ALLOWED_USER_IDS
         self.allowed_role_ids = ALLOWED_ROLE_IDS
-        self.guild_roster_cache = {}  
+        # guild_roster_cache — легаси, один общий кэш (мирроит гильдию id=1),
+        # оставлен для cogs, ещё не переведённых на guild_id (см. Milestone 4
+        # плана мультитенантности); guild_roster_caches — новый, per-guild.
+        # Убрать guild_roster_cache, когда миграция всех cogs завершится.
+        self.guild_roster_cache = {}
+        self.guild_roster_caches = {}
         
         # === Новые атрибуты для ротационного тега ===
         self.PING_CHANNEL_ID = PING_CHANNEL_ID
