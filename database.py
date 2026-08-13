@@ -365,7 +365,7 @@ def set_bot_state(key: str, value: str):
 # =====================================================================
 # ИСТОРИЯ ТБ (последние N событий, для команд compare / player_compare)
 # =====================================================================
-TB_HISTORY_KEEP = 3
+TB_HISTORY_KEEP = 6
 
 def _ensure_tb_history_tables(cursor):
     cursor.execute("""

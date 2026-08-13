@@ -438,8 +438,40 @@ class GuildEvents(commands.Cog):
             lines.append(row)
         return "\n".join(lines)
 
+    # Метрики, по которым ловим "просадку" (атеншен): очки территории (вдруг не залил
+    # склад), попытки ОЗ, волны БЗ — см. project_registration_bulk_import и обсуждение
+    # с пользователем 2026-08-13.
+    TB_REGRESSION_METRICS = ("summary", "covert_attempt", "strike_encounter")
+    TB_REGRESSION_BASELINE_SIZE = 3  # игрок сравнивается со своим средним за 3 ТБ до последней
+
+    def _compute_tb_regressions(self, events, by_member):
+        """Помечает member_id, у кого последняя ТБ хуже среднего за TB_REGRESSION_BASELINE_SIZE
+        предыдущих ТБ хотя бы по одной из TB_REGRESSION_METRICS. Нужно минимум
+        baseline(2) + текущая(1) сохранённых ТБ с данными игрока, иначе не оцениваем."""
+        event_ids = [e[0] for e in events]
+        if len(event_ids) < 2:
+            return set()
+
+        latest_id = event_ids[-1]
+        baseline_ids = event_ids[max(0, len(event_ids) - 1 - self.TB_REGRESSION_BASELINE_SIZE):-1]
+
+        regressed = set()
+        for member_id, entry in by_member.items():
+            latest_data = entry.get(latest_id)
+            if not latest_data:
+                continue
+            baseline_values = [entry[eid] for eid in baseline_ids if eid in entry]
+            if len(baseline_values) < 2:
+                continue
+            for metric in self.TB_REGRESSION_METRICS:
+                baseline_avg = sum(v[metric] for v in baseline_values) / len(baseline_values)
+                if baseline_avg > 0 and latest_data[metric] < baseline_avg:
+                    regressed.add(member_id)
+                    break
+        return regressed
+
     def _format_tb_compare_table(self, events, summary_rows):
-        """events: [(event_id, completed_at), ...] от старых к новым (макс. 3).
+        """events: [(event_id, completed_at), ...] от старых к новым (до TB_HISTORY_KEEP).
         summary_rows: строки из get_tb_player_summary_for_events."""
         metrics = [
             ("summary", "Очки", 11),
@@ -449,6 +481,7 @@ class GuildEvents(commands.Cog):
             ("strike_attempt", "Поп", 4),
         ]
         block_width = sum(w for _, _, w in metrics)
+        mark_width = 2
         name_width = 22
 
         by_member = {}
@@ -460,9 +493,11 @@ class GuildEvents(commands.Cog):
                 "strike_encounter": strike_encounter, "strike_attempt": strike_attempt,
             }
 
+        regressed = self._compute_tb_regressions(events, by_member)
+
         n = len(events)
-        header1 = f"{'Игрок':<{name_width}}"
-        header2 = " " * name_width
+        header1 = " " * mark_width + f"{'Игрок':<{name_width}}"
+        header2 = " " * (mark_width + name_width)
         for i, (event_id, completed_at) in enumerate(events):
             label = f"ТБ-{n - i} ({completed_at[:10]})"
             header1 += " | " + f"{label:^{block_width}}"
@@ -477,7 +512,8 @@ class GuildEvents(commands.Cog):
             return entry.get(latest_event_id, {}).get("summary", -1)
 
         for member_id, entry in sorted(by_member.items(), key=sort_key, reverse=True):
-            row = f"{entry['name'][:name_width - 1]:<{name_width}}"
+            marker = "🚨" if member_id in regressed else "  "
+            row = f"{marker}{entry['name'][:name_width - 1]:<{name_width}}"
             for event_id, _ in events:
                 data = entry.get(event_id)
                 row += " | "
@@ -486,6 +522,11 @@ class GuildEvents(commands.Cog):
                 else:
                     row += "".join(f"{'-':>{w}}" for _, _, w in metrics)
             lines.append(row)
+
+        if regressed:
+            lines.append("")
+            lines.append(f"🚨 — последняя ТБ ниже среднего за {self.TB_REGRESSION_BASELINE_SIZE} предыдущих (очки территории / ОЗ / волны БЗ)")
+
         return "\n".join(lines)
 
     def _store_tb_history(self, fingerprint, result, members, player_names, stats):
@@ -641,7 +682,7 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     def _format_tb_player_compare_report(self, player_name, events, per_event, planet_maps):
-        """events: [(event_id, completed_at), ...] от старых к новым (макс. 3).
+        """events: [(event_id, completed_at), ...] от старых к новым (до TB_HISTORY_KEEP).
         per_event: список той же длины, элемент — dict с zone_data/global_totals/
         round_totals/raw_keys для игрока в эту ТБ, либо None если данных нет."""
         n = len(events)
@@ -827,7 +868,7 @@ class GuildEvents(commands.Cog):
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
 
-    @tb_report.sub_command(name="сравнение_по_тб", description="Сравнение игроков по гильдии за последние 3 ТБ")
+    @tb_report.sub_command(name="сравнение_по_тб", description="Сравнение игроков по гильдии за последние ТБ, с пометкой просевших")
     async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
@@ -846,7 +887,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")
         await inter.edit_original_message("Отчёт сравнения отправлен файлом.")
 
-    @tb_report.sub_command(name="сравнение_по_игроку", description="Сравнение статистики игрока по фазам за последние 3 ТБ")
+    @tb_report.sub_command(name="сравнение_по_игроку", description="Сравнение статистики игрока по фазам за последние ТБ")
     async def tb_player_compare(
         self,
         inter: disnake.ApplicationCommandInteraction,
