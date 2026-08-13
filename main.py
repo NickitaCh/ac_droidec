@@ -128,7 +128,7 @@ async def on_ready():
         name="AbsoluteChaos",
         ally_code=ALLY_CODE,
         discord_guild_id=str(SNG_GUILD_ID),
-        member_role_id=str(ALLOWED_ROLE_IDS[0]),
+        member_role_id=str(TB_ORDER_ROLE_ID),
         officer_role_id=str(ALLOWED_OFFICER_ROLE_ID),
         ping_channel_id=str(PING_CHANNEL_ID),
         ping_role_id=str(PING_ROLE_ID),
