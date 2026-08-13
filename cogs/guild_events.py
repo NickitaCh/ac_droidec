@@ -771,15 +771,24 @@ class GuildEvents(commands.Cog):
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(description="Выберите игрока", autocomplete=autocomplete_players)
+        name: str = commands.Param(default=None, description="Игрок — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players)
     ):
         await inter.response.defer()
 
-        cache = self.bot.guild_roster_cache
-        if not cache or name not in cache:
-            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
-            return
-        allycode = cache[name]
+        if name is None:
+            registration = database.get_user_registration(str(inter.author.id))
+            if not registration:
+                await inter.edit_original_message(
+                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."
+                )
+                return
+            allycode, name = registration
+        else:
+            cache = self.bot.guild_roster_cache
+            if not cache or name not in cache:
+                await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
+                return
+            allycode = cache[name]
 
         try:
             player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)

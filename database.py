@@ -210,6 +210,52 @@ def get_all_user_mappings():
     return rows
 
 # =====================================================================
+# САМОСТОЯТЕЛЬНАЯ РЕГИСТРАЦИЯ ИГРОКОВ (/регистрация): discord_id -> ally_code,
+# отдельно от user_mapping — ту таблицу каждый час полностью перезаписывает
+# ViolationsCog.update_roster_cache (см. cogs/violations.py), так что реальная
+# привязка к Discord ID там не переживёт следующий проход ростер-кэша.
+# =====================================================================
+def _ensure_user_registration_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_registration (
+            discord_id TEXT PRIMARY KEY,
+            ally_code TEXT NOT NULL,
+            ingame_name TEXT,
+            registered_at TEXT NOT NULL
+        )
+    """)
+
+
+def set_user_registration(discord_id: str, ally_code: str, ingame_name: str = ""):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute("""
+        INSERT INTO user_registration (discord_id, ally_code, ingame_name, registered_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(discord_id) DO UPDATE SET
+            ally_code = excluded.ally_code,
+            ingame_name = excluded.ingame_name,
+            registered_at = excluded.registered_at
+    """, (discord_id, ally_code, ingame_name))
+    conn.commit()
+    conn.close()
+
+
+def get_user_registration(discord_id: str):
+    """Возвращает (ally_code, ingame_name) либо None, если игрок не регистрировался."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT ally_code, ingame_name FROM user_registration WHERE discord_id = ?", (discord_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row if row else None
+
+
+# =====================================================================
 # ПРОИЗВОЛЬНОЕ СОСТОЯНИЕ БОТА (переживает рестарты, key-value)
 # =====================================================================
 def _ensure_bot_state_table(cursor):

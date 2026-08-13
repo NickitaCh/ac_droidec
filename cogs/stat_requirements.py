@@ -643,7 +643,7 @@ class StatRequirementsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
-        игрок: str = commands.Param(description="Игрок гильдии — статы посчитаются с его реальными модами/шмотом", autocomplete=autocomplete_players),
+        игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
     ):
@@ -658,10 +658,19 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
 
-        ally_code = self.bot.guild_roster_cache.get(игрок) if self.bot.guild_roster_cache else None
-        if not ally_code:
-            await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
-            return
+        if игрок is None:
+            registration = database.get_user_registration(str(inter.author.id))
+            if not registration:
+                await inter.edit_original_response(
+                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."
+                )
+                return
+            ally_code, игрок = registration
+        else:
+            ally_code = self.bot.guild_roster_cache.get(игрок) if self.bot.guild_roster_cache else None
+            if not ally_code:
+                await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
+                return
 
         lines = []
         matched_total = 0
