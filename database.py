@@ -317,6 +317,19 @@ def get_all_main_registrations():
     return rows
 
 
+def get_all_registrations():
+    """Возвращает [(discord_id, ally_code, ingame_name, is_main), ...] по вообще
+    всем привязкам (и основным, и альтам) — для отчёта, различающего "не привязан"
+    от "привязан как альт"."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute("SELECT discord_id, ally_code, ingame_name, is_main FROM user_registration")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 # =====================================================================
 # ПРОИЗВОЛЬНОЕ СОСТОЯНИЕ БОТА (переживает рестарты, key-value)
 # =====================================================================
