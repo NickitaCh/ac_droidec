@@ -125,6 +125,16 @@ async def on_ready():
             f.write("LOCAL bot.all_slash_commands keys:\n")
             for name in sorted(bot.all_slash_commands.keys()):
                 f.write(f"  {name}\n")
+
+            f.write("\nFORCING _sync_application_commands()...\n")
+            try:
+                await bot._sync_application_commands()
+                f.write("sync call returned without raising\n")
+            except Exception as sync_err:
+                import traceback
+                f.write(f"sync call RAISED: {sync_err!r}\n")
+                f.write(traceback.format_exc())
+
             for gid in test_guilds_list:
                 try:
                     remote = await bot.fetch_guild_commands(gid)
