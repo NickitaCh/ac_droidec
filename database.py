@@ -643,28 +643,46 @@ def get_all_registrations(guild_id: int = 1):
 def _ensure_bot_state_table(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_state (
-            key TEXT PRIMARY KEY,
-            value TEXT
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            key TEXT NOT NULL,
+            value TEXT,
+            PRIMARY KEY (guild_id, key)
         )
     """)
+    # Миграция с версии до мультитенантности (PRIMARY KEY только по key).
+    cursor.execute("PRAGMA table_info(bot_state)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if cols and "guild_id" not in cols:
+        cursor.execute("ALTER TABLE bot_state RENAME TO bot_state_old")
+        cursor.execute("""
+            CREATE TABLE bot_state (
+                guild_id INTEGER NOT NULL DEFAULT 1,
+                key TEXT NOT NULL,
+                value TEXT,
+                PRIMARY KEY (guild_id, key)
+            )
+        """)
+        cursor.execute("INSERT INTO bot_state (guild_id, key, value) SELECT 1, key, value FROM bot_state_old")
+        cursor.execute("DROP TABLE bot_state_old")
+        cursor.connection.commit()  # см. объяснение в _ensure_user_registration_table
 
-def get_bot_state(key: str) -> str | None:
+def get_bot_state(key: str, guild_id: int = 1) -> str | None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_bot_state_table(cursor)
-    cursor.execute("SELECT value FROM bot_state WHERE key = ?", (key,))
+    cursor.execute("SELECT value FROM bot_state WHERE guild_id = ? AND key = ?", (guild_id, key))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
 
-def set_bot_state(key: str, value: str):
+def set_bot_state(key: str, value: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_bot_state_table(cursor)
     cursor.execute("""
-        INSERT OR REPLACE INTO bot_state (key, value)
-        VALUES (?, ?)
-    """, (key, value))
+        INSERT OR REPLACE INTO bot_state (guild_id, key, value)
+        VALUES (?, ?, ?)
+    """, (guild_id, key, value))
     conn.commit()
     conn.close()
 
@@ -678,10 +696,32 @@ def _ensure_tb_history_tables(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fingerprint TEXT UNIQUE NOT NULL,
-            completed_at TEXT NOT NULL
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            fingerprint TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            UNIQUE (guild_id, fingerprint)
         )
     """)
+    # Миграция с версии до мультитенантности (UNIQUE был только по fingerprint).
+    cursor.execute("PRAGMA table_info(tb_events)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if cols and "guild_id" not in cols:
+        cursor.execute("ALTER TABLE tb_events RENAME TO tb_events_old")
+        cursor.execute("""
+            CREATE TABLE tb_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL DEFAULT 1,
+                fingerprint TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                UNIQUE (guild_id, fingerprint)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO tb_events (id, guild_id, fingerprint, completed_at)
+            SELECT id, 1, fingerprint, completed_at FROM tb_events_old
+        """)
+        cursor.execute("DROP TABLE tb_events_old")
+        cursor.connection.commit()  # см. объяснение в _ensure_user_registration_table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_player_summary (
             event_id INTEGER NOT NULL,
@@ -708,19 +748,19 @@ def _ensure_tb_history_tables(cursor):
         )
     """)
 
-def record_tb_event(fingerprint: str) -> int:
-    """Идемпотентно регистрирует ТБ по отпечатку (fingerprint), возвращает event_id."""
+def record_tb_event(fingerprint: str, guild_id: int = 1) -> int:
+    """Идемпотентно регистрирует ТБ гильдии по отпечатку (fingerprint), возвращает event_id."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_history_tables(cursor)
-    cursor.execute("SELECT id FROM tb_events WHERE fingerprint = ?", (fingerprint,))
+    cursor.execute("SELECT id FROM tb_events WHERE guild_id = ? AND fingerprint = ?", (guild_id, fingerprint))
     row = cursor.fetchone()
     if row:
         conn.close()
         return row[0]
     cursor.execute(
-        "INSERT INTO tb_events (fingerprint, completed_at) VALUES (?, datetime('now'))",
-        (fingerprint,)
+        "INSERT INTO tb_events (guild_id, fingerprint, completed_at) VALUES (?, ?, datetime('now'))",
+        (guild_id, fingerprint)
     )
     event_id = cursor.lastrowid
     conn.commit()
@@ -757,12 +797,12 @@ def save_tb_player_detail(rows):
     conn.commit()
     conn.close()
 
-def prune_tb_events(keep: int = TB_HISTORY_KEEP):
+def prune_tb_events(keep: int = TB_HISTORY_KEEP, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_history_tables(cursor)
     _ensure_tb_plan_tables(cursor)
-    cursor.execute("SELECT id FROM tb_events ORDER BY id DESC LIMIT -1 OFFSET ?", (keep,))
+    cursor.execute("SELECT id FROM tb_events WHERE guild_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?", (guild_id, keep))
     old_ids = [r[0] for r in cursor.fetchall()]
     if old_ids:
         placeholders = ",".join("?" * len(old_ids))
@@ -773,12 +813,12 @@ def prune_tb_events(keep: int = TB_HISTORY_KEEP):
     conn.commit()
     conn.close()
 
-def get_recent_tb_events(limit: int = TB_HISTORY_KEEP):
-    """Возвращает [(event_id, completed_at), ...] от старых к новым (максимум `limit`)."""
+def get_recent_tb_events(limit: int = TB_HISTORY_KEEP, guild_id: int = 1):
+    """Возвращает [(event_id, completed_at), ...] от старых к новым (максимум `limit`) для этой гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_history_tables(cursor)
-    cursor.execute("SELECT id, completed_at FROM tb_events ORDER BY id DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT id, completed_at FROM tb_events WHERE guild_id = ? ORDER BY id DESC LIMIT ?", (guild_id, limit))
     rows = cursor.fetchall()
     conn.close()
     return list(reversed(rows))
@@ -818,14 +858,39 @@ def get_tb_player_detail(event_id, member_id):
 def _ensure_tb_plan_tables(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_planet_names (
+            guild_id INTEGER NOT NULL DEFAULT 1,
             phase TEXT NOT NULL,
             conflict_key TEXT NOT NULL,
             planet_name TEXT NOT NULL,
             source TEXT NOT NULL DEFAULT 'manual',
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (phase, conflict_key)
+            PRIMARY KEY (guild_id, phase, conflict_key)
         )
     """)
+    # Миграция с версии до мультитенантности (PRIMARY KEY (phase, conflict_key),
+    # единый "живой план" на всех — с двумя гильдиями это был бы общий стейт,
+    # который они бы друг другу затирали.
+    cursor.execute("PRAGMA table_info(tb_planet_names)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if cols and "guild_id" not in cols:
+        cursor.execute("ALTER TABLE tb_planet_names RENAME TO tb_planet_names_old")
+        cursor.execute("""
+            CREATE TABLE tb_planet_names (
+                guild_id INTEGER NOT NULL DEFAULT 1,
+                phase TEXT NOT NULL,
+                conflict_key TEXT NOT NULL,
+                planet_name TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, phase, conflict_key)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO tb_planet_names (guild_id, phase, conflict_key, planet_name, source, updated_at)
+            SELECT 1, phase, conflict_key, planet_name, source, updated_at FROM tb_planet_names_old
+        """)
+        cursor.execute("DROP TABLE tb_planet_names_old")
+        cursor.connection.commit()  # см. объяснение в _ensure_user_registration_table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_event_planet_names (
             event_id INTEGER NOT NULL,
@@ -836,43 +901,43 @@ def _ensure_tb_plan_tables(cursor):
         )
     """)
 
-def set_tb_planet_name(phase: str, conflict_key: str, planet_name: str, source: str = "manual"):
+def set_tb_planet_name(phase: str, conflict_key: str, planet_name: str, source: str = "manual", guild_id: int = 1):
     """conflict_key: '01'/'02'/'03' (Light/Dark/Mixed) или 'bonus' для доп. зоны."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_plan_tables(cursor)
     cursor.execute("""
-        INSERT OR REPLACE INTO tb_planet_names (phase, conflict_key, planet_name, source, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
-    """, (phase, conflict_key, planet_name, source))
+        INSERT OR REPLACE INTO tb_planet_names (guild_id, phase, conflict_key, planet_name, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (guild_id, phase, conflict_key, planet_name, source))
     conn.commit()
     conn.close()
 
-def get_tb_planet_names():
-    """Текущий (живой) план планет — для отчёта по ещё не заснэпшоченной/последней ТБ."""
+def get_tb_planet_names(guild_id: int = 1):
+    """Текущий (живой) план планет гильдии — для отчёта по ещё не заснэпшоченной/последней ТБ."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_plan_tables(cursor)
-    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names")
+    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return {(phase, conflict_key): planet_name for phase, conflict_key, planet_name in rows}
 
-def clear_tb_planet_names():
+def clear_tb_planet_names(guild_id: int = 1):
     """Вызывается при анонсе 1 этапа новой ТБ, чтобы не тащить названия планет прошлой ТБ."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_plan_tables(cursor)
-    cursor.execute("DELETE FROM tb_planet_names")
+    cursor.execute("DELETE FROM tb_planet_names WHERE guild_id = ?", (guild_id,))
     conn.commit()
     conn.close()
 
-def snapshot_tb_planet_names(event_id: int):
-    """Копирует текущий живой план планет в историю конкретного завершённого события ТБ."""
+def snapshot_tb_planet_names(event_id: int, guild_id: int = 1):
+    """Копирует текущий живой план планет гильдии в историю конкретного завершённого события ТБ."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_plan_tables(cursor)
-    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names")
+    cursor.execute("SELECT phase, conflict_key, planet_name FROM tb_planet_names WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     if rows:
         cursor.executemany("""

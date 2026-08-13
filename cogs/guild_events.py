@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import database
-from swgoh_comlink import SwgohComlink
+import guild_resolver
 from cogs.violations import autocomplete_players
 import tempfile
 
@@ -113,17 +113,12 @@ def _fmt_line(label, value, indent=0) -> str:
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.comlink = SwgohComlink(url="http://localhost:3000")
-        self.guild_id = "-kJhCaGGQqGOjgbWpJFEIg"
-        self.officer_channel_id = bot.OFFICER_CHANNEL_ID
-        self.allowed_role_id = bot.ALLOWED_OFFICER_ROLE_ID
-        self.tb_plan_channel_id = bot.TB_PLAN_CHANNEL_ID
-        self.tb_order_source_channel_id = bot.TB_ORDER_SOURCE_CHANNEL_ID
-        self.tb_order_role_id = bot.TB_ORDER_ROLE_ID
-        # Отпечаток последней ОТПРАВЛЕННОЙ ТБ, переживает рестарт бота (см. monitor_loop).
-        self.last_reported_tb_fingerprint = database.get_bot_state("last_reported_tb_fingerprint")
-        self.last_tw_status = None
-        self._tb_order_sent_key = None
+        # По гильдии: отпечаток последней ОТПРАВЛЕННОЙ ТБ (переживает рестарт бота —
+        # лениво подгружается из bot_state при первом тике monitor_loop для каждой
+        # гильдии), последний статус ВГ, ключ последней отправки ордера ТБ.
+        self.last_reported_tb_fingerprint = {}
+        self.last_tw_status = {}
+        self._tb_order_sent_key = {}
         self.monitor_loop.start()
         self.tb_order_loop.start()
 
@@ -134,16 +129,25 @@ class GuildEvents(commands.Cog):
     # ------------------ Авто-разбор плана планет из анонсов офицеров ------------------
     @commands.Cog.listener()
     async def on_message(self, message: disnake.Message):
-        if message.author.bot or message.channel.id != self.tb_plan_channel_id:
+        if message.author.bot:
+            return
+        # Канал анонсов — per-guild конфиг, ищем, какой гильдии принадлежит этот канал.
+        guild_cfg = next(
+            (cfg for cfg in database.get_all_guild_configs()
+             if cfg.get("tb_plan_channel_id") and str(message.channel.id) == str(cfg["tb_plan_channel_id"])),
+            None
+        )
+        if guild_cfg is None:
             return
         parsed = self._parse_tb_plan_message(message.content)
         if not parsed:
             return
         phase, mapping = parsed
+        gid = guild_cfg["id"]
         if phase == "1":
-            database.clear_tb_planet_names()
+            database.clear_tb_planet_names(guild_id=gid)
         for conflict_key, planet_name in mapping.items():
-            database.set_tb_planet_name(phase, conflict_key, planet_name, source="auto")
+            database.set_tb_planet_name(phase, conflict_key, planet_name, source="auto", guild_id=gid)
 
     def _parse_tb_plan_message(self, content: str):
         """Разбирает анонс "Восход Империи — N этап" на {conflict_key: planet_name}.
@@ -171,21 +175,31 @@ class GuildEvents(commands.Cog):
         return (phase, mapping) if mapping else None
 
     # ------------------ Ежедневная публикация ордера на актуальный этап ------------------
-    # Офицеры выкладывают план на все 6 этапов разом, одной веткой (TB_ORDER_SOURCE_
-    # CHANNEL_ID), а не по дням — поэтому бот сам режет её на блоки по заголовкам
+    # Офицеры выкладывают план на все 6 этапов разом, одной веткой (guilds.tb_order_
+    # source_channel_id), а не по дням — поэтому бот сам режет её на блоки по заголовкам
     # "Восход Империи — N этап" и публикует нужный блок каждый день. Какой этап
     # актуален "сегодня" определяем не по датам ТБ (бот их не знает), а по дню
     # недели внутри "тегаемой" недели: этап 1 — в тот день, что идёт первым в
-    # расписании "ордер" (bot.PING_SCHEDULE), этап 2 — во второй и т.д. Так публикация
-    # автоматически совпадает с днями, когда RotationPing и так напоминает про
-    # взводы/ордер — отдельного расписания не заводим.
-    def _is_ping_week(self, today_date) -> bool:
-        start_date = datetime.strptime(self.bot.PING_START_DATE, "%Y-%m-%d").date()
+    # расписании "ордер" (guilds.ping_schedule_json), этап 2 — во второй и т.д. Так
+    # публикация автоматически совпадает с днями, когда RotationPing и так напоминает
+    # про взводы/ордер — отдельного расписания не заводим.
+    @staticmethod
+    def _is_ping_week(guild_cfg, today_date) -> bool:
+        if not guild_cfg.get("ping_start_date"):
+            return False
+        start_date = datetime.strptime(guild_cfg["ping_start_date"], "%Y-%m-%d").date()
         delta = (today_date - start_date).days
         return (delta // 7) % 2 == 0
 
-    def _tb_order_phase_for_weekday(self, weekday: int):
-        order_entry = next((e for e in self.bot.PING_SCHEDULE if e.get("text") == "ордер"), None)
+    @staticmethod
+    def _tb_order_phase_for_weekday(guild_cfg, weekday: int):
+        if not guild_cfg.get("ping_schedule_json"):
+            return None
+        try:
+            schedule = json.loads(guild_cfg["ping_schedule_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        order_entry = next((e for e in schedule if e.get("text") == "ордер"), None)
         if not order_entry:
             return None
         days = sorted(order_entry.get("days", []))
@@ -193,10 +207,10 @@ class GuildEvents(commands.Cog):
             return None
         return str(days.index(weekday) + 1)
 
-    async def _fetch_tb_order_source_messages(self) -> list:
-        channel = self.bot.get_channel(self.tb_order_source_channel_id)
+    async def _fetch_tb_order_source_messages(self, source_channel_id: int) -> list:
+        channel = self.bot.get_channel(source_channel_id)
         if channel is None:
-            channel = await self.bot.fetch_channel(self.tb_order_source_channel_id)
+            channel = await self.bot.fetch_channel(source_channel_id)
         parts = []
         async for message in channel.history(limit=None, oldest_first=True):
             if message.content:
@@ -264,38 +278,46 @@ class GuildEvents(commands.Cog):
         now_msk = datetime.now(MSK)
         if now_msk.hour != 20 or now_msk.minute != 0:
             return
-        if not self._is_ping_week(now_msk.date()):
-            return
-        phase = self._tb_order_phase_for_weekday(now_msk.weekday())
-        if not phase:
-            return
 
         current_key = now_msk.strftime("%Y%m%d%H%M")
-        if current_key == self._tb_order_sent_key:
-            return
 
-        channel = self.bot.get_channel(self.tb_plan_channel_id)
-        if channel is None:
-            print(f"❌ [TBOrder] Канал {self.tb_plan_channel_id} не найден")
-            return
-        role = channel.guild.get_role(self.tb_order_role_id) if channel.guild else None
-        if role is None:
-            print(f"❌ [TBOrder] Роль {self.tb_order_role_id} не найдена")
-            return
+        for guild_cfg in database.get_all_guild_configs():
+            gid = guild_cfg["id"]
+            gname = guild_cfg["name"]
+            if not guild_cfg.get("tb_plan_channel_id") or not guild_cfg.get("tb_order_source_channel_id") \
+                    or not guild_cfg.get("tb_order_role_id"):
+                continue
+            if not self._is_ping_week(guild_cfg, now_msk.date()):
+                continue
+            phase = self._tb_order_phase_for_weekday(guild_cfg, now_msk.weekday())
+            if not phase:
+                continue
 
-        try:
-            messages = await self._fetch_tb_order_source_messages()
-            block = self._extract_tb_order_block(messages, phase)
-            if not block:
-                print(f"❌ [TBOrder] Не нашёл блок {phase} этапа в ветке-плане")
-                return
-            message_text = f"## {block}\n\n\n{role.mention}"
-            for chunk in self._chunk_message(message_text):
-                await channel.send(chunk)
-            self._tb_order_sent_key = current_key
-            print(f"✅ [TBOrder] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
-        except Exception as e:
-            print(f"❌ [TBOrder] Ошибка отправки ордера: {e}")
+            if current_key == self._tb_order_sent_key.get(gid):
+                continue
+
+            channel = self.bot.get_channel(int(guild_cfg["tb_plan_channel_id"]))
+            if channel is None:
+                print(f"❌ [TBOrder] [{gname}] Канал {guild_cfg['tb_plan_channel_id']} не найден")
+                continue
+            role = channel.guild.get_role(int(guild_cfg["tb_order_role_id"])) if channel.guild else None
+            if role is None:
+                print(f"❌ [TBOrder] [{gname}] Роль {guild_cfg['tb_order_role_id']} не найдена")
+                continue
+
+            try:
+                messages = await self._fetch_tb_order_source_messages(int(guild_cfg["tb_order_source_channel_id"]))
+                block = self._extract_tb_order_block(messages, phase)
+                if not block:
+                    print(f"❌ [TBOrder] [{gname}] Не нашёл блок {phase} этапа в ветке-плане")
+                    continue
+                message_text = f"## {block}\n\n\n{role.mention}"
+                for chunk in self._chunk_message(message_text):
+                    await channel.send(chunk)
+                self._tb_order_sent_key[gid] = current_key
+                print(f"✅ [TBOrder] [{gname}] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
+            except Exception as e:
+                print(f"❌ [TBOrder] [{gname}] Ошибка отправки ордера: {e}")
 
     @tb_order_loop.before_loop
     async def _before_tb_order_loop(self):
@@ -329,67 +351,82 @@ class GuildEvents(commands.Cog):
     @tasks.loop(minutes=5)
     async def monitor_loop(self):
         await self.bot.wait_until_ready()
-        try:
-            guild = await asyncio.to_thread(
-                self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True
-            )
-        except Exception as e:
-            print(f"Ошибка получения данных гильдии: {e}")
-            return
 
-        # Триггерим не по полю "status" (оно ненадёжно: рестарт бота обнуляет память,
-        # а comlink может проскочить статус "completed" между опросами) — а по факту
-        # изменения содержимого recentTerritoryBattleResult. Отпечаток хранится в БД,
-        # поэтому рестарт бота не приводит ни к повторной, ни к пропущенной отправке.
-        try:
-            result = guild.get("recentTerritoryBattleResult", [])
-            if result:
-                fingerprint = hashlib.sha1(
-                    json.dumps(result, sort_keys=True, default=str).encode()
-                ).hexdigest()
-                if fingerprint != self.last_reported_tb_fingerprint:
-                    self.last_reported_tb_fingerprint = fingerprint
-                    database.set_bot_state("last_reported_tb_fingerprint", fingerprint)
-                    await self.generate_tb_report(guild, fingerprint)
-        except Exception as e:
-            print(f"Ошибка обработки отчёта по ТБ: {e}")
+        for guild_cfg in database.get_all_guild_configs():
+            gid = guild_cfg["id"]
+            gname = guild_cfg["name"]
+            swgoh_guild_id = guild_cfg.get("swgoh_guild_id")
+            if not swgoh_guild_id:
+                continue
 
-        tw_status = guild.get("territoryWarStatus", [])
-        current_tw = tw_status[0] if tw_status else None
-        if current_tw and self.last_tw_status and current_tw.get("status") != self.last_tw_status.get("status"):
-            if current_tw.get("status") == "completed":
-                await self.generate_tw_report(guild)
-        self.last_tw_status = current_tw
+            try:
+                guild = await asyncio.to_thread(
+                    self.bot.comlink.get_guild, swgoh_guild_id, include_recent_guild_activity_info=True
+                )
+            except Exception as e:
+                print(f"❌ [{gname}] Ошибка получения данных гильдии: {e}")
+                continue
 
-    async def generate_tb_report(self, guild, fingerprint=None):
+            # Триггерим не по полю "status" (оно ненадёжно: рестарт бота обнуляет память,
+            # а comlink может проскочить статус "completed" между опросами) — а по факту
+            # изменения содержимого recentTerritoryBattleResult. Отпечаток хранится в БД
+            # per-guild, поэтому рестарт бота не приводит ни к повторной, ни к пропущенной
+            # отправке. Лениво подгружаем сохранённый отпечаток при первом тике на гильдию.
+            if gid not in self.last_reported_tb_fingerprint:
+                self.last_reported_tb_fingerprint[gid] = database.get_bot_state("last_reported_tb_fingerprint", guild_id=gid)
+            try:
+                result = guild.get("recentTerritoryBattleResult", [])
+                if result:
+                    fingerprint = hashlib.sha1(
+                        json.dumps(result, sort_keys=True, default=str).encode()
+                    ).hexdigest()
+                    if fingerprint != self.last_reported_tb_fingerprint.get(gid):
+                        self.last_reported_tb_fingerprint[gid] = fingerprint
+                        database.set_bot_state("last_reported_tb_fingerprint", fingerprint, guild_id=gid)
+                        await self.generate_tb_report(guild, guild_cfg, fingerprint)
+            except Exception as e:
+                print(f"❌ [{gname}] Ошибка обработки отчёта по ТБ: {e}")
+
+            tw_status = guild.get("territoryWarStatus", [])
+            current_tw = tw_status[0] if tw_status else None
+            prev_tw = self.last_tw_status.get(gid)
+            if current_tw and prev_tw and current_tw.get("status") != prev_tw.get("status"):
+                if current_tw.get("status") == "completed":
+                    await self.generate_tw_report(guild)
+            self.last_tw_status[gid] = current_tw
+
+    async def generate_tb_report(self, guild, guild_cfg, fingerprint=None):
+        gid = guild_cfg["id"]
         result = guild.get("recentTerritoryBattleResult", [])
         if not result:
-            await self.notify_officers("ТБ завершена, но отчёт пуст.")
+            await self.notify_officers(guild_cfg, "ТБ завершена, но отчёт пуст.")
             return
 
         members = guild.get("member", [])
         player_names = {m["playerId"]: m["playerName"] for m in members if "playerId" in m and "playerName" in m}
         stats = self._collect_guild_stats(result, player_names)
         if not stats:
-            await self.notify_officers("Нет данных по очкам.")
+            await self.notify_officers(guild_cfg, "Нет данных по очкам.")
             return
 
         if fingerprint:
             try:
-                self._store_tb_history(fingerprint, result, members, player_names, stats)
+                self._store_tb_history(fingerprint, result, members, player_names, stats, guild_id=gid)
             except Exception as e:
                 print(f"Ошибка сохранения истории ТБ: {e}")
 
         report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
-        channel = self.bot.get_channel(self.officer_channel_id)
+        channel = self.bot.get_channel(int(guild_cfg["officer_channel_id"])) if guild_cfg.get("officer_channel_id") else None
         if channel:
             await self.send_as_file(channel, report, "tb_report.txt")
 
     async def generate_tw_report(self, guild):
         pass
 
-    async def notify_officers(self, message):
-        channel = self.bot.get_channel(self.officer_channel_id)
+    async def notify_officers(self, guild_cfg, message):
+        if not guild_cfg.get("officer_channel_id"):
+            return
+        channel = self.bot.get_channel(int(guild_cfg["officer_channel_id"]))
         if channel:
             await channel.send(f"📢 {message}")
 
@@ -529,11 +566,11 @@ class GuildEvents(commands.Cog):
 
         return "\n".join(lines)
 
-    def _store_tb_history(self, fingerprint, result, members, player_names, stats):
+    def _store_tb_history(self, fingerprint, result, members, player_names, stats, guild_id=1):
         """Сохраняет итоги завершённой ТБ (сводку по гильдии + полную расшифровку
-        по каждому игроку) в БД, храним только последние TB_HISTORY_KEEP событий."""
-        event_id = database.record_tb_event(fingerprint)
-        database.snapshot_tb_planet_names(event_id)
+        по каждому игроку) в БД, храним только последние TB_HISTORY_KEEP событий на гильдию."""
+        event_id = database.record_tb_event(fingerprint, guild_id=guild_id)
+        database.snapshot_tb_planet_names(event_id, guild_id=guild_id)
 
         summary_rows = [
             (event_id, member_id, s["name"], s["summary"], s["unit_donated"],
@@ -558,7 +595,7 @@ class GuildEvents(commands.Cog):
             ))
         database.save_tb_player_detail(detail_rows)
 
-        database.prune_tb_events()
+        database.prune_tb_events(guild_id=guild_id)
 
     async def send_as_file(self, channel, content, filename):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
@@ -773,16 +810,32 @@ class GuildEvents(commands.Cog):
 
     # ------------------ Slash-команды ------------------
     @commands.slash_command(name="тб_отчет", description="Управление отчётами по ТБ")
-    @commands.has_any_role(1153753506772164629)
+    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
+
+    def _resolve_guild_config(self, inter):
+        """Общий шаг для команд /тб_отчет: резолвит guild_id по роли автора и
+        достаёт конфиг гильдии. Возвращает None, если не удалось (нет роли ни
+        одной гильдии, либо для гильдии ещё не резолвлен swgoh_guild_id)."""
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            return None
+        guild_cfg = database.get_guild_config(guild_id)
+        if not guild_cfg or not guild_cfg.get("swgoh_guild_id"):
+            return None
+        return guild_cfg
 
     @tb_report.sub_command(name="последняя", description="Сводка последней завершённой ТБ")
     async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
+        guild_cfg = self._resolve_guild_config(inter)
+        if guild_cfg is None:
+            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
+            return
         try:
             guild = await asyncio.wait_for(
-                asyncio.to_thread(self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True),
+                asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"], include_recent_guild_activity_info=True),
                 timeout=15.0
             )
         except asyncio.TimeoutError:
@@ -816,8 +869,14 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
+        guild_cfg = self._resolve_guild_config(inter)
+        if guild_cfg is None:
+            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
+            return
+        guild_id = guild_cfg["id"]
+
         if name is None:
-            registration = database.get_user_registration(str(inter.author.id))
+            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_message(
                     "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."
@@ -825,21 +884,21 @@ class GuildEvents(commands.Cog):
                 return
             allycode, name = registration
         else:
-            cache = self.bot.guild_roster_cache
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
             if not cache or name not in cache:
                 await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
                 return
             allycode = cache[name]
 
         try:
-            player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
+            player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
                 return
 
             guild = await asyncio.wait_for(
-                asyncio.to_thread(self.comlink.get_guild, self.guild_id, include_recent_guild_activity_info=True),
+                asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"], include_recent_guild_activity_info=True),
                 timeout=15.0
             )
             result = guild.get("recentTerritoryBattleResult", [])
@@ -852,7 +911,7 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
                 return
 
-            planet_map = database.get_tb_planet_names()
+            planet_map = database.get_tb_planet_names(guild_id=guild_id)
             report = self._format_tb_player_report(name, zone_data, global_totals, round_totals, raw_keys, planet_map)
             if unrecognized:
                 report += "\n\nНераспознанные ключи (новая механика?):\n"
@@ -872,7 +931,12 @@ class GuildEvents(commands.Cog):
     async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        events = database.get_recent_tb_events()
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        events = database.get_recent_tb_events(guild_id=guild_id)
         if not events:
             await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
             return
@@ -895,14 +959,19 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
-        cache = self.bot.guild_roster_cache
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
+            return
+
+        cache = self.bot.guild_roster_caches.get(guild_id, {})
         if not cache or name not in cache:
             await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
             return
         allycode = cache[name]
 
         try:
-            player = await asyncio.to_thread(self.comlink.get_player, allycode=allycode)
+            player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
             player_id = player.get("playerId")
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
@@ -911,7 +980,7 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message(f"Ошибка: {e}")
             return
 
-        events = database.get_recent_tb_events()
+        events = database.get_recent_tb_events(guild_id=guild_id)
         if not events:
             await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
             return
@@ -960,8 +1029,13 @@ class GuildEvents(commands.Cog):
         ),
         планета: str = commands.Param(description="Название планеты"),
     ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+
         planet_name = планета.strip()
-        database.set_tb_planet_name(str(этап), ветка, planet_name, source="manual")
+        database.set_tb_planet_name(str(этап), ветка, planet_name, source="manual", guild_id=guild_id)
         await inter.response.send_message(
             f"✅ Этап {этап}: сохранена планета «{planet_name}»", ephemeral=True
         )
@@ -969,8 +1043,14 @@ class GuildEvents(commands.Cog):
     @tb_report.sub_command(name="синхронизация", description="Привязать Discord-пользователей к игровым аккаунтам")
     async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
+        guild_cfg = self._resolve_guild_config(inter)
+        if guild_cfg is None:
+            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
+            return
+        guild_id = guild_cfg["id"]
+
         try:
-            guild = await asyncio.to_thread(self.comlink.get_guild, self.guild_id)
+            guild = await asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"])
         except Exception as e:
             await inter.edit_original_message(f"Ошибка получения гильдии: {e}")
             return
@@ -989,7 +1069,7 @@ class GuildEvents(commands.Cog):
             if not player_id or not player_name:
                 continue
             try:
-                player = await asyncio.to_thread(self.comlink.get_player, player_id=player_id)
+                player = await asyncio.to_thread(self.bot.comlink.get_player, player_id=player_id)
                 allycode = player.get("allyCode")
                 if not allycode:
                     continue
@@ -1006,7 +1086,7 @@ class GuildEvents(commands.Cog):
                 not_found.append(player_name)
                 continue
 
-            database.set_user_mapping(str(member_found.id), str(allycode), player_name)
+            database.set_user_mapping(str(member_found.id), str(allycode), player_name, guild_id=guild_id)
             linked += 1
 
         msg = f"✅ Привязано: {linked} игроков."
