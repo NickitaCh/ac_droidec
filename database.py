@@ -8,6 +8,11 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
+    # 0. Реестр SWGOH-гильдий, обслуживаемых ботом (мультитенантность).
+    #    identity/каналы/роли живут здесь, а не в main.py — их нужно редактировать
+    #    без деплоя (через будущий веб-дашборд). См. CLAUDE.md.
+    _ensure_guilds_table(cursor)
+
     # 1. Таблица маппинга пользователей (Discord <-> SWGOH)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_mapping (
@@ -64,6 +69,130 @@ def init_db():
     conn.commit()
     conn.close()
     print("📋 [БД] Инициализация структуры базы данных успешно завершена.")
+
+# =====================================================================
+# РЕЕСТР ГИЛЬДИЙ (мультитенантность): какие SWGOH-гильдии обслуживает бот,
+# и их Discord-конфиг (каналы/роли/расписания). Раньше это были одноимённые
+# константы в main.py (ALLY_CODE, TB_PLAN_CHANNEL_ID и т.д.) — теперь одна
+# строка на гильдию, редактируемая без деплоя. main.py на старте сидирует
+# сюда текущую гильдию (AC) через seed_default_guild, если таблица пуста.
+# =====================================================================
+GUILD_CONFIG_COLUMNS = [
+    "name", "ally_code", "swgoh_guild_id", "discord_guild_id",
+    "member_role_id", "officer_role_id",
+    "ping_channel_id", "ping_role_id", "ping_start_date", "ping_schedule_json",
+    "birthday_channel_id", "birthday_role_id",
+    "officer_channel_id",
+    "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
+]
+
+
+def _ensure_guilds_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guilds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            ally_code TEXT NOT NULL,
+            swgoh_guild_id TEXT,
+            discord_guild_id TEXT NOT NULL,
+            member_role_id TEXT NOT NULL,
+            officer_role_id TEXT NOT NULL,
+            ping_channel_id TEXT,
+            ping_role_id TEXT,
+            ping_start_date TEXT,
+            ping_schedule_json TEXT,
+            birthday_channel_id TEXT,
+            birthday_role_id TEXT,
+            officer_channel_id TEXT,
+            tb_plan_channel_id TEXT,
+            tb_order_source_channel_id TEXT,
+            tb_order_role_id TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def _row_to_guild_dict(row, columns):
+    return {columns[i]: row[i] for i in range(len(columns))}
+
+
+def get_all_guild_configs(active_only: bool = True) -> list:
+    """Возвращает все зарегистрированные гильдии как список dict (включая id)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    query = "SELECT * FROM guilds"
+    if active_only:
+        query += " WHERE is_active = 1"
+    cursor.execute(query)
+    columns = [d[0] for d in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_guild_dict(r, columns) for r in rows]
+
+
+def get_guild_config(guild_id: int) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute("SELECT * FROM guilds WHERE id = ?", (guild_id,))
+    columns = [d[0] for d in cursor.description]
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_guild_dict(row, columns) if row else None
+
+
+def create_guild(**fields) -> int:
+    """fields — любое подмножество GUILD_CONFIG_COLUMNS. name/ally_code/discord_guild_id/
+    member_role_id/officer_role_id обязательны (NOT NULL в схеме)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cols = [c for c in GUILD_CONFIG_COLUMNS if c in fields]
+    placeholders = ", ".join("?" for _ in cols)
+    cursor.execute(
+        f"INSERT INTO guilds ({', '.join(cols)}, created_at) VALUES ({placeholders}, datetime('now'))",
+        tuple(fields[c] for c in cols)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return new_id
+
+
+def update_guild_config(guild_id: int, **fields) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cols = [c for c in GUILD_CONFIG_COLUMNS if c in fields]
+    if not cols:
+        conn.close()
+        return False
+    set_clause = ", ".join(f"{c} = ?" for c in cols)
+    cursor.execute(
+        f"UPDATE guilds SET {set_clause} WHERE id = ?",
+        tuple(fields[c] for c in cols) + (guild_id,)
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def seed_default_guild(**fields) -> int | None:
+    """Идемпотентный сид: если в guilds ещё нет ни одной строки — создаёт первую
+    (текущая единственная гильдия, id=1) из переданных main.py-констант. Если
+    таблица уже не пуста — ничего не делает и возвращает None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute("SELECT COUNT(*) FROM guilds")
+    count = cursor.fetchone()[0]
+    conn.close()
+    if count > 0:
+        return None
+    return create_guild(**fields)
 
 # =====================================================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С НАРУШЕНИЯМИ (WARNS)

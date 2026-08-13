@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import disnake
@@ -114,6 +115,26 @@ async def on_ready():
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
     database.init_birthday_table()
+
+    # Сид первой (текущей) гильдии в реестр мультитенантности — не трогает
+    # существующие строки, отрабатывает один раз, пока таблица guilds пуста.
+    database.seed_default_guild(
+        name="AbsoluteChaos",
+        ally_code=ALLY_CODE,
+        discord_guild_id=str(SNG_GUILD_ID),
+        member_role_id=str(ALLOWED_ROLE_IDS[0]),
+        officer_role_id=str(ALLOWED_OFFICER_ROLE_ID),
+        ping_channel_id=str(PING_CHANNEL_ID),
+        ping_role_id=str(PING_ROLE_ID),
+        ping_start_date=PING_START_DATE,
+        ping_schedule_json=json.dumps(PING_SCHEDULE),
+        birthday_channel_id=str(BIRTHDAY_CHANNEL_ID),
+        birthday_role_id=str(BIRTHDAY_ROLE_ID),
+        officer_channel_id=str(OFFICER_CHANNEL_ID),
+        tb_plan_channel_id=str(TB_PLAN_CHANNEL_ID),
+        tb_order_source_channel_id=str(TB_ORDER_SOURCE_CHANNEL_ID),
+        tb_order_role_id=str(TB_ORDER_ROLE_ID),
+    )
 
     # 2. Установка статуса бота
     await bot.change_presence(
