@@ -74,7 +74,13 @@ class GuildManagerBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
-            test_guilds=test_guilds_list
+            test_guilds=test_guilds_list,
+            # Автосинк слэш-команд (disnake) ловил баг: периодический авто-ресинк
+            # иногда пушил ПУСТОЙ список в гильдию 931280548402442310, стирая все
+            # слэш-команды гильдии целиком. Отключаем автосинк совсем, пока не
+            # разобрались в первопричине — список команд теперь меняется только
+            # вручную через Discord REST API (см. память проекта).
+            command_sync_flags=commands.CommandSyncFlags.none()
         )
         self.comlink = comlink
         self.ally_code = ALLY_CODE
