@@ -5,6 +5,7 @@ import disnake
 from disnake.ext import commands
 from dotenv import load_dotenv
 import database
+import guild_resolver
 from swgoh_comlink import SwgohComlink
 
 # stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
@@ -143,22 +144,15 @@ async def on_ready():
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
-def _check_allowed_role(author, guild_id) -> bool:
+def _check_allowed_role(author) -> bool:
     if author.id in bot.allowed_user_ids:
         return True
-    if guild_id is None:
-        return False
-    # Берём сырые id ролей (author._roles) вместо author.roles: это свойство
-    # само резолвит роли через author.guild.get_role(...), а Interaction.guild
-    # может вернуть None даже когда взаимодействие реально пришло из гильдии
-    # (см. disnake docs: "This will only return a full Guild for cached guilds").
-    # _roles заполняется напрямую из пейлоада интеракции и от кэша не зависит.
-    user_role_ids = getattr(author, "_roles", None)
-    if user_role_ids is None:
-        user_role_ids = [role.id for role in getattr(author, "roles", [])]
-    has_permission = any(role_id in bot.allowed_role_ids for role_id in user_role_ids)
-    if not has_permission:
-        raise commands.MissingAnyRole(bot.allowed_role_ids)
+    # Раньше проверялось по одному глобальному allowed_role_ids — теперь
+    # "доступ разрешён" значит "автор состоит в member/officer-роли ХОТЯ БЫ
+    # одной зарегистрированной в guilds гильдии" (guild_resolver сам читает
+    # сырые author._roles по тому же паттерну, что был здесь раньше).
+    if guild_resolver.resolve_guild_id(author) is None:
+        raise commands.MissingAnyRole(guild_resolver.all_registered_role_ids())
     return True
 
 # @bot.check — только для текстовых (!) команд, слэш-команды не проверяет
@@ -166,11 +160,11 @@ def _check_allowed_role(author, guild_id) -> bool:
 # apply to application commands."). Нужен отдельный @bot.slash_command_check.
 @bot.check
 async def check_guild_roles(ctx):
-    return _check_allowed_role(ctx.author, ctx.guild.id if ctx.guild else None)
+    return _check_allowed_role(ctx.author)
 
 @bot.slash_command_check
 async def check_guild_roles_slash(inter):
-    return _check_allowed_role(inter.author, inter.guild_id)
+    return _check_allowed_role(inter.author)
 
 @bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
