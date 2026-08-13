@@ -1143,7 +1143,7 @@ class DatacronRequirementsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         сезон: str = commands.Param(description="Сезон для проверки", autocomplete=autocomplete_datacron_season),
-        игрок: str = commands.Param(default=None, description="Если не указан — берётся ваша регистрация (/регистрация), либо гильдия=True для отчёта по всей гильдии", autocomplete=autocomplete_players),
+        игрок: str = commands.Param(default=None, description="Не указан → вы (/регистрация); либо гильдия=True для отчёта по всей гильдии", autocomplete=autocomplete_players),
         гильдия: bool = commands.Param(default=False, description="Отчёт по всей гильдии вместо одного игрока (работает только без указания игрока)"),
     ):
         await inter.response.defer(ephemeral=True)
