@@ -1,9 +1,16 @@
 import os
+import sys
 import disnake
 from disnake.ext import commands
 from dotenv import load_dotenv
 import database
 from swgoh_comlink import SwgohComlink
+
+# stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
+# копится в буфере и попадает в `docker logs` только при заполнении буфера либо
+# выходе процесса (тогда там оказывается вывод ПРЕДЫДУЩЕГО запуска, а не текущего).
+# Форсируем построчный флаш, чтобы логи отражали реальное текущее состояние бота.
+sys.stdout.reconfigure(line_buffering=True)
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
