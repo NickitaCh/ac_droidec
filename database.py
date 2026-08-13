@@ -381,44 +381,68 @@ def init_birthday_table():
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS birthdays (
-            discord_id TEXT PRIMARY KEY,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            discord_id TEXT NOT NULL,
             day INTEGER NOT NULL,
             month INTEGER NOT NULL,
-            year INTEGER
+            year INTEGER,
+            PRIMARY KEY (guild_id, discord_id)
         )
     """)
+    # Миграция с версии до мультитенантности (PRIMARY KEY только по discord_id) —
+    # человек, отслеживаемый в двух гильдиях, теоретически возможен, поэтому
+    # discord_id сам по себе больше не уникальный ключ.
+    cursor.execute("PRAGMA table_info(birthdays)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if cols and "guild_id" not in cols:
+        cursor.execute("ALTER TABLE birthdays RENAME TO birthdays_old")
+        cursor.execute("""
+            CREATE TABLE birthdays (
+                guild_id INTEGER NOT NULL DEFAULT 1,
+                discord_id TEXT NOT NULL,
+                day INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                year INTEGER,
+                PRIMARY KEY (guild_id, discord_id)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO birthdays (guild_id, discord_id, day, month, year)
+            SELECT 1, discord_id, day, month, year FROM birthdays_old
+        """)
+        cursor.execute("DROP TABLE birthdays_old")
     conn.commit()
     conn.close()
 
-def add_birthday(discord_id: str, day: int, month: int, year: int = None):
+def add_birthday(discord_id: str, day: int, month: int, year: int = None, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR REPLACE INTO birthdays (discord_id, day, month, year)
-        VALUES (?, ?, ?, ?)
-    """, (discord_id, day, month, year))
+        INSERT OR REPLACE INTO birthdays (guild_id, discord_id, day, month, year)
+        VALUES (?, ?, ?, ?, ?)
+    """, (guild_id, discord_id, day, month, year))
     conn.commit()
     conn.close()
 
-def remove_birthday(discord_id: str):
+def remove_birthday(discord_id: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM birthdays WHERE discord_id = ?", (discord_id,))
+    cursor.execute("DELETE FROM birthdays WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id))
     conn.commit()
     conn.close()
 
-def get_all_birthdays():
+def get_all_birthdays(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT discord_id, day, month, year FROM birthdays")
+    cursor.execute("SELECT discord_id, day, month, year FROM birthdays WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
-def get_birthday_by_discord_id(discord_id: str):
+def get_birthday_by_discord_id(discord_id: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT day, month, year FROM birthdays WHERE discord_id = ?", (discord_id,))
+    cursor.execute("SELECT day, month, year FROM birthdays WHERE guild_id = ? AND discord_id = ?", (guild_id, discord_id))
     row = cursor.fetchone()
     conn.close()
     return row
