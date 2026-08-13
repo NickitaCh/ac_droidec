@@ -21,21 +21,6 @@ def _is_officer(inter: disnake.ApplicationCommandInteraction) -> bool:
     return OFFICER_ROLE_ID in role_ids
 
 
-def _resolve_display_name(inter: disnake.ApplicationCommandInteraction, discord_id: str) -> str:
-    """Имя участника, полученное из собственного кэша бота (intents.members),
-    а не через <@id>-упоминание — рендер упоминания в клиенте Discord зависит
-    от того, закэширован ли этот пользователь именно у смотрящего, и часто
-    показывает голый ID вместо ника. Резолв на стороне бота даёт стабильный
-    результат у всех."""
-    member = None
-    if inter.guild:
-        try:
-            member = inter.guild.get_member(int(discord_id))
-        except (TypeError, ValueError):
-            member = None
-    return member.display_name if member else f"<@{discord_id}>"
-
-
 class SelfRegistrationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -161,8 +146,7 @@ class SelfRegistrationCog(commands.Cog):
                 missing_lines.append(f"{name} (`{ally_code}`)")
                 continue
             discord_id, is_main = entry
-            display = _resolve_display_name(inter, discord_id)
-            line = f"{display} — {name} (`{ally_code}`)"
+            line = f"<@{discord_id}> — {name} (`{ally_code}`)"
             (main_lines if is_main else alt_lines).append(line)
 
         total = len(cache)
