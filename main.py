@@ -65,9 +65,10 @@ intents.message_content = True
 class GuildManagerBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix="!", 
-            intents=intents, 
-            test_guilds=test_guilds_list
+            command_prefix="!",
+            intents=intents,
+            test_guilds=test_guilds_list,
+            sync_commands_debug=True
         )
         self.comlink = comlink
         self.ally_code = ALLY_CODE
