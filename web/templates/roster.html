@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Состав гильдии — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Состав гильдии</h1>
+
+    <div class="stats-grid">
+        <div class="stat-tile">
+            <div class="stat-value">{{ rows|length }}</div>
+            <div class="stat-label">Игроков в составе</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value">{{ rows|selectattr("registered")|list|length }}</div>
+            <div class="stat-label">Привязали Discord (/регистрация)</div>
+        </div>
+    </div>
+
+    {% if not rows %}
+        <p class="empty-state">Состав пуст — кэш ростера ещё не синхронизировался с Comlink.</p>
+    {% else %}
+        <div class="table-toolbar">
+            <input type="search" placeholder="Поиск по имени или коду союзника…" data-table-search="roster-table">
+        </div>
+        <div class="table-scroll">
+            <table class="data" id="roster-table">
+                <thead>
+                    <tr>
+                        <th data-sort="text">Игрок</th>
+                        <th data-sort="text">Код союзника</th>
+                        <th data-sort="text">Discord</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr data-search="{{ (row.ingame_name ~ ' ' ~ row.ally_code)|lower }}">
+                            <td>{{ row.ingame_name }}</td>
+                            <td><code>{{ row.ally_code }}</code></td>
+                            <td>
+                                {% if row.registered %}
+                                    <span class="badge badge-ok">привязан</span>
+                                {% else %}
+                                    <span class="badge badge-neutral">не привязан</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

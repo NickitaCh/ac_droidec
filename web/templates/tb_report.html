@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}ТБ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Территориальные битвы</h1>
+
+    {% if not report %}
+        <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
+    {% else %}
+        {% set latest_event = report.events[-1] %}
+        <div class="stats-grid">
+            <div class="stat-tile">
+                <div class="stat-value">{{ latest_event[1][:10] }}</div>
+                <div class="stat-label">Дата последней ТБ</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-value">{{ report.latest|length }}</div>
+                <div class="stat-label">Участников</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-value">{{ report.latest|sum(attribute="summary") }}</div>
+                <div class="stat-label">Очков территории всего</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-value">{{ report.history|selectattr("regressed")|list|length }}</div>
+                <div class="stat-label">🚨 просадка vs среднего</div>
+            </div>
+        </div>
+
+        <h2>Последняя ТБ ({{ latest_event[1][:10] }})</h2>
+        <div class="table-toolbar">
+            <input type="search" placeholder="Поиск по игроку…" data-table-search="latest-tb-table">
+        </div>
+        <div class="table-scroll">
+            <table class="data" id="latest-tb-table">
+                <thead>
+                    <tr>
+                        <th data-sort="text">Игрок</th>
+                        <th class="num" data-sort="num">Очки территории</th>
+                        <th class="num" data-sort="num">Юниты во взвод</th>
+                        <th class="num" data-sort="num">ОЗ попытки</th>
+                        <th class="num" data-sort="num">БЗ волн пройдено</th>
+                        <th class="num" data-sort="num">БЗ попыток</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in report.latest %}
+                        <tr data-search="{{ p.name|lower }}">
+                            <td>{{ p.name }}</td>
+                            <td class="num">{{ p.summary }}</td>
+                            <td class="num">{{ p.unit_donated }}</td>
+                            <td class="num">{{ p.covert_attempt }}</td>
+                            <td class="num">{{ p.strike_encounter }}</td>
+                            <td class="num">{{ p.strike_attempt }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if report.events|length > 1 %}
+            <h2>История по очкам территории (последние {{ report.events|length }} ТБ)</h2>
+            <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ).</p>
+            <div class="table-scroll">
+                <table class="data" id="tb-history-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            {% for event_id, completed_at in report.events %}
+                                <th class="num" data-sort="num">ТБ ({{ completed_at[:10] }})</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in report.history %}
+                            <tr data-search="{{ row.name|lower }}">
+                                <td>{% if row.regressed %}🚨 {% endif %}{{ row.name }}</td>
+                                {% for event_id, completed_at in report.events %}
+                                    {% set cell = row.per_event.get(event_id) %}
+                                    <td class="num" data-value="{{ cell.summary if cell else -1 }}">{{ cell.summary if cell else "—" }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}
