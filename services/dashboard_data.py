@@ -55,6 +55,10 @@ class TbHistoryRow:
     name: str
     per_event: dict  # {event_id: TbSummaryRow}
     regressed: bool
+    sparkline_points: str = ""  # "x,y x,y ..." для <polyline>, viewBox "0 0 100 30"
+    sparkline_last_xy: tuple | None = None  # (x, y) последней точки — для точки-маркера
+    sparkline_hits: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — hover-точки со значениями
+    last_value: int | None = None
 
 
 @dataclass
@@ -62,6 +66,31 @@ class TbReport:
     events: list  # [(event_id, completed_at), ...] старые -> новые
     latest: list[TbSummaryRow]  # последняя ТБ, отсортирована по очкам убыв.
     history: list[TbHistoryRow]  # матрица по всем событиям, тоже по убыв. последних очков
+    event_totals: list  # [(completed_at, total_summary), ...] — по гильдии, для тренд-графика
+    trend_points: str = ""  # "x,y x,y ..." для <polyline>, viewBox "0 0 100 40"
+    trend_area_points: str = ""  # то же + замыкание по низу, для залитой площади под линией
+    trend_coords: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — для точек-маркеров
+
+
+def _svg_coords(values: list, width: int = 100, height: int = 30, pad: int = 3) -> list:
+    """Нормализует values в координаты (x, y) для SVG, viewBox "0 0 width height".
+    min→низ, max→верх (SVG y растёт вниз, поэтому инвертируем)."""
+    if not values:
+        return []
+    if len(values) == 1:
+        return [(width / 2, height / 2)]
+    vmin, vmax = min(values), max(values)
+    span = (vmax - vmin) or 1
+    coords = []
+    for i, v in enumerate(values):
+        x = (i / (len(values) - 1)) * (width - 2 * pad) + pad
+        y = height - pad - ((v - vmin) / span) * (height - 2 * pad)
+        coords.append((round(x, 1), round(y, 1)))
+    return coords
+
+
+def _points_str(coords: list) -> str:
+    return " ".join(f"{x},{y}" for x, y in coords)
 
 
 def _compute_tb_regressions(event_ids: list[int], by_member: dict) -> set:
@@ -95,9 +124,11 @@ def get_tb_report(guild_id: int) -> TbReport | None:
     summary_rows = database.get_tb_player_summary_for_events(event_ids)
 
     by_member = {}
+    totals_by_event = {eid: 0 for eid in event_ids}
     for event_id, member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt in summary_rows:
         row = TbSummaryRow(member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt)
         by_member.setdefault(member_id, {})[event_id] = row
+        totals_by_event[event_id] = totals_by_event.get(event_id, 0) + summary
 
     regressed = _compute_tb_regressions(event_ids, by_member)
 
@@ -115,9 +146,38 @@ def get_tb_report(guild_id: int) -> TbReport | None:
     history = []
     for member_id, rows in sorted(by_member.items(), key=latest_summary, reverse=True):
         name = rows[latest_event_id].name if latest_event_id in rows else next(iter(rows.values())).name
-        history.append(TbHistoryRow(member_id=member_id, name=name, per_event=rows, regressed=member_id in regressed))
+        ordered_event_ids = [eid for eid in event_ids if eid in rows]
+        ordered_values = [rows[eid].summary for eid in ordered_event_ids]
+        completed_at_by_id = dict(events)
+        spark_coords = _svg_coords(ordered_values, width=68, height=22, pad=3)
+        sparkline_hits = [
+            (x, y, completed_at_by_id[eid], v)
+            for (x, y), eid, v in zip(spark_coords, ordered_event_ids, ordered_values)
+        ]
+        history.append(TbHistoryRow(
+            member_id=member_id, name=name, per_event=rows, regressed=member_id in regressed,
+            sparkline_points=_points_str(spark_coords),
+            sparkline_last_xy=spark_coords[-1] if spark_coords else None,
+            sparkline_hits=sparkline_hits,
+            last_value=ordered_values[-1] if ordered_values else None,
+        ))
 
-    return TbReport(events=events, latest=latest, history=history)
+    event_totals = [(completed_at, totals_by_event[eid]) for eid, completed_at in events]
+    trend_w, trend_h, trend_pad = 100, 40, 4
+    trend_coords = _svg_coords([t for _, t in event_totals], width=trend_w, height=trend_h, pad=trend_pad)
+    trend_points = _points_str(trend_coords)
+    trend_area_points = ""
+    if trend_coords:
+        baseline = trend_h - 1
+        trend_area_points = f"{trend_coords[0][0]},{baseline} " + trend_points + f" {trend_coords[-1][0]},{baseline}"
+    trend_coords_full = [
+        (x, y, event_totals[i][0], event_totals[i][1]) for i, (x, y) in enumerate(trend_coords)
+    ]
+
+    return TbReport(
+        events=events, latest=latest, history=history, event_totals=event_totals,
+        trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
+    )
 
 
 @dataclass

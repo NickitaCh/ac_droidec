@@ -21,68 +21,133 @@
                 <div class="stat-value">{{ report.latest|sum(attribute="summary") }}</div>
                 <div class="stat-label">Очков территории всего</div>
             </div>
-            <div class="stat-tile">
+            <div class="stat-tile {% if report.history|selectattr('regressed')|list|length > 0 %}status-danger{% endif %}">
                 <div class="stat-value">{{ report.history|selectattr("regressed")|list|length }}</div>
                 <div class="stat-label">🚨 просадка vs среднего</div>
             </div>
         </div>
 
-        <h2>Последняя ТБ ({{ latest_event[1][:10] }})</h2>
-        <div class="table-toolbar">
-            <input type="search" placeholder="Поиск по игроку…" data-table-search="latest-tb-table">
-        </div>
-        <div class="table-scroll">
-            <table class="data" id="latest-tb-table">
-                <thead>
-                    <tr>
-                        <th data-sort="text">Игрок</th>
-                        <th class="num" data-sort="num">Очки территории</th>
-                        <th class="num" data-sort="num">Юниты во взвод</th>
-                        <th class="num" data-sort="num">ОЗ попытки</th>
-                        <th class="num" data-sort="num">БЗ волн пройдено</th>
-                        <th class="num" data-sort="num">БЗ попыток</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for p in report.latest %}
-                        <tr data-search="{{ p.name|lower }}">
-                            <td>{{ p.name }}</td>
-                            <td class="num">{{ p.summary }}</td>
-                            <td class="num">{{ p.unit_donated }}</td>
-                            <td class="num">{{ p.covert_attempt }}</td>
-                            <td class="num">{{ p.strike_encounter }}</td>
-                            <td class="num">{{ p.strike_attempt }}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        {% if report.event_totals|length > 1 %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>Очки территории по гильдии — динамика</span>
+                    <span class="panel-hint">сумма очков всех игроков за каждую ТБ</span>
+                </div>
+                <div class="trend-chart-wrap">
+                    <div class="trend-chart-plot">
+                        <svg class="trend-chart" viewBox="0 0 100 40" preserveAspectRatio="none">
+                            <polyline class="trend-area" points="{{ report.trend_area_points }}"></polyline>
+                            <polyline points="{{ report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
+                        </svg>
+                        {% for x, y, completed_at, value in report.trend_coords %}
+                            <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
+                        {% endfor %}
+                    </div>
+                    <div class="trend-chart-labels">
+                        {% for completed_at, value in report.event_totals %}
+                            <span>{{ completed_at[:10] }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>Последняя ТБ по очкам территории</span>
+                <span class="panel-hint">{{ latest_event[1][:10] }}</span>
+            </div>
+            <div class="bar-chart">
+                {% for p in report.latest %}
+                    <div class="bar-chart-row">
+                        <div class="bar-chart-name">{{ p.name }}</div>
+                        <div class="bar-chart-track">
+                            <div class="bar-chart-fill" data-tip="{{ p.name }}: {{ p.summary }}" style="width: {{ (p.summary / max_summary * 100) if max_summary else 0 }}%;"></div>
+                        </div>
+                        <div class="bar-chart-value">{{ p.summary }}</div>
+                    </div>
+                {% endfor %}
+            </div>
         </div>
 
-        {% if report.events|length > 1 %}
-            <h2>История по очкам территории (последние {{ report.events|length }} ТБ)</h2>
-            <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ).</p>
+        <h2>Последняя ТБ — подробно</h2>
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по игроку…" data-table-search="latest-tb-table">
+            </div>
             <div class="table-scroll">
-                <table class="data" id="tb-history-table">
+                <table class="data" id="latest-tb-table">
                     <thead>
                         <tr>
                             <th data-sort="text">Игрок</th>
-                            {% for event_id, completed_at in report.events %}
-                                <th class="num" data-sort="num">ТБ ({{ completed_at[:10] }})</th>
-                            {% endfor %}
+                            <th class="num" data-sort="num">Очки территории</th>
+                            <th class="num" data-sort="num">Юниты во взвод</th>
+                            <th class="num" data-sort="num">ОЗ попытки</th>
+                            <th class="num" data-sort="num">БЗ волн пройдено</th>
+                            <th class="num" data-sort="num">БЗ попыток</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for row in report.history %}
-                            <tr data-search="{{ row.name|lower }}">
-                                <td>{% if row.regressed %}🚨 {% endif %}{{ row.name }}</td>
-                                {% for event_id, completed_at in report.events %}
-                                    {% set cell = row.per_event.get(event_id) %}
-                                    <td class="num" data-value="{{ cell.summary if cell else -1 }}">{{ cell.summary if cell else "—" }}</td>
-                                {% endfor %}
+                        {% for p in report.latest %}
+                            <tr data-search="{{ p.name|lower }}">
+                                <td>{{ p.name }}</td>
+                                <td class="num">{{ p.summary }}</td>
+                                <td class="num">{{ p.unit_donated }}</td>
+                                <td class="num">{{ p.covert_attempt }}</td>
+                                <td class="num">{{ p.strike_encounter }}</td>
+                                <td class="num">{{ p.strike_attempt }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        {% if report.events|length > 1 %}
+            <h2>История по игрокам (последние {{ report.events|length }} ТБ)</h2>
+            <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ). Спарклайн — динамика очков территории по сохранённым ТБ.</p>
+            <div class="panel">
+                <div class="table-toolbar">
+                    <input type="search" placeholder="Поиск по игроку…" data-table-search="tb-history-table">
+                </div>
+                <div class="table-scroll">
+                    <table class="data" id="tb-history-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="text">Игрок</th>
+                                <th data-sort="text">Статус</th>
+                                <th class="num" data-sort="num">Динамика очков</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in report.history %}
+                                <tr data-search="{{ row.name|lower }}">
+                                    <td>{{ row.name }}</td>
+                                    <td>
+                                        {% if row.regressed %}
+                                            <span class="badge badge-danger">🚨 просадка</span>
+                                        {% else %}
+                                            <span class="badge badge-ok">стабильно</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="num" data-value="{{ row.last_value or 0 }}">
+                                        <div class="sparkline-cell">
+                                            <svg class="sparkline {% if row.regressed %}regressed{% endif %}" viewBox="0 0 68 22" preserveAspectRatio="none">
+                                                <polyline points="{{ row.sparkline_points }}"></polyline>
+                                                {% for x, y, completed_at, value in row.sparkline_hits %}
+                                                    <circle cx="{{ x }}" cy="{{ y }}" r="{{ '2.4' if loop.last else '5' }}" opacity="{{ '1' if loop.last else '0' }}">
+                                                        <title>{{ completed_at[:10] }}: {{ value }} очков</title>
+                                                    </circle>
+                                                {% endfor %}
+                                            </svg>
+                                            <span>{{ row.last_value if row.last_value is not none else "—" }}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         {% endif %}
     {% endif %}

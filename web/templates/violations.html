@@ -9,7 +9,7 @@
             <div class="stat-value">{{ rows|length }}</div>
             <div class="stat-label">{{ "Игроков в списке" if show_all else "С нарушениями за 90 дней" }}</div>
         </div>
-        <div class="stat-tile">
+        <div class="stat-tile {% if rows|selectattr('flagged')|list|length > 0 %}status-danger{% endif %}">
             <div class="stat-value">{{ rows|selectattr("flagged")|list|length }}</div>
             <div class="stat-label">🚨 На пороге ({{ n_limit }}+ за 90 дней)</div>
         </div>
@@ -26,44 +26,77 @@
     {% if not rows %}
         <p class="empty-state">😇 Нарушений за последние 90 дней не найдено.</p>
     {% else %}
-        <div class="table-toolbar">
-            <input type="search" placeholder="Поиск по игроку…" data-table-search="violations-table">
-        </div>
-        <div class="table-scroll">
-            <table class="data" id="violations-table">
-                <thead>
-                    <tr>
-                        <th data-sort="text">Игрок</th>
-                        <th class="num" data-sort="num">ТБ</th>
-                        <th class="num" data-sort="num">ВГ</th>
-                        <th class="num" data-sort="num">Рейд</th>
-                        <th class="num" data-sort="num">За 90 дней</th>
-                        <th class="num" data-sort="num">Всего</th>
-                        <th data-sort="text">Статус</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in rows %}
-                        <tr data-search="{{ row.name|lower }}">
-                            <td>{{ row.name }}</td>
-                            <td class="num">{{ row.counts_recent.get("ТБ", 0) }}</td>
-                            <td class="num">{{ row.counts_recent.get("ВГ", 0) }}</td>
-                            <td class="num">{{ row.counts_recent.get("Рейд", 0) }}</td>
-                            <td class="num">{{ row.recent_total }}</td>
-                            <td class="num">{{ row.lifetime_total }}</td>
-                            <td>
-                                {% if row.flagged %}
-                                    <span class="badge badge-danger">🚨 порог</span>
-                                {% elif row.recent_total > 0 %}
-                                    <span class="badge badge-neutral">есть нарушения</span>
-                                {% else %}
-                                    <span class="badge badge-ok">чисто</span>
-                                {% endif %}
-                            </td>
+        {% if top_offenders %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>Топ по нарушениям за 90 дней</span>
+                    <span class="panel-hint">состав по категориям</span>
+                </div>
+                <div class="stack-legend">
+                    <span class="stack-legend-item"><span class="stack-legend-swatch" style="background: var(--series-1);"></span>ТБ</span>
+                    <span class="stack-legend-item"><span class="stack-legend-swatch" style="background: var(--series-2);"></span>ВГ</span>
+                    <span class="stack-legend-item"><span class="stack-legend-swatch" style="background: var(--series-3);"></span>Рейд</span>
+                </div>
+                {% for row in top_offenders %}
+                    {% set outer_pct = (row.recent_total / max_recent * 100) if max_recent else 0 %}
+                    <div class="stack-bar-row">
+                        <div class="stack-bar-name">{{ row.name }}</div>
+                        <div class="stack-bar-track">
+                            <div class="stack-bar-fill-group" style="width: {{ outer_pct }}%;">
+                                {% for cat, color in [("ТБ", "var(--series-1)"), ("ВГ", "var(--series-2)"), ("Рейд", "var(--series-3)")] %}
+                                    {% set n = row.counts_recent.get(cat, 0) %}
+                                    {% if n > 0 %}
+                                        <div class="stack-bar-segment" data-tip="{{ row.name }}: {{ cat }} — {{ n }}" style="width: {{ (n / row.recent_total * 100) if row.recent_total else 0 }}%; background: {{ color }};"></div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="stack-bar-value">{{ row.recent_total }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по игроку…" data-table-search="violations-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="violations-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th class="num" data-sort="num">ТБ</th>
+                            <th class="num" data-sort="num">ВГ</th>
+                            <th class="num" data-sort="num">Рейд</th>
+                            <th class="num" data-sort="num">За 90 дней</th>
+                            <th class="num" data-sort="num">Всего</th>
+                            <th data-sort="text">Статус</th>
                         </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr data-search="{{ row.name|lower }}">
+                                <td>{{ row.name }}</td>
+                                <td class="num">{{ row.counts_recent.get("ТБ", 0) }}</td>
+                                <td class="num">{{ row.counts_recent.get("ВГ", 0) }}</td>
+                                <td class="num">{{ row.counts_recent.get("Рейд", 0) }}</td>
+                                <td class="num">{{ row.recent_total }}</td>
+                                <td class="num">{{ row.lifetime_total }}</td>
+                                <td>
+                                    {% if row.flagged %}
+                                        <span class="badge badge-danger">🚨 порог</span>
+                                    {% elif row.recent_total > 0 %}
+                                        <span class="badge badge-neutral">есть нарушения</span>
+                                    {% else %}
+                                        <span class="badge badge-ok">чисто</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     {% endif %}
 {% endblock %}
