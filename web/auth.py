@@ -105,7 +105,9 @@ async def callback(request: Request):
             if member_resp.status_code == 200:
                 role_ids.update(int(r) for r in member_resp.json().get("roles", []))
 
-    resolved_guild_id = guild_resolver.resolve_guild_id_from_roles(role_ids)
+    # Веб-дашборд — только для офицеров (в отличие от слэш-команд бота, где
+    # достаточно member_role_id): доступ сюда даём по officer_role_id гильдии.
+    resolved_guild_id = guild_resolver.resolve_officer_guild_id_from_roles(role_ids)
 
     request.session["user"] = {
         "discord_id": discord_id,

@@ -43,6 +43,27 @@ def resolve_guild_id(author) -> int | None:
     return resolve_guild_id_from_roles(_raw_role_ids(author))
 
 
+def resolve_officer_guild_id_from_roles(role_ids) -> int | None:
+    """Как resolve_guild_id_from_roles, но матчит только officer_role_id (не
+    member_role_id) — используется веб-дашбордом: доступ туда даём только
+    офицерам гильдии, в отличие от слэш-команд бота, где member_role_id тоже
+    достаточно (см. web/auth.py::callback)."""
+    role_id_set = {int(r) for r in role_ids}
+    matches = []
+    for cfg in database.get_all_guild_configs():
+        try:
+            officer_role = int(cfg["officer_role_id"])
+        except (TypeError, ValueError):
+            continue
+        if officer_role in role_id_set:
+            matches.append(cfg["id"])
+    if not matches:
+        return None
+    if len(matches) > 1:
+        print(f"⚠️ [guild_resolver] Офицерские роли {sorted(role_id_set)} подходят под несколько гильдий {matches} — беру минимальный id")
+    return min(matches)
+
+
 def is_officer_for_resolved_guild(author) -> bool:
     guild_id = resolve_guild_id(author)
     if guild_id is None:
