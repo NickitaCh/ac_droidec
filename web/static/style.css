@@ -1,16 +1,47 @@
 :root {
     color-scheme: light dark;
-    --bg: #f7f7f8;
-    --fg: #1a1a1a;
+    /* страница vs поверхность карточки — небольшая разница даёт глубину без теней */
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: color-mix(in srgb, #0b0b0b 4%, var(--surface)); /* зебра/hover */
+    --fg: #0b0b0b;
+    --fg-secondary: #52514e;
+    --fg-muted: #898781;
     --accent: #5865f2;
-    --border: #d9d9dd;
-    --error: #c0392b;
+    --border: #e1e0d9;
+    --border-strong: #c3c2b7;
+    --error: #d03b3b;
+
+    /* палитра для графиков (см. dataviz-скилл, референсный набор, порядок фиксирован) */
+    --series-1: #2a78d6; /* blue */
+    --series-2: #eb6834; /* orange */
+    --series-3: #1baf7a; /* aqua */
+    --series-1-track: #cde2fb;
+
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-critical: #d03b3b;
 }
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg: #1e1f22;
-        --fg: #e6e6e6;
-        --border: #3a3b3f;
+        --page: #0d0d0d;
+        --surface: #1a1a19;
+        --surface-2: color-mix(in srgb, #ffffff 5%, var(--surface));
+        --fg: #ffffff;
+        --fg-secondary: #c3c2b7;
+        --fg-muted: #898781;
+        --border: #2c2c2a;
+        --border-strong: #383835;
+        --error: #e66767;
+
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --series-3: #199e70;
+        --series-1-track: #184f95;
+
+        --status-good: #0ca30c;
+        --status-warning: #fab219;
+        --status-critical: #d03b3b;
     }
 }
 
@@ -19,9 +50,14 @@
 body {
     margin: 0;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: var(--bg);
+    background: var(--page);
     color: var(--fg);
+    -webkit-font-smoothing: antialiased;
 }
+
+h1 { font-size: 1.6em; margin: 0 0 0.6em; }
+h2 { font-size: 1.15em; margin: 1.75em 0 0.6em; color: var(--fg); }
+h1, h2 { letter-spacing: -0.01em; }
 
 .topbar {
     display: flex;
@@ -29,32 +65,41 @@ body {
     align-items: center;
     padding: 0.75em 1.5em;
     border-bottom: 1px solid var(--border);
+    background: var(--surface);
 }
 
 .topbar .brand {
-    font-weight: 600;
+    font-weight: 700;
     text-decoration: none;
     color: var(--fg);
 }
 
+.topbar nav { display: flex; align-items: center; gap: 0.35em; }
 .topbar nav a {
-    margin-left: 1em;
-    color: var(--accent);
+    padding: 0.4em 0.7em;
+    border-radius: 6px;
+    color: var(--fg-secondary);
     text-decoration: none;
+    font-size: 0.95em;
+    font-weight: 500;
 }
+.topbar nav a:hover { background: var(--surface-2); color: var(--fg); }
 
 .topbar nav .user {
-    margin-left: 1em;
-    opacity: 0.7;
+    margin-left: 0.5em;
+    padding-left: 0.9em;
+    border-left: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 0.9em;
 }
 
 main {
     max-width: 40em;
     margin: 2em auto;
-    padding: 0 1.5em;
+    padding: 0 1.5em 4em;
 }
 main.wide {
-    max-width: 75em;
+    max-width: 78em;
 }
 
 .button, button {
@@ -70,17 +115,6 @@ main.wide {
 }
 
 .error { color: var(--error); }
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 1.5em;
-}
-th, td {
-    text-align: left;
-    padding: 0.5em;
-    border-bottom: 1px solid var(--border);
-}
 
 form {
     display: flex;
@@ -117,40 +151,68 @@ input[type="text"] {
     border-radius: 10px;
     text-decoration: none;
     color: var(--fg);
-    background: color-mix(in srgb, var(--fg) 3%, transparent);
-    transition: border-color 0.15s ease;
+    background: var(--surface);
+    transition: border-color 0.15s ease, transform 0.15s ease;
 }
-.card:hover { border-color: var(--accent); }
+.card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .card .card-title { font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
-.card .card-desc { margin-top: 0.35em; opacity: 0.7; font-size: 0.9em; }
+.card .card-desc { margin-top: 0.35em; color: var(--fg-muted); font-size: 0.9em; }
 
 /* ---- Статы-плашки ---- */
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(11em, 1fr));
     gap: 1em;
-    margin-bottom: 1.5em;
+    margin-bottom: 1.75em;
 }
 .stat-tile {
     padding: 1em 1.25em;
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--fg) 3%, transparent);
+    background: var(--surface);
 }
-.stat-tile .stat-value { font-size: 1.6em; font-weight: 700; line-height: 1.2; }
-.stat-tile .stat-label { opacity: 0.7; font-size: 0.85em; margin-top: 0.15em; }
+.stat-tile .stat-value {
+    font-size: 1.7em;
+    font-weight: 700;
+    line-height: 1.2;
+    font-variant-numeric: proportional-nums;
+}
+.stat-tile .stat-label { color: var(--fg-muted); font-size: 0.85em; margin-top: 0.2em; }
+.stat-tile.status-danger .stat-value { color: var(--status-critical); }
 
 /* ---- Значки/бейджи ---- */
 .badge {
-    display: inline-block;
-    padding: 0.15em 0.55em;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.2em 0.6em;
     border-radius: 999px;
     font-size: 0.8em;
     font-weight: 600;
+    white-space: nowrap;
 }
-.badge-ok { background: color-mix(in srgb, #2ecc71 22%, transparent); color: #1a8a4a; }
-.badge-neutral { background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.75; }
-.badge-danger { background: color-mix(in srgb, var(--error) 20%, transparent); color: var(--error); }
+.badge-ok { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); }
+.badge-neutral { background: var(--surface-2); color: var(--fg-secondary); }
+.badge-danger { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
+
+/* ---- Секция-карточка (таблица/график в рамке) ---- */
+.panel {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 1.25em;
+    margin-bottom: 1.75em;
+}
+.panel-title {
+    font-weight: 600;
+    margin-bottom: 0.9em;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1em;
+    flex-wrap: wrap;
+}
+.panel-title .panel-hint { font-weight: 400; color: var(--fg-muted); font-size: 0.85em; }
 
 /* ---- Таблицы данных: поиск, скролл, сортировка ---- */
 .table-toolbar {
@@ -158,32 +220,139 @@ input[type="text"] {
     justify-content: space-between;
     align-items: center;
     gap: 1em;
-    margin-bottom: 0.75em;
+    margin-bottom: 0.9em;
     flex-wrap: wrap;
 }
 .table-toolbar input[type="search"] {
-    padding: 0.5em 0.75em;
+    padding: 0.55em 0.8em;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    background: transparent;
+    border-radius: 7px;
+    background: var(--page);
     color: var(--fg);
     min-width: 16em;
 }
-.table-scroll { overflow-x: auto; }
-table.data th {
+.table-toolbar input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+
+table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+}
+table.data th, table.data td {
+    text-align: left;
+    padding: 0.7em 0.9em;
+}
+table.data thead th {
+    background: var(--surface-2);
+    color: var(--fg-secondary);
+    font-size: 0.82em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     white-space: nowrap;
     cursor: pointer;
     user-select: none;
+    border-bottom: 1px solid var(--border-strong);
+    position: sticky;
+    top: 0;
 }
-table.data th[data-sort]:hover { color: var(--accent); }
-table.data th .sort-arrow { opacity: 0.4; margin-left: 0.25em; font-size: 0.85em; }
-table.data tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-table.data td.num, table.data th.num { text-align: right; }
-.muted { opacity: 0.6; }
+table.data thead th[data-sort]:hover { color: var(--accent); }
+table.data th .sort-arrow { opacity: 0.5; margin-left: 0.3em; font-size: 0.85em; }
+table.data tbody tr { border-bottom: 1px solid var(--border); }
+table.data tbody tr:last-child { border-bottom: none; }
+table.data tbody tr:nth-child(even) { background: color-mix(in srgb, var(--fg) 2%, transparent); }
+table.data tbody tr:hover { background: var(--surface-2); }
+table.data td.num, table.data th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.muted { color: var(--fg-muted); }
 .empty-state {
-    padding: 2em;
+    padding: 2.5em 1.5em;
     text-align: center;
-    opacity: 0.7;
-    border: 1px dashed var(--border);
-    border-radius: 10px;
+    color: var(--fg-muted);
+    border: 1px dashed var(--border-strong);
+    border-radius: 12px;
+    background: var(--surface);
 }
+
+/* ---- Мини-тултип на наведение (для баров/точек графиков) ---- */
+[data-tip] { position: relative; }
+[data-tip]:hover::after, [data-tip]:focus-visible::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translate(-50%, -6px);
+    background: var(--fg);
+    color: var(--surface);
+    padding: 0.35em 0.65em;
+    border-radius: 6px;
+    font-size: 0.78em;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 20;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+/* ---- Горизонтальный бар-чарт (ранжирование по величине, один hue) ---- */
+.bar-chart { display: flex; flex-direction: column; gap: 0.55em; }
+.bar-chart-row { display: grid; grid-template-columns: minmax(7em, 12em) 1fr auto; align-items: center; gap: 0.75em; }
+.bar-chart-name { font-size: 0.92em; color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-chart-track { position: relative; height: 16px; border-radius: 4px; background: var(--series-1-track); overflow: hidden; }
+.bar-chart-fill {
+    position: absolute; inset: 0 auto 0 0;
+    height: 100%;
+    background: var(--series-1);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+.bar-chart-fill.regressed { background: var(--status-critical); }
+.bar-chart-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.92em; min-width: 3.5em; text-align: right; }
+
+/* ---- Стековый бар (композиция по категориям, часть-от-целого) ---- */
+.stack-legend { display: flex; gap: 1.25em; flex-wrap: wrap; margin-bottom: 1em; font-size: 0.85em; color: var(--fg-secondary); }
+.stack-legend-item { display: inline-flex; align-items: center; gap: 0.4em; }
+.stack-legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.stack-bar-row { display: grid; grid-template-columns: minmax(7em, 12em) 1fr auto; align-items: center; gap: 0.75em; margin-bottom: 0.55em; }
+.stack-bar-name { font-size: 0.92em; color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stack-bar-track { height: 16px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.stack-bar-fill-group { height: 100%; display: flex; }
+.stack-bar-segment { height: 100%; transition: width 0.4s ease; }
+.stack-bar-segment + .stack-bar-segment { margin-left: 2px; }
+.stack-bar-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.92em; min-width: 2.5em; text-align: right; }
+
+/* ---- Спарклайн (тренд в ячейке таблицы) ---- */
+.sparkline { width: 68px; height: 22px; display: block; overflow: visible; }
+.sparkline polyline { fill: none; stroke: var(--fg-muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sparkline circle { fill: var(--series-1); }
+.sparkline.regressed circle { fill: var(--status-critical); }
+.sparkline-cell { display: flex; align-items: center; gap: 0.6em; justify-content: flex-end; }
+
+/* ---- Линейный тренд-график (крупный, наверху страницы ТБ) ---- */
+.trend-chart-wrap { width: 100%; }
+.trend-chart-plot { position: relative; width: 100%; height: 120px; }
+.trend-chart { width: 100%; height: 100%; display: block; position: absolute; inset: 0; }
+.trend-chart polyline { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-chart .trend-area { fill: var(--series-1); opacity: 0.08; stroke: none; }
+/* Точки — обычные HTML-круги поверх SVG: у линии viewBox растягивается неравномерно
+   под гибкую ширину контейнера, а <circle> внутри того же viewBox от такого растяжения
+   превращается в эллипс. HTML-оверлей с border-radius:50% остаётся кругом всегда. */
+.trend-dot {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: var(--series-1);
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+}
+.trend-chart-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
+
+/* ---- Мера (доля от целого, одна полоса) ---- */
+.meter { display: flex; align-items: center; gap: 0.75em; }
+.meter-track { flex: 1; height: 10px; border-radius: 999px; background: var(--series-1-track); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--series-1); border-radius: 999px; transition: width 0.4s ease; }
+.meter-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.9em; min-width: 3em; text-align: right; }
