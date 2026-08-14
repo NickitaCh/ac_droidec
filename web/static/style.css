@@ -53,6 +53,9 @@ main {
     margin: 2em auto;
     padding: 0 1.5em;
 }
+main.wide {
+    max-width: 75em;
+}
 
 .button, button {
     display: inline-block;
@@ -97,3 +100,90 @@ input[type="text"] {
 
 .menu { list-style: none; padding: 0; }
 .menu li { margin-bottom: 0.5em; }
+
+/* ---- Карточки-разделы на главной ---- */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15em, 1fr));
+    gap: 1em;
+    padding: 0;
+    list-style: none;
+}
+.card-grid li { margin: 0; }
+.card {
+    display: block;
+    padding: 1.25em;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+    transition: border-color 0.15s ease;
+}
+.card:hover { border-color: var(--accent); }
+.card .card-title { font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
+.card .card-desc { margin-top: 0.35em; opacity: 0.7; font-size: 0.9em; }
+
+/* ---- Статы-плашки ---- */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11em, 1fr));
+    gap: 1em;
+    margin-bottom: 1.5em;
+}
+.stat-tile {
+    padding: 1em 1.25em;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.stat-tile .stat-value { font-size: 1.6em; font-weight: 700; line-height: 1.2; }
+.stat-tile .stat-label { opacity: 0.7; font-size: 0.85em; margin-top: 0.15em; }
+
+/* ---- Значки/бейджи ---- */
+.badge {
+    display: inline-block;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+.badge-ok { background: color-mix(in srgb, #2ecc71 22%, transparent); color: #1a8a4a; }
+.badge-neutral { background: color-mix(in srgb, var(--fg) 10%, transparent); opacity: 0.75; }
+.badge-danger { background: color-mix(in srgb, var(--error) 20%, transparent); color: var(--error); }
+
+/* ---- Таблицы данных: поиск, скролл, сортировка ---- */
+.table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1em;
+    margin-bottom: 0.75em;
+    flex-wrap: wrap;
+}
+.table-toolbar input[type="search"] {
+    padding: 0.5em 0.75em;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    min-width: 16em;
+}
+.table-scroll { overflow-x: auto; }
+table.data th {
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+table.data th[data-sort]:hover { color: var(--accent); }
+table.data th .sort-arrow { opacity: 0.4; margin-left: 0.25em; font-size: 0.85em; }
+table.data tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+table.data td.num, table.data th.num { text-align: right; }
+.muted { opacity: 0.6; }
+.empty-state {
+    padding: 2em;
+    text-align: center;
+    opacity: 0.7;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}

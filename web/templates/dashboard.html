@@ -14,8 +14,23 @@
         <p class="error">Доступ к веб-дашборду есть только у офицеров гильдии — у вас нет офицерской роли ни в одной зарегистрированной гильдии.</p>
     {% else %}
         <h1>{{ guild_cfg.name }}</h1>
-        <ul class="menu">
-            <li><a href="/registration">Моя регистрация (Discord ↔ код союзника)</a></li>
+        <ul class="card-grid">
+            <li><a class="card" href="/roster">
+                <div class="card-title">👥 Состав гильдии</div>
+                <div class="card-desc">Игроки и коды союзника</div>
+            </a></li>
+            <li><a class="card" href="/tb">
+                <div class="card-title">⚔️ Территориальные битвы</div>
+                <div class="card-desc">Последняя ТБ и история по игрокам</div>
+            </a></li>
+            <li><a class="card" href="/violations">
+                <div class="card-title">🚨 Нарушения</div>
+                <div class="card-desc">Таблица нарушений за 90 дней</div>
+            </a></li>
+            <li><a class="card" href="/registration">
+                <div class="card-title">📝 Моя регистрация</div>
+                <div class="card-desc">Привязать Discord ↔ код союзника</div>
+            </a></li>
         </ul>
     {% endif %}
 {% endblock %}
