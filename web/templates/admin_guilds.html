@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Гильдии — AC Droidec{% endblock %}
+{% block content %}
+    <h1>Обслуживаемые гильдии</h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if guilds %}
+        <table>
+            <thead><tr><th>ID</th><th>Название</th><th>Comlink guild ID</th><th>Discord-сервер</th><th>Статус</th><th></th></tr></thead>
+            <tbody>
+            {% for g in guilds %}
+                <tr>
+                    <td>{{ g.id }}</td>
+                    <td>{{ g.name }}</td>
+                    <td><code>{{ g.swgoh_guild_id or "—" }}</code></td>
+                    <td><code>{{ g.discord_guild_id }}</code></td>
+                    <td>{% if g.is_active %}✅ активна{% else %}🚫 деактивирована{% endif %}</td>
+                    <td>
+                        {% if g.is_active %}
+                        <form method="post" action="/admin/guilds/{{ g.id }}/deactivate">
+                            <button type="submit">Деактивировать</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Список пуст.</p>
+    {% endif %}
+
+    <h2>Добавить гильдию</h2>
+    <p>Имя и игровой ID гильдии подтягиваются из Comlink автоматически — достаточно кода союзника любого участника.</p>
+    <form method="post" action="/admin/guilds/add">
+        <label>
+            Код союзника (9 цифр)
+            <input type="text" name="ally_code" pattern="[0-9]{9}" maxlength="9" required>
+        </label>
+        <label>
+            ID Discord-сервера гильдии
+            <input type="text" name="discord_guild_id" required>
+        </label>
+        <button type="submit">Добавить</button>
+    </form>
+{% endblock %}

@@ -10,11 +10,24 @@ def get_current_user(request: Request) -> dict:
     return user
 
 
-def require_guild_access(request: Request) -> dict:
-    """Как get_current_user, но также требует, чтобы у пользователя резолвилась
-    гильдия — веб-дашборд доступен только офицерам (officer_role_id гильдии),
-    в отличие от слэш-команд бота, где хватает member_role_id (см. web/auth.py)."""
+def require_officer_access(request: Request) -> dict:
+    """Как get_current_user, но также требует tier="officer" — веб-дашборд
+    доступен только офицерам/лидерам (игровой ранг из Comlink, либо супер-админ,
+    либо ручной грант уровня officer — см. guild_resolver.resolve_access).
+    ВАЖНО: проверяем именно user["tier"], а не user["guild_id"] — у MEMBER-уровня
+    тоже резолвится guild_id (для скоупа команд бота), но веб им не положен."""
     user = get_current_user(request)
-    if user.get("guild_id") is None:
-        raise HTTPException(status_code=403, detail="Доступ к веб-дашборду есть только у офицеров гильдии — нет офицерской роли ни в одном зарегистрированном Discord-сервере")
+    if user.get("tier") != "officer":
+        raise HTTPException(status_code=403, detail="Доступ к веб-дашборду есть только у офицеров/лидеров гильдии")
+    return user
+
+
+# Старое имя — оставлено алиасом, чтобы не трогать импорты в web/routes/*.py.
+require_guild_access = require_officer_access
+
+
+def require_super_admin(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Доступ только для супер-админов")
     return user

@@ -9,9 +9,9 @@
         <h1>AC Droidec</h1>
         <p>Веб-дашборд гильдии SWGOH — войдите через Discord, чтобы увидеть свою регистрацию и гильдию.</p>
         <a class="button" href="/login">Войти через Discord</a>
-    {% elif not guild_cfg %}
+    {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
-        <p class="error">Доступ к веб-дашборду есть только у офицеров гильдии — у вас нет офицерской роли ни в одной зарегистрированной гильдии.</p>
+        <p class="error">Доступ к веб-дашборду есть только у офицеров/лидеров гильдии (по игровому рангу) — у вас {% if user.tier == "member" %}уровень обычного участника{% else %}пока нет доступа{% endif %}.</p>
     {% else %}
         <h1>{{ guild_cfg.name }}</h1>
         <ul class="card-grid">

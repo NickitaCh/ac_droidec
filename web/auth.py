@@ -1,11 +1,10 @@
 """Discord OAuth2 (authorization code flow) — переиспользует то же Discord-приложение,
 что и сам бот (тот же DISCORD_TOKEN из .env), никакого отдельного бота не заводим.
 
-Роли пользователя в конкретном Discord-сервере получаем НЕ через OAuth-скоуп
-guilds.members.read (ограниченный/требует апрува от Discord), а серверным вызовом
-GET /guilds/{id}/members/{user_id} с ботовым токеном — тот же паттерн, что уже
-используют cogs (main.py::_check_allowed_role и guild_resolver.py), только роли
-приходят по HTTP, а не из disnake.Member."""
+Права доступа резолвятся НЕ по Discord-ролям, а по discord_id напрямую через
+guild_resolver.resolve_access (игровой ранг из Comlink, закэшированный в БД, +
+супер-админы + ручные гранты) — после получения identity через OAuth ни одного
+дополнительного запроса к Discord API не требуется."""
 
 import os
 import secrets
@@ -15,7 +14,6 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-import database
 import guild_resolver
 
 router = APIRouter()
@@ -24,7 +22,6 @@ DISCORD_API = "https://discord.com/api/v10"
 
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 
 OAUTH_NOT_CONFIGURED_HTML = """
 <!doctype html><html><body style="font-family: sans-serif; max-width: 40em; margin: 4em auto;">
@@ -92,28 +89,16 @@ async def callback(request: Request):
             return RedirectResponse("/?error=oauth_user")
         discord_user = user_resp.json()
 
-        discord_id = str(discord_user["id"])
-        role_ids = set()
-        for guild_cfg in database.get_all_guild_configs():
-            discord_guild_id = guild_cfg.get("discord_guild_id")
-            if not discord_guild_id:
-                continue
-            member_resp = await client.get(
-                f"{DISCORD_API}/guilds/{discord_guild_id}/members/{discord_id}",
-                headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
-            )
-            if member_resp.status_code == 200:
-                role_ids.update(int(r) for r in member_resp.json().get("roles", []))
-
-    # Веб-дашборд — только для офицеров (в отличие от слэш-команд бота, где
-    # достаточно member_role_id): доступ сюда даём по officer_role_id гильдии.
-    resolved_guild_id = guild_resolver.resolve_officer_guild_id_from_roles(role_ids)
+    discord_id = str(discord_user["id"])
+    access = guild_resolver.resolve_access(discord_id)
 
     request.session["user"] = {
         "discord_id": discord_id,
         "username": discord_user.get("username", "?"),
         "avatar": discord_user.get("avatar"),
-        "guild_id": resolved_guild_id,
+        "guild_id": access["guild_id"],
+        "tier": access["tier"],
+        "is_super_admin": access["is_super_admin"],
     }
     return RedirectResponse("/")
 

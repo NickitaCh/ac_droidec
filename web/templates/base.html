@@ -12,11 +12,15 @@
         <a class="brand" href="/">AC Droidec</a>
         <nav>
             {% if user %}
-                {% if user.guild_id is not none %}
+                {% if user.tier == "officer" %}
                     <a href="/roster">Состав</a>
                     <a href="/tb">ТБ</a>
                     <a href="/violations">Нарушения</a>
                     <a href="/registration">Регистрация</a>
+                {% endif %}
+                {% if user.is_super_admin %}
+                    <a href="/admin/guilds">Гильдии</a>
+                    <a href="/admin/access">Админы</a>
                 {% endif %}
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout">Выйти</a>
