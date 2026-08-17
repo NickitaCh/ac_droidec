@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ plate_name }} — Плейты — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/plates">← Все плейты</a></p>
+    <h1>{{ plate_name }}</h1>
+    {% if description %}<p class="muted">{{ description }}</p>{% endif %}
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="stats-grid">
+        <div class="stat-tile">
+            <div class="stat-value">{{ characters|length }}</div>
+            <div class="stat-label">Персонажей</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value">{{ req_count }}</div>
+            <div class="stat-label">Требований</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>Добавить требование</span></div>
+        <form method="post" action="/plates/{{ plate_name }}/requirements/add" class="requirement-form">
+            <label>
+                Персонаж
+                <div class="unit-search" data-unit-search>
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                    <input type="hidden" name="base_id" class="unit-search-value" required>
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Стат
+                <select name="stat_name" required>
+                    {% for label, value in stat_options %}
+                        <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Оператор
+                <select name="operator" required>
+                    {% for label, value in operator_options %}
+                        <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Пороговое значение
+                <input type="number" name="threshold" step="any" required>
+            </label>
+            <label>
+                Приоритет
+                <select name="priority" required>
+                    {% for label, value in priority_options %}
+                        <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Комментарий (необязательно)
+                <input type="text" name="comment">
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+    </div>
+
+    {% if not characters %}
+        <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
+    {% else %}
+        {% for char in characters %}
+            <div class="panel">
+                <div class="panel-title"><span>{{ char.name }}</span><span class="panel-hint">{{ char.requirements|length }} треб.</span></div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>Стат</th>
+                                <th>Приоритет</th>
+                                <th>Комментарий</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in char.requirements %}
+                                <tr>
+                                    <td>{{ r.stat_name }} {{ r.operator }} {{ r.threshold_fmt }}</td>
+                                    <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                                    <td>{{ r.comment or "—" }}</td>
+                                    <td class="row-actions">
+                                        <details>
+                                            <summary class="link-btn">править</summary>
+                                            <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
+                                                <select name="operator">
+                                                    {% for label, value in operator_options %}
+                                                        <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                                <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
+                                                <select name="priority">
+                                                    {% for label, value in priority_options %}
+                                                        <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                                <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
+                                                <button type="submit">Сохранить</button>
+                                            </form>
+                                        </details>
+                                        <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
+                                              onsubmit="return confirm('Удалить требование «{{ r.stat_name }} {{ r.operator }} {{ r.threshold_fmt }}» для {{ char.name }}?');">
+                                            <button type="submit" class="button-danger">Удалить</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock %}

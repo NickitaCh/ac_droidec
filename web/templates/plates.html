@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Плейты — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Плейты статов</h1>
+    <p class="muted">Плейт — именованный набор норм статов персонажей (как в HotUtils), которые сверяются с ростером игрока в /статы.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not plates %}
+        <p class="empty-state">Плейтов пока нет — создайте первый ниже.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по названию…" data-table-search="plates-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="plates-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Плейт</th>
+                            <th data-sort="text">Описание</th>
+                            <th class="num" data-sort="num">Персонажей</th>
+                            <th class="num" data-sort="num">Требований</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in plates %}
+                            <tr data-search="{{ p.name|lower }}">
+                                <td><a href="/plates/{{ p.name }}"><strong>{{ p.name }}</strong></a></td>
+                                <td>{{ p.description or "—" }}</td>
+                                <td class="num">{{ p.char_count }}</td>
+                                <td class="num">{{ p.req_count }}</td>
+                                <td class="row-actions">
+                                    <details>
+                                        <summary class="link-btn">переименовать</summary>
+                                        <form method="post" action="/plates/{{ p.name }}/rename" class="inline-form">
+                                            <input type="text" name="new_name" value="{{ p.name }}" required>
+                                            <button type="submit">Сохранить</button>
+                                        </form>
+                                    </details>
+                                    <form method="post" action="/plates/{{ p.name }}/delete"
+                                          onsubmit="return confirm('Удалить плейт «{{ p.name }}» и все его требования ({{ p.req_count }})? Это необратимо.');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Новый плейт</span></div>
+        <form method="post" action="/plates/create">
+            <label>
+                Название (как в HotUtils, например AC_ALL)
+                <input type="text" name="name" required>
+            </label>
+            <label>
+                Описание (необязательно)
+                <input type="text" name="description">
+            </label>
+            <button type="submit">Создать</button>
+        </form>
+    </div>
+{% endblock %}
