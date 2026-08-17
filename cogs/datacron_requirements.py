@@ -838,8 +838,10 @@ class DatacronRequirementsCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ------------------ Slash-команды ------------------
+    # Проверка прав больше не висит на группе целиком: "список" открыт уровню
+    # member (main.py::MEMBER_ACCESSIBLE_COMMANDS), остальные сабкоманды и так
+    # требуют officer через глобальный гейт main.py::_check_access по умолчанию.
     @commands.slash_command(name="дк_требования", description="Управление требованиями к датакронам по сезонам ТБ")
-    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def datacron_req(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
