@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+import database
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -105,3 +106,11 @@ async def grants_add(
 async def grants_remove(discord_id: str, user: dict = Depends(require_super_admin)):
     remove_grant(discord_id)
     return RedirectResponse("/admin/access", status_code=303)
+
+
+@router.get("/access-log", response_class=HTMLResponse)
+async def access_log_page(request: Request, user: dict = Depends(require_super_admin)):
+    return templates.TemplateResponse(request, "admin_access_log.html", {
+        "user": user,
+        "entries": database.get_web_access_log(limit=200),
+    })

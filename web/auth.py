@@ -14,6 +14,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+import database
 import guild_resolver
 
 router = APIRouter()
@@ -91,10 +92,12 @@ async def callback(request: Request):
 
     discord_id = str(discord_user["id"])
     access = guild_resolver.resolve_access(discord_id)
+    username = discord_user.get("username", "?")
+    database.log_web_access(discord_id, username, access["guild_id"], access["tier"], access["is_super_admin"])
 
     request.session["user"] = {
         "discord_id": discord_id,
-        "username": discord_user.get("username", "?"),
+        "username": username,
         "avatar": discord_user.get("avatar"),
         "guild_id": access["guild_id"],
         "tier": access["tier"],

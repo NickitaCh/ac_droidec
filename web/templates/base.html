@@ -21,6 +21,7 @@
                 {% if user.is_super_admin %}
                     <a href="/admin/guilds">Гильдии</a>
                     <a href="/admin/access">Админы</a>
+                    <a href="/admin/access-log">Лог входов</a>
                 {% endif %}
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout">Выйти</a>

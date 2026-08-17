@@ -329,6 +329,60 @@ def seed_bot_admin(discord_id: str, username: str = None, added_by: str = None) 
     return add_bot_admin(discord_id, username=username, added_by=added_by)
 
 # =====================================================================
+# ЛОГ ВХОДОВ В ВЕБ-ДАШБОРД: пишется на каждый успешный OAuth-коллбэк
+# (web/auth.py::callback), сразу после guild_resolver.resolve_access —
+# видно и кто зашёл с доступом (tier=officer/member), и кто зашёл без
+# доступа (tier=None) — попытка входа без прав. Страница только для
+# супер-админов (web/routes/admin.py, /admin/access-log).
+# =====================================================================
+def _ensure_web_access_log_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS web_access_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_id TEXT NOT NULL,
+            username TEXT,
+            guild_id INTEGER,
+            tier TEXT,
+            is_super_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def log_web_access(discord_id: str, username: str, guild_id: int | None, tier: str | None, is_super_admin: bool) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_access_log_table(cursor)
+    cursor.execute("""
+        INSERT INTO web_access_log (discord_id, username, guild_id, tier, is_super_admin, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (str(discord_id), username, guild_id, tier, int(is_super_admin)))
+    conn.commit()
+    conn.close()
+
+
+def get_web_access_log(limit: int = 200) -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_access_log_table(cursor)
+    cursor.execute("""
+        SELECT l.discord_id, l.username, l.guild_id, g.name, l.tier, l.is_super_admin, l.created_at
+        FROM web_access_log l
+        LEFT JOIN guilds g ON g.id = l.guild_id
+        ORDER BY l.id DESC
+        LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "discord_id": r[0], "username": r[1], "guild_id": r[2], "guild_name": r[3],
+            "tier": r[4], "is_super_admin": bool(r[5]), "created_at": r[6],
+        }
+        for r in rows
+    ]
+
+# =====================================================================
 # РУЧНЫЕ ГРАНТЫ ДОСТУПА: для игроков ВНЕ участвующих гильдий (или без
 # закэшированного игрового ранга) — выдаются только супер-админами, см.
 # guild_resolver.resolve_access (фолбэк после регистрации/ростер-кэша),
