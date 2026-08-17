@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Лог входов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Лог входов в веб-дашборд</h1>
+    <p class="muted">Каждая строка — успешный OAuth-вход через Discord (в т.ч. без доступа к дашборду — такие подсвечены). Последние {{ entries|length }} записей.</p>
+
+    {% if not entries %}
+        <p class="empty-state">Пока никто не заходил.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по имени или Discord ID…" data-table-search="access-log-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="access-log-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Когда</th>
+                            <th data-sort="text">Пользователь</th>
+                            <th data-sort="text">Discord ID</th>
+                            <th data-sort="text">Гильдия</th>
+                            <th data-sort="text">Уровень доступа</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for e in entries %}
+                            <tr data-search="{{ ((e.username or '') ~ ' ' ~ e.discord_id)|lower }}">
+                                <td>{{ e.created_at }}</td>
+                                <td>{{ e.username or "—" }}</td>
+                                <td><code>{{ e.discord_id }}</code></td>
+                                <td>{{ e.guild_name or "—" }}</td>
+                                <td>
+                                    {% if e.is_super_admin %}
+                                        <span class="badge badge-ok">👑 супер-админ</span>
+                                    {% elif e.tier == "officer" %}
+                                        <span class="badge badge-ok">офицер</span>
+                                    {% elif e.tier == "member" %}
+                                        <span class="badge badge-neutral">игрок</span>
+                                    {% else %}
+                                        <span class="badge badge-danger">нет доступа</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

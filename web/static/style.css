@@ -124,13 +124,15 @@ form {
 }
 form label { display: flex; flex-direction: column; gap: 0.25em; }
 form label.checkbox { flex-direction: row; align-items: center; gap: 0.5em; }
-input[type="text"] {
+input[type="text"], input[type="number"], input[type="search"], select {
     padding: 0.5em;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: transparent;
     color: var(--fg);
+    font: inherit;
 }
+select { background: var(--page); }
 
 .menu { list-style: none; padding: 0; }
 .menu li { margin-bottom: 0.5em; }
@@ -350,6 +352,86 @@ table.data td.num, table.data th.num {
     cursor: pointer;
 }
 .trend-chart-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
+
+/* ---- Плейты: форма добавления требования (шире, в сетку, не колонка) ---- */
+.requirement-form {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: none;
+    align-items: flex-end;
+    gap: 1em;
+}
+.requirement-form label { flex: 1 1 12em; min-width: 10em; }
+.requirement-form button { flex: 0 0 auto; height: 2.6em; }
+
+/* ---- Строчные мини-формы (переименовать / править требование) — <details>
+   раскрывается в обычном потоке (не поповер: внутри .table-scroll оверфлоу
+   обрезал бы position:absolute, т.к. overflow-x:auto неявно делает и
+   overflow-y:auto — see MDN overflow shorthand), поэтому просто растягивает
+   высоту строки/ячейки, что для table-layout безопасно. ---- */
+.row-actions { display: flex; align-items: flex-start; gap: 0.75em; flex-wrap: wrap; }
+.row-actions summary { list-style: none; cursor: pointer; }
+.row-actions summary::-webkit-details-marker { display: none; }
+.link-btn { color: var(--accent); font-size: 0.9em; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+.row-actions details[open] { flex-basis: 100%; }
+.inline-form {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: none;
+    gap: 0.5em;
+    align-items: center;
+    margin-top: 0.5em;
+    padding: 0.6em;
+    background: var(--page);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.inline-form input, .inline-form select {
+    padding: 0.4em 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--fg);
+}
+
+.button-danger {
+    background: transparent;
+    color: var(--error);
+    border: 1px solid var(--error);
+    padding: 0.35em 0.7em;
+    font-size: 0.85em;
+}
+.button-danger:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
+
+/* ---- Поиск персонажа с выпадающим списком (добавление требования к плейту) ---- */
+.unit-search { position: relative; }
+.unit-search-input {
+    width: 100%;
+    padding: 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--page);
+    color: var(--fg);
+}
+.unit-search-results {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    max-height: 16em;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    margin-top: 0.25em;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.unit-search-results.open { display: block; }
+.unit-search-result { padding: 0.5em 0.75em; cursor: pointer; font-size: 0.9em; }
+.unit-search-result:hover, .unit-search-result.active { background: var(--surface-2); }
+.unit-search-empty { padding: 0.5em 0.75em; color: var(--fg-muted); font-size: 0.85em; }
 
 /* ---- Мера (доля от целого, одна полоса) ---- */
 .meter { display: flex; align-items: center; gap: 0.75em; }

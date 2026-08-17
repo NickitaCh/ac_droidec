@@ -477,9 +477,12 @@ class StatRequirementsCog(commands.Cog):
     async def _before_player_units_sync_loop(self):
         await self.bot.wait_until_ready()
 
-    # ------------------ /статы_требования (офицеры) ------------------
+    # ------------------ /статы_требования ------------------
+    # Проверка прав больше не висит на группе целиком: "список"/"плейты" открыты
+    # уровню member (main.py::MEMBER_ACCESSIBLE_COMMANDS), а остальные сабкоманды
+    # (создать/добавить/редактировать/переименовать/удалить_плейт) и так требуют
+    # officer через глобальный гейт main.py::_check_access по умолчанию.
     @commands.slash_command(name="статы_требования", description="Управление требованиями к статам персонажей по плейтам")
-    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def stat_req(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
