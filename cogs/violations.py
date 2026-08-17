@@ -128,6 +128,13 @@ class ViolationsCog(commands.Cog):
                     continue
                 print(f"✅ [{gname}] Шаг 2: Guild ID успешно получен: {swgoh_guild_id}")
 
+                # Самовосстановление swgoh_guild_id: раньше эта колонка нигде не
+                # заполнялась, из-за чего ТБ-подсистема (guild_events.py) молча не
+                # работала — мы и так уже получили актуальный ID выше, просто
+                # сохраняем его, если он расходится с тем, что в БД.
+                if str(guild_cfg.get("swgoh_guild_id") or "") != str(swgoh_guild_id):
+                    database.update_guild_config(gid, swgoh_guild_id=str(swgoh_guild_id))
+
                 print(f"🔎 [{gname}] Шаг 3: Запрос данных гильдии из comlink...")
                 guild = self.bot.comlink.get_guild(guild_id=swgoh_guild_id)
                 members = guild.get("guild", guild).get("member", [])
@@ -141,6 +148,7 @@ class ViolationsCog(commands.Cog):
                     p_id = member.get("playerId")
                     p_name = member.get("playerName", f"Игрок {p_id[:8]}")
                     a_code = str(member.get("allyCode", p_id))
+                    member_level = member.get("memberLevel")
 
                     try:
                         prof = self.bot.comlink.get_player(player_id=p_id)
@@ -150,7 +158,7 @@ class ViolationsCog(commands.Cog):
                         pass
 
                     new_cache[p_name] = a_code
-                    temp_roster_data.append((a_code, a_code, p_name))
+                    temp_roster_data.append((a_code, a_code, p_name, member_level))
                     await asyncio.sleep(0.1)
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
