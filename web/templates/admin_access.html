@@ -41,7 +41,10 @@
                             <tr>
                                 <td><code>{{ a.discord_id }}</code></td>
                                 <td>{{ a.username or "—" }}</td>
-                                <td><code>{{ a.added_by }}</code></td>
+                                <td>
+                                    {{ a.added_by_name or a.added_by }}
+                                    {% if a.added_by_name %}<code class="cell-sub">{{ a.added_by }}</code>{% endif %}
+                                </td>
                                 <td>{{ a.added_at }}</td>
                                 <td class="row-actions">
                                     <form method="post" action="/admin/access/super-admins/{{ a.discord_id }}/remove"
@@ -82,7 +85,7 @@
                 <table class="data">
                     <thead>
                         <tr>
-                            <th data-sort="text">Discord ID</th>
+                            <th data-sort="text">Игрок</th>
                             <th data-sort="text">Код союзника</th>
                             <th data-sort="text">Уровень</th>
                             <th data-sort="text">Гильдия</th>
@@ -93,7 +96,10 @@
                     <tbody>
                         {% for g in grants %}
                             <tr>
-                                <td><code>{{ g.discord_id }}</code></td>
+                                <td>
+                                    {{ g.ingame_name or g.discord_id }}
+                                    {% if g.ingame_name %}<code class="cell-sub">{{ g.discord_id }}</code>{% endif %}
+                                </td>
                                 <td><code>{{ g.ally_code }}</code></td>
                                 <td>
                                     {% if g.tier == "officer" %}
@@ -102,8 +108,11 @@
                                         <span class="badge badge-neutral">Игрок</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ g.guild_id }}</td>
-                                <td><code>{{ g.granted_by }}</code></td>
+                                <td>{{ g.guild_name or g.guild_id }}</td>
+                                <td>
+                                    {{ g.granted_by_name or g.granted_by }}
+                                    {% if g.granted_by_name %}<code class="cell-sub">{{ g.granted_by }}</code>{% endif %}
+                                </td>
                                 <td class="row-actions">
                                     <form method="post" action="/admin/access/grants/{{ g.discord_id }}/remove"
                                           onsubmit="return confirm('Снять грант доступа для {{ g.discord_id }}?');">

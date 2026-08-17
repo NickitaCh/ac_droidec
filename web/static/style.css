@@ -270,6 +270,8 @@ table.data td.num, table.data th.num {
     font-variant-numeric: tabular-nums;
 }
 .muted { color: var(--fg-muted); }
+/* ---- Вторичная строка в ячейке таблицы (напр. сырой ID под резолвленным именем) ---- */
+.cell-sub { display: block; color: var(--fg-muted); font-size: 0.8em; margin-top: 0.15em; }
 .empty-state {
     padding: 2.5em 1.5em;
     text-align: center;
