@@ -61,10 +61,26 @@ async def guilds_deactivate(guild_id: int, user: dict = Depends(require_super_ad
 @router.get("/access", response_class=HTMLResponse)
 async def access_page(request: Request, user: dict = Depends(require_super_admin)):
     data = list_admins()
+    # Голые discord_id/guild_id нечитаемы для человека — резолвим в имена здесь,
+    # а не в шаблоне (Jinja без доступа к БД). guild_names — по ВСЕМ гильдиям
+    # (не только активным), т.к. грант может указывать на уже деактивированную.
+    guild_names = {g["id"]: g["name"] for g in list_guilds(active_only=False)}
+    super_admins = [
+        {**a, "added_by_name": database.get_username_for_discord_id(a["added_by"])}
+        for a in data["super_admins"]
+    ]
+    grants = [
+        {
+            **g,
+            "granted_by_name": database.get_username_for_discord_id(g["granted_by"]),
+            "guild_name": guild_names.get(g["guild_id"]),
+        }
+        for g in data["grants"]
+    ]
     return templates.TemplateResponse(request, "admin_access.html", {
         "user": user,
-        "super_admins": data["super_admins"],
-        "grants": data["grants"],
+        "super_admins": super_admins,
+        "grants": grants,
         "guilds": list_guilds(active_only=True),
         "error": request.query_params.get("error"),
     })

@@ -382,6 +382,33 @@ def get_web_access_log(limit: int = 200) -> list:
         for r in rows
     ]
 
+
+def get_username_for_discord_id(discord_id: str) -> str | None:
+    """Лучшее известное отображаемое имя для чужого discord_id (не текущего
+    залогиненного user — для него имя уже есть в сессии) — используется в
+    веб-таблицах, чтобы показывать имя вместо голого ID (added_by/granted_by
+    и т.п.). Источники по приоритету: username супер-админа (задаётся явно
+    при выдаче статуса), затем самое свежее имя из web_access_log (пишется
+    при каждом логине). Возвращает None, если ни разу не встречался —
+    вызывающий код в этом случае показывает сырой ID как есть (например,
+    для сид-меток вида "startup-seed", которые не являются discord_id)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_admins_table(cursor)
+    cursor.execute("SELECT username FROM bot_admins WHERE discord_id = ? AND username IS NOT NULL", (str(discord_id),))
+    row = cursor.fetchone()
+    if row and row[0]:
+        conn.close()
+        return row[0]
+    _ensure_web_access_log_table(cursor)
+    cursor.execute(
+        "SELECT username FROM web_access_log WHERE discord_id = ? ORDER BY id DESC LIMIT 1",
+        (str(discord_id),)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
 # =====================================================================
 # РУЧНЫЕ ГРАНТЫ ДОСТУПА: для игроков ВНЕ участвующих гильдий (или без
 # закэшированного игрового ранга) — выдаются только супер-админами, см.
@@ -399,24 +426,29 @@ def _ensure_manual_access_grants_table(cursor):
             granted_at TEXT NOT NULL
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE manual_access_grants ADD COLUMN ingame_name TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
 
-def add_manual_grant(discord_id: str, ally_code: str, guild_id: int, tier: str, granted_by: str = None) -> None:
+def add_manual_grant(discord_id: str, ally_code: str, guild_id: int, tier: str, granted_by: str = None, ingame_name: str = None) -> None:
     if tier not in ("member", "officer"):
         raise ValueError(f"Неверный уровень доступа: {tier!r} (ожидается 'member' или 'officer')")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_manual_access_grants_table(cursor)
     cursor.execute("""
-        INSERT INTO manual_access_grants (discord_id, ally_code, guild_id, tier, granted_by, granted_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO manual_access_grants (discord_id, ally_code, guild_id, tier, granted_by, granted_at, ingame_name)
+        VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
         ON CONFLICT(discord_id) DO UPDATE SET
             ally_code = excluded.ally_code,
             guild_id = excluded.guild_id,
             tier = excluded.tier,
             granted_by = excluded.granted_by,
-            granted_at = excluded.granted_at
-    """, (str(discord_id), ally_code, guild_id, tier, granted_by))
+            granted_at = excluded.granted_at,
+            ingame_name = excluded.ingame_name
+    """, (str(discord_id), ally_code, guild_id, tier, granted_by, ingame_name))
     conn.commit()
     conn.close()
 
@@ -437,25 +469,31 @@ def get_manual_grant(discord_id: str) -> dict | None:
     cursor = conn.cursor()
     _ensure_manual_access_grants_table(cursor)
     cursor.execute(
-        "SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at FROM manual_access_grants WHERE discord_id = ?",
+        "SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at, ingame_name FROM manual_access_grants WHERE discord_id = ?",
         (str(discord_id),)
     )
     row = cursor.fetchone()
     conn.close()
     if not row:
         return None
-    return {"discord_id": row[0], "ally_code": row[1], "guild_id": row[2], "tier": row[3], "granted_by": row[4], "granted_at": row[5]}
+    return {
+        "discord_id": row[0], "ally_code": row[1], "guild_id": row[2], "tier": row[3],
+        "granted_by": row[4], "granted_at": row[5], "ingame_name": row[6],
+    }
 
 
 def get_all_manual_grants() -> list:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_manual_access_grants_table(cursor)
-    cursor.execute("SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at FROM manual_access_grants ORDER BY granted_at")
+    cursor.execute("SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at, ingame_name FROM manual_access_grants ORDER BY granted_at")
     rows = cursor.fetchall()
     conn.close()
     return [
-        {"discord_id": r[0], "ally_code": r[1], "guild_id": r[2], "tier": r[3], "granted_by": r[4], "granted_at": r[5]}
+        {
+            "discord_id": r[0], "ally_code": r[1], "guild_id": r[2], "tier": r[3],
+            "granted_by": r[4], "granted_at": r[5], "ingame_name": r[6],
+        }
         for r in rows
     ]
 

@@ -107,7 +107,7 @@ async def add_grant(comlink, discord_id: str, ally_code: str, guild_id: int, tie
     if not player_data or "name" not in player_data:
         return GrantResult(ok=False, error=f"Игрок с кодом союзника {clean_code} не найден на серверах EA/CG.")
 
-    database.add_manual_grant(str(discord_id), clean_code, guild_id, tier, granted_by=granted_by)
+    database.add_manual_grant(str(discord_id), clean_code, guild_id, tier, granted_by=granted_by, ingame_name=player_data["name"])
     return GrantResult(ok=True, ingame_name=player_data["name"])
 
 
