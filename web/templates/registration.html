@@ -1,2 +1,53 @@
-429: Too Many Requests
-For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
+{% extends "base.html" %}
+{% block title %}Регистрация — AC Droidec{% endblock %}
+{% block content %}
+    <h1>Моя регистрация</h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if accounts %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Игровой ник</th><th>Код союзника</th><th>Статус</th></tr></thead>
+                    <tbody>
+                    {% for ally_code, ingame_name, is_main in accounts %}
+                        <tr>
+                            <td>{{ ingame_name }}</td>
+                            <td><code>{{ ally_code }}</code></td>
+                            <td>
+                                {% if is_main %}
+                                    <span class="badge badge-ok">⭐ Основной</span>
+                                {% else %}
+                                    <span class="badge badge-neutral">Альт</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% else %}
+        <p class="empty-state">Вы ещё не привязали ни одного аккаунта.</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>{% if accounts %}Привязать ещё один аккаунт (альт){% else %}Привязать аккаунт{% endif %}</span></div>
+        <form method="post" action="/registration">
+            <label>
+                Код союзника (9 цифр)
+                <input type="text" name="ally_code" pattern="[0-9]{9}" maxlength="9" required>
+            </label>
+            {% if accounts %}
+                <label class="checkbox">
+                    <input type="checkbox" name="is_alt" value="true" checked>
+                    Это альт (не заменять основной аккаунт)
+                </label>
+            {% endif %}
+            <button type="submit">Привязать</button>
+        </form>
+    </div>
+{% endblock %}
