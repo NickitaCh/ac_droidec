@@ -26,6 +26,10 @@ def init_db():
         )
     """)
     _migrate_user_mapping_guild_id(cursor)
+    try:
+        cursor.execute("ALTER TABLE user_mapping ADD COLUMN member_level INTEGER")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # 2. Таблица нарушений
     cursor.execute("""
@@ -128,6 +132,7 @@ GUILD_CONFIG_COLUMNS = [
     "birthday_channel_id", "birthday_role_id",
     "officer_channel_id",
     "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
+    "is_active",
 ]
 
 
@@ -187,6 +192,21 @@ def get_guild_config(guild_id: int) -> dict | None:
     return _row_to_guild_dict(row, columns) if row else None
 
 
+def get_guild_config_by_swgoh_id(swgoh_guild_id: str) -> dict | None:
+    """Резолв внутреннего guild_id по игровому ID гильдии (Comlink) — используется
+    и самовосстановлением swgoh_guild_id (ViolationsCog.update_roster_cache), и
+    регистрацией (services/registration.py), чтобы определить гильдию по ally_code
+    без Discord-ролей."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute("SELECT * FROM guilds WHERE swgoh_guild_id = ? AND is_active = 1", (swgoh_guild_id,))
+    columns = [d[0] for d in cursor.description]
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_guild_dict(row, columns) if row else None
+
+
 def create_guild(**fields) -> int:
     """fields — любое подмножество GUILD_CONFIG_COLUMNS. name/ally_code/discord_guild_id/
     member_role_id/officer_role_id обязательны (NOT NULL в схеме)."""
@@ -237,6 +257,153 @@ def seed_default_guild(**fields) -> int | None:
     if count > 0:
         return None
     return create_guild(**fields)
+
+# =====================================================================
+# СУПЕР-АДМИНЫ БОТА: полный доступ ко всем гильдиям + управление гильдиями/
+# грантами (см. guild_resolver.resolve_access, cogs/admin_management.py).
+# Засеивается текущим владельцем бота (main.py::ALLOWED_USER_IDS[0]) при
+# старте — см. seed_bot_admin, вызывается из main.py::on_ready.
+# =====================================================================
+def _ensure_bot_admins_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_admins (
+            discord_id TEXT PRIMARY KEY,
+            username TEXT,
+            added_by TEXT,
+            added_at TEXT NOT NULL
+        )
+    """)
+
+
+def add_bot_admin(discord_id: str, username: str = None, added_by: str = None) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_admins_table(cursor)
+    cursor.execute(
+        "INSERT OR IGNORE INTO bot_admins (discord_id, username, added_by, added_at) VALUES (?, ?, ?, datetime('now'))",
+        (str(discord_id), username, added_by)
+    )
+    conn.commit()
+    added = cursor.rowcount > 0
+    conn.close()
+    return added
+
+
+def remove_bot_admin(discord_id: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_admins_table(cursor)
+    cursor.execute("DELETE FROM bot_admins WHERE discord_id = ?", (str(discord_id),))
+    conn.commit()
+    removed = cursor.rowcount > 0
+    conn.close()
+    return removed
+
+
+def is_bot_admin(discord_id: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_admins_table(cursor)
+    cursor.execute("SELECT 1 FROM bot_admins WHERE discord_id = ?", (str(discord_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
+def get_all_bot_admins() -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bot_admins_table(cursor)
+    cursor.execute("SELECT discord_id, username, added_by, added_at FROM bot_admins ORDER BY added_at")
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"discord_id": r[0], "username": r[1], "added_by": r[2], "added_at": r[3]}
+        for r in rows
+    ]
+
+
+def seed_bot_admin(discord_id: str, username: str = None, added_by: str = None) -> bool:
+    """Идемпотентный сид (INSERT OR IGNORE) — безопасно звать на каждом старте,
+    как seed_default_guild."""
+    return add_bot_admin(discord_id, username=username, added_by=added_by)
+
+# =====================================================================
+# РУЧНЫЕ ГРАНТЫ ДОСТУПА: для игроков ВНЕ участвующих гильдий (или без
+# закэшированного игрового ранга) — выдаются только супер-админами, см.
+# guild_resolver.resolve_access (фолбэк после регистрации/ростер-кэша),
+# cogs/admin_management.py.
+# =====================================================================
+def _ensure_manual_access_grants_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS manual_access_grants (
+            discord_id TEXT PRIMARY KEY,
+            ally_code TEXT,
+            guild_id INTEGER,
+            tier TEXT NOT NULL CHECK(tier IN ('member', 'officer')),
+            granted_by TEXT,
+            granted_at TEXT NOT NULL
+        )
+    """)
+
+
+def add_manual_grant(discord_id: str, ally_code: str, guild_id: int, tier: str, granted_by: str = None) -> None:
+    if tier not in ("member", "officer"):
+        raise ValueError(f"Неверный уровень доступа: {tier!r} (ожидается 'member' или 'officer')")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_manual_access_grants_table(cursor)
+    cursor.execute("""
+        INSERT INTO manual_access_grants (discord_id, ally_code, guild_id, tier, granted_by, granted_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(discord_id) DO UPDATE SET
+            ally_code = excluded.ally_code,
+            guild_id = excluded.guild_id,
+            tier = excluded.tier,
+            granted_by = excluded.granted_by,
+            granted_at = excluded.granted_at
+    """, (str(discord_id), ally_code, guild_id, tier, granted_by))
+    conn.commit()
+    conn.close()
+
+
+def remove_manual_grant(discord_id: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_manual_access_grants_table(cursor)
+    cursor.execute("DELETE FROM manual_access_grants WHERE discord_id = ?", (str(discord_id),))
+    conn.commit()
+    removed = cursor.rowcount > 0
+    conn.close()
+    return removed
+
+
+def get_manual_grant(discord_id: str) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_manual_access_grants_table(cursor)
+    cursor.execute(
+        "SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at FROM manual_access_grants WHERE discord_id = ?",
+        (str(discord_id),)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"discord_id": row[0], "ally_code": row[1], "guild_id": row[2], "tier": row[3], "granted_by": row[4], "granted_at": row[5]}
+
+
+def get_all_manual_grants() -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_manual_access_grants_table(cursor)
+    cursor.execute("SELECT discord_id, ally_code, guild_id, tier, granted_by, granted_at FROM manual_access_grants ORDER BY granted_at")
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"discord_id": r[0], "ally_code": r[1], "guild_id": r[2], "tier": r[3], "granted_by": r[4], "granted_at": r[5]}
+        for r in rows
+    ]
 
 # =====================================================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С НАРУШЕНИЯМИ (WARNS)
@@ -479,18 +646,35 @@ def get_all_user_mappings(guild_id: int = 1):
 
 def sync_guild_roster(guild_id: int, roster_rows):
     """Полная замена состава гильдии guild_id в user_mapping: roster_rows —
-    [(discord_id, ally_code, ingame_name), ...]. Используется часовым рефрешем
-    ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
+    [(discord_id, ally_code, ingame_name, member_level), ...]. member_level —
+    сырое значение Comlink (4=лидер, 3=офицер, 2=рядовой участник), используется
+    guild_resolver.resolve_access для прав по игровому рангу. Используется часовым
+    рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("DELETE FROM user_mapping WHERE guild_id = ?", (guild_id,))
     cursor.executemany(
-        "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name) VALUES (?, ?, ?, ?)",
-        [(guild_id, discord_id, ally_code, ingame_name) for discord_id, ally_code, ingame_name in roster_rows]
+        "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name, member_level) VALUES (?, ?, ?, ?, ?)",
+        [(guild_id, discord_id, ally_code, ingame_name, member_level) for discord_id, ally_code, ingame_name, member_level in roster_rows]
     )
     conn.commit()
     conn.close()
+
+
+def get_member_level(guild_id: int, ally_code: str) -> int | None:
+    """Закэшированный игровой ранг (memberLevel из Comlink) игрока в гильдии —
+    4=лидер, 3=офицер, 2=рядовой участник. None, если ally_code не найден в
+    последнем ростер-кэше этой гильдии (не в гильдии/ещё не обновлялось)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT member_level FROM user_mapping WHERE guild_id = ? AND ally_code = ?",
+        (guild_id, ally_code)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] is not None else None
 
 def get_user_mapping_for_name(guild_id: int, name: str):
     """Точное совпадение по ingame_name в пределах гильдии — (ally_code, ingame_name) или None."""
