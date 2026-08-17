@@ -29,8 +29,24 @@ test_guilds_list = [TUSA_GUILD_ID, SNG_GUILD_ID]
 ALLY_CODE = "572624393"  
 N_LIMIT = 3              
 
-ALLOWED_ROLE_IDS = [1153753506772164629] 
-ALLOWED_USER_IDS = [291656027659698176]  
+ALLOWED_ROLE_IDS = [1153753506772164629]
+ALLOWED_USER_IDS = [291656027659698176]
+
+# Доступ по умолчанию — только уровень "officer" (игровой ранг офицер/лидер в
+# гильдии, см. guild_resolver.resolve_access). Команды из этого списка (полное
+# qualified_name — "группа сабкоманда" для сабкоманд) дополнительно открыты и
+# уровню "member" (рядовой участник участвующей гильдии). "регистрация" — особый
+# случай: открыта вообще всем, включая tier=None — это единственная "дверь" в
+# систему (см. main.py::_check_access, services/registration.py).
+ALWAYS_ALLOWED_COMMANDS = {"регистрация"}
+MEMBER_ACCESSIBLE_COMMANDS = {
+    "дк_требования список",
+    "статы_требования список",
+    "статы_требования плейты",
+    "статы",
+    "статы_релик",
+    "регистрация",
+}
 
 # === Настройки ротационного тега ===
 PING_CHANNEL_ID = 1222515211659907204  # ID канала, куда слать теги
@@ -142,6 +158,11 @@ async def on_ready():
         tb_order_role_id=str(TB_ORDER_ROLE_ID),
     )
 
+    # Сид первого супер-админа (текущий владелец бота) — идемпотентно (INSERT OR
+    # IGNORE), безопасно на каждом старте. Супер-админы управляют гильдиями и
+    # выдают доступ другим (см. guild_resolver.resolve_access, cogs/admin_management.py).
+    database.seed_bot_admin(str(ALLOWED_USER_IDS[0]), added_by="startup-seed")
+
     # 2. Установка статуса бота
     await bot.change_presence(
         status=disnake.Status.online,
@@ -149,27 +170,35 @@ async def on_ready():
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
-def _check_allowed_role(author) -> bool:
-    if author.id in bot.allowed_user_ids:
+def _check_access(author, command_name: str) -> bool:
+    """Единая точка входа для гейта: по умолчанию нужен tier="officer"
+    (guild_resolver.resolve_access — игровой ранг офицер/лидер, супер-админ,
+    или ручной грант уровня officer). ALWAYS_ALLOWED_COMMANDS пропускает вообще
+    всех (сейчас только "регистрация" — единственная "дверь" в систему прав, без
+    неё новый участник никогда не получит tier). MEMBER_ACCESSIBLE_COMMANDS
+    дополнительно открыт tier="member" (рядовой участник)."""
+    if author.id in bot.allowed_user_ids or guild_resolver.is_super_admin(author):
         return True
-    # Раньше проверялось по одному глобальному allowed_role_ids — теперь
-    # "доступ разрешён" значит "автор состоит в member/officer-роли ХОТЯ БЫ
-    # одной зарегистрированной в guilds гильдии" (guild_resolver сам читает
-    # сырые author._roles по тому же паттерну, что был здесь раньше).
-    if guild_resolver.resolve_guild_id(author) is None:
-        raise commands.MissingAnyRole(guild_resolver.all_registered_role_ids())
-    return True
+    if command_name in ALWAYS_ALLOWED_COMMANDS:
+        return True
+    tier = guild_resolver.resolve_tier(author)
+    if command_name in MEMBER_ACCESSIBLE_COMMANDS:
+        if tier in ("member", "officer"):
+            return True
+    elif tier == "officer":
+        return True
+    raise commands.CheckFailure(f"Недостаточно прав для команды «{command_name}» (уровень: {tier or 'нет доступа'})")
 
 # @bot.check — только для текстовых (!) команд, слэш-команды не проверяет
 # (см. disnake BotBase.check: "This is for text commands only, and doesn't
 # apply to application commands."). Нужен отдельный @bot.slash_command_check.
 @bot.check
 async def check_guild_roles(ctx):
-    return _check_allowed_role(ctx.author)
+    return _check_access(ctx.author, ctx.command.qualified_name)
 
 @bot.slash_command_check
 async def check_guild_roles_slash(inter):
-    return _check_allowed_role(inter.author)
+    return _check_access(inter.author, inter.application_command.qualified_name)
 
 @bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
@@ -177,9 +206,9 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
         error = error.original
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole, commands.CheckFailure)):
         try:
-            role_ids = list(getattr(inter.author, "_roles", []))
+            tier = guild_resolver.resolve_tier(inter.author)
             cmd_name = inter.application_command.qualified_name if inter.application_command else "?"
-            print(f"🛑 [Доступ] {inter.author} ({inter.author.id}) роли={role_ids} команда=/{cmd_name}: {error}")
+            print(f"🛑 [Доступ] {inter.author} ({inter.author.id}) tier={tier} команда=/{cmd_name}: {error}")
         except Exception as log_err:
             print(f"🛑 [Доступ] (не удалось залогировать детали: {log_err}): {error}")
         if not inter.response.is_done():

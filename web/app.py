@@ -18,7 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 load_dotenv()
 
 from web import auth
-from web.routes import dashboard, guild_dashboard, registration
+from web.routes import admin, dashboard, guild_dashboard, registration
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -40,3 +40,4 @@ app.include_router(auth.router, tags=["auth"])
 app.include_router(dashboard.router, tags=["dashboard"])
 app.include_router(guild_dashboard.router, tags=["guild-dashboard"])
 app.include_router(registration.router, prefix="/registration", tags=["registration"])
+app.include_router(admin.router, prefix="/admin", tags=["admin"])

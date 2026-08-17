@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Админы — AC Droidec{% endblock %}
+{% block content %}
+    <h1>Супер-админы и ручные гранты доступа</h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <h2>Супер-админы</h2>
+    <p>Полный доступ ко всем гильдиям + управление гильдиями/грантами.</p>
+    {% if super_admins %}
+        <table>
+            <thead><tr><th>Discord ID</th><th>Имя</th><th>Добавил</th><th>Когда</th><th></th></tr></thead>
+            <tbody>
+            {% for a in super_admins %}
+                <tr>
+                    <td><code>{{ a.discord_id }}</code></td>
+                    <td>{{ a.username or "—" }}</td>
+                    <td><code>{{ a.added_by }}</code></td>
+                    <td>{{ a.added_at }}</td>
+                    <td>
+                        <form method="post" action="/admin/access/super-admins/{{ a.discord_id }}/remove">
+                            <button type="submit">Снять</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>— никого —</p>
+    {% endif %}
+
+    <form method="post" action="/admin/access/super-admins/add">
+        <label>
+            Discord ID
+            <input type="text" name="discord_id" required>
+        </label>
+        <label>
+            Имя (для отображения, необязательно)
+            <input type="text" name="username">
+        </label>
+        <button type="submit">Выдать статус супер-админа</button>
+    </form>
+
+    <h2>Ручные гранты доступа</h2>
+    <p>Для игроков вне участвующих гильдий — уровень доступа привязывается к конкретной гильдии (для скоупа данных вроде /статы).</p>
+    {% if grants %}
+        <table>
+            <thead><tr><th>Discord ID</th><th>Код союзника</th><th>Уровень</th><th>Гильдия</th><th>Выдал</th><th></th></tr></thead>
+            <tbody>
+            {% for g in grants %}
+                <tr>
+                    <td><code>{{ g.discord_id }}</code></td>
+                    <td><code>{{ g.ally_code }}</code></td>
+                    <td>{{ "Офицер" if g.tier == "officer" else "Игрок" }}</td>
+                    <td>{{ g.guild_id }}</td>
+                    <td><code>{{ g.granted_by }}</code></td>
+                    <td>
+                        <form method="post" action="/admin/access/grants/{{ g.discord_id }}/remove">
+                            <button type="submit">Снять</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>— никого —</p>
+    {% endif %}
+
+    <form method="post" action="/admin/access/grants/add">
+        <label>
+            Discord ID
+            <input type="text" name="discord_id" required>
+        </label>
+        <label>
+            Код союзника (9 цифр)
+            <input type="text" name="ally_code" pattern="[0-9]{9}" maxlength="9" required>
+        </label>
+        <label>
+            Уровень
+            <select name="tier" required>
+                <option value="member">Игрок</option>
+                <option value="officer">Офицер</option>
+            </select>
+        </label>
+        <label>
+            Гильдия (для скоупа данных)
+            <select name="guild_id" required>
+                {% for g in guilds %}
+                    <option value="{{ g.id }}">{{ g.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit">Выдать доступ</button>
+    </form>
+{% endblock %}
