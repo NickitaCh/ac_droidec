@@ -12,8 +12,8 @@ class SelfRegistrationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def _do_registration(self, inter, target_user, ally_code, альт, guild_id):
-        result = await register_player(self.bot.comlink, guild_id, str(target_user.id), ally_code, is_alt=альт)
+    async def _do_registration(self, inter, target_user, ally_code, альт):
+        result = await register_player(self.bot.comlink, str(target_user.id), ally_code, is_alt=альт)
         if not result.ok:
             await inter.edit_original_response(content=f"❌ **Ошибка:** {result.error}")
             return
@@ -61,11 +61,10 @@ class SelfRegistrationCog(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None:
-            await inter.edit_original_response(content="❌ Не удалось определить, к какой гильдии вы относитесь.")
-            return
-
+        # Гильдия определяется не по Discord-роли вызывающего, а внутри
+        # register_player живым запросом к Comlink по самому ally_code — эта
+        # команда открыта вообще всем (main.py::ALWAYS_ALLOWED_COMMANDS), в том
+        # числе тем, у кого пока нет вообще никакого резолвящегося доступа.
         if участник is not None and участник.id != inter.author.id:
             if not guild_resolver.is_officer_for_resolved_guild(inter.author):
                 await inter.edit_original_response(
@@ -76,7 +75,7 @@ class SelfRegistrationCog(commands.Cog):
         else:
             target_user = inter.author
 
-        await self._do_registration(inter, target_user, ally_code, альт, guild_id)
+        await self._do_registration(inter, target_user, ally_code, альт)
 
     @commands.slash_command(
         name="регистрация_отчёт",

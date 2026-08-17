@@ -38,7 +38,7 @@ async def submit_registration(
     user: dict = Depends(require_guild_access),
 ):
     comlink = _get_comlink()
-    result = await register_player(comlink, user["guild_id"], user["discord_id"], ally_code, is_alt=is_alt)
+    result = await register_player(comlink, user["discord_id"], ally_code, is_alt=is_alt)
     if not result.ok:
         return RedirectResponse(f"/registration?{urlencode({'error': result.error})}", status_code=303)
     return RedirectResponse("/registration", status_code=303)

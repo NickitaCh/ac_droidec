@@ -1,6 +1,11 @@
 """Ядро привязки Discord-аккаунта к коду союзника SWGOH (/регистрация в боте и
 веб-дашборд зовут одну и ту же функцию) — только Comlink-валидация + запись в БД,
-без форматирования ответа (embed в cog, HTML в web/routes/registration.py)."""
+без форматирования ответа (embed в cog, HTML в web/routes/registration.py).
+
+Это единственная "дверь" в систему прав: гильдия определяется НЕ по Discord-роли
+вызывающего, а живым запросом к Comlink по самому ally_code (guildId игрока →
+сверка с guilds.swgoh_guild_id) — так что команда доступна вообще всем, включая
+пользователей без единого известного боту тега (main.py::ALWAYS_ALLOWED_COMMANDS)."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -18,7 +23,7 @@ class RegistrationResult:
     accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
 
 
-async def register_player(comlink, guild_id: int, discord_id: str, ally_code: str, is_alt: bool = False) -> RegistrationResult:
+async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False) -> RegistrationResult:
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
         return RegistrationResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
@@ -30,6 +35,14 @@ async def register_player(comlink, guild_id: int, discord_id: str, ally_code: st
         ingame_name = player_data["name"]
     except Exception as e:
         return RegistrationResult(ok=False, error=f"Не удалось проверить код из-за сбоя связи с сервером: {e}")
+
+    swgoh_guild_id = player_data.get("guildId")
+    if not swgoh_guild_id:
+        return RegistrationResult(ok=False, error="Этот аккаунт не состоит ни в одной гильдии SWGOH.")
+    guild_cfg = database.get_guild_config_by_swgoh_id(str(swgoh_guild_id))
+    if not guild_cfg:
+        return RegistrationResult(ok=False, error="Эта SWGOH-гильдия не входит в число обслуживаемых ботом. Обратитесь к супер-админу за ручным доступом.")
+    guild_id = guild_cfg["id"]
 
     # Первая регистрация в этой гильдии всегда основная, даже если попросили
     # альт — иначе получится аккаунт без единого основного.
