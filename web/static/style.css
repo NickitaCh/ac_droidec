@@ -184,9 +184,10 @@ select { background: var(--page); }
     padding: 0;
     list-style: none;
 }
-.card-grid li { margin: 0; }
+.card-grid li { margin: 0; height: 100%; }
 .card {
     display: block;
+    height: 100%;
     padding: 1.25em;
     border: 1px solid var(--border);
     border-radius: 10px;
