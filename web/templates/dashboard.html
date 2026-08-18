@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Дашборд — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
     {% if error %}
         <p class="error">Ошибка входа: {{ error }}</p>
@@ -27,9 +28,25 @@
                 <div class="card-title">🚨 Нарушения</div>
                 <div class="card-desc">Таблица нарушений за 90 дней</div>
             </a></li>
+            <li><a class="card" href="/activity">
+                <div class="card-title">📈 Активность</div>
+                <div class="card-desc">Прогресс гильдии: шмот, реликвии, звёзды, зеты</div>
+            </a></li>
             <li><a class="card" href="/plates">
                 <div class="card-title">🧬 Плейты статов</div>
                 <div class="card-desc">Нормы статов персонажей по билдам</div>
+            </a></li>
+            <li><a class="card" href="/datacrons">
+                <div class="card-title">🔮 Датакроны</div>
+                <div class="card-desc">Требования к билдам и проверка по составу</div>
+            </a></li>
+            <li><a class="card" href="/stats-check">
+                <div class="card-title">📊 Статы</div>
+                <div class="card-desc">Проверка статов персонажей у игроков</div>
+            </a></li>
+            <li><a class="card" href="/birthdays">
+                <div class="card-title">🎂 Дни рождения</div>
+                <div class="card-desc">Список и ближайшие поздравления</div>
             </a></li>
             <li><a class="card" href="/registration">
                 <div class="card-title">📝 Моя регистрация</div>

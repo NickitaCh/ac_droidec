@@ -176,18 +176,20 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Поповеры переименования/редактирования (details.row-actions) — закрывать
-    // остальные при открытии одного и по клику вне, иначе накапливаются открытыми.
-    document.querySelectorAll(".row-actions details").forEach((d) => {
+    // Поповеры переименования/редактирования (details.row-actions) и выпадающие
+    // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
+    // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.
+    document.querySelectorAll(".row-actions details, .nav-dropdown").forEach((d) => {
+        const group = d.classList.contains("nav-dropdown") ? ".nav-dropdown" : ".row-actions details";
         d.addEventListener("toggle", () => {
             if (!d.open) return;
-            document.querySelectorAll(".row-actions details[open]").forEach((other) => {
+            document.querySelectorAll(`${group}[open]`).forEach((other) => {
                 if (other !== d) other.open = false;
             });
         });
     });
     document.addEventListener("click", (e) => {
-        document.querySelectorAll(".row-actions details[open]").forEach((d) => {
+        document.querySelectorAll(".row-actions details[open], .nav-dropdown[open]").forEach((d) => {
             if (!d.contains(e.target)) d.open = false;
         });
     });

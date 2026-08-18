@@ -17,17 +17,26 @@
                     <a href="/tb">ТБ</a>
                     <a href="/violations">Нарушения</a>
                     <a href="/activity">Активность</a>
-                    <a href="/plates">Плейты</a>
                     <a href="/datacrons">Датакроны</a>
-                    <a href="/stats-check">Статы</a>
                     <a href="/birthdays">Дни рождения</a>
-                    <a href="/tasks">Задачи</a>
                     <a href="/registration">Регистрация</a>
+                    <details class="nav-dropdown">
+                        <summary>Моды</summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="/plates">Плейты</a>
+                            <a href="/stats-check">Статы</a>
+                        </div>
+                    </details>
                 {% endif %}
                 {% if user.is_super_admin %}
-                    <a href="/admin/guilds">Гильдии</a>
-                    <a href="/admin/access">Админы</a>
-                    <a href="/admin/access-log">Лог входов</a>
+                    <details class="nav-dropdown">
+                        <summary>Админ меню</summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="/admin/guilds">Гильдии</a>
+                            <a href="/admin/access">Админы</a>
+                            <a href="/admin/access-log">Лог входов</a>
+                        </div>
+                    </details>
                 {% endif %}
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout">Выйти</a>
