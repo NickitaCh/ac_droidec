@@ -14,6 +14,31 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Поиск по ленте активности (/activity) — структура там не таблица, а вложенные
+    // карточки дата -> игрок -> строка, поэтому отдельный от data-table-search виджет:
+    // фильтрует строки с [data-search], затем прячет опустевшие карточки игрока и
+    // целиком опустевшие дневные группы, а не просто скрывает отдельные <tr>.
+    document.querySelectorAll("[data-feed-search]").forEach((input) => {
+        const feed = document.getElementById(input.dataset.feedSearch);
+        if (!feed) return;
+        input.addEventListener("input", () => {
+            const q = input.value.trim().toLowerCase();
+            feed.querySelectorAll(".activity-event-row").forEach((row) => {
+                row.style.display = !q || row.dataset.search.includes(q) ? "" : "none";
+            });
+            feed.querySelectorAll(".activity-player-card").forEach((card) => {
+                const anyVisible = Array.from(card.querySelectorAll(".activity-event-row"))
+                    .some((row) => row.style.display !== "none");
+                card.style.display = anyVisible ? "" : "none";
+            });
+            feed.querySelectorAll(".activity-date-group").forEach((group) => {
+                const anyVisible = Array.from(group.querySelectorAll(".activity-player-card"))
+                    .some((card) => card.style.display !== "none");
+                group.style.display = anyVisible ? "" : "none";
+            });
+        });
+    });
+
     document.querySelectorAll("table.data").forEach((table) => {
         const headers = table.querySelectorAll("th[data-sort]");
         headers.forEach((th, colIndex) => {

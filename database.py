@@ -3,6 +3,14 @@ import sqlite3
 
 DB_NAME = "guild_management.db"
 
+# Раз во сколько часов фоново обновлять кэш полного ростера юнитов игроков (см.
+# cogs/stat_requirements.py::player_units_sync_loop) — живёт здесь (не в main.py, как
+# остальные operator-константы, см. CLAUDE.md), потому что веб-процесс (services/
+# dashboard_data.py, оценка "автообновление через X" на /activity) тоже читает это
+# значение и не поднимает bot/main.py вообще. main.py импортирует его же, чтобы не
+# держать два независимых числа, которые могут разойтись при правке одного и не другого.
+PLAYER_STATS_SYNC_HOURS = 6
+
 def init_db():
     """Создает все таблицы в единой БД, если они еще не созданы"""
     conn = sqlite3.connect(DB_NAME)
@@ -777,6 +785,19 @@ def get_all_user_mappings(guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("SELECT discord_id, ally_code, ingame_name FROM user_mapping WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_guild_ids_for_ally_code(ally_code: str) -> set:
+    """Все guild_id, где зарегистрирован этот ally_code (обычно один, но игрок теоретически
+    может состоять в нескольких зарегистрированных гильдиях сразу — см. player_units_sync_loop
+    в cogs/stat_requirements.py, тот же паттерн). Используется ручным синком с /activity,
+    чтобы не потерять события для "чужой" гильдии, если игрок состоит сразу в нескольких."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT guild_id FROM user_mapping WHERE ally_code = ?", (ally_code,))
+    rows = {r[0] for r in cursor.fetchall()}
     conn.close()
     return rows
 
@@ -1926,6 +1947,25 @@ def get_player_units(ally_code: str) -> dict:
     return {base_id: json.loads(unit_json) for base_id, unit_json in rows}
 
 
+def get_player_units_last_sync(ally_codes: list) -> str | None:
+    """MAX(updated_at) по кэшу для набора ally_code — "когда последний раз обновлялся
+    ростер этой гильдии" для панели статуса на /activity. Не разделяет ручной/авто-синк —
+    оба пишут через upsert_player_units одинаково."""
+    if not ally_codes:
+        return None
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    placeholders = ",".join("?" for _ in ally_codes)
+    cursor.execute(
+        f"SELECT MAX(updated_at) FROM player_unit_cache WHERE ally_code IN ({placeholders})",
+        ally_codes,
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+
 # =====================================================================
 # АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
 # =====================================================================
@@ -1964,9 +2004,11 @@ def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action
     return inserted
 
 
-def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit: int = 300):
+def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit: int = 300,
+                               date_from: str | None = None, date_to: str | None = None):
     """Возвращает [(ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at), ...],
-    новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми)."""
+    новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми).
+    date_from/date_to — включительно, формат event_date (YYYY-MM-DD)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
@@ -1978,6 +2020,12 @@ def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit
     if ally_code:
         query += " AND ally_code = ?"
         params.append(ally_code)
+    if date_from:
+        query += " AND event_date >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND event_date <= ?"
+        params.append(date_to)
     query += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
     cursor.execute(query, params)

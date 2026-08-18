@@ -167,22 +167,10 @@ def _build_synthetic_unit(base_id: str, relic_level: int) -> dict:
     }
 
 
-async def _fetch_player_units(comlink, ally_code: str) -> dict:
-    """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
-    player_data = await asyncio.to_thread(comlink.get_player, allycode=str(ally_code))
-    roster = player_data.get("rosterUnit") or player_data.get("roster") or []
-    units = {}
-    for u in roster:
-        base_id = u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]
-        if base_id:
-            units[base_id] = u
-    return units
-
-
 async def _get_unit_for_player(bot, ally_code: str, base_id: str, force_refresh: bool):
     """Возвращает (unit_dict, updated_at) либо (None, None)."""
     if force_refresh:
-        units = await _fetch_player_units(bot.comlink, ally_code)
+        units = await activity_diff.fetch_player_units(bot.comlink, ally_code)
         if units:
             database.upsert_player_units(ally_code, units)
         unit = units.get(base_id)
@@ -469,27 +457,23 @@ class StatRequirementsCog(commands.Cog):
         ally_codes = list(ally_to_guilds)
         if not ally_codes:
             return
+        # Метка "последний автоцикл стартовал в X" — веб-дашборд (/activity) оценивает время
+        # до следующего автообновления как last_auto_run + PLAYER_STATS_SYNC_HOURS. Пишем
+        # только тут (не из ручного веб-синка), иначе кнопка "Обновить сейчас" на веб-странице
+        # сбивала бы эту оценку, не переставляя реальный внутренний таймер disnake tasks.loop.
+        database.set_bot_state("player_units_sync_loop_last_auto_run", datetime.now(MSK).isoformat())
         print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
         synced = 0
         total_events = 0
         today = datetime.now(MSK).date().isoformat()
         for ally_code in ally_codes:
             try:
-                new_units = await _fetch_player_units(self.bot.comlink, ally_code)
-                if not new_units:
-                    continue
-                old_units = database.get_player_units(ally_code)
-                events = activity_diff.diff_roster(old_units, new_units, is_first_sync=not old_units)
-                database.upsert_player_units(ally_code, new_units)
-                synced += 1
-                for base_id, action_type, old_value, new_value in events:
-                    for guild_id in ally_to_guilds[ally_code]:
-                        if database.add_guild_activity_event(
-                            guild_id=guild_id, ally_code=ally_code, base_id=base_id,
-                            action_type=action_type, old_value=old_value, new_value=new_value,
-                            event_date=today,
-                        ):
-                            total_events += 1
+                fetched, added = await activity_diff.sync_player(
+                    self.bot.comlink, ally_code, ally_to_guilds[ally_code], today
+                )
+                if fetched:
+                    synced += 1
+                total_events += added
             except Exception as e:
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)

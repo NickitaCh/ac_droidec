@@ -77,9 +77,9 @@ TB_ORDER_SOURCE_CHANNEL_ID = 1523597487934541834
 # Роль, которую тегаем при ежедневной публикации ордера на актуальный этап
 TB_ORDER_ROLE_ID = 1153753562254426192
 
-# Раз во сколько часов фоново обновлять кэш полного ростера юнитов игроков
-# (моды/шмот/реликвия) для /статы — см. cogs/stat_requirements.py
-PLAYER_STATS_SYNC_HOURS = 6
+# PLAYER_STATS_SYNC_HOURS теперь определён в database.py (веб-процесс тоже его читает,
+# для оценки "автообновление через X" на /activity — main.py ему не виден).
+PLAYER_STATS_SYNC_HOURS = database.PLAYER_STATS_SYNC_HOURS
 
 comlink = SwgohComlink(url=COMLINK_URL)
 
