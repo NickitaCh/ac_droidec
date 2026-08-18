@@ -827,11 +827,21 @@ class DatacronRequirementsCog(commands.Cog):
 
     @tasks.loop(hours=12)
     async def datacron_cache_loop(self):
+        # На старте/при сетевых сбоях comlink иногда отдаёт /data с 400 (сторонний
+        # сбой, не наш код) — без быстрого ретрая справочник застревал бы пустым
+        # на все 12 часов (см. /дк_требования список: "справочник ещё загружается").
+        # Тот же паттерн динамического интервала, что update_roster_cache в violations.py.
         try:
             self.bot.datacron_cache = await _fetch_datacron_cache(self.bot.comlink)
             print(f"✅ [ДК] Справочник датакронов обновлён: {len(self.bot.datacron_cache['seasons'])} сезонов")
+            if self.datacron_cache_loop.hours != 12:
+                print("⚙️ [ДК] Справочник восстановлен. Возвращаем штатный интервал: 12 часов")
+                self.datacron_cache_loop.change_interval(hours=12, minutes=0)
         except Exception as e:
             print(f"❌ [ДК] Ошибка обновления справочника датакронов: {e}")
+            if self.datacron_cache_loop.minutes != 5:
+                print("⚙️ [ДК] Сбой обновления справочника. Устанавливаем частый интервал проверки: 5 минут")
+                self.datacron_cache_loop.change_interval(hours=0, minutes=5)
 
     @datacron_cache_loop.before_loop
     async def _before_datacron_cache_loop(self):
