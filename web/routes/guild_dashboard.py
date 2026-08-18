@@ -1,9 +1,11 @@
+from collections import Counter
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+import database
 from services import dashboard_data
 from web.deps import require_guild_access
 
@@ -34,6 +36,28 @@ async def tb_report(request: Request, user: dict = Depends(require_guild_access)
         "report": report,
         "max_summary": max_summary,
         "max_trend_total": max_trend_total,
+    })
+
+
+@router.get("/activity", response_class=HTMLResponse)
+async def activity(request: Request, user: dict = Depends(require_guild_access)):
+    player_filter = request.query_params.get("player") or None
+    rows = dashboard_data.get_guild_activity(user["guild_id"], ally_code=player_filter)
+    players = dashboard_data.get_guild_activity_players(user["guild_id"])
+    guild_cfg = database.get_guild_config(user["guild_id"])
+
+    breakdown = Counter(r.action_label for r in rows)
+    breakdown_rows = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
+    max_breakdown = breakdown_rows[0][1] if breakdown_rows else 0
+
+    return templates.TemplateResponse(request, "activity.html", {
+        "user": user,
+        "rows": rows,
+        "players": players,
+        "player_filter": player_filter,
+        "gg_configured": bool(guild_cfg and guild_cfg.get("swgoh_gg_guild_id")),
+        "breakdown_rows": breakdown_rows,
+        "max_breakdown": max_breakdown,
     })
 
 

@@ -8,3 +8,5 @@ jinja2
 itsdangerous
 python-multipart
 httpx
+aiohttp
+beautifulsoup4
