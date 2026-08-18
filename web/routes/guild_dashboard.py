@@ -116,7 +116,6 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     player_filter = request.query_params.get("player") or None
     rows = dashboard_data.get_guild_activity(user["guild_id"], ally_code=player_filter)
     players = dashboard_data.get_guild_activity_players(user["guild_id"])
-    guild_cfg = database.get_guild_config(user["guild_id"])
 
     breakdown = Counter(r.action_label for r in rows)
     breakdown_rows = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
@@ -127,7 +126,6 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "rows": rows,
         "players": players,
         "player_filter": player_filter,
-        "gg_configured": bool(guild_cfg and guild_cfg.get("swgoh_gg_guild_id")),
         "breakdown_rows": breakdown_rows,
         "max_breakdown": max_breakdown,
     })

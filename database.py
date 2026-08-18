@@ -1914,6 +1914,18 @@ def get_player_unit(ally_code: str, base_id: str):
     return json.loads(row[0]), row[1]
 
 
+def get_player_units(ally_code: str) -> dict:
+    """base_id -> сырой rosterUnit словарь, весь закэшированный ростер игрока разом
+    (для диффа активности в player_units_sync_loop — см. services/activity_diff.py)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    cursor.execute("SELECT base_id, unit_json FROM player_unit_cache WHERE ally_code = ?", (ally_code,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {base_id: json.loads(unit_json) for base_id, unit_json in rows}
+
+
 # =====================================================================
 # АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
 # =====================================================================
