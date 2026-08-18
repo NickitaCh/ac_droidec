@@ -74,6 +74,10 @@ def deactivate_guild(guild_id: int) -> bool:
     return database.update_guild_config(guild_id, is_active=0)
 
 
+def set_swgoh_gg_guild_id(guild_id: int, swgoh_gg_guild_id: str) -> bool:
+    return database.update_guild_config(guild_id, swgoh_gg_guild_id=swgoh_gg_guild_id.strip() or None)
+
+
 def list_guilds(active_only: bool = True) -> list:
     return database.get_all_guild_configs(active_only=active_only)
 

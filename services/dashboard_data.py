@@ -222,3 +222,56 @@ def get_violations_overview(guild_id: int, include_zero: bool = False) -> list[V
 
     rows.sort(key=lambda r: r.recent_total, reverse=True)
     return rows
+
+
+ACTIVITY_ACTION_LABELS = {
+    "gear": "Снаряжение",
+    "level": "Уровень",
+    "era": "Эра",
+    "relic": "Реликвия",
+    "star": "Звёзды",
+    "zeta": "Зета",
+    "omicron": "Омикрон",
+}
+
+
+@dataclass
+class ActivityEventRow:
+    ally_code: str
+    player_name: str
+    base_id: str
+    unit_name: str
+    action_type: str
+    action_label: str
+    old_value: str | None
+    new_value: str
+    event_date: str
+
+
+def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int = 300) -> list[ActivityEventRow]:
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, limit=limit)
+    unit_names = database.get_game_unit_names([r[1] for r in rows])
+    result = []
+    for ac, base_id, action_type, old_value, new_value, event_date, scraped_at in rows:
+        result.append(ActivityEventRow(
+            ally_code=ac,
+            player_name=names_by_code.get(ac, ac),
+            base_id=base_id,
+            unit_name=unit_names.get(base_id) or base_id,
+            action_type=action_type,
+            action_label=ACTIVITY_ACTION_LABELS.get(action_type, action_type),
+            old_value=old_value,
+            new_value=new_value,
+            event_date=event_date,
+        ))
+    return result
+
+
+def get_guild_activity_players(guild_id: int) -> list:
+    """[(ally_code, name), ...] по ВСЕМ игрокам с активностью в этой гильдии — не зависит
+    от текущего фильтра/лимита get_guild_activity, иначе выбор игрока в выпадающем списке
+    на веб-странице схлопывал бы сам список до одного уже выбранного игрока."""
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    codes = database.get_guild_activity_player_codes(guild_id)
+    return sorted(((c, names_by_code.get(c, c)) for c in codes), key=lambda p: p[1].lower())

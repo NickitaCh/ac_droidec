@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Активность гильдии — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Активность гильдии</h1>
+
+    {% if not gg_configured %}
+        <p class="empty-state">Для этой гильдии не указан ID на swgoh.gg — сбор активности не запущен. Обратитесь к супер-админу, чтобы настроить его в «Гильдии».</p>
+    {% elif not players %}
+        <p class="empty-state">Данных пока нет — либо гильдия ещё не прожила первый час после подключения, либо активности не было.</p>
+    {% else %}
+        <div class="stats-grid">
+            <div class="stat-tile">
+                <div class="stat-value">{{ rows|length }}</div>
+                <div class="stat-label">{{ "Событий по игроку" if player_filter else "Событий в ленте" }}</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-value">{{ players|length }}</div>
+                <div class="stat-label">Игроков</div>
+            </div>
+        </div>
+
+        {% if breakdown_rows %}
+            <div class="panel">
+                <div class="panel-title"><span>По типу изменения</span></div>
+                <div class="bar-chart">
+                    {% for label, count in breakdown_rows %}
+                        <div class="bar-chart-row">
+                            <div class="bar-chart-name">{{ label }}</div>
+                            <div class="bar-chart-track">
+                                <div class="bar-chart-fill" data-tip="{{ label }}: {{ count }}" style="width: {{ (count / max_breakdown * 100) if max_breakdown else 0 }}%;"></div>
+                            </div>
+                            <div class="bar-chart-value">{{ count }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        <form method="get" action="/activity" class="table-toolbar" style="margin-bottom: 1em;">
+            <select name="player" onchange="this.form.submit()">
+                <option value="">Все игроки</option>
+                {% for ally_code, name in players %}
+                    <option value="{{ ally_code }}" {% if ally_code == player_filter %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+            {% if player_filter %}
+                <a href="/activity">Сбросить фильтр</a>
+            {% endif %}
+        </form>
+
+        {% if not rows %}
+            <p class="empty-state">У этого игрока пока нет событий активности.</p>
+        {% else %}
+            <div class="panel">
+                <div class="table-toolbar">
+                    <input type="search" placeholder="Поиск по игроку или персонажу…" data-table-search="activity-table">
+                </div>
+                <div class="table-scroll">
+                    <table class="data" id="activity-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="text">Дата</th>
+                                <th data-sort="text">Игрок</th>
+                                <th data-sort="text">Персонаж</th>
+                                <th data-sort="text">Изменение</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                                <tr data-search="{{ (row.player_name ~ ' ' ~ row.unit_name)|lower }}">
+                                    <td>{{ row.event_date }}</td>
+                                    <td>{{ row.player_name }}</td>
+                                    <td>{{ row.unit_name }}</td>
+                                    <td>
+                                        <span class="badge badge-neutral">{{ row.action_label }}</span>
+                                        {% if row.old_value %}
+                                            {{ row.old_value }} → {{ row.new_value }}
+                                        {% else %}
+                                            {{ row.new_value }}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

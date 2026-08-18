@@ -132,6 +132,7 @@ GUILD_CONFIG_COLUMNS = [
     "birthday_channel_id", "birthday_role_id",
     "officer_channel_id",
     "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
+    "swgoh_gg_guild_id",
     "is_active",
 ]
 
@@ -160,6 +161,10 @@ def _ensure_guilds_table(cursor):
             created_at TEXT NOT NULL
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN swgoh_gg_guild_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
 
 def _row_to_guild_dict(row, columns):
@@ -597,6 +602,21 @@ def get_game_unit_name(base_id: str) -> str | None:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+def get_game_unit_names(base_ids: list[str]) -> dict:
+    """Батч-версия get_game_unit_name — один запрос вместо одного на каждый base_id
+    (нужна там, где имена резолвятся для десятков/сотен строк разом, например /activity)."""
+    if not base_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    unique_ids = list(set(base_ids))
+    placeholders = ", ".join("?" for _ in unique_ids)
+    cursor.execute(f"SELECT base_id, cached_name FROM game_units WHERE base_id IN ({placeholders})", unique_ids)
+    result = dict(cursor.fetchall())
+    conn.close()
+    return result
 
 # =====================================================================
 # ЗАДАЧИ НА ПРОКАЧКУ (/task_add + часовой аудит выполнения через Comlink)
@@ -1868,3 +1888,76 @@ def get_player_unit(ally_code: str, base_id: str):
     if not row:
         return None
     return json.loads(row[0]), row[1]
+
+
+# =====================================================================
+# АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
+# =====================================================================
+def _ensure_guild_activity_events_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            base_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT NOT NULL,
+            event_date TEXT NOT NULL,
+            scraped_at TEXT NOT NULL,
+            UNIQUE(guild_id, ally_code, base_id, action_type, old_value, new_value, event_date)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_guild_activity_guild_date ON guild_activity_events(guild_id, event_date)")
+
+
+def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action_type: str,
+                              old_value: str | None, new_value: str, event_date: str) -> bool:
+    """Возвращает True, если строка реально добавлена (False — уже была, INSERT OR IGNORE проглотил дубль)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    cursor.execute("""
+        INSERT OR IGNORE INTO guild_activity_events
+            (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date))
+    conn.commit()
+    inserted = cursor.rowcount > 0
+    conn.close()
+    return inserted
+
+
+def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit: int = 300):
+    """Возвращает [(ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at), ...],
+    новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    query = """
+        SELECT ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at
+        FROM guild_activity_events WHERE guild_id = ?
+    """
+    params = [guild_id]
+    if ally_code:
+        query += " AND ally_code = ?"
+        params.append(ally_code)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_guild_activity_player_codes(guild_id: int) -> list:
+    """Все ally_code, у которых есть хотя бы одно событие активности в этой гильдии —
+    независимо от лимита/фильтра get_guild_activity_events, чтобы список для фильтра
+    на веб-странице не схлопывался до одного игрока при уже применённом фильтре."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    cursor.execute("SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ?", (guild_id,))
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
