@@ -6,6 +6,9 @@
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}
+    {% if registered_name %}
+        <p><span class="badge badge-ok">Зарегистрирован(а): {{ registered_name }}</span></p>
+    {% endif %}
 
     {% if accounts %}
         <div class="panel">
@@ -48,6 +51,35 @@
                 </label>
             {% endif %}
             <button type="submit">Привязать</button>
+        </form>
+    </div>
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Зарегистрировать другого участника</span></div>
+        <p class="muted" style="margin-top:0;">Необязательно — оставьте пустым, чтобы привязать код союзника к себе (форма выше делает то же самое).</p>
+        <form method="post" action="/registration">
+            <label>
+                Игрок (по регистрации)
+                <div class="unit-search" data-live-search data-url="/registration/api/players"
+                     data-value-field="discord_id" data-label-field="name" data-required="false">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off">
+                    <input type="hidden" name="discord_id_search" class="unit-search-value">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                …либо Discord ID вручную (если ещё не проходил /регистрация)
+                <input type="text" name="discord_id_manual" placeholder="например 123456789012345678">
+            </label>
+            <label>
+                Код союзника (9 цифр)
+                <input type="text" name="ally_code" pattern="[0-9]{9}" maxlength="9" required>
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" name="is_alt" value="true">
+                Это альт (не заменять основной аккаунт)
+            </label>
+            <button type="submit">Привязать участнику</button>
         </form>
     </div>
 {% endblock %}
