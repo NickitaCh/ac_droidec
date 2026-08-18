@@ -61,7 +61,7 @@ class UnwarnSelectView(disnake.ui.View):
     def __init__(self, ally_code, player_name, warns_list, guild_id=1):
         super().__init__(timeout=60)
         options = []
-        for i, (cat, subcat, d_str, comment) in enumerate(warns_list[:25]):
+        for i, (warn_id, cat, subcat, d_str, comment) in enumerate(warns_list[:25]):
             if comment:
                 label = f"{d_str} - {cat}: {subcat} ({comment})"[:100]
             else:
@@ -355,7 +355,7 @@ class ViolationsCog(commands.Cog):
 
             recent_count = 0
             details = ""
-            for cat, subcat, d_str, comment in rows:
+            for warn_id, cat, subcat, d_str, comment in rows:
                 try:
                     w_date = datetime.strptime(d_str, "%d.%m.%Y")
                     if w_date >= three_months_ago: recent_count += 1

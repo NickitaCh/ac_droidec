@@ -3,6 +3,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Территориальные битвы</h1>
+    <p class="muted"><a href="/tb/plan">План планет →</a></p>
 
     {% if not report %}
         <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
@@ -90,7 +91,7 @@
                     <tbody>
                         {% for p in report.latest %}
                             <tr data-search="{{ p.name|lower }}">
-                                <td>{{ p.name }}</td>
+                                <td><a href="/tb/player/{{ p.name | urlencode }}">{{ p.name }}</a></td>
                                 <td class="num">{{ p.summary }}</td>
                                 <td class="num">{{ p.unit_donated }}</td>
                                 <td class="num">{{ p.covert_attempt }}</td>
@@ -117,12 +118,13 @@
                                 <th data-sort="text">Игрок</th>
                                 <th data-sort="text">Статус</th>
                                 <th class="num" data-sort="num">Динамика очков</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for row in report.history %}
                                 <tr data-search="{{ row.name|lower }}">
-                                    <td>{{ row.name }}</td>
+                                    <td><a href="/tb/player/{{ row.name | urlencode }}">{{ row.name }}</a></td>
                                     <td>
                                         {% if row.regressed %}
                                             <span class="badge badge-danger">🚨 просадка</span>
@@ -142,6 +144,39 @@
                                             </svg>
                                             <span>{{ row.last_value if row.last_value is not none else "—" }}</span>
                                         </div>
+                                    </td>
+                                    <td class="row-actions">
+                                        <a href="/tb/compare/{{ row.name | urlencode }}" class="link-btn">сравнение</a>
+                                        <details>
+                                            <summary class="link-btn">по метрикам</summary>
+                                            <div class="table-scroll">
+                                                <table class="data">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>ТБ</th>
+                                                            <th class="num">Очки</th>
+                                                            <th class="num">Юн</th>
+                                                            <th class="num">ОЗ</th>
+                                                            <th class="num">Волн</th>
+                                                            <th class="num">Поп</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for event_id, completed_at in report.events %}
+                                                            {% set s = row.per_event.get(event_id) %}
+                                                            <tr>
+                                                                <td>{{ completed_at[:10] }}</td>
+                                                                <td class="num">{{ s.summary if s else "—" }}</td>
+                                                                <td class="num">{{ s.unit_donated if s else "—" }}</td>
+                                                                <td class="num">{{ s.covert_attempt if s else "—" }}</td>
+                                                                <td class="num">{{ s.strike_encounter if s else "—" }}</td>
+                                                                <td class="num">{{ s.strike_attempt if s else "—" }}</td>
+                                                            </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </details>
                                     </td>
                                 </tr>
                             {% endfor %}

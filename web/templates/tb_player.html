@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}ТБ: {{ report.player_name }} — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/tb">← Назад к ТБ</a></p>
+    <h1>ТБ — {{ report.player_name }}</h1>
+    <p class="muted">
+        Данные последней сохранённой ТБ ({{ report.completed_at[:10] }}).
+        <a href="/tb/compare/{{ report.player_name | urlencode }}">Сравнить по нескольким ТБ →</a>
+    </p>
+
+    <div class="panel">
+        <div class="panel-title"><span>Итого за событие</span></div>
+        <table class="data">
+            <tbody>
+                {% for label, value in report.global_rows %}
+                    <tr><td>{{ label }}</td><td class="num">{{ value }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% for phase in report.phases %}
+        <div class="panel">
+            <div class="panel-title"><span>Фаза {{ phase.phase }}</span></div>
+            {% if phase.round_rows %}
+                <table class="data">
+                    <tbody>
+                        {% for label, value in phase.round_rows %}
+                            <tr><td>{{ label }}</td><td class="num">{{ value }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+            {% if phase.planets %}
+                <h3>Планеты</h3>
+                {% for planet in phase.planets %}
+                    <table class="data" style="margin-bottom: 1em;">
+                        <thead><tr><th colspan="2">{{ planet.label }}</th></tr></thead>
+                        <tbody>
+                            {% for label, value in planet.actions %}
+                                <tr><td>{{ label }}</td><td class="num">{{ value }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% endfor %}
+            {% else %}
+                <p class="muted">Детализация по планетам недоступна в comlink для этой фазы.</p>
+            {% endif %}
+        </div>
+    {% endfor %}
+
+    {% if not report.phases %}
+        <p class="empty-state">Нет пофазовых данных для этого события.</p>
+    {% endif %}
+
+    <p class="muted">Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт зональной детализации для этого показателя, только итог по фазе.</p>
+
+    {% if report.hidden_entries %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Скрытые параметры</span>
+                <span class="panel-hint">недостоверные данные comlink за эту ТБ</span>
+            </div>
+            <table class="data">
+                <tbody>
+                    {% for raw_key, value in report.hidden_entries %}
+                        <tr><td><code>{{ raw_key }}</code></td><td class="num">{{ value }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

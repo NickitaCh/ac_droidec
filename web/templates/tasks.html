@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Задачи — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Задачи на прокачку</h1>
+    <p class="muted">Статус задачи (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница только создаёт задачи и показывает уже проставленный ботом статус, дедлайны сама не проверяет.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if synced %}
+        <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 32em;">
+        <div class="panel-title"><span>Новая задача</span></div>
+        <form method="post" action="/tasks/add">
+            <label>
+                Игрок
+                <div class="unit-search" data-live-search data-url="/tasks/api/players" data-value-field="ally_code" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя игрока…" autocomplete="off" required>
+                    <input type="hidden" name="ally_code" class="unit-search-value" required>
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Персонаж/корабль
+                <div class="unit-search" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required>
+                    <input type="hidden" name="base_id" class="unit-search-value" required>
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Критерий прокачки
+                <select name="target_type" required>
+                    {% for value, label in target_type_options %}
+                        <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Целевое значение (например: 7 для звёзд, 5 для R5, 1 для омикрона)
+                <input type="text" name="target_value" required>
+            </label>
+            <label>
+                Срок выполнения, дней
+                <input type="number" name="days_to_complete" min="1" max="365" value="14" required>
+            </label>
+            <button type="submit">Поставить задачу</button>
+        </form>
+    </div>
+
+    <div class="panel" style="max-width: 24em;">
+        <div class="panel-title"><span>Справочник юнитов</span></div>
+        <p class="muted">Обычно обновляется ботом автоматически каждый час — жми только если нужен персонаж/корабль, которого ещё нет в подсказках выше.</p>
+        <form method="post" action="/tasks/sync-units">
+            <button type="submit">🔄 Обновить справочник юнитов</button>
+        </form>
+    </div>
+
+    <div class="panel">
+        <div class="table-toolbar">
+            <input type="search" placeholder="Поиск по игроку…" data-table-search="tasks-table">
+            <span class="panel-hint">
+                {% if status_filter %}
+                    <a href="/tasks">Все статусы</a>
+                {% else %}
+                    Все статусы
+                {% endif %}
+                ·
+                <a href="/tasks?status=ACTIVE">В работе</a>
+                ·
+                <a href="/tasks?status=COMPLETED">Выполнено</a>
+                ·
+                <a href="/tasks?status=FAILED">Провалено</a>
+            </span>
+        </div>
+        {% if not tasks %}
+            <p class="empty-state">Задач пока нет.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data" id="tasks-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th data-sort="text">Юнит</th>
+                            <th data-sort="text">Цель</th>
+                            <th data-sort="text">Дедлайн</th>
+                            <th data-sort="text">Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in tasks %}
+                            <tr data-search="{{ t.player_name|lower }}">
+                                <td>{{ t.player_name }}</td>
+                                <td>{{ t.unit_name }}</td>
+                                <td>{{ t.target_label }} → {{ t.target_value }}</td>
+                                <td>{{ t.deadline }}</td>
+                                <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

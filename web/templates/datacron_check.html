@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Проверка датакронов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/datacrons">← Все сезоны</a></p>
+    <h1>Проверка датакронов</h1>
+    <p class="muted">Сверяет реальные датакроны игрока (или всей гильдии) с сохранёнными требованиями сезона. Данные по игроку запрашиваются у Comlink живьём — это не мгновенно.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <form method="get" action="/datacrons/check" class="requirement-form">
+            <label>
+                Сезон
+                <select name="season" required>
+                    <option value="" disabled {% if not season_param %}selected{% endif %}>— выберите сезон —</option>
+                    {% for s in seasons %}
+                        <option value="{{ s.set_id }}" {% if season_param and season_param|int == s.set_id %}selected{% endif %}>{{ s.display_name }} [{{ s.set_id }}]</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Кого проверить
+                <select name="target">
+                    <option value="" {% if not guild_mode and not player_param %}selected{% endif %}>Я (по своей регистрации)</option>
+                    <option value="__guild__" {% if guild_mode %}selected{% endif %}>Гильдия целиком</option>
+                    {% for p in players %}
+                        <option value="{{ p }}" {% if player_param == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Проверить</button>
+        </form>
+    </div>
+
+    {% if result and not result.guild_mode %}
+        <h2>{{ result.player_name }}</h2>
+        <div class="stats-grid">
+            {% for p in priority_order %}
+                {% set t = result.totals[p] %}
+                {% if t.total > 0 %}
+                    <div class="stat-tile {% if t.matched < t.total %}status-danger{% endif %}">
+                        <div class="stat-value">{{ t.matched }}/{{ t.total }}</div>
+                        <div class="stat-label">{{ priority_emoji[p] }} {{ priority_labels[p] }}</div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        {% for p in priority_order %}
+            {% set rows = result.rows_by_priority[p] %}
+            {% if rows %}
+                <div class="panel">
+                    <div class="panel-title"><span>{{ priority_emoji[p] }} {{ priority_labels[p] }}</span></div>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Пак / персонаж</th>
+                                    <th>Требуется</th>
+                                    <th>У игрока</th>
+                                    <th>Комментарий</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for r in rows %}
+                                    <tr>
+                                        <td>{% if r.matched %}<span class="badge badge-ok">✅</span>{% else %}<span class="badge badge-danger">❌</span>{% endif %}</td>
+                                        {% if r.kind == "base" %}
+                                            <td>{{ r.pack or "—" }}</td>
+                                            <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}</td>
+                                            <td>{{ r.closed|join(", ") if r.closed else "—" }}</td>
+                                        {% else %}
+                                            <td>{{ r.pack or r.character_label }}</td>
+                                            <td>{{ r.character_label }} — {{ r.required_level }}+</td>
+                                            <td>уровень {{ r.current_level }}</td>
+                                        {% endif %}
+                                        <td>{{ r.comment or "—" }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    {% elif result and result.guild_mode %}
+        <div class="stats-grid">
+            <div class="stat-tile"><div class="stat-value">{{ result.total }}</div><div class="stat-label">Проверено</div></div>
+            <div class="stat-tile status-danger"><div class="stat-value">{{ result.missing_required|length }}</div><div class="stat-label">Не закрыли «Обязательно»</div></div>
+            <div class="stat-tile"><div class="stat-value">{{ result.fully_compliant|length }}</div><div class="stat-label">Закрыли всё</div></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>❌ Не закрыли «Обязательно»</span><span class="panel-hint">{{ result.missing_required|length }}</span></div>
+            {% if not result.missing_required %}
+                <p class="empty-state">Все закрыли все обязательные требования! 🎉</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Игрок</th><th>Прогресс по приоритетам</th></tr></thead>
+                        <tbody>
+                            {% for r in result.missing_required %}
+                                <tr><td>{{ r.name }}</td><td>{{ r.detail }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>✅ Закрыли всё «Обязательно»</span><span class="panel-hint">{{ result.fully_compliant|length }}</span></div>
+            <p>{{ result.fully_compliant|join(", ") if result.fully_compliant else "—" }}</p>
+        </div>
+
+        {% if result.failed %}
+            <p class="muted">⚠️ Не удалось получить данные: {{ result.failed|join(", ") }}</p>
+        {% endif %}
+    {% endif %}
+{% endblock %}
