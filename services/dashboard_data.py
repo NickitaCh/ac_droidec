@@ -6,9 +6,12 @@
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import database
+
+MSK = ZoneInfo("Europe/Moscow")
 from cogs.guild_events import TB_ACTION_LABELS, TB_CONFLICT_LABELS, TB_HIDDEN_ZONE_ACTIONS
 
 # Дублирует main.py::N_LIMIT (порог 🚨 для нарушений) — тот же паттерн
@@ -499,6 +502,21 @@ ACTIVITY_ACTION_LABELS = {
     "unlock": "Новый герой",
 }
 
+# Суффикс CSS-класса .badge-<...> (web/static/style.css) — цветовое кодирование по типу
+# изменения, как на карточках активности swgoh.gg (ориентир для этой страницы).
+ACTIVITY_ACTION_CLASSES = {
+    "gear": "gear",
+    "level": "neutral",
+    "era": "neutral",
+    "relic": "relic",
+    "star": "star",
+    "zeta": "zeta",
+    "omicron": "omicron",
+    "unlock": "unlock",
+}
+
+PLAYER_STATS_SYNC_HOURS = database.PLAYER_STATS_SYNC_HOURS
+
 
 @dataclass
 class ActivityEventRow:
@@ -508,14 +526,17 @@ class ActivityEventRow:
     unit_name: str
     action_type: str
     action_label: str
+    action_class: str
     old_value: str | None
     new_value: str
     event_date: str
 
 
-def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int = 300) -> list[ActivityEventRow]:
+def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int = 500,
+                        date_from: str | None = None, date_to: str | None = None) -> list[ActivityEventRow]:
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-    rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, limit=limit)
+    rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, limit=limit,
+                                                date_from=date_from, date_to=date_to)
     unit_names = database.get_game_unit_names([r[1] for r in rows])
     result = []
     for ac, base_id, action_type, old_value, new_value, event_date, scraped_at in rows:
@@ -526,6 +547,7 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int =
             unit_name=unit_names.get(base_id) or base_id,
             action_type=action_type,
             action_label=ACTIVITY_ACTION_LABELS.get(action_type, action_type),
+            action_class=ACTIVITY_ACTION_CLASSES.get(action_type, "neutral"),
             old_value=old_value,
             new_value=new_value,
             event_date=event_date,
@@ -540,3 +562,66 @@ def get_guild_activity_players(guild_id: int) -> list:
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
     codes = database.get_guild_activity_player_codes(guild_id)
     return sorted(((c, names_by_code.get(c, c)) for c in codes), key=lambda p: p[1].lower())
+
+
+def _friendly_date_label(event_date: str, today) -> str:
+    if event_date == today.isoformat():
+        return "Сегодня"
+    try:
+        d = datetime.strptime(event_date, "%Y-%m-%d").date()
+    except ValueError:
+        return event_date
+    if d == today - timedelta(days=1):
+        return "Вчера"
+    return d.strftime("%d.%m.%Y")
+
+
+def group_activity(rows: list[ActivityEventRow]) -> list[dict]:
+    """[{"date_label", "players": [{"ally_code", "player_name", "rows": [...]}]}] — двухуровневая
+    группировка (дата -> игрок), как на карточках активности swgoh.gg. rows уже упорядочены
+    по убыванию id (свежие сначала, см. database.get_guild_activity_events) — группировка
+    сохраняет этот порядок появления, без пересортировки по алфавиту."""
+    today = datetime.now(MSK).date()
+    groups: dict[str, dict[str, dict]] = {}
+    order: list[str] = []
+    for row in rows:
+        if row.event_date not in groups:
+            groups[row.event_date] = {}
+            order.append(row.event_date)
+        by_player = groups[row.event_date]
+        if row.ally_code not in by_player:
+            by_player[row.ally_code] = {"ally_code": row.ally_code, "player_name": row.player_name, "rows": []}
+        by_player[row.ally_code]["rows"].append(row)
+
+    result = []
+    for event_date in order:
+        result.append({
+            "date_label": _friendly_date_label(event_date, today),
+            "players": list(groups[event_date].values()),
+        })
+    return result
+
+
+def get_activity_sync_status(guild_id: int) -> dict:
+    """Для панели статуса на /activity: когда последний раз обновлялся кэш ростера этой
+    гильдии (учитывает и авто-, и ручной синк — оба пишут через upsert_player_units) и
+    ориентировочно когда сработает следующий автоматический цикл бота."""
+    ally_codes = [code for _, code, _ in database.get_all_user_mappings(guild_id)]
+    last_sync_raw = database.get_player_units_last_sync(ally_codes)
+    last_sync = None
+    if last_sync_raw:
+        try:
+            # updated_at пишется через SQLite datetime('now') — наивный UTC.
+            last_sync = datetime.strptime(last_sync_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(MSK)
+        except ValueError:
+            pass
+
+    next_auto = None
+    last_auto_raw = database.get_bot_state("player_units_sync_loop_last_auto_run")
+    if last_auto_raw:
+        try:
+            next_auto = datetime.fromisoformat(last_auto_raw) + timedelta(hours=PLAYER_STATS_SYNC_HOURS)
+        except ValueError:
+            pass
+
+    return {"last_sync": last_sync, "next_auto": next_auto, "sync_hours": PLAYER_STATS_SYNC_HOURS}

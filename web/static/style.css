@@ -197,6 +197,14 @@ select { background: var(--page); }
 .badge-neutral { background: var(--surface-2); color: var(--fg-secondary); }
 .badge-danger { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
 
+/* ---- Бейджи по типу изменения на /activity (services/dashboard_data.py::ACTIVITY_ACTION_CLASSES) ---- */
+.badge-gear { background: color-mix(in srgb, var(--series-1) 16%, transparent); color: var(--series-1); }
+.badge-relic { background: color-mix(in srgb, var(--series-3) 16%, transparent); color: var(--series-3); }
+.badge-star { background: color-mix(in srgb, var(--status-warning) 20%, transparent); color: var(--status-warning); }
+.badge-zeta { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge-omicron { background: color-mix(in srgb, var(--series-2) 16%, transparent); color: var(--series-2); }
+.badge-unlock { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); }
+
 /* ---- Секция-карточка (таблица/график в рамке) ---- */
 .panel {
     border: 1px solid var(--border);
@@ -440,3 +448,57 @@ table.data td.num, table.data th.num {
 .meter-track { flex: 1; height: 10px; border-radius: 999px; background: var(--series-1-track); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--series-1); border-radius: 999px; transition: width 0.4s ease; }
 .meter-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.9em; min-width: 3em; text-align: right; }
+
+/* ---- Лента активности гильдии (/activity): дата -> карточка игрока -> строки ---- */
+.activity-date-header {
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    text-align: center;
+    margin: 1.75em 0 0.9em;
+    position: relative;
+}
+.activity-date-header:first-child { margin-top: 0; }
+.activity-date-header::before, .activity-date-header::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 5em);
+    border-top: 1px solid var(--border);
+}
+.activity-date-header::before { left: 0; }
+.activity-date-header::after { right: 0; }
+.activity-player-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 0.9em 1.1em;
+    margin-bottom: 0.75em;
+}
+.activity-player-name { font-weight: 700; font-size: 0.9em; margin-bottom: 0.5em; }
+.activity-event-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    padding: 0.3em 0;
+    font-size: 0.92em;
+}
+.activity-event-row + .activity-event-row { border-top: 1px dashed var(--border); }
+.activity-unit-name { font-weight: 600; }
+.activity-change { color: var(--fg-secondary); }
+.activity-change strong { color: var(--fg); }
+
+/* ---- Панель статуса синхронизации (/activity) ---- */
+.sync-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75em;
+    font-size: 0.88em;
+    color: var(--fg-secondary);
+}
+.sync-status form { margin: 0; }

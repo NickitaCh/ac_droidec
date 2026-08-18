@@ -1,17 +1,36 @@
-"""Сравнение снимков ростера игрока (сырые rosterUnit из comlink.get_player, см.
-cogs/stat_requirements.py::_fetch_player_units) между двумя циклами player_units_sync_loop —
-источник событий гильдийской активности вместо сдохшего из-за Cloudflare скрапинга
-swgoh.gg (был cogs/gohgg_activity.py). Пишет в ту же guild_activity_events, тем же
+"""Сравнение снимков ростера игрока (сырые rosterUnit из comlink.get_player) между двумя
+циклами синка — источник событий гильдийской активности вместо сдохшего из-за Cloudflare
+скрапинга swgoh.gg (был cogs/gohgg_activity.py). Пишет в ту же guild_activity_events, тем же
 набором action_type ('gear'/'relic'/'star'/'zeta'/'omicron'), плюс новый 'unlock'.
 
 old_value="" (не None) для zeta/omicron/unlock — как и в исходном скрапере: в UNIQUE-индексе
 guild_activity_events каждый NULL уникален сам по себе (поведение SQLite), из-за чего
-INSERT OR IGNORE не смог бы задедуплицировать повторную запись одного и того же события."""
+INSERT OR IGNORE не смог бы задедуплицировать повторную запись одного и того же события.
 
+sync_player() — общая точка входа, используется и автоматическим циклом (cogs/stat_requirements.py
+::player_units_sync_loop, раз в PLAYER_STATS_SYNC_HOURS), и ручной кнопкой "Обновить сейчас" на
+веб-странице /activity (web/routes/guild_dashboard.py) — оба процесса (бот и веб) держат свой
+собственный SwgohComlink на один и тот же comlink-сайдкар, но диффят/пишут события одинаково."""
+
+import asyncio
+
+import database
 import stat_engine
 
 ZETA_TIER = 8
 OMICRON_MIN_TIER = 9
+
+
+async def fetch_player_units(comlink, ally_code: str) -> dict:
+    """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
+    player_data = await asyncio.to_thread(comlink.get_player, allycode=str(ally_code))
+    roster = player_data.get("rosterUnit") or player_data.get("roster") or []
+    units = {}
+    for u in roster:
+        base_id = u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]
+        if base_id:
+            units[base_id] = u
+    return units
 
 
 def diff_unit(old: dict, new: dict) -> list[tuple[str, str, str]]:
@@ -66,3 +85,34 @@ def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool) -> list[t
         for action_type, old_value, new_value in diff_unit(old_unit, new_unit):
             events.append((base_id, action_type, old_value, new_value))
     return events
+
+
+async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeout: float = 15.0) -> tuple[bool, int]:
+    """Тянет живой ростер игрока (Comlink-вызов ограничен timeout секунд — тот же паттерн,
+    что в web/routes/datacrons.py::_build_guild_report, а не голый to_thread без дедлайна),
+    диффит против player_unit_cache, обновляет кэш и пишет новые события активности в
+    guild_activity_events для каждой из guild_ids (обычно одна — но игрок теоретически может
+    состоять в нескольких зарегистрированных гильдиях сразу).
+
+    Возвращает (fetched, added_events): fetched=False при таймауте или пустом ростере —
+    вызывающий код (player_units_sync_loop, /activity/sync) использует это для честного
+    счётчика "сколько игроков реально обновилось", а не считает таймаут за успех."""
+    try:
+        new_units = await asyncio.wait_for(fetch_player_units(comlink, ally_code), timeout=timeout)
+    except asyncio.TimeoutError:
+        return False, 0
+    if not new_units:
+        return False, 0
+    old_units = database.get_player_units(ally_code)
+    events = diff_roster(old_units, new_units, is_first_sync=not old_units)
+    database.upsert_player_units(ally_code, new_units)
+    added = 0
+    for base_id, action_type, old_value, new_value in events:
+        for guild_id in guild_ids:
+            if database.add_guild_activity_event(
+                guild_id=guild_id, ally_code=ally_code, base_id=base_id,
+                action_type=action_type, old_value=old_value, new_value=new_value,
+                event_date=event_date,
+            ):
+                added += 1
+    return True, added

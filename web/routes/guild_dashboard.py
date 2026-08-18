@@ -1,7 +1,9 @@
+import asyncio
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -9,8 +11,55 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.violations import WARNS_STRUCTURE
-from services import dashboard_data
+from services import activity_diff, dashboard_data
 from web.deps import require_guild_access
+
+MSK = ZoneInfo("Europe/Moscow")
+
+
+def _get_comlink():
+    # См. web/routes/admin.py::_get_comlink / registration.py::_get_comlink — веб-процесс
+    # не поднимает бота, строит свой SwgohComlink на тот же comlink-сайдкар.
+    from swgoh_comlink import SwgohComlink
+    return SwgohComlink(url="http://localhost:3000")
+
+
+def _valid_iso_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        return None
+
+
+def _format_delta(delta: timedelta) -> str:
+    total_minutes = round(delta.total_seconds() / 60)
+    hours, minutes = divmod(abs(total_minutes), 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} ч")
+    parts.append(f"{minutes} мин")
+    return " ".join(parts)
+
+
+def _sync_status_text(sync_status: dict) -> dict:
+    """(last_sync, next_auto) -> человекочитаемые строки для панели на /activity."""
+    last_sync_text = None
+    if sync_status["last_sync"]:
+        last_sync_text = sync_status["last_sync"].strftime("%d.%m.%Y %H:%M (МСК)")
+
+    next_auto_text = None
+    next_auto = sync_status["next_auto"]
+    if next_auto:
+        now = datetime.now(MSK)
+        if next_auto <= now:
+            next_auto_text = "вот-вот"
+        else:
+            next_auto_text = f"через {_format_delta(next_auto - now)}"
+
+    return {"last_sync_text": last_sync_text, "next_auto_text": next_auto_text}
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -114,8 +163,14 @@ async def tb_plan_save(
 @router.get("/activity", response_class=HTMLResponse)
 async def activity(request: Request, user: dict = Depends(require_guild_access)):
     player_filter = request.query_params.get("player") or None
-    rows = dashboard_data.get_guild_activity(user["guild_id"], ally_code=player_filter)
+    date_from = _valid_iso_date(request.query_params.get("date_from"))
+    date_to = _valid_iso_date(request.query_params.get("date_to"))
+    rows = dashboard_data.get_guild_activity(user["guild_id"], ally_code=player_filter,
+                                              date_from=date_from, date_to=date_to)
     players = dashboard_data.get_guild_activity_players(user["guild_id"])
+    grouped = dashboard_data.group_activity(rows)
+    sync_status = dashboard_data.get_activity_sync_status(user["guild_id"])
+    sync_status_text = _sync_status_text(sync_status)
 
     breakdown = Counter(r.action_label for r in rows)
     breakdown_rows = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
@@ -124,11 +179,58 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     return templates.TemplateResponse(request, "activity.html", {
         "user": user,
         "rows": rows,
+        "grouped": grouped,
         "players": players,
         "player_filter": player_filter,
+        "date_from": date_from or "",
+        "date_to": date_to or "",
         "breakdown_rows": breakdown_rows,
         "max_breakdown": max_breakdown,
+        "sync_status": sync_status_text,
+        "synced_now": request.query_params.get("synced"),
     })
+
+
+@router.post("/activity/sync", response_class=HTMLResponse)
+async def activity_sync(
+    request: Request,
+    player: str = Form(""),
+    date_from: str = Form(""),
+    date_to: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    # Ограниченная параллельность (semaphore) + таймаут внутри sync_player — тот же паттерн,
+    # что и в web/routes/datacrons.py::_build_guild_report, чтобы HTTP-запрос от кнопки
+    # "Обновить сейчас" не висел последовательно по 15с на каждого из ~50 игроков гильдии.
+    guild_id = user["guild_id"]
+    ally_codes = [code for _, code, _ in database.get_all_user_mappings(guild_id)]
+    comlink = _get_comlink()
+    today = datetime.now(MSK).date().isoformat()
+    semaphore = asyncio.Semaphore(6)
+
+    async def sync_one(ally_code):
+        async with semaphore:
+            try:
+                # guild_ids не {guild_id} — игрок теоретически состоит сразу в нескольких
+                # зарегистрированных гильдиях; player_unit_cache общий на всех, и если
+                # обновить его тут только под текущую гильдию, автоцикл бота позже не
+                # найдёт разницы и "чужая" гильдия потеряет эти события безвозвратно.
+                guild_ids = database.get_guild_ids_for_ally_code(ally_code) or {guild_id}
+                _, added = await activity_diff.sync_player(comlink, ally_code, guild_ids, today)
+                return added
+            except Exception as e:
+                print(f"⚠️ [/activity/sync] Не удалось обновить ростер {ally_code}: {e}")
+                return 0
+
+    results = await asyncio.gather(*(sync_one(ac) for ac in ally_codes))
+    params = {"synced": sum(results)}
+    if _valid_iso_date(date_from):
+        params["date_from"] = date_from
+    if _valid_iso_date(date_to):
+        params["date_to"] = date_to
+    if player:
+        params["player"] = player
+    return RedirectResponse(f"/activity?{urlencode(params)}", status_code=303)
 
 
 @router.get("/violations", response_class=HTMLResponse)

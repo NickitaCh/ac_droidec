@@ -4,13 +4,43 @@
 {% block content %}
     <h1>Активность гильдии</h1>
 
+    <div class="panel">
+        <div class="sync-status">
+            <div>
+                {% if sync_status.last_sync_text %}
+                    Обновлено: <strong>{{ sync_status.last_sync_text }}</strong>
+                {% else %}
+                    Кэш ростера ещё не наполнялся
+                {% endif %}
+                {% if sync_status.next_auto_text %}
+                    &nbsp;·&nbsp;автообновление {{ sync_status.next_auto_text }}
+                {% endif %}
+            </div>
+            <form method="post" action="/activity/sync">
+                <input type="hidden" name="player" value="{{ player_filter or '' }}">
+                <input type="hidden" name="date_from" value="{{ date_from }}">
+                <input type="hidden" name="date_to" value="{{ date_to }}">
+                <button type="submit">🔄 Обновить сейчас</button>
+            </form>
+        </div>
+        {% if synced_now is not none %}
+            <p class="empty-state" style="margin-top: 0.75em; padding: 0;">
+                {% if synced_now|int > 0 %}
+                    Готово — добавлено {{ synced_now }} новых событий.
+                {% else %}
+                    Готово — новых изменений не найдено.
+                {% endif %}
+            </p>
+        {% endif %}
+    </div>
+
     {% if not players %}
-        <p class="empty-state">Данных пока нет — активность считается по разнице между снимками ростера (раз в 6 часов), так что первое событие появится не раньше второго цикла синхронизации после регистрации игроков.</p>
+        <p class="empty-state">Данных пока нет — активность считается по разнице между снимками ростера (раз в 6 часов), так что первое событие появится не раньше второго цикла синхронизации после регистрации игроков. Либо нажми «Обновить сейчас» выше.</p>
     {% else %}
         <div class="stats-grid">
             <div class="stat-tile">
                 <div class="stat-value">{{ rows|length }}</div>
-                <div class="stat-label">{{ "Событий по игроку" if player_filter else "Событий в ленте" }}</div>
+                <div class="stat-label">{{ "Событий по фильтру" if (player_filter or date_from or date_to) else "Событий в ленте" }}</div>
             </div>
             <div class="stat-tile">
                 <div class="stat-value">{{ players|length }}</div>
@@ -35,54 +65,52 @@
             </div>
         {% endif %}
 
-        <form method="get" action="/activity" class="table-toolbar" style="margin-bottom: 1em;">
-            <select name="player" onchange="this.form.submit()">
+        <form method="get" action="/activity" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+            <select name="player">
                 <option value="">Все игроки</option>
                 {% for ally_code, name in players %}
                     <option value="{{ ally_code }}" {% if ally_code == player_filter %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
             </select>
-            {% if player_filter %}
+            <input type="date" name="date_from" value="{{ date_from }}" title="С даты">
+            <span>—</span>
+            <input type="date" name="date_to" value="{{ date_to }}" title="По дату">
+            <button type="submit">Применить</button>
+            {% if player_filter or date_from or date_to %}
                 <a href="/activity">Сбросить фильтр</a>
             {% endif %}
         </form>
 
         {% if not rows %}
-            <p class="empty-state">У этого игрока пока нет событий активности.</p>
+            <p class="empty-state">По этому фильтру событий не найдено.</p>
         {% else %}
-            <div class="panel">
-                <div class="table-toolbar">
-                    <input type="search" placeholder="Поиск по игроку или персонажу…" data-table-search="activity-table">
-                </div>
-                <div class="table-scroll">
-                    <table class="data" id="activity-table">
-                        <thead>
-                            <tr>
-                                <th data-sort="text">Дата</th>
-                                <th data-sort="text">Игрок</th>
-                                <th data-sort="text">Персонаж</th>
-                                <th data-sort="text">Изменение</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in rows %}
-                                <tr data-search="{{ (row.player_name ~ ' ' ~ row.unit_name)|lower }}">
-                                    <td>{{ row.event_date }}</td>
-                                    <td>{{ row.player_name }}</td>
-                                    <td>{{ row.unit_name }}</td>
-                                    <td>
-                                        <span class="badge badge-neutral">{{ row.action_label }}</span>
-                                        {% if row.old_value %}
-                                            {{ row.old_value }} → {{ row.new_value }}
-                                        {% else %}
-                                            {{ row.new_value }}
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+            <div class="table-toolbar" style="margin-bottom: 0.75em;">
+                <input type="search" placeholder="Поиск по игроку или персонажу…" data-feed-search="activity-feed">
+            </div>
+            <div id="activity-feed">
+                {% for group in grouped %}
+                    <div class="activity-date-group">
+                        <div class="activity-date-header">{{ group.date_label }}</div>
+                        {% for player in group.players %}
+                            <div class="activity-player-card">
+                                <div class="activity-player-name">{{ player.player_name }}</div>
+                                {% for row in player.rows %}
+                                    <div class="activity-event-row" data-search="{{ (player.player_name ~ ' ' ~ row.unit_name)|lower }}">
+                                        <span class="activity-unit-name">{{ row.unit_name }}</span>
+                                        <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
+                                        <span class="activity-change">
+                                            {% if row.old_value %}
+                                                <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
+                                            {% else %}
+                                                <strong>{{ row.new_value }}</strong>
+                                            {% endif %}
+                                        </span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
             </div>
         {% endif %}
     {% endif %}
