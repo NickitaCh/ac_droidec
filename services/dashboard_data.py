@@ -496,6 +496,7 @@ ACTIVITY_ACTION_LABELS = {
     "star": "Звёзды",
     "zeta": "Зета",
     "omicron": "Омикрон",
+    "unlock": "Новый герой",
 }
 
 

@@ -15,7 +15,6 @@ from services.guild_admin import (
     list_guilds,
     remove_grant,
     remove_super_admin,
-    set_swgoh_gg_guild_id,
 )
 from web.deps import require_super_admin
 
@@ -56,16 +55,6 @@ async def guilds_add(
 @router.post("/guilds/{guild_id}/deactivate", response_class=HTMLResponse)
 async def guilds_deactivate(guild_id: int, user: dict = Depends(require_super_admin)):
     deactivate_guild(guild_id)
-    return RedirectResponse("/admin/guilds", status_code=303)
-
-
-@router.post("/guilds/{guild_id}/swgoh-gg", response_class=HTMLResponse)
-async def guilds_set_swgoh_gg(
-    guild_id: int,
-    swgoh_gg_guild_id: str = Form(""),
-    user: dict = Depends(require_super_admin),
-):
-    set_swgoh_gg_guild_id(guild_id, swgoh_gg_guild_id)
     return RedirectResponse("/admin/guilds", status_code=303)
 
 

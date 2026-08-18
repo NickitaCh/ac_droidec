@@ -34,7 +34,6 @@
                             <th data-sort="text">Название</th>
                             <th data-sort="text">Comlink guild ID</th>
                             <th data-sort="text">Discord-сервер</th>
-                            <th>swgoh.gg ID</th>
                             <th data-sort="text">Статус</th>
                             <th></th>
                         </tr>
@@ -46,13 +45,6 @@
                                 <td><strong>{{ g.name }}</strong></td>
                                 <td><code>{{ g.swgoh_guild_id or "—" }}</code></td>
                                 <td><code>{{ g.discord_guild_id }}</code></td>
-                                <td>
-                                    <form method="post" action="/admin/guilds/{{ g.id }}/swgoh-gg" style="display: flex; gap: 0.4em;">
-                                        <input type="text" name="swgoh_gg_guild_id" value="{{ g.swgoh_gg_guild_id or '' }}"
-                                               placeholder="-kJhCaGG..." style="width: 10em;">
-                                        <button type="submit">💾</button>
-                                    </form>
-                                </td>
                                 <td>
                                     {% if g.is_active %}
                                         <span class="badge badge-ok">активна</span>

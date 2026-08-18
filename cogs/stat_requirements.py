@@ -1,6 +1,8 @@
 import asyncio
 import math
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import disnake
 from disnake.ext import commands, tasks
@@ -8,8 +10,11 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 import stat_engine
+from services import activity_diff
 from cogs.violations import autocomplete_players
 from cogs.tasks import units_autocomplete
+
+MSK = ZoneInfo("Europe/Moscow")
 from cogs.datacron_requirements import (
     PRIORITY_REQUIRED,
     PRIORITY_LABELS,
@@ -452,26 +457,43 @@ class StatRequirementsCog(commands.Cog):
     async def player_units_sync_loop(self):
         # player_unit_cache — не per-guild (ключ ally_code глобально уникален), поэтому
         # синхронизируем объединённый ростер по всем зарегистрированным гильдиям сразу.
+        # Заодно, до перезаписи кэша, диффим новый снимок против старого и пишем события
+        # гильдийской активности (guild_activity_events) — замена сдохшему из-за Cloudflare
+        # скрапингу swgoh.gg, см. services/activity_diff.py.
         if not self.bot.guild_roster_caches:
             return
-        ally_codes = set()
-        for cache in self.bot.guild_roster_caches.values():
-            ally_codes.update(cache.values())
-        ally_codes = list(ally_codes)
+        ally_to_guilds = {}
+        for guild_id, cache in self.bot.guild_roster_caches.items():
+            for ally_code in cache.values():
+                ally_to_guilds.setdefault(ally_code, set()).add(guild_id)
+        ally_codes = list(ally_to_guilds)
         if not ally_codes:
             return
         print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
         synced = 0
+        total_events = 0
+        today = datetime.now(MSK).date().isoformat()
         for ally_code in ally_codes:
             try:
-                units = await _fetch_player_units(self.bot.comlink, ally_code)
-                if units:
-                    database.upsert_player_units(ally_code, units)
-                    synced += 1
+                new_units = await _fetch_player_units(self.bot.comlink, ally_code)
+                if not new_units:
+                    continue
+                old_units = database.get_player_units(ally_code)
+                events = activity_diff.diff_roster(old_units, new_units, is_first_sync=not old_units)
+                database.upsert_player_units(ally_code, new_units)
+                synced += 1
+                for base_id, action_type, old_value, new_value in events:
+                    for guild_id in ally_to_guilds[ally_code]:
+                        if database.add_guild_activity_event(
+                            guild_id=guild_id, ally_code=ally_code, base_id=base_id,
+                            action_type=action_type, old_value=old_value, new_value=new_value,
+                            event_date=today,
+                        ):
+                            total_events += 1
             except Exception as e:
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)
-        print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}")
+        print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}, событий активности: {total_events}")
 
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):
