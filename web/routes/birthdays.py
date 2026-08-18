@@ -36,10 +36,14 @@ async def birthdays_list(request: Request, user: dict = Depends(require_officer_
     for discord_id_str, day, month, year in all_bdays:
         display_name = database.get_username_for_discord_id(discord_id_str) or registrations_by_id.get(discord_id_str)
         date_str = f"{day:02d}.{month:02d}" + (f".{year}" if year is not None else "")
+        # Формат с дефисами, а не точками — под парсер parse_birthday, используется
+        # только для предзаполнения формы редактирования на клиенте.
+        edit_date_str = f"{day:02d}-{month:02d}" + (f"-{year}" if year is not None else "")
         rows.append({
             "discord_id": discord_id_str,
             "display_name": display_name,
             "date_str": date_str,
+            "edit_date_str": edit_date_str,
             "next_birthday": next_birthday(day, month, year, today),
         })
     rows.sort(key=lambda r: r["next_birthday"])

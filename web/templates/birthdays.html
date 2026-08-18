@@ -34,6 +34,15 @@
                                 </td>
                                 <td>{{ row.date_str }}</td>
                                 <td class="row-actions">
+                                    <details>
+                                        <summary class="link-btn">редактировать</summary>
+                                        <form method="post" action="/birthdays/add" class="inline-form">
+                                            <input type="hidden" name="discord_id_manual" value="{{ row.discord_id }}">
+                                            <input type="text" name="date_str" value="{{ row.edit_date_str }}"
+                                                   placeholder="15-03 или 15-03-1995" required>
+                                            <button type="submit">Сохранить</button>
+                                        </form>
+                                    </details>
                                     <form method="post" action="/birthdays/{{ row.discord_id }}/remove"
                                           onsubmit="return confirm('Удалить день рождения ({{ row.date_str }})?');">
                                         <button type="submit" class="button-danger">Удалить</button>
