@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Дни рождения — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Дни рождения</h1>
+    <p class="muted">Ежедневное поздравление и выдача роли именинника (06:00 МСК) со снятием в полночь по-прежнему делает бот автоматически — здесь только редактируется сам список дат.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not rows %}
+        <p class="empty-state">Дней рождения пока не сохранено — добавьте первое ниже.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Игрок</th>
+                            <th>Дата</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                <td>
+                                    {% if row.display_name %}
+                                        {{ row.display_name }}
+                                    {% else %}
+                                        <span class="badge badge-neutral">не опознан</span> {{ row.discord_id }}
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.date_str }}</td>
+                                <td class="row-actions">
+                                    <form method="post" action="/birthdays/{{ row.discord_id }}/remove"
+                                          onsubmit="return confirm('Удалить день рождения ({{ row.date_str }})?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Добавить день рождения</span></div>
+        <form method="post" action="/birthdays/add">
+            <label>
+                Игрок (по регистрации)
+                <div class="unit-search" data-live-search data-url="/birthdays/api/players"
+                     data-value-field="discord_id" data-label-field="name" data-required="false">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off">
+                    <input type="hidden" name="discord_id_search" class="unit-search-value">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                …либо Discord ID вручную (если игрок ещё не проходил /регистрация)
+                <input type="text" name="discord_id_manual" placeholder="например 123456789012345678">
+            </label>
+            <label>
+                Дата (ДД-ММ-ГГГГ или ДД-ММ)
+                <input type="text" name="date_str" placeholder="15-03 или 15-03-1995" required>
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+        <p class="muted" style="font-size: 0.85em; margin-top: 0.5em;">Если заполнено и поле поиска, и Discord ID вручную — используется поиск.</p>
+    </div>
+{% endblock %}

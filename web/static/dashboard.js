@@ -46,9 +46,12 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Поиск персонажа для формы добавления требования к плейту (/plates/<name>) —
-    // GET /plates/api/units?q=, выбор кладёт base_id в скрытое поле формы.
-    document.querySelectorAll("[data-unit-search]").forEach((wrap) => {
+    // Живой поиск (персонаж для формы плейта, игрок для формы нарушения и т.п.) —
+    // общий виджет: [data-unit-search] (легаси-имя, юниты) и [data-live-search]
+    // (общий случай, настраивается через data-url/data-value-field/data-label-field/
+    // data-min-length) используют один и тот же обработчик, только источник данных
+    // и поля ответа разные. Выбор кладёт value-field в скрытое поле формы.
+    const initSearchWidget = (wrap, { url, valueField, labelField, minLength, emptyText, required = true }) => {
         const input = wrap.querySelector(".unit-search-input");
         const hidden = wrap.querySelector(".unit-search-value");
         const results = wrap.querySelector(".unit-search-results");
@@ -59,12 +62,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const render = () => {
             results.innerHTML = "";
             if (items.length === 0) {
-                results.innerHTML = '<div class="unit-search-empty">Ничего не найдено</div>';
+                results.innerHTML = `<div class="unit-search-empty">${emptyText}</div>`;
             } else {
                 items.forEach((item, i) => {
                     const el = document.createElement("div");
                     el.className = "unit-search-result" + (i === activeIndex ? " active" : "");
-                    el.textContent = item.name;
+                    el.textContent = item[labelField];
                     el.addEventListener("mousedown", (e) => { e.preventDefault(); select(item); });
                     results.appendChild(el);
                 });
@@ -73,8 +76,8 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         const select = (item) => {
-            input.value = item.name;
-            hidden.value = item.base_id;
+            input.value = item[labelField];
+            hidden.value = item[valueField];
             input.setCustomValidity("");
             results.classList.remove("open");
         };
@@ -83,10 +86,10 @@ document.addEventListener("DOMContentLoaded", () => {
             hidden.value = "";
             const q = input.value.trim();
             clearTimeout(debounceTimer);
-            if (q.length < 2) { results.classList.remove("open"); return; }
+            if (q.length < minLength) { results.classList.remove("open"); return; }
             debounceTimer = setTimeout(async () => {
                 try {
-                    const resp = await fetch(`/plates/api/units?q=${encodeURIComponent(q)}`);
+                    const resp = await fetch(`${url}?q=${encodeURIComponent(q)}`);
                     items = resp.ok ? await resp.json() : [];
                 } catch {
                     items = [];
@@ -106,16 +109,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
         input.addEventListener("blur", () => setTimeout(() => results.classList.remove("open"), 150));
 
-        const form = wrap.closest("form");
-        if (form) {
-            form.addEventListener("submit", (e) => {
-                if (!hidden.value) {
-                    e.preventDefault();
-                    input.setCustomValidity("Выберите персонажа из списка подсказок");
-                    input.reportValidity();
-                }
-            });
+        // data-required="false" — для форм, где рядом есть равноценная альтернатива
+        // выбору из подсказок (например, ручной ввод ID), поэтому пустой hidden не
+        // должен блокировать отправку. По умолчанию — обязательный выбор, как раньше.
+        if (required) {
+            const form = wrap.closest("form");
+            if (form) {
+                form.addEventListener("submit", (e) => {
+                    if (!hidden.value) {
+                        e.preventDefault();
+                        input.setCustomValidity("Выберите вариант из списка подсказок");
+                        input.reportValidity();
+                    }
+                });
+            }
         }
+    };
+
+    // Легаси: поиск персонажа для формы добавления требования к плейту (/plates/<name>) —
+    // GET /plates/api/units?q=, выбор кладёт base_id в скрытое поле формы.
+    document.querySelectorAll("[data-unit-search]").forEach((wrap) => {
+        initSearchWidget(wrap, {
+            url: "/plates/api/units", valueField: "base_id", labelField: "name",
+            minLength: 2, emptyText: "Ничего не найдено",
+        });
+    });
+
+    // Общий случай (например, поиск игрока для формы нарушения/дня рождения) —
+    // источник и поля ответа задаются на разметке: data-url/data-value-field/
+    // data-label-field/data-required (по умолчанию выбор из подсказок обязателен
+    // для отправки формы; data-required="false" — когда рядом есть равноценная
+    // альтернатива, например ручной ввод ID).
+    document.querySelectorAll("[data-live-search]").forEach((wrap) => {
+        initSearchWidget(wrap, {
+            url: wrap.dataset.url,
+            valueField: wrap.dataset.valueField || "value",
+            labelField: wrap.dataset.labelField || "name",
+            minLength: parseInt(wrap.dataset.minLength || "2", 10),
+            emptyText: "Ничего не найдено",
+            required: wrap.dataset.required !== "false",
+        });
     });
 
     // Поповеры переименования/редактирования (details.row-actions) — закрывать

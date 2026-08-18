@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}План ТБ — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/tb">← Назад к ТБ</a></p>
+    <h1>План планет ТБ</h1>
+    <p class="muted">
+        Ручная привязка реальной планеты к фазе и ветке — фолбэк на случай, если авто-разбор
+        офицерского анонса в Discord (#ac-тб-оповещения) не сработал. Сохраняется как «живой»
+        план текущей ТБ и сразу попадает в отчёты.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Текущий план</span></div>
+        {% if not rows %}
+            <p class="empty-state">План ещё не задан — заполните форму ниже.</p>
+        {% else %}
+            <table class="data">
+                <thead><tr><th>Фаза</th><th>Ветка</th><th>Планета</th></tr></thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.phase }}</td>
+                            <td>{{ row.conflict_label }}</td>
+                            <td>{{ row.planet_name }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Задать/поправить планету</span></div>
+        <form method="post" action="/tb/plan">
+            <label>
+                Этап
+                <input type="number" name="phase" min="1" max="6" required>
+            </label>
+            <label>
+                Ветка
+                <select name="conflict_key" required>
+                    {% for opt in conflict_options %}
+                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Название планеты
+                <input type="text" name="planet_name" required>
+            </label>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+{% endblock %}

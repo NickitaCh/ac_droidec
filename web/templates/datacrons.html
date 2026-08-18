@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Датакроны — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Датакрон-требования</h1>
+    <p class="muted">Требования к датакронам по активным сезонам ТБ — что игроки должны накопить/сфокусировать. <a href="/datacrons/check">Проверить игрока или всю гильдию →</a></p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if notice %}
+        <p class="muted">{{ notice }}</p>
+    {% endif %}
+
+    {% if not catalog_loaded %}
+        <p class="empty-state">⏳ Справочник датакронов ещё загружается (или Comlink недоступен) — попробуйте обновить страницу через минуту.</p>
+    {% elif not seasons %}
+        <p class="empty-state">Нет активных (незавершённых) сезонов датакронов по данным Comlink.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Сезон</th>
+                            <th class="num" data-sort="num">Обычных</th>
+                            <th class="num" data-sort="num">Спец.</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in seasons %}
+                            <tr>
+                                <td><a href="/datacrons/{{ s.set_id }}"><strong>{{ s.display_name }}</strong></a> <span class="muted">[{{ s.set_id }}]</span></td>
+                                <td class="num">{{ s.base_count }}</td>
+                                <td class="num">{{ s.focused_count }}</td>
+                                <td class="row-actions">
+                                    <a class="link-btn" href="/datacrons/{{ s.set_id }}">открыть</a>
+                                    <a class="link-btn" href="/datacrons/check?season={{ s.set_id }}">проверить</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Пересчёт нормы на релик — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Пересчёт нормы плейта на другой релик</h1>
+    <p class="muted">Пересчитывает уже заданную в плейте норму персонажа так, как если бы плейт требовал другой уровень реликвии — не привязано к конкретному игроку. То же самое, что делает Discord-команда /статы_релик. Прогноз статов реального игрока — на <a href="/stats-check">отдельной странице</a>.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="get" action="/stats-check/relic">
+            <label>
+                Плейт
+                <select name="plate" required onchange="this.form.character.value=''; this.form.submit();">
+                    <option value="">— выберите плейт —</option>
+                    {% for p in plates %}
+                        <option value="{{ p }}" {% if p == selected_plate %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            {% if selected_plate %}
+                <label>
+                    Персонаж
+                    <select name="character" required>
+                        <option value="">— выберите персонажа —</option>
+                        {% for base_id, name in characters %}
+                            <option value="{{ base_id }}" {% if base_id == selected_character %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>
+                    Целевой релик (0–10)
+                    <input type="number" name="relic" min="0" max="10" value="{{ selected_relic if selected_relic is not none else '' }}" required>
+                </label>
+            {% endif %}
+
+            <button type="submit">{% if selected_plate %}Пересчитать{% else %}Выбрать{% endif %}</button>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif result %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ result.char_name }}</span></div>
+            <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ result.block }}</pre>
+        </div>
+    {% endif %}
+{% endblock %}

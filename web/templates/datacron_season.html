@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}{{ display_name }} — Датакроны — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/datacrons">← Все сезоны</a></p>
+    <h1>{{ display_name }} <span class="muted">[{{ set_id }}]</span></h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if notice %}
+        <p class="muted">{{ notice }}</p>
+    {% endif %}
+
+    <div class="stats-grid">
+        <div class="stat-tile">
+            <div class="stat-value">{{ base_reqs|length }}</div>
+            <div class="stat-label">Обычных требований</div>
+        </div>
+        <div class="stat-tile">
+            <div class="stat-value">{{ focused_reqs|length }}</div>
+            <div class="stat-label">Спец. требований</div>
+        </div>
+    </div>
+
+    <p><a href="/datacrons/check?season={{ set_id }}">Проверить игрока/гильдию по этому сезону →</a></p>
+
+    <div class="panel">
+        <div class="panel-title"><span>Добавить обычное требование</span></div>
+        <form method="post" action="/datacrons/{{ set_id }}/add" class="requirement-form">
+            <label>
+                Пак/персонаж (справочно)
+                <input type="text" name="pack">
+            </label>
+            <label>
+                Приоритет
+                <select name="priority" required>
+                    {% for label, value in priority_options %}
+                        <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Уровень 3
+                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/3" data-label-field="label">
+                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
+                    <input type="hidden" name="level3" class="unit-search-value" value="NONE">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Уровень 6
+                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/6" data-label-field="label">
+                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
+                    <input type="hidden" name="level6" class="unit-search-value" value="NONE">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Уровень 9
+                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/9" data-label-field="label">
+                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
+                    <input type="hidden" name="level9" class="unit-search-value" value="NONE">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Комментарий (необязательно)
+                <input type="text" name="comment">
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите способность из подсказок (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования.</p>
+    </div>
+
+    {% if not base_reqs %}
+        <p class="empty-state">Обычных требований пока нет.</p>
+    {% else %}
+        <div class="panel">
+            <div class="panel-title"><span>Обычные требования</span><span class="panel-hint">{{ base_reqs|length }}</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Пак</th>
+                            <th>3 → 6 → 9 уровень</th>
+                            <th>Приоритет</th>
+                            <th>Комментарий</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in base_reqs %}
+                            <tr>
+                                <td>#{{ r.id }} {{ r.pack or "—" }}</td>
+                                <td>{{ r.level3_label }} → {{ r.level6_label }} → {{ r.level9_label }}</td>
+                                <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                                <td>{{ r.comment or "—" }}</td>
+                                <td class="row-actions">
+                                    <details>
+                                        <summary class="link-btn">править</summary>
+                                        <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/edit" class="inline-form">
+                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Пак">
+                                            <select name="priority">
+                                                {% for label, value in priority_options %}
+                                                    <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
+                                            <button type="submit">Сохранить</button>
+                                        </form>
+                                    </details>
+                                    {% if r.alt_levels %}
+                                        <details>
+                                            <summary class="link-btn">+ альтернатива</summary>
+                                            {% for lvl in r.alt_levels %}
+                                                <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/add-alt" class="inline-form">
+                                                    <input type="hidden" name="level" value="{{ lvl }}">
+                                                    <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/{{ lvl }}" data-label-field="label">
+                                                        <input type="text" class="unit-search-input" placeholder="Ур. {{ lvl }}: ещё вариант…" autocomplete="off" required>
+                                                        <input type="hidden" name="value" class="unit-search-value" required>
+                                                        <div class="unit-search-results"></div>
+                                                    </div>
+                                                    <button type="submit">Добавить</button>
+                                                </form>
+                                            {% endfor %}
+                                        </details>
+                                    {% endif %}
+                                    <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/delete"
+                                          onsubmit="return confirm('Удалить требование #{{ r.id }}?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if has_focused_catalog %}
+        <div class="panel">
+            <div class="panel-title"><span>Добавить спец. (фокусное) требование</span></div>
+            <form method="post" action="/datacrons/{{ set_id }}/add-focused" class="requirement-form">
+                <label>
+                    Персонаж
+                    <div class="unit-search" data-live-search data-url="/datacrons/api/focused-characters/{{ set_id }}" data-label-field="label">
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off" required>
+                        <input type="hidden" name="character_key" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Нужный уровень
+                    <input type="number" name="required_level" min="1" max="20" required>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Пак (справочно)
+                    <input type="text" name="pack">
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
+    {% endif %}
+
+    {% if focused_reqs %}
+        <div class="panel">
+            <div class="panel-title"><span>Спец. требования</span><span class="panel-hint">{{ focused_reqs|length }}</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Пак</th>
+                            <th>Персонаж</th>
+                            <th class="num">Нужен уровень</th>
+                            <th>Приоритет</th>
+                            <th>Комментарий</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in focused_reqs %}
+                            <tr>
+                                <td>F{{ r.id }} {{ r.pack or "—" }}</td>
+                                <td>{{ r.character_label }}</td>
+                                <td class="num">{{ r.required_level }}+</td>
+                                <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                                <td>{{ r.comment or "—" }}</td>
+                                <td class="row-actions">
+                                    <details>
+                                        <summary class="link-btn">править</summary>
+                                        <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/edit" class="inline-form">
+                                            <input type="number" name="required_level" min="1" max="20" value="{{ r.required_level }}" required>
+                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Пак">
+                                            <select name="priority">
+                                                {% for label, value in priority_options %}
+                                                    <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
+                                            <button type="submit">Сохранить</button>
+                                        </form>
+                                    </details>
+                                    <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/delete"
+                                          onsubmit="return confirm('Удалить спец. требование F{{ r.id }}?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Опасная зона</span></div>
+        <form method="post" action="/datacrons/{{ set_id }}/clear"
+              onsubmit="return confirm('Удалить ВСЕ требования сезона «{{ display_name }}» ({{ base_reqs|length }} обычных + {{ focused_reqs|length }} спец.)? Это необратимо.');">
+            <button type="submit" class="button-danger">Очистить весь сезон</button>
+        </form>
+    </div>
+{% endblock %}

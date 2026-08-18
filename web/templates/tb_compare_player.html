@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}ТБ сравнение: {{ compare.player_name }} — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/tb">← Назад к ТБ</a></p>
+    <h1>Сравнение по ТБ — {{ compare.player_name }}</h1>
+    <p class="muted"><a href="/tb/player/{{ compare.player_name | urlencode }}">Подробно за последнюю ТБ →</a></p>
+
+    <div class="panel">
+        <div class="panel-title"><span>Итого за событие</span></div>
+        <div class="table-scroll">
+            <table class="data">
+                <thead>
+                    <tr><th></th>{% for label in compare.event_labels %}<th class="num">{{ label }}</th>{% endfor %}</tr>
+                </thead>
+                <tbody>
+                    {% for row in compare.global_rows %}
+                        <tr>
+                            <td>{{ row.label }}</td>
+                            {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% for phase in compare.phases %}
+        <div class="panel">
+            <div class="panel-title"><span>Фаза {{ phase.phase }}</span></div>
+            {% if phase.round_rows %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr><th></th>{% for label in compare.event_labels %}<th class="num">{{ label }}</th>{% endfor %}</tr>
+                        </thead>
+                        <tbody>
+                            {% for row in phase.round_rows %}
+                                <tr>
+                                    <td>{{ row.label }}</td>
+                                    {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+            {% for planet in phase.planets %}
+                <h3>{{ planet.label }}</h3>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr><th></th>{% for label in compare.event_labels %}<th class="num">{{ label }}</th>{% endfor %}</tr>
+                        </thead>
+                        <tbody>
+                            {% for row in planet.rows %}
+                                <tr>
+                                    <td>{{ row.label }}</td>
+                                    {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endfor %}
+        </div>
+    {% endfor %}
+
+    {% if not compare.phases %}
+        <p class="empty-state">Нет пофазовых данных ни по одному сохранённому событию.</p>
+    {% endif %}
+
+    {% if compare.hidden_entries %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Скрытые параметры</span>
+                <span class="panel-hint">недостоверные данные comlink</span>
+            </div>
+            <table class="data">
+                <thead><tr><th>ТБ</th><th>Ключ</th><th class="num">Значение</th></tr></thead>
+                <tbody>
+                    {% for event_label, raw_key, value in compare.hidden_entries %}
+                        <tr><td>{{ event_label }}</td><td><code>{{ raw_key }}</code></td><td class="num">{{ value }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

@@ -1,16 +1,12 @@
 import disnake
 from disnake.ext import commands, tasks
-import asyncio
 import re
 from datetime import datetime, timedelta
 import database
 import guild_resolver
+from services.units_sync import sync_units
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
-
-# 'UnitDefinitions' — бит из comlink.get_enums()["GameDataItemsEnum"], тот же приём,
-# что DATACRON_DEFINITIONS_FLAG в datacron_requirements.py.
-UNIT_DEFINITIONS_FLAG = 137438953472
 
 # =====================================================================
 # АВТОКОМПЛИТЫ ДЛЯ КОМАНДЫ ПОСТАНОВКИ ЗАДАЧ (ВНЕ КЛАССА)
@@ -34,38 +30,11 @@ class TasksCog(commands.Cog):
     # СИНХРОНИЗАЦИЯ СПРАВОЧНИКА ЮНИТОВ (get_game_data + русская локализация)
     # =====================================================================
     async def _do_units_synchronization(self) -> int:
-        """Стягивает справочник юнитов через comlink.get_game_data(items=UnitDefinitions) —
-        тот же приём, что _fetch_datacron_cache в datacron_requirements.py. Старый вариант
-        через сырой aiohttp POST /data с минимальным payload молча отдавал пустой 'units'
-        (воспроизведено вживую) — library-метод отдаёт полный список без этой проблемы.
-        Имена берём из RUS_RU локализации, а не из nameKey — то же, что делает datacron-кэш.
-        """
-        game_data = await asyncio.to_thread(self.bot.comlink.get_game_data, items=str(UNIT_DEFINITIONS_FLAG))
-        units_list = game_data.get('units') or []
-        if not units_list:
-            raise Exception("В полученных данных отсутствует массив персонажей ('units').")
-
-        loc = await asyncio.to_thread(self.bot.comlink.get_localization, locale="RUS_RU", unzip=True)
-        loc_text = loc.get("Loc_RUS_RU.txt", "")
-        loc_kv = {}
-        for line in loc_text.split("\n"):
-            if "|" not in line:
-                continue
-            k, _, v = line.partition("|")
-            loc_kv[k.strip()] = v.strip()
-
-        units_to_db = {}
-        for unit in units_list:
-            bid = unit.get('baseId')
-            if not bid:
-                continue
-            name_key = unit.get('nameKey', bid)
-            name = loc_kv.get(name_key, name_key)
-            unit_type = "ship" if unit.get("combatType") == 2 else "character"
-            units_to_db[bid] = (name, unit_type)
-
-        database.upsert_game_units(units_to_db)
-        return len(units_to_db)
+        """Тонкая обёртка над services.units_sync.sync_units (общая реализация с
+        веб-дашбордом, /tasks -> "Обновить справочник") — сама логика (запрос
+        UnitDefinitions + RUS_RU локализация, см. докстринг sync_units) живёт там,
+        чтобы бот и веб не расходились при будущих правках."""
+        return await sync_units(self.bot.comlink)
 
     # =====================================================================
     # ФОНОВЫЙ АУДИТ ЗАДАЧ (КАЖДЫЙ ЧАС)

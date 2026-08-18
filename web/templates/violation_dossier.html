@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ player_name }} — Нарушения — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/violations">← Все нарушения</a></p>
+    <h1>Досье: {{ player_name }}</h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="stats-grid">
+        <div class="stat-tile">
+            <div class="stat-value">{{ lifetime_count }}</div>
+            <div class="stat-label">Всего нарушений</div>
+        </div>
+        <div class="stat-tile {% if recent_count >= n_limit %}status-danger{% endif %}">
+            <div class="stat-value">{{ recent_count }}</div>
+            <div class="stat-label">За последние 90 дней {% if recent_count >= n_limit %}🚨{% endif %}</div>
+        </div>
+    </div>
+
+    {% if not entries %}
+        <p class="empty-state">😇 У игрока нет нарушений.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Режим</th>
+                            <th>Нарушение</th>
+                            <th>Комментарий</th>
+                            <th></th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for e in entries %}
+                            <tr>
+                                <td>{{ e.date_str }}</td>
+                                <td>{{ e.category }}</td>
+                                <td>{{ e.subcategory }}</td>
+                                <td>{{ e.comment or "—" }}</td>
+                                <td>{% if e.recent %}<span class="badge badge-neutral">за 90 дней</span>{% endif %}</td>
+                                <td class="row-actions">
+                                    <form method="post" action="/violations/{{ e.id }}/delete"
+                                          onsubmit="return confirm('Удалить нарушение «{{ e.subcategory }}» от {{ e.date_str }}?');">
+                                        <input type="hidden" name="ally_code" value="{{ ally_code }}">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

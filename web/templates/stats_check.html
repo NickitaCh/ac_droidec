@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Статы — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Прогноз статов</h1>
+    <p class="muted">Сравнивает реальные статы игрока (на релике плейта) с сохранёнными в плейте нормами — то же самое, что делает Discord-команда /статы. Пересчёт нормы плейта на другой релик — на <a href="/stats-check/relic">отдельной странице</a>.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="get" action="/stats-check">
+            <label>
+                Плейт
+                <select name="plate" required onchange="this.form.character.value=''; this.form.submit();">
+                    <option value="">— выберите плейт —</option>
+                    {% for p in plates %}
+                        <option value="{{ p }}" {% if p == selected_plate %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            {% if selected_plate %}
+                <label>
+                    Игрок
+                    <select name="ally_code">
+                        <option value="">{% if self_ally_code %}— свой аккаунт ({{ self_ally_code }}) —{% else %}— свой аккаунт не привязан, выберите игрока —{% endif %}</option>
+                        {% for code, name in roster %}
+                            <option value="{{ code }}" {% if code == selected_ally_code %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>
+                    Персонаж (пусто — все персонажи плейта)
+                    <select name="character">
+                        <option value="">— все персонажи плейта —</option>
+                        {% for base_id, name in characters %}
+                            <option value="{{ base_id }}" {% if base_id == selected_character %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label class="checkbox-label">
+                    <input type="checkbox" name="force_refresh" value="1" {% if force_refresh %}checked{% endif %}>
+                    Обновить статы игрока с сервера (медленнее, но актуально прямо сейчас)
+                </label>
+            {% endif %}
+
+            <button type="submit">{% if selected_plate %}Показать{% else %}Выбрать{% endif %}</button>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif results is not none %}
+        {% if not results %}
+            <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
+        {% else %}
+            <h2>{{ player_label }}</h2>
+            {% for r in results %}
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>{{ r.char_name }}</span>
+                        <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
+                    </div>
+                    <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endif %}
+{% endblock %}

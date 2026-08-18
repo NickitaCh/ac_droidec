@@ -519,7 +519,7 @@ def get_player_warns(ally_code, guild_id=1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT category, subcategory, date_str, comment
+        SELECT id, category, subcategory, date_str, comment
         FROM position_warns
         WHERE ally_code = ? AND guild_id = ?
         ORDER BY id DESC
@@ -535,6 +535,15 @@ def remove_warn(ally_code, category, subcategory, date_str, guild_id=1):
         DELETE FROM position_warns
         WHERE ally_code = ? AND category = ? AND subcategory = ? AND date_str = ? AND guild_id = ?
     """, (ally_code, category, subcategory, date_str, guild_id))
+    conn.commit()
+    conn.close()
+
+def remove_warn_by_id(warn_id: int, guild_id: int = 1):
+    """Удаление по id (веб-дашборд) — в отличие от remove_warn, не задевает
+    случайно другую строку с тем же составным ключом при дублирующихся нарушениях."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM position_warns WHERE id = ? AND guild_id = ?", (warn_id, guild_id))
     conn.commit()
     conn.close()
 
@@ -640,6 +649,21 @@ def get_active_tasks(guild_id: int = 1):
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline
         FROM tasks WHERE status = 'ACTIVE' AND guild_id = ?
+    """, (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_tasks(guild_id: int = 1):
+    """Как get_active_tasks, но без фильтра по статусу — вся история (ACTIVE/
+    COMPLETED/FAILED), для веб-дашборда (/tasks), которому нужно показывать
+    не только активные задачи."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status
+        FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
     conn.close()

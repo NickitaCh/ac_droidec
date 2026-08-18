@@ -4,10 +4,12 @@
 скопирована 1:1 из cogs/guild_events.py и cogs/violations.py, чтобы дашборд
 показывал те же цифры, что и команды бота в Discord."""
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import database
+from cogs.guild_events import TB_ACTION_LABELS, TB_CONFLICT_LABELS, TB_HIDDEN_ZONE_ACTIONS
 
 # Дублирует main.py::N_LIMIT (порог 🚨 для нарушений) — тот же паттерн
 # дублирования операторских констант, что и COMLINK_URL/officer-роль (см. CLAUDE.md).
@@ -177,6 +179,268 @@ def get_tb_report(guild_id: int) -> TbReport | None:
     return TbReport(
         events=events, latest=latest, history=history, event_totals=event_totals,
         trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
+    )
+
+
+# Порядок вывода действий — совпадает с cogs/guild_events.py::_format_tb_player_report
+# и _format_tb_player_compare_report, чтобы веб-версия показывала те же строки в том же
+# порядке, что и Discord-команды "тб_отчет игрок"/"сравнение_по_игроку".
+TB_GLOBAL_ACTION_ORDER = ("summary", "unit_donated", "strike_encounter", "strike_attempt", "covert_attempt", "disobey")
+TB_PHASE_ACTION_ORDER = ("summary", "power", "strike_attempt", "strike_encounter", "covert_attempt", "unit_donated", "disobey")
+
+
+def _tb_conflict_sort_key(conflict_key: str):
+    base = conflict_key.split("_")[0]
+    return (base, 1 if "_bonus" in conflict_key else 0)
+
+
+def _tb_planet_label(phase: str, conflict_key: str, planet_map: dict) -> str:
+    base_conflict = conflict_key.split("_")[0]
+    is_bonus = "_bonus" in conflict_key
+    fallback = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+    name = planet_map.get((phase, "bonus" if is_bonus else base_conflict))
+    if name:
+        return f"{name} — {fallback}" + (" (бонус)" if is_bonus else "")
+    return fallback + (" (бонус)" if is_bonus else "")
+
+
+def _tb_planet_label_compare(phase: str, conflict_key: str, planet_maps: list) -> str:
+    base_conflict = conflict_key.split("_")[0]
+    is_bonus = "_bonus" in conflict_key
+    fallback = TB_CONFLICT_LABELS.get(base_conflict, f"Conflict {base_conflict}")
+    lookup_key = "bonus" if is_bonus else base_conflict
+    names = [pm.get((phase, lookup_key)) if pm else None for pm in planet_maps]
+    if any(names):
+        shown = " | ".join(n if n else "—" for n in names)
+        return f"{shown} ({fallback})" + (", бонус" if is_bonus else "")
+    return fallback + (" (бонус)" if is_bonus else "")
+
+
+def _resolve_tb_member_id(events: list, name: str) -> str | None:
+    """Ищет member_id по отображаемому имени игрока среди сохранённых событий ТБ,
+    начиная с самого свежего — member_id (comlink playerId) стабилен между ТБ, даже
+    если игровой ник менялся, поэтому одного совпадения имени в любом сохранённом
+    событии достаточно, чтобы дальше опознавать игрока во всех остальных событиях."""
+    if not events:
+        return None
+    event_ids = [e[0] for e in events]
+    rows = database.get_tb_player_summary_for_events(event_ids)
+    name_lower = name.strip().lower()
+    by_event = {}
+    for event_id, member_id, player_name, *_rest in rows:
+        if player_name.lower() == name_lower:
+            by_event[event_id] = member_id
+    for event_id, _ in reversed(events):
+        if event_id in by_event:
+            return by_event[event_id]
+    return None
+
+
+@dataclass
+class TbPlayerPlanetDetail:
+    label: str
+    actions: list  # [(action_label, value), ...]
+
+
+@dataclass
+class TbPlayerPhaseDetail:
+    phase: str
+    round_rows: list  # [(action_label, value), ...]
+    planets: list  # [TbPlayerPlanetDetail, ...]
+
+
+@dataclass
+class TbPlayerReport:
+    player_name: str
+    completed_at: str
+    global_rows: list  # [(action_label, value), ...]
+    phases: list  # [TbPlayerPhaseDetail, ...]
+    hidden_entries: list  # [(raw_key, value), ...] — недостоверные данные comlink, см. TB_HIDDEN_ZONE_ACTIONS
+
+
+def get_tb_player_report(guild_id: int, name: str) -> TbPlayerReport | None:
+    """Порт cogs/guild_events.py::_format_tb_player_report — читает уже раскодированные
+    и сохранённые данные последней ТБ (не дёргает Comlink живьём, см. решения плана)."""
+    events = database.get_recent_tb_events(guild_id=guild_id)
+    if not events:
+        return None
+    member_id = _resolve_tb_member_id(events, name)
+    if member_id is None:
+        return None
+
+    event_id, completed_at = events[-1]
+    detail = database.get_tb_player_detail(event_id, member_id)
+    if not detail:
+        return None
+    zone_data = json.loads(detail[0])
+    global_totals = json.loads(detail[1])
+    round_totals = json.loads(detail[2])
+    raw_keys = json.loads(detail[3])
+    planet_map = database.get_tb_event_planet_names(event_id)
+
+    summary_rows = database.get_tb_player_summary_for_events([event_id])
+    display_name = next((r[2] for r in summary_rows if r[1] == member_id), name)
+
+    global_rows = [(TB_ACTION_LABELS.get(a, a), global_totals[a]) for a in TB_GLOBAL_ACTION_ORDER if a in global_totals]
+
+    all_phases = sorted(set(round_totals.keys()) | set(zone_data.keys()), key=int)
+    phases = []
+    hidden_entries = []
+    for phase in all_phases:
+        rt = round_totals.get(phase, {})
+        round_rows = [(TB_ACTION_LABELS.get(a, a), rt[a]) for a in TB_PHASE_ACTION_ORDER if a in rt]
+
+        planets = []
+        conflicts = zone_data.get(phase, {})
+        for conflict_key in sorted(conflicts.keys(), key=_tb_conflict_sort_key):
+            actions = conflicts[conflict_key]
+            hidden_actions = TB_HIDDEN_ZONE_ACTIONS.get((phase, conflict_key), set())
+            action_rows = []
+            for action in sorted(actions.keys()):
+                if action in hidden_actions:
+                    entries = raw_keys.get(phase, {}).get(conflict_key, {}).get(action, {})
+                    for entry_key, value in actions[action].items():
+                        raw_key = entries.get(entry_key, f"{action}_phase{phase}_conflict{conflict_key}_{entry_key}")
+                        hidden_entries.append((raw_key, value))
+                    continue
+                total = sum(actions[action].values())
+                action_rows.append((TB_ACTION_LABELS.get(action, action), total))
+            planets.append(TbPlayerPlanetDetail(label=_tb_planet_label(phase, conflict_key, planet_map), actions=action_rows))
+
+        phases.append(TbPlayerPhaseDetail(phase=phase, round_rows=round_rows, planets=planets))
+
+    return TbPlayerReport(
+        player_name=display_name, completed_at=completed_at,
+        global_rows=global_rows, phases=phases, hidden_entries=hidden_entries,
+    )
+
+
+@dataclass
+class TbCompareRow:
+    label: str
+    values: list  # по одному значению на событие (None, если данных нет)
+
+
+@dataclass
+class TbComparePlanet:
+    label: str
+    rows: list  # [TbCompareRow, ...]
+
+
+@dataclass
+class TbComparePhase:
+    phase: str
+    round_rows: list  # [TbCompareRow, ...]
+    planets: list  # [TbComparePlanet, ...]
+
+
+@dataclass
+class TbPlayerCompare:
+    player_name: str
+    event_labels: list  # ["ТБ-3 (2026-08-01)", ...], в порядке events (старые -> новые)
+    global_rows: list  # [TbCompareRow, ...]
+    phases: list  # [TbComparePhase, ...]
+    hidden_entries: list  # [(event_label, raw_key, value), ...]
+
+
+def get_tb_player_compare(guild_id: int, name: str) -> TbPlayerCompare | None:
+    """Порт cogs/guild_events.py::_format_tb_player_compare_report — по всем сохранённым
+    событиям ТБ (до TB_HISTORY_KEEP), не только последнему."""
+    events = database.get_recent_tb_events(guild_id=guild_id)
+    if not events:
+        return None
+    member_id = _resolve_tb_member_id(events, name)
+    if member_id is None:
+        return None
+
+    event_ids = [e[0] for e in events]
+    summary_rows = database.get_tb_player_summary_for_events(event_ids)
+    names_by_event = {r[0]: r[2] for r in summary_rows if r[1] == member_id}
+    display_name = names_by_event.get(event_ids[-1]) or next(iter(names_by_event.values()), name)
+
+    n = len(events)
+    event_labels = [f"ТБ-{n - i} ({events[i][1][:10]})" for i in range(n)]
+
+    per_event = []
+    planet_maps = []
+    for event_id, _completed_at in events:
+        detail = database.get_tb_player_detail(event_id, member_id)
+        planet_maps.append(database.get_tb_event_planet_names(event_id))
+        if not detail:
+            per_event.append(None)
+            continue
+        per_event.append({
+            "zone_data": json.loads(detail[0]),
+            "global_totals": json.loads(detail[1]),
+            "round_totals": json.loads(detail[2]),
+            "raw_keys": json.loads(detail[3]),
+        })
+
+    global_rows = []
+    for action in TB_GLOBAL_ACTION_ORDER:
+        values = [e["global_totals"].get(action) if e else None for e in per_event]
+        if all(v is None for v in values):
+            continue
+        global_rows.append(TbCompareRow(label=TB_ACTION_LABELS.get(action, action), values=values))
+
+    all_phases = sorted(
+        {p for e in per_event if e for p in set(e["round_totals"].keys()) | set(e["zone_data"].keys())},
+        key=int,
+    )
+
+    hidden_entries = []
+    phases = []
+    for phase in all_phases:
+        round_rows = []
+        for action in TB_PHASE_ACTION_ORDER:
+            values = [(e["round_totals"].get(phase, {}).get(action) if e else None) for e in per_event]
+            if all(v is None for v in values):
+                continue
+            round_rows.append(TbCompareRow(label=TB_ACTION_LABELS.get(action, action), values=values))
+
+        conflict_keys = set()
+        for e in per_event:
+            if e:
+                conflict_keys |= set(e["zone_data"].get(phase, {}).keys())
+
+        planets = []
+        for conflict_key in sorted(conflict_keys, key=_tb_conflict_sort_key):
+            action_keys = set()
+            for e in per_event:
+                if e:
+                    action_keys |= set(e["zone_data"].get(phase, {}).get(conflict_key, {}).keys())
+
+            hidden_actions = TB_HIDDEN_ZONE_ACTIONS.get((phase, conflict_key), set())
+            rows = []
+            for action in sorted(action_keys):
+                values = []
+                for e in per_event:
+                    if not e:
+                        values.append(None)
+                        continue
+                    entries = e["zone_data"].get(phase, {}).get(conflict_key, {}).get(action)
+                    values.append(sum(entries.values()) if entries else None)
+
+                if action in hidden_actions:
+                    for idx, e in enumerate(per_event):
+                        if not e or values[idx] is None:
+                            continue
+                        raw_entries = e["raw_keys"].get(phase, {}).get(conflict_key, {}).get(action, {})
+                        actual_entries = e["zone_data"].get(phase, {}).get(conflict_key, {}).get(action, {})
+                        for entry_key, val in actual_entries.items():
+                            raw_key = raw_entries.get(entry_key, f"{action}_phase{phase}_conflict{conflict_key}_{entry_key}")
+                            hidden_entries.append((event_labels[idx], raw_key, val))
+                    continue
+
+                rows.append(TbCompareRow(label=TB_ACTION_LABELS.get(action, action), values=values))
+
+            planets.append(TbComparePlanet(label=_tb_planet_label_compare(phase, conflict_key, planet_maps), rows=rows))
+
+        phases.append(TbComparePhase(phase=phase, round_rows=round_rows, planets=planets))
+
+    return TbPlayerCompare(
+        player_name=display_name, event_labels=event_labels,
+        global_rows=global_rows, phases=phases, hidden_entries=hidden_entries,
     )
 
 
