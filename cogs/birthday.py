@@ -153,8 +153,12 @@ class Birthday(commands.Cog):
         await self.bot.wait_until_ready()
 
     # -------------------- Slash-команды --------------------
-    @commands.slash_command(name="др_добавить", description="Добавить/обновить день рождения")
+    @commands.slash_command(name="др", description="Дни рождения участников гильдии")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
+    async def birthday_group(self, inter: disnake.ApplicationCommandInteraction):
+        pass
+
+    @birthday_group.sub_command(name="добавить", description="Добавить/обновить день рождения")
     async def add_birthday(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -180,8 +184,7 @@ class Birthday(commands.Cog):
             f"✅ День рождения {user.mention} сохранён: {date_str}", ephemeral=True
         )
 
-    @commands.slash_command(name="др_удалить", description="Удалить день рождения")
-    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
+    @birthday_group.sub_command(name="удалить", description="Удалить день рождения")
     async def remove_birthday(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -195,8 +198,7 @@ class Birthday(commands.Cog):
         database.remove_birthday(str(user.id), guild_id=guild_id)
         await inter.response.send_message(f"День рождения {user.mention} удалён", ephemeral=True)
 
-    @commands.slash_command(name="др_список", description="Список дней рождений гильдии")
-    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
+    @birthday_group.sub_command(name="список", description="Список дней рождений гильдии")
     async def birthday_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
