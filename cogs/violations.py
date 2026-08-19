@@ -211,8 +211,12 @@ class ViolationsCog(commands.Cog):
     async def before_loop(self):
         await self.bot.wait_until_ready()
 
+    @commands.slash_command(name="нарушения", description="Учёт нарушений участников гильдии")
+    async def violations_group(self, inter: disnake.ApplicationCommandInteraction):
+        pass
+
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARN С 3 НАРУШЕНИЯМИ ЗА РАЗ ---
-    @commands.slash_command(name="нарушение", description="Зафиксировать нарушение у игрока")
+    @violations_group.sub_command(name="добавить", description="Зафиксировать нарушение у игрока")
     async def warn(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -314,7 +318,7 @@ class ViolationsCog(commands.Cog):
         await inter.response.send_message(result_text, ephemeral=False)
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARNS С ТЕКСТОВОЙ ТАБЛИЦЕЙ СТАТИСТИКИ И ЗНАЧКАМИ 🚨 ---
-    @commands.slash_command(name="нарушения", description="Просмотр таблицы всех нарушений или досье конкретного игрока")
+    @violations_group.sub_command(name="список", description="Просмотр таблицы всех нарушений или досье конкретного игрока")
     async def warns(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -420,7 +424,7 @@ class ViolationsCog(commands.Cog):
             await inter.followup.send(f"```text\n{table}\n```", ephemeral=False)
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /UNWARN С ИНТЕРАКТИВНЫМ ВЫБОРОМ ИЗ СПИСКА ---
-    @commands.slash_command(name="снять_нарушение", description="Удалить конкретное нарушение у выбранного игрока")
+    @violations_group.sub_command(name="снять", description="Удалить конкретное нарушение у выбранного игрока")
     async def unwarn(
         self,
         inter: disnake.ApplicationCommandInteraction,
