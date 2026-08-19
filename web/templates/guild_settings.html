@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Настройки гильдии — AC Droidec{% endblock %}
+{% block content %}
+    <h1>Настройки гильдии</h1>
+    <p class="muted">
+        Каналы и роли, которые бот использует для автоматических уведомлений (теги на ротацию,
+        поздравления с ДР, отчёты по ТБ, автоордера). Включите режим разработчика в Discord
+        (Настройки пользователя → Расширенные), чтобы правой кнопкой скопировать ID канала,
+        ветки или роли. Пустое поле — настройка не задана, соответствующая функция бота
+        для гильдии отключена. То же самое можно задать командой <code>/настройки</code> в Discord.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 32em;">
+        <form method="post" action="/settings">
+            {% for row in rows %}
+                <label>
+                    {{ row.label }}
+                    <input
+                        type="text"
+                        name="{{ row.field }}"
+                        value="{{ row.value }}"
+                        placeholder="ID {{ 'роли' if row.kind == 'role' else 'канала/ветки' }} (пусто — не задано)"
+                        inputmode="numeric"
+                        pattern="[0-9]*"
+                    >
+                </label>
+            {% endfor %}
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+{% endblock %}
