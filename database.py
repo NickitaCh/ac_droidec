@@ -2202,6 +2202,36 @@ def get_player_units_last_sync(ally_codes: list) -> str | None:
     return row[0] if row and row[0] else None
 
 
+def get_omicron_capable_base_ids() -> set:
+    """base_id персонажей/кораблей, у которых хотя бы у одного игрока в player_unit_cache
+    есть способность на омикрон-тире (tier >= 9, тот же порог, что OMICRON_MIN_TIER в
+    services/activity_diff.py — не импортируем его напрямую, чтобы не тянуть services в
+    database.py). Полный скан кэша при каждом вызове, а не отдельная поддерживаемая
+    таблица — player_unit_cache и так обновляется каждый час целиком, так что второй
+    денормализованный источник только рассинхронился бы. Используется для фильтрации
+    автокомплита в cogs/stat_requirements.py (/омикрон_текст) и web/routes/admin.py
+    (/admin/omicron-phrases) — не показывать юниты, у которых омикрона нет вообще."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    cursor.execute("SELECT base_id, unit_json FROM player_unit_cache")
+    rows = cursor.fetchall()
+    conn.close()
+    capable = set()
+    for base_id, unit_json in rows:
+        if base_id in capable:
+            continue
+        try:
+            unit = json.loads(unit_json)
+        except (TypeError, ValueError):
+            continue
+        for skill in unit.get("skill") or []:
+            if (skill.get("tier") or 0) >= 9:
+                capable.add(base_id)
+                break
+    return capable
+
+
 # =====================================================================
 # АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
 # =====================================================================
