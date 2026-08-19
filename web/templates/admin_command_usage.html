@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Использование команд — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Использование команд</h1>
+    <p class="muted">Счётчик вызовов слэш-команд по имени команды (сабкоманды считаются отдельно), без учёта параметров. Копится с момента добавления этой страницы — история до неё не восстановима. Всего вызовов: {{ total_calls }}.</p>
+
+    {% for group in groups %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ group.title }}</span><span class="panel-hint">{{ group.rows|length }}</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Команда</th>
+                            <th>Описание</th>
+                            <th data-sort="num" class="num">Вызовов</th>
+                            <th data-sort="text">Последний вызов</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in group.rows %}
+                            <tr>
+                                <td><code>/{{ row.name }}</code></td>
+                                <td class="muted">{{ row.description or "—" }}</td>
+                                <td class="num">{{ row.count }}</td>
+                                <td>{{ row.last_used_at or "—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endfor %}
+{% endblock %}

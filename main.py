@@ -201,6 +201,12 @@ async def check_guild_roles_slash(inter):
     return _check_access(inter.author, inter.application_command.qualified_name)
 
 @bot.event
+async def on_slash_command_completion(inter: disnake.ApplicationCommandInteraction):
+    # Считаем по "чистому" qualified_name (группа+сабкоманда), без параметров
+    # вызова — для статистики "какими командами пользуются" на /admin/command-usage.
+    database.log_command_usage(inter.application_command.qualified_name)
+
+@bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
     if hasattr(error, "original"):
         error = error.original
