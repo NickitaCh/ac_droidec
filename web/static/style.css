@@ -403,6 +403,12 @@ table.data td.num, table.data th.num {
 }
 .trend-chart-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
 
+/* ---- Конструктор (/mod-builder): форма из разнородных секций (обычные поля +
+   сетка сетов + повторяемые строки статов) — колонка пошире дефолтной (20em). ---- */
+.builder-form { max-width: 42em; gap: 1.25em; }
+.builder-form label { max-width: 20em; }
+.builder-form .form-block > span { display: block; margin-bottom: 0.5em; }
+
 /* ---- Плейты: форма добавления требования (шире, в сетку, не колонка) ---- */
 .requirement-form {
     flex-direction: row;
@@ -541,4 +547,32 @@ table.data td.num, table.data th.num {
     font-size: 0.88em;
     color: var(--fg-secondary);
 }
+
+/* ---- Конструктор (/mod-builder): сетка счётчиков сетов модов ---- */
+.mod-set-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9em, 1fr));
+    gap: 0.75em;
+    max-width: none;
+}
+.mod-set-grid label { flex: none; }
+
+/* ---- Повторяемые строки формы (статы от модов на /mod-builder) ---- */
+.row-group-rows { display: flex; flex-direction: column; gap: 0.5em; }
+.row-group-row { display: flex; gap: 0.5em; align-items: center; }
+.row-group-row select { flex: 1 1 14em; }
+.row-group-row input { flex: 0 0 8em; }
+.row-group-remove {
+    flex: 0 0 auto;
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 2em;
+    height: 2em;
+    line-height: 1;
+    cursor: pointer;
+}
+.row-group-remove:hover { color: var(--error); border-color: var(--error); }
+.row-group-add { align-self: flex-start; margin-top: 0.5em; }
 .sync-status form { margin: 0; }

@@ -176,6 +176,35 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Повторяемые строки формы (статы от модов на /mod-builder) — [data-row-group]
+    // оборачивает .row-group-rows (контейнер строк) + .row-group-add (кнопка "добавить"):
+    // клонирует последнюю строку, очищает её поля. Последнюю оставшуюся строку удалить
+    // нельзя (иначе форма могла бы уйти без единого input с именем stat_name/stat_value).
+    document.querySelectorAll("[data-row-group]").forEach((group) => {
+        const rows = group.querySelector(".row-group-rows");
+        const addBtn = group.querySelector(".row-group-add");
+        if (!rows || !addBtn) return;
+
+        const bindRemove = (row) => {
+            const btn = row.querySelector(".row-group-remove");
+            if (!btn) return;
+            btn.addEventListener("click", () => {
+                if (rows.children.length > 1) row.remove();
+            });
+        };
+
+        rows.querySelectorAll(".row-group-row").forEach(bindRemove);
+
+        addBtn.addEventListener("click", () => {
+            const last = rows.querySelector(".row-group-row:last-child");
+            if (!last) return;
+            const clone = last.cloneNode(true);
+            clone.querySelectorAll("input, select").forEach((el) => { el.value = ""; });
+            bindRemove(clone);
+            rows.appendChild(clone);
+        });
+    });
+
     // Поповеры переименования/редактирования (details.row-actions) и выпадающие
     // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.

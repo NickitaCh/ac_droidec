@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Конструктор — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Конструктор</h1>
+    <p class="muted">
+        Прикидка статов персонажа, которого ещё никто не прокачал — под гипотетический набор
+        модов. Бонус сетов считается точно (реальные игровые данные), а вклад самих роллов
+        (primary + secondary у всех 6 модов) вы оцениваете сами и вписываете суммой по каждому
+        стату — движок не умеет посчитать это точно (нет игровых таблиц значений роллов),
+        поэтому здесь то же допущение, что и в пересчёте нормы плейта на другой релик.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 46em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="get" action="/mod-builder" class="builder-form">
+            <label>
+                Персонаж
+                <div class="unit-search" data-unit-search>
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required value="{{ selected_character_label }}">
+                    <input type="hidden" name="character" class="unit-search-value" required value="{{ selected_character }}">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+
+            <label>
+                Уровень реликвии
+                <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
+            </label>
+
+            <div class="form-block">
+                <span>Сеты модов — сколько модов каждого сета надето (сумма обычно 6)</span>
+                <div class="mod-set-grid">
+                    {% for set_id, set_name in mod_sets %}
+                        <label>
+                            {{ set_name }}
+                            <input type="number" name="set_{{ set_id }}" min="0" max="6" value="{{ set_counts.get(set_id, 0) }}">
+                        </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="form-block" data-row-group>
+                <span>Вклад в статы от роллов модов (сумма по всем 6 модам, в игровых единицах — проценты как проценты)</span>
+                <div class="row-group-rows">
+                    {% for name, value in manual_stat_rows %}
+                        <div class="row-group-row">
+                            <select name="stat_name">
+                                <option value="">— стат —</option>
+                                {% for label, val in stat_name_choices %}
+                                    <option value="{{ val }}" {% if val == name %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <input type="number" name="stat_value" step="any" value="{{ value }}" placeholder="0">
+                            <button type="button" class="row-group-remove" title="Убрать строку">✕</button>
+                        </div>
+                    {% endfor %}
+                </div>
+                <button type="button" class="row-group-add">+ добавить стат</button>
+            </div>
+
+            <button type="submit">Посчитать</button>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif result %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ result.char_name }}</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Стат</th><th>Итоговое значение</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for label, value in result.rows %}
+                            <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel" style="max-width: 30em;">
+            <div class="panel-title"><span>Сохранить как пресет</span></div>
+            <form method="post" action="/mod-builder/presets/save" class="inline-form">
+                {% for set_id, count in set_counts.items() %}
+                    <input type="hidden" name="set_{{ set_id }}" value="{{ count }}">
+                {% endfor %}
+                {% for name, value in manual_stat_rows %}
+                    {% if name %}
+                        <input type="hidden" name="stat_name" value="{{ name }}">
+                        <input type="hidden" name="stat_value" value="{{ value }}">
+                    {% endif %}
+                {% endfor %}
+                <input type="hidden" name="character" value="{{ selected_character }}">
+                <input type="hidden" name="relic" value="{{ selected_relic }}">
+                <input type="text" name="name" placeholder="Название пресета" required>
+                <button type="submit">Сохранить</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">сеты + статы, применимые к любому персонажу</span></div>
+        {% if not presets %}
+            <p class="empty-state">Пока нет сохранённых пресетов — посчитайте сборку выше и сохраните.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Название</th><th>Сеты</th><th>Статы</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for p in presets %}
+                            <tr>
+                                <td>{{ p.name }}</td>
+                                <td>{{ p.sets_summary }}</td>
+                                <td>{{ p.stats_summary }}</td>
+                                <td class="row-actions">
+                                    <a class="link-btn" href="/mod-builder?preset_id={{ p.id }}">применить</a>
+                                    <form method="post" action="/mod-builder/presets/{{ p.id }}/delete"
+                                          onsubmit="return confirm('Удалить пресет «{{ p.name }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} расчётов гильдии</span></div>
+        {% if not history %}
+            <p class="empty-state">Пока нет расчётов — посчитайте сборку выше.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Персонаж</th><th>Релик</th><th>Сеты</th><th>Статы</th><th>Когда</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for h in history %}
+                            <tr>
+                                <td>{{ h.char_name }}</td>
+                                <td>{{ h.relic }}</td>
+                                <td>{{ h.sets_summary }}</td>
+                                <td>{{ h.stats_summary }}</td>
+                                <td>{{ h.created_at }}</td>
+                                <td><a class="link-btn" href="/mod-builder?history_id={{ h.id }}">открыть</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}
