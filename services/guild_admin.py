@@ -121,3 +121,43 @@ def list_admins() -> dict:
         "super_admins": database.get_all_bot_admins(),
         "grants": database.get_all_manual_grants(),
     }
+
+
+@dataclass
+class WebCredentialResult:
+    ok: bool
+    error: str = None
+
+
+MIN_PASSWORD_LENGTH = 8
+
+
+def add_web_credential(login: str, discord_id: str, password: str, created_by: str) -> WebCredentialResult:
+    """Заводит логин/пароль для входа в веб мимо Discord OAuth (см. web/auth.py::
+    login_password_submit) — учётка привязывается к discord_id, права по-прежнему
+    резолвятся через guild_resolver.resolve_access(discord_id), как при обычном входе."""
+    login = login.strip()
+    discord_id = str(discord_id).strip()
+    if not login or not discord_id:
+        return WebCredentialResult(ok=False, error="Логин и Discord ID обязательны.")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return WebCredentialResult(ok=False, error=f"Пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов.")
+    if not database.create_web_credential(login, discord_id, password, created_by=created_by):
+        return WebCredentialResult(ok=False, error=f"Логин «{login}» уже занят.")
+    return WebCredentialResult(ok=True)
+
+
+def set_web_credential_password(login: str, password: str) -> WebCredentialResult:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return WebCredentialResult(ok=False, error=f"Пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов.")
+    if not database.set_web_credential_password(login, password):
+        return WebCredentialResult(ok=False, error=f"Учётка «{login}» не найдена.")
+    return WebCredentialResult(ok=True)
+
+
+def remove_web_credential(login: str) -> bool:
+    return database.delete_web_credential(login)
+
+
+def list_web_credentials() -> list:
+    return database.get_all_web_credentials()

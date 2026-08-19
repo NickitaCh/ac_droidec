@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import sqlite3
 
 DB_NAME = "guild_management.db"
@@ -413,6 +415,110 @@ def get_web_access_log(limit: int = 200) -> list:
         }
         for r in rows
     ]
+
+# =====================================================================
+# ЛОГИН/ПАРОЛЬ ДЛЯ ВЕБ-ДАШБОРДА: второй способ входа рядом с Discord OAuth
+# (web/routes/password_auth.py) — заведён для офицеров, которым Discord
+# недоступен (блокировки РФ). Учётка ВСЕГДА привязана к discord_id — права
+# (tier/is_super_admin) после успешного входа резолвятся так же, как при
+# OAuth, через guild_resolver.resolve_access(discord_id), а не хранятся тут.
+# Заводится/меняется/удаляется только супер-админом (web/routes/admin.py,
+# /admin/web-accounts) — самостоятельной регистрации логин/паролем нет.
+# Пароль хранится как PBKDF2-HMAC-SHA256 (соль per-запись, 200k итераций) —
+# в requirements.txt нет отдельной hashing-библиотеки, обходимся stdlib.
+# =====================================================================
+def _ensure_web_credentials_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS web_credentials (
+            login TEXT PRIMARY KEY,
+            discord_id TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def _hash_password(password: str, salt_hex: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 200_000).hex()
+
+
+def create_web_credential(login: str, discord_id: str, password: str, created_by: str = None) -> bool:
+    """False, если такой логин уже занят (используйте set_web_credential_password для смены пароля)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_credentials_table(cursor)
+    salt_hex = os.urandom(16).hex()
+    password_hash = _hash_password(password, salt_hex)
+    try:
+        cursor.execute(
+            "INSERT INTO web_credentials (login, discord_id, password_hash, password_salt, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (login, str(discord_id), password_hash, salt_hex, created_by),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def set_web_credential_password(login: str, password: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_credentials_table(cursor)
+    salt_hex = os.urandom(16).hex()
+    password_hash = _hash_password(password, salt_hex)
+    cursor.execute(
+        "UPDATE web_credentials SET password_hash = ?, password_salt = ? WHERE login = ?",
+        (password_hash, salt_hex, login),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_web_credential(login: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_credentials_table(cursor)
+    cursor.execute("DELETE FROM web_credentials WHERE login = ?", (login,))
+    conn.commit()
+    removed = cursor.rowcount > 0
+    conn.close()
+    return removed
+
+
+def get_all_web_credentials() -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_credentials_table(cursor)
+    cursor.execute("SELECT login, discord_id, created_by, created_at FROM web_credentials ORDER BY created_at")
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"login": r[0], "discord_id": r[1], "created_by": r[2], "created_at": r[3]}
+        for r in rows
+    ]
+
+
+def verify_web_credential(login: str, password: str) -> str | None:
+    """Возвращает discord_id при верных логине/пароле, иначе None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_credentials_table(cursor)
+    cursor.execute("SELECT discord_id, password_hash, password_salt FROM web_credentials WHERE login = ?", (login,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    discord_id, password_hash, salt_hex = row
+    if _hash_password(password, salt_hex) != password_hash:
+        return None
+    return discord_id
 
 # =====================================================================
 # СЧЁТЧИК ИСПОЛЬЗОВАНИЯ КОМАНД: инкрементится на каждое успешное выполнение
