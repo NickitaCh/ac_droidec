@@ -176,6 +176,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Живая подсветка карточки слота мода на /mod-builder — бордер загорается сразу
+    // при выборе сета, не дожидаясь отправки формы (серверная "filled" метка выставляется
+    // только при рендере, а не отслеживает live-изменения на клиенте).
+    document.querySelectorAll(".mod-slot-card select").forEach((select) => {
+        const card = select.closest(".mod-slot-card");
+        select.addEventListener("change", () => {
+            card.classList.toggle("filled", !!select.value);
+        });
+    });
+
     // Повторяемые строки формы (статы от модов на /mod-builder) — [data-row-group]
     // оборачивает .row-group-rows (контейнер строк) + .row-group-add (кнопка "добавить"):
     // клонирует последнюю строку, очищает её поля. Последнюю оставшуюся строку удалить
