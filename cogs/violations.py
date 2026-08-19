@@ -119,7 +119,7 @@ class ViolationsCog(commands.Cog):
             print(f"🔄 [{gname}] Запуск безопасного обновления состава...")
             try:
                 print(f"🔎 [{gname}] Шаг 1: Запрос профиля игрока для Ally Code: {guild_cfg['ally_code']}...")
-                player_data = self.bot.comlink.get_player(allycode=str(guild_cfg["ally_code"]))
+                player_data = await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(guild_cfg["ally_code"]))
 
                 swgoh_guild_id = player_data.get("guildId")
                 if not swgoh_guild_id:
@@ -136,7 +136,7 @@ class ViolationsCog(commands.Cog):
                     database.update_guild_config(gid, swgoh_guild_id=str(swgoh_guild_id))
 
                 print(f"🔎 [{gname}] Шаг 3: Запрос данных гильдии из comlink...")
-                guild = self.bot.comlink.get_guild(guild_id=swgoh_guild_id)
+                guild = await asyncio.to_thread(self.bot.comlink.get_guild, guild_id=swgoh_guild_id)
                 members = guild.get("guild", guild).get("member", [])
                 print(f"✅ [{gname}] Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
 
@@ -151,7 +151,7 @@ class ViolationsCog(commands.Cog):
                     member_level = member.get("memberLevel")
 
                     try:
-                        prof = self.bot.comlink.get_player(player_id=p_id)
+                        prof = await asyncio.to_thread(self.bot.comlink.get_player, player_id=p_id)
                         p_name = prof.get("name", p_name)
                         a_code = str(prof.get("allyCode", a_code))
                     except:
