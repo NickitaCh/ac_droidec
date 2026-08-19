@@ -548,9 +548,8 @@ table.data td.num, table.data th.num {
     color: var(--fg-secondary);
 }
 
-/* ---- Конструктор (/mod-builder): 6 карточек-слотов модов (форма + какой сет надет) —
-   один слот каждой формы у персонажа всегда ровно один, поэтому по построению не
-   допускает невозможную сборку (в отличие от прежних 8 отдельных счётчиков сетов). ---- */
+/* ---- Конструктор (/mod-builder): 6 карточек-слотов модов (форма + выбранный primary-стат
+   на ней) — один слот каждой формы у персонажа всегда ровно один. ---- */
 .mod-slot-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
@@ -573,6 +572,17 @@ table.data td.num, table.data th.num {
 .mod-slot-card.filled .mod-slot-icon { color: var(--accent); }
 .mod-slot-label { font-size: 0.76em; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .mod-slot-card select { width: 100%; font-size: 0.85em; padding: 0.35em; }
+
+/* ---- Конструктор (/mod-builder): интерактивный выбор сетов — 8 строк с подписанным
+   нужным количеством + живой счётчик "выбрано/6" (dashboard.js). ---- */
+.mod-set-picker { max-width: 28em; }
+.mod-set-rows { display: flex; flex-direction: column; gap: 0.4em; }
+.mod-set-row { display: flex; align-items: center; gap: 0.6em; }
+.mod-set-name { flex: 1 1 8em; }
+.mod-set-need { flex: 0 0 auto; font-size: 0.78em; color: var(--fg-muted); }
+.mod-set-row input[type="number"] { flex: 0 0 4.5em; }
+.mod-set-total { margin-top: 0.6em; font-weight: 600; font-size: 0.9em; }
+.mod-set-total.over-limit { color: var(--error); }
 
 /* ---- Повторяемые строки формы (статы от модов на /mod-builder) — настоящая таблица,
    а не список карточек, ради компактности при нескольких строках. ---- */

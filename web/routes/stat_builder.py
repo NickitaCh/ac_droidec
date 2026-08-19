@@ -1,11 +1,13 @@
 """Веб-only "Конструктор" (/mod-builder) — гипотетическая сборка модов для персонажа,
-которого никто ещё не прокачал: сколько модов какого сета надето (точный бонус сета из
-реальных данных игры) + вручную оценённая сумма вклада в каждый стат от primary+secondary
-роллов (то же допущение, что RELIC_PROJECTION_FLAT_OFFSET в cogs/stat_requirements.py, но
-для любого стата, а не только четырёх захардкоженных). Расчёт — stat_engine.
-build_hypothetical_unit + apply_manual_stat_totals (см. их докстринги за подробным "почему
-не точные 6 слотов с primary/secondary"). Отдельная фича, не порт Discord-команды — той
-не существует, поэтому не в stat_forecast.py (тот держит только веб-версии /статы и
+которого никто ещё не прокачал: 6 слотов (форма мода) с выбором ТОЧНОГО primary-стата
+(реальные игровые константы на 6★/ур.15, добыты эмпирически из реальных модов гильдии —
+см. stat_engine.MOD_PRIMARY_OPTIONS) + отдельно интерактивный выбор сетов (сколько модов
+какого сета, с подписанным количеством для бонуса) + вручную оценённая сумма вклада
+ВТОРИЧНЫХ статов (единственное, что действительно нельзя посчитать точно — вторички
+рандомны). Расчёт — stat_engine.build_hypothetical_unit (собирает синтетические
+equippedStatMod-объекты, тот же формат, что реальные моды игроков в /статы) +
+apply_manual_stat_totals для вторичек. Отдельная фича, не порт Discord-команды — той не
+существует, поэтому не в stat_forecast.py (тот держит только веб-версии /статы и
 /статы_релик)."""
 
 from pathlib import Path
@@ -27,12 +29,8 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
 
-# Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы,
-# поэтому 6 отдельных селектов "какой сет в этом слоте" одновременно нагляднее (как в
-# HotUtils-редакторе шаблонов, Template -> Squad Editor -> ... -> Edit -> Mods — так же
-# организовано по слотам) и по построению не даёт ввести невозможную сборку (не может
-# получиться сумма модов ≠ 6, в отличие от старых 8 отдельных счётчиков "сколько от
-# каждого сета"). Иконки — свои простые SVG (не растровые ассеты HotUtils).
+# Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы.
+# Иконки — свои простые SVG (не растровые ассеты HotUtils).
 MOD_SLOT_DEFS = [
     ("square", "Квадрат"),
     ("arrow", "Стрела"),
@@ -63,9 +61,33 @@ def _char_label(base_id: str) -> str:
     return database.get_game_unit_name(base_id) or base_id
 
 
+def _primary_option_by_stat(slot_key: str, unit_stat_id):
+    if not unit_stat_id:
+        return None
+    for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []):
+        if opt["unit_stat"] == int(unit_stat_id):
+            return opt
+    return None
+
+
+def _primaries_to_list(primaries: dict) -> list:
+    """{slot_key: unit_stat_id} -> [option|None, ...] в порядке MOD_SLOT_DEFS, для
+    stat_engine.build_hypothetical_unit (позиционный список из 6 физических модов)."""
+    return [_primary_option_by_stat(slot_key, primaries.get(slot_key)) for slot_key, _ in MOD_SLOT_DEFS]
+
+
 def _sets_summary(set_counts: dict) -> str:
     set_names = dict(MOD_SET_CHOICES)
-    parts = [f"{count}×{set_names.get(int(set_id), f'#{set_id}')}" for set_id, count in sorted(set_counts.items(), key=lambda kv: int(kv[0]))]
+    parts = [f"{count}×{set_names.get(int(set_id), f'#{set_id}')}" for set_id, count in sorted(set_counts.items(), key=lambda kv: int(kv[0])) if count]
+    return ", ".join(parts) if parts else "—"
+
+
+def _primaries_summary(primaries: dict) -> str:
+    parts = []
+    for slot_key, slot_label in MOD_SLOT_DEFS:
+        opt = _primary_option_by_stat(slot_key, primaries.get(slot_key))
+        if opt:
+            parts.append(f"{slot_label}: {opt['label']}")
     return ", ".join(parts) if parts else "—"
 
 
@@ -75,8 +97,11 @@ def _stats_summary(manual_stats: dict) -> str:
 
 def _preset_rows(guild_id: int):
     return [
-        {"id": pid, "name": name, "sets_summary": _sets_summary(sets), "stats_summary": _stats_summary(stats)}
-        for pid, name, sets, stats, _created_by, _created_at in database.get_all_stat_mod_presets(guild_id=guild_id)
+        {
+            "id": pid, "name": name, "sets_summary": _sets_summary(sets),
+            "primaries_summary": _primaries_summary(primaries), "stats_summary": _stats_summary(stats),
+        }
+        for pid, name, sets, primaries, stats, _created_by, _created_at in database.get_all_stat_mod_presets(guild_id=guild_id)
     ]
 
 
@@ -84,45 +109,44 @@ def _history_rows(guild_id: int):
     return [
         {
             "id": hid, "char_name": _char_label(char_key), "relic": relic,
-            "sets_summary": _sets_summary(sets), "stats_summary": _stats_summary(stats), "created_at": created_at,
+            "sets_summary": _sets_summary(sets), "primaries_summary": _primaries_summary(primaries),
+            "stats_summary": _stats_summary(stats), "created_at": created_at,
         }
-        for hid, char_key, relic, sets, stats, _created_by, created_at in database.get_stat_hypothetical_history(guild_id=guild_id)
+        for hid, char_key, relic, sets, primaries, stats, _created_by, created_at in database.get_stat_hypothetical_history(guild_id=guild_id)
     ]
 
 
 def _parse_set_counts(mapping) -> dict:
-    """mapping — Starlette QueryParams (GET) или FormData (POST), обе умеют .get().
-    Читает 6 полей slot_<shape> (значение — id сета или пусто) и сворачивает в
-    {set_id: количество}."""
-    valid_set_ids = {sid for sid, _ in MOD_SET_CHOICES}
+    """mapping — Starlette QueryParams (GET) или FormData (POST), обе умеют .get()."""
     counts = {}
+    for set_id, _ in MOD_SET_CHOICES:
+        raw = mapping.get(f"set_{set_id}")
+        if not raw:
+            continue
+        try:
+            n = int(raw)
+        except ValueError:
+            continue
+        if n > 0:
+            counts[set_id] = n
+    return counts
+
+
+def _parse_primary_picks(mapping) -> dict:
+    """Возвращает {slot_key: unit_stat_id} — только валидные пары (стат реально входит
+    в список опций этого слота, см. stat_engine.MOD_PRIMARY_OPTIONS)."""
+    picks = {}
     for slot_key in MOD_SLOT_KEYS:
         raw = mapping.get(f"slot_{slot_key}")
         if not raw:
             continue
         try:
-            set_id = int(raw)
+            stat_id = int(raw)
         except ValueError:
             continue
-        if set_id in valid_set_ids:
-            counts[set_id] = counts.get(set_id, 0) + 1
-    return counts
-
-
-def _slot_assignment(set_counts: dict) -> dict:
-    """Обратная операция для предзаполнения формы (из агрегированных счётчиков — пресет/
-    история — в конкретные слоты): раскладывает сеты по 6 слотам в фиксированном порядке.
-    Само распределение по формам произвольно (эта информация не хранится — форма слота не
-    влияет на расчёт, важны только счётчики), просто даёт валидную эквивалентную раскладку."""
-    slots = iter(MOD_SLOT_KEYS)
-    assignment = {}
-    for set_id, count in sorted(set_counts.items(), key=lambda kv: int(kv[0])):
-        for _ in range(int(count)):
-            slot_key = next(slots, None)
-            if slot_key is None:
-                return assignment
-            assignment[slot_key] = str(set_id)
-    return assignment
+        if _primary_option_by_stat(slot_key, stat_id):
+            picks[slot_key] = stat_id
+    return picks
 
 
 def _parse_manual_stats(mapping) -> dict:
@@ -143,8 +167,8 @@ def _parse_manual_stats(mapping) -> dict:
 
 
 def _redirect_qs(mapping) -> str:
-    """Пересобирает querystring из текущего запроса (character/relic/сеты/статы) — чтобы
-    после сохранения пресета редирект вернул пользователя на тот же расчёт."""
+    """Пересобирает querystring из текущего запроса (character/relic/сеты/primary-статы/
+    вторички) — чтобы после сохранения пресета редирект вернул пользователя на тот же расчёт."""
     pairs = []
     character = mapping.get("character")
     if character:
@@ -152,6 +176,10 @@ def _redirect_qs(mapping) -> str:
     relic = mapping.get("relic")
     if relic:
         pairs.append(("relic", relic))
+    for set_id, _ in MOD_SET_CHOICES:
+        val = mapping.get(f"set_{set_id}")
+        if val:
+            pairs.append((f"set_{set_id}", val))
     for slot_key in MOD_SLOT_KEYS:
         val = mapping.get(f"slot_{slot_key}")
         if val:
@@ -171,6 +199,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     character = qp.get("character", "")
     relic_raw = qp.get("relic", "")
     set_counts = _parse_set_counts(qp)
+    primaries = _parse_primary_picks(qp)
     manual_stats = _parse_manual_stats(qp)
 
     history_id = qp.get("history_id")
@@ -179,33 +208,31 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     if history_id:
         entry = database.get_stat_hypothetical_history_entry(int(history_id), guild_id=guild_id)
         if entry:
-            _, character, relic_int, set_counts, manual_stats, _, _ = entry
+            _, character, relic_int, set_counts, primaries, manual_stats, _, _ = entry
             relic_raw = str(relic_int)
             reopened_from_history = True
     elif preset_id:
         preset = database.get_stat_mod_preset(int(preset_id), guild_id=guild_id)
         if preset:
-            _, _, set_counts, manual_stats, _, _ = preset
+            _, _, set_counts, primaries, manual_stats, _, _ = preset
 
-    # JSON-хранение (пресеты/история) отдаёт ключи sets как строки — приводим к int,
-    # чтобы совпадало с MOD_SET_CHOICES/шаблоном; для set_counts из _parse_set_counts
-    # ключи и так int, int(int) безвреден.
+    # JSON-хранение (пресеты/история) отдаёт ключи sets как строки — приводим к int, чтобы
+    # совпадало с MOD_SET_CHOICES/шаблоном; для set_counts из _parse_set_counts ключи и так
+    # int. primaries хранит {slot_key: unit_stat_id} — ключи уже строки, значения int.
     set_counts = {int(k): v for k, v in set_counts.items()}
-    # Раскладка по слотам всегда выводится из счётчиков (а не из сырых slot_* полей
-    # запроса) — так пресет/история и обычная пересборка формы работают одинаково,
-    # см. докстринг _slot_assignment.
-    slot_values = _slot_assignment(set_counts)
 
     context = {
         "user": user,
         "mod_sets": MOD_SET_CHOICES,
+        "mod_set_piece_count": stat_engine.MOD_SET_PIECE_COUNT,
         "mod_slots": MOD_SLOT_DEFS,
-        "slot_values": slot_values,
+        "mod_primary_options": stat_engine.MOD_PRIMARY_OPTIONS,
         "stat_name_choices": STAT_NAME_CHOICES,
         "selected_character": character,
         "selected_character_label": _char_label(character) if character else "",
         "selected_relic": relic_raw,
         "set_counts": set_counts,
+        "primaries": primaries,
         "manual_stat_rows": [(name, _fmt_value(value)) for name, value in manual_stats.items()] if manual_stats else [("", "")],
         "presets": _preset_rows(guild_id),
         "history": _history_rows(guild_id),
@@ -233,7 +260,8 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         context["loading"] = True
         return templates.TemplateResponse(request, "stat_builder.html", context)
 
-    unit = stat_engine.build_hypothetical_unit(character, relic, set_counts)
+    primary_list = _primaries_to_list(primaries)
+    unit = stat_engine.build_hypothetical_unit(character, relic, set_counts, primary_list)
     final_stats = stat_engine.calc_final_stats(stat_calc, unit)
     final_stats = stat_engine.apply_manual_stat_totals(final_stats, manual_stats)
 
@@ -243,7 +271,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     }
 
     if not reopened_from_history:
-        database.add_stat_hypothetical_history(character, relic, set_counts, manual_stats, user["discord_id"], guild_id=guild_id)
+        database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id)
         context["history"] = _history_rows(guild_id)
 
     return templates.TemplateResponse(request, "stat_builder.html", context)
@@ -257,8 +285,9 @@ async def preset_save(request: Request, user: dict = Depends(require_officer_acc
         return RedirectResponse(f"/mod-builder?{urlencode({'error': 'Укажите имя пресета.'})}", status_code=303)
 
     set_counts = _parse_set_counts(form)
+    primaries = _parse_primary_picks(form)
     manual_stats = _parse_manual_stats(form)
-    ok = database.create_stat_mod_preset(name, set_counts, manual_stats, user["discord_id"], guild_id=user["guild_id"])
+    ok = database.create_stat_mod_preset(name, set_counts, primaries, manual_stats, user["discord_id"], guild_id=user["guild_id"])
     qs = _redirect_qs(form)
     if not ok:
         error_qs = urlencode({"error": f"Пресет «{name}» уже существует."})

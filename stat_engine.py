@@ -48,23 +48,110 @@ def calc_final_stats(stat_calc: StatCalc, unit: dict) -> dict:
 
 
 # Для веб-only "Конструктора" (/mod-builder, web/routes/stat_builder.py): гипотетическая
-# сборка для персонажа, которого никто ещё не прокачал. StatCalc умеет синтетические моды
-# вида {"set": id, "primaryStat": {...}, "secondaryStat": [...]}, но значения primary/
-# secondary роллов нигде не подгружаются — GameDataBuilder не тянет у Comlink таблицу с
-# этими значениями (только statProgression/equipment/statModSet/table/xpTable/
-# relicTierDefinition/units/skill), а хардкодить общеизвестные "стандартные" роллы — это
-# угадывание, которого проект избегает (см. память feedback_swgoh_statcalc_quirks).
-# Поэтому здесь моделируется только точно посчитываемая часть — бонус сета (реальные
-# данные modSetData/_mod_set_data): передаём калькулятору {"set": id} без primary/
-# secondary — _calculate_mod_stats (swgoh_comlink) корректно считает комплекты сетов и
-# добавляет их бонус, вклад от primary/secondary остаётся нулевым (безопасно, код не
-# падает на stat=None). Вклад от самих роллов пользователь оценивает вручную —
-# apply_manual_stat_totals ниже.
-def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict) -> dict:
-    """set_counts: {mod_set_id (int, см. MOD_SET_IDS): количество надетых модов этого сета}.
+# сборка модов для персонажа, которого никто ещё не прокачал.
+#
+# ПЕРВИЧНЫЕ статы модов (primary) на 6★ уровне 15 — это фиксированные игровые константы
+# (не роллы), но Comlink их нигде не отдаёт отдельной таблицей (GameDataBuilder тянет
+# только statProgression/equipment/statModSet/table/xpTable/relicTierDefinition/units/
+# skill — ни один из них не содержит значений primary-статов). Поэтому 2026-08-19 значения
+# ниже (MOD_PRIMARY_OPTIONS) добыты эмпирически: просканированы реальные равные 6★/ур.15
+# моды всей гильдии из player_unit_cache (91576 модов) — для каждой пары (форма слота,
+# primary-стат) взято реальное значение unscaledDecimalValue из настоящего экипированного
+# мода игрока (формат equippedStatMod, тот же, что даёт Comlink для реальных игроков и уже
+# используется в /статы). Значение оказалось идентично на тысячах образцов по каждой паре
+# (детерминированная константа, не ролл) — подтверждено кросс-проверкой (Defense+20%
+# повторяется на Arrow/Triangle/Circle с одним и тем же unscaledDecimalValue). Список
+# статов на слот — ТОЛЬКО то, что реально встретилось хотя бы раз в гильдии; теоретически
+# легальные, но никем не отфармленные комбинации (например Arrow/Triangle умеют больше
+# опций в игре) сюда не добавлены — не гадаем про то, чего не увидели своими глазами.
+#
+# unscaled_value передаётся в equippedStatMod.primaryStat.stat.unscaledDecimalValue
+# напрямую, без пересчёта — это ровно то, что тот же код StatCalc уже читает для реальных
+# модов игроков (см. calc_final_stats), поэтому Health%/Protection%/Offense%/Defense%
+# (проценты от БАЗОВОГО стата персонажа) корректно масштабируются под конкретного
+# персонажа сами, без ручного пересчёта с нашей стороны — в отличие от плоских
+# статов (Speed/Potency/Tenacity/крит.), которые для любого персонажа одинаковы.
+MOD_PRIMARY_OPTIONS = {
+    "square": [
+        {"label": "Offense +8.5%", "unit_stat": 48, "unscaled_value": "8500000"},
+    ],
+    "arrow": [
+        {"label": "Speed +32", "unit_stat": 5, "unscaled_value": "3200000000"},
+        {"label": "Offense +8.5%", "unit_stat": 48, "unscaled_value": "8500000"},
+        {"label": "Defense +20%", "unit_stat": 49, "unscaled_value": "20000000"},
+        {"label": "Accuracy +30%", "unit_stat": 52, "unscaled_value": "30000000"},
+        {"label": "Critical Avoidance +35%", "unit_stat": 54, "unscaled_value": "35000000"},
+        {"label": "Health +16%", "unit_stat": 55, "unscaled_value": "16000000"},
+        {"label": "Protection +24%", "unit_stat": 56, "unscaled_value": "24000000"},
+    ],
+    "diamond": [
+        {"label": "Defense +20%", "unit_stat": 49, "unscaled_value": "20000000"},
+    ],
+    "triangle": [
+        {"label": "Critical Damage +42%", "unit_stat": 16, "unscaled_value": "42000000"},
+        {"label": "Offense +8.5%", "unit_stat": 48, "unscaled_value": "8500000"},
+        {"label": "Defense +20%", "unit_stat": 49, "unscaled_value": "20000000"},
+        {"label": "Critical Chance +20%", "unit_stat": 53, "unscaled_value": "20000000"},
+        {"label": "Health +16%", "unit_stat": 55, "unscaled_value": "16000000"},
+        {"label": "Protection +24%", "unit_stat": 56, "unscaled_value": "24000000"},
+    ],
+    "cross": [
+        {"label": "Health +16%", "unit_stat": 55, "unscaled_value": "16000000"},
+        {"label": "Protection +24%", "unit_stat": 56, "unscaled_value": "24000000"},
+    ],
+    "circle": [
+        {"label": "Potency +30%", "unit_stat": 17, "unscaled_value": "30000000"},
+        {"label": "Tenacity +35%", "unit_stat": 18, "unscaled_value": "35000000"},
+        {"label": "Offense +8.5%", "unit_stat": 48, "unscaled_value": "8500000"},
+        {"label": "Defense +20%", "unit_stat": 49, "unscaled_value": "20000000"},
+        {"label": "Health +16%", "unit_stat": 55, "unscaled_value": "16000000"},
+        {"label": "Protection +24%", "unit_stat": 56, "unscaled_value": "24000000"},
+    ],
+}
+
+# Сколько модов сета нужно для бонуса — из реальных данных игры (modSetData/statModSet,
+# добыто 2026-08-19 через comlink.get_game_data(items=StatMod), поле setCount), не угадано.
+MOD_SET_PIECE_COUNT = {
+    1: 2,  # Health
+    2: 4,  # Offense
+    3: 2,  # Defense
+    4: 4,  # Speed
+    5: 2,  # Critical Chance
+    6: 4,  # Critical Damage
+    7: 2,  # Potency
+    8: 2,  # Tenacity
+}
+
+
+def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, primary_picks: list | None = None) -> dict:
+    """set_counts: {mod_set_id (int, см. MOD_SET_IDS): количество модов этого сета}.
+    primary_picks: список словарей из MOD_PRIMARY_OPTIONS (или None на пустых позициях) —
+    один на физический мод. Сет и primary комбинируются позиционно в один и тот же список
+    из 6 equippedStatMod-объектов, но что именно с чем совпало, не важно для итога: подсчёт
+    бонуса сета (по count) и вклад primary-статов (по unscaledDecimalValue) в
+    _calculate_mod_stats (swgoh_comlink) полностью независимы и просто складываются —
+    поэтому 6 слотов в форме и 8 счётчиков сетов ниже могут быть независимыми виджетами,
+    без привязки "какой сет реально в каком слоте".
+    tier=1 — не влияет на статы (только на GP, которую эта фича не показывает), нужен
+    просто чтобы calc_char_stats не упал на KeyError при попутном подсчёте GP.
+    Позиция без сета получает definitionId с первой цифрой "0" — такого setId не существует
+    в modSetData, _calculate_mod_stats тихо не начисляет бонус (не падает), ровно то, что
+    нужно для "выбран primary, но сет для этого мода ещё не назначен".
     7★/85/шмот13 — как _build_synthetic_unit в cogs/stat_requirements.py (тот же смысл,
     не переиспользуется напрямую: тот вариант принципиально без модов)."""
-    mods = [{"set": set_id} for set_id, count in set_counts.items() for _ in range(count)]
+    primary_picks = list(primary_picks or [])
+    slot_sets = [set_id for set_id, count in set_counts.items() for _ in range(count)][:6]
+    n = min(max(len(primary_picks), len(slot_sets)), 6)
+
+    mods = []
+    for i in range(n):
+        set_digit = slot_sets[i] if i < len(slot_sets) else 0
+        mod = {"definitionId": f"{set_digit}61", "level": 15, "tier": 1}
+        pick = primary_picks[i] if i < len(primary_picks) else None
+        if pick:
+            mod["primaryStat"] = {"stat": {"unitStatId": pick["unit_stat"], "unscaledDecimalValue": pick["unscaled_value"]}}
+        mods.append(mod)
+
     return {
         "defId": base_id,
         "rarity": 7,
@@ -72,15 +159,17 @@ def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict) ->
         "gear": 13,
         "equipped": [],
         "skills": [],
-        "mods": mods,
+        "equippedStatMod": mods,
         "relic": {"currentTier": relic_level + 2},
     }
 
 
 def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
     """final_stats — результат calc_final_stats. manual_totals — {stat_name: value},
-    введённая пользователем оценка суммарного вклада 6 модов (primary+secondary роллы)
-    по этому стату, в тех же единицах, что final_stats (проценты — в игровых %, не долях)."""
+    введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов модов (единственное,
+    что действительно нельзя посчитать точно — вторички рандомны, у них нет фиксированной
+    таблицы значений, в отличие от primary-статов выше), в тех же единицах, что
+    final_stats (проценты — в игровых %, не долях)."""
     result = dict(final_stats)
     for name, value in manual_totals.items():
         result[name] = result.get(name, 0) + value

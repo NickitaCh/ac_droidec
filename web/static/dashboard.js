@@ -176,6 +176,24 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Живой счётчик "выбрано модов/6" на /mod-builder — [data-set-picker] суммирует все
+    // [data-set-count] инпуты при вводе и подсвечивает превышение (не блокирует отправку —
+    // сумма сетов формально может быть меньше 6, если сборка ещё не полностью задана).
+    document.querySelectorAll("[data-set-picker]").forEach((picker) => {
+        const total = picker.querySelector("[data-set-total]");
+        const totalLine = picker.querySelector(".mod-set-total");
+        const inputs = picker.querySelectorAll("[data-set-count]");
+        if (!total) return;
+        const recalc = () => {
+            let sum = 0;
+            inputs.forEach((input) => { sum += parseInt(input.value, 10) || 0; });
+            total.textContent = sum;
+            if (totalLine) totalLine.classList.toggle("over-limit", sum > 6);
+        };
+        inputs.forEach((input) => input.addEventListener("input", recalc));
+        recalc();
+    });
+
     // Живая подсветка карточки слота мода на /mod-builder — бордер загорается сразу
     // при выборе сета, не дожидаясь отправки формы (серверная "filled" метка выставляется
     // только при рендере, а не отслеживает live-изменения на клиенте).
