@@ -16,11 +16,11 @@ import guild_resolver
 
 # (поле в guilds, человекочитаемое название) — для /настройки список
 SETTINGS_FIELDS = [
-    ("ping_channel_id", "Канал для тегов на ротацию"),
-    ("ping_role_id", "Роль для тегов на ротацию"),
+    ("ping_channel_id", "Канал для тега на ротацию/взводы перед ТБ"),
+    ("ping_role_id", "Роль, тегаемая на ротацию/взводы перед ТБ"),
     ("birthday_channel_id", "Канал для поздравлений с ДР"),
     ("birthday_role_id", "Роль, выдаваемая в ДР"),
-    ("officer_channel_id", "Офицерский канал (отчёты/уведомления)"),
+    ("officer_channel_id", "Канал для автоотчёта и уведомлений по ТБ"),
     ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)"),
     ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ"),
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
@@ -30,10 +30,12 @@ SETTINGS_FIELDS = [
 # в /настройки список (эмбед по секциям) и должно соответствовать
 # web/routes/guild_dashboard.py::GUILD_SETTINGS_GROUPS.
 SETTINGS_GROUPS = [
-    ("Ротация (тег перед ТБ)", ["ping_channel_id", "ping_role_id"]),
+    ("Территориальная битва (ТБ)", [
+        "ping_channel_id", "ping_role_id",
+        "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
+        "officer_channel_id",
+    ]),
     ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
-    ("Территориальная битва (ТБ)", ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
-    ("Офицерские уведомления", ["officer_channel_id"]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
 
@@ -55,19 +57,19 @@ class GuildSettings(commands.Cog):
     async def settings_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
-    @settings_group.sub_command(name="пинг_канал", description="Канал, куда бот шлёт еженедельные теги на ротацию")
+    @settings_group.sub_command(name="тб_ротация_канал", description="Канал, куда бот шлёт тег на ротацию/взводы перед ТБ")
     async def set_ping_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для тегов на ротацию"),
+        канал: disnake.TextChannel = commands.Param(description="Канал для тега на ротацию перед ТБ"),
     ):
-        await self._set_field(inter, "ping_channel_id", канал, "Канал для тегов на ротацию")
+        await self._set_field(inter, "ping_channel_id", канал, "Канал для тега на ротацию/взводы перед ТБ")
 
-    @settings_group.sub_command(name="пинг_роль", description="Роль, которую бот тегает при ротации")
+    @settings_group.sub_command(name="тб_ротация_роль", description="Роль, которую бот тегает на ротацию/взводы перед ТБ")
     async def set_ping_role(
         self, inter: disnake.ApplicationCommandInteraction,
-        роль: disnake.Role = commands.Param(description="Тегаемая роль"),
+        роль: disnake.Role = commands.Param(description="Тегаемая роль перед ТБ"),
     ):
-        await self._set_field(inter, "ping_role_id", роль, "Роль для тегов на ротацию")
+        await self._set_field(inter, "ping_role_id", роль, "Роль, тегаемая на ротацию/взводы перед ТБ")
 
     @settings_group.sub_command(name="др_канал", description="Канал, куда бот пишет поздравления с днём рождения")
     async def set_birthday_channel(
@@ -83,12 +85,12 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "birthday_role_id", роль, "Роль, выдаваемая в ДР")
 
-    @settings_group.sub_command(name="офицерский_канал", description="Канал для отчётов по ТБ и других офицерских уведомлений")
+    @settings_group.sub_command(name="тб_отчет_канал", description="Канал, куда бот публикует автоотчёт по итогам ТБ и уведомления офицерам о ТБ")
     async def set_officer_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Офицерский канал"),
+        канал: disnake.TextChannel = commands.Param(description="Канал для автоотчёта и уведомлений по ТБ"),
     ):
-        await self._set_field(inter, "officer_channel_id", канал, "Офицерский канал")
+        await self._set_field(inter, "officer_channel_id", канал, "Канал для автоотчёта и уведомлений по ТБ")
 
     @settings_group.sub_command(name="тб_план_канал", description="Канал анонсов плана ТБ — планеты по фазам и автоордера")
     async def set_tb_plan_channel(
