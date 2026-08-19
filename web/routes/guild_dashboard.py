@@ -44,8 +44,23 @@ def _format_delta(delta: timedelta) -> str:
     return " ".join(parts)
 
 
+def _hours_label(hours: int) -> str:
+    """Склонение "час"/"часа"/"часов" под PLAYER_STATS_SYNC_HOURS — значение конфигурируемое
+    (сейчас 1), поэтому текст на /activity не может просто хардкодить "часов"."""
+    n = abs(hours) % 100
+    if 11 <= n <= 14:
+        word = "часов"
+    elif n % 10 == 1:
+        word = "час"
+    elif 2 <= n % 10 <= 4:
+        word = "часа"
+    else:
+        word = "часов"
+    return f"{hours} {word}"
+
+
 def _sync_status_text(sync_status: dict) -> dict:
-    """(last_sync, next_auto) -> человекочитаемые строки для панели на /activity."""
+    """(last_sync, next_auto, sync_hours) -> человекочитаемые строки для панели на /activity."""
     last_sync_text = None
     if sync_status["last_sync"]:
         last_sync_text = sync_status["last_sync"].strftime("%d.%m.%Y %H:%M (МСК)")
@@ -59,7 +74,11 @@ def _sync_status_text(sync_status: dict) -> dict:
         else:
             next_auto_text = f"через {_format_delta(next_auto - now)}"
 
-    return {"last_sync_text": last_sync_text, "next_auto_text": next_auto_text}
+    return {
+        "last_sync_text": last_sync_text,
+        "next_auto_text": next_auto_text,
+        "sync_hours_text": _hours_label(sync_status["sync_hours"]),
+    }
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -216,7 +235,9 @@ async def activity_sync(
                 # обновить его тут только под текущую гильдию, автоцикл бота позже не
                 # найдёт разницы и "чужая" гильдия потеряет эти события безвозвратно.
                 guild_ids = database.get_guild_ids_for_ally_code(ally_code) or {guild_id}
-                _, added = await activity_diff.sync_player(comlink, ally_code, guild_ids, today)
+                # Объявления в Discord из omicron_hits тут не постим — у веб-процесса нет
+                # Discord-клиента, см. services/activity_diff.py::sync_player.
+                _, added, _ = await activity_diff.sync_player(comlink, ally_code, guild_ids, today)
                 return added
             except Exception as e:
                 print(f"⚠️ [/activity/sync] Не удалось обновить ростер {ally_code}: {e}")

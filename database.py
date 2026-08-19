@@ -9,7 +9,7 @@ DB_NAME = "guild_management.db"
 # dashboard_data.py, оценка "автообновление через X" на /activity) тоже читает это
 # значение и не поднимает bot/main.py вообще. main.py импортирует его же, чтобы не
 # держать два независимых числа, которые могут разойтись при правке одного и не другого.
-PLAYER_STATS_SYNC_HOURS = 6
+PLAYER_STATS_SYNC_HOURS = 1
 
 def init_db():
     """Создает все таблицы в единой БД, если они еще не созданы"""
@@ -147,6 +147,7 @@ GUILD_CONFIG_COLUMNS = [
     "officer_channel_id",
     "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
     "swgoh_gg_guild_id",
+    "omicron_channel_id",
     "is_active",
 ]
 
@@ -177,6 +178,10 @@ def _ensure_guilds_table(cursor):
     """)
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN swgoh_gg_guild_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN omicron_channel_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -2276,3 +2281,66 @@ def get_guild_activity_player_codes(guild_id: int) -> list:
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+# =====================================================================
+# ФРАЗЫ-ПРИПИСКИ ДЛЯ ОБЪЯВЛЕНИЙ О ВЫДАЧЕ ОМИКРОНОВ (cogs/stat_requirements.py)
+# Глобальный справочник (не per-guild) — персонаж редко зависит от того, в какой
+# из обслуживаемых гильдий выдан омикрон, а управляется он супер-админами через
+# веб (web/routes/omicron_phrases.py), а не гильдийскими офицерами.
+# =====================================================================
+def _ensure_omicron_phrases_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS omicron_phrases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            character_key TEXT NOT NULL UNIQUE,
+            phrase TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def set_omicron_phrase(character_key: str, phrase: str, updated_by: str = None) -> None:
+    """Добавляет фразу для персонажа либо (при уже существующей записи) заменяет её."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_omicron_phrases_table(cursor)
+    cursor.execute("""
+        INSERT OR REPLACE INTO omicron_phrases (character_key, phrase, updated_by, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+    """, (character_key, phrase, updated_by))
+    conn.commit()
+    conn.close()
+
+
+def get_omicron_phrase(character_key: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_omicron_phrases_table(cursor)
+    cursor.execute("SELECT phrase FROM omicron_phrases WHERE character_key = ?", (character_key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_all_omicron_phrases() -> list:
+    """[(id, character_key, phrase, updated_by, updated_at), ...] по алфавиту персонажа."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_omicron_phrases_table(cursor)
+    cursor.execute("SELECT id, character_key, phrase, updated_by, updated_at FROM omicron_phrases ORDER BY character_key")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_omicron_phrase(character_key: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_omicron_phrases_table(cursor)
+    cursor.execute("DELETE FROM omicron_phrases WHERE character_key = ?", (character_key,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted

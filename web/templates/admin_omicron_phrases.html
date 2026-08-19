@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Фразы для омикронов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Фразы для объявлений о выдаче омикронов</h1>
+    <p class="muted">
+        Бот сам объявляет в Discord-канале гильдии (настраивается командой <code>/омикрон канал</code>), когда игрок
+        выдаёт омикрон персонажу: «Игрок выдал омикрон Персонаж.» — и, если для персонажа задана фраза ниже, дописывает её.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 32em;">
+        <div class="panel-title"><span>Добавить фразу</span></div>
+        <form method="post" action="/admin/omicron-phrases/add">
+            <label>
+                Персонаж
+                <div class="unit-search" data-live-search data-url="/admin/omicron-phrases/api/units"
+                     data-value-field="base_id" data-label-field="name">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                    <input type="hidden" name="character_key" class="unit-search-value" required>
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Фраза
+                <input type="text" name="phrase" placeholder="Например: Ну и пиздец" required>
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+    </div>
+
+    {% if not phrases %}
+        <p class="empty-state">Список пуст — добавьте первую фразу выше.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по персонажу…" data-table-search="omicron-phrases-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="omicron-phrases-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Персонаж</th>
+                            <th>Фраза</th>
+                            <th data-sort="text">Изменил</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in phrases %}
+                            <tr data-search="{{ p.character_name|lower }}">
+                                <td><strong>{{ p.character_name }}</strong></td>
+                                <td>{{ p.phrase }}</td>
+                                <td>{{ p.updated_by_name or "—" }}</td>
+                                <td class="row-actions">
+                                    <details>
+                                        <summary class="link-btn">править</summary>
+                                        <form method="post" action="/admin/omicron-phrases/{{ p.character_key }}/edit" class="inline-form">
+                                            <input type="text" name="phrase" value="{{ p.phrase }}" required>
+                                            <button type="submit">Сохранить</button>
+                                        </form>
+                                    </details>
+                                    <form method="post" action="/admin/omicron-phrases/{{ p.character_key }}/delete"
+                                          onsubmit="return confirm('Удалить фразу для «{{ p.character_name }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}
