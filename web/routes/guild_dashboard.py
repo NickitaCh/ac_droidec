@@ -381,3 +381,66 @@ async def violation_delete(
 ):
     database.remove_warn_by_id(warn_id, guild_id=user["guild_id"])
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
+
+
+# (поле в guilds, человекочитаемое название, "channel"|"role") — те же поля,
+# что и в cogs/guild_settings.py::SETTINGS_FIELDS (веб-эквивалент /настройки).
+GUILD_SETTINGS_FIELDS = [
+    ("ping_channel_id", "Канал для тегов на ротацию", "channel"),
+    ("ping_role_id", "Роль для тегов на ротацию", "role"),
+    ("birthday_channel_id", "Канал для поздравлений с ДР", "channel"),
+    ("birthday_role_id", "Роль, выдаваемая в ДР", "role"),
+    ("officer_channel_id", "Офицерский канал (отчёты/уведомления)", "channel"),
+    ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)", "channel"),
+    ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ", "channel"),
+    ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ", "role"),
+]
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
+    guild_cfg = database.get_guild_config(user["guild_id"])
+    rows = [
+        {"field": field, "label": label, "kind": kind, "value": guild_cfg.get(field) or ""}
+        for field, label, kind in GUILD_SETTINGS_FIELDS
+    ]
+    return templates.TemplateResponse(request, "guild_settings.html", {
+        "user": user,
+        "rows": rows,
+        "error": request.query_params.get("error"),
+        "saved": request.query_params.get("saved"),
+    })
+
+
+@router.post("/settings", response_class=HTMLResponse)
+async def guild_settings_save(
+    ping_channel_id: str = Form(""),
+    ping_role_id: str = Form(""),
+    birthday_channel_id: str = Form(""),
+    birthday_role_id: str = Form(""),
+    officer_channel_id: str = Form(""),
+    tb_plan_channel_id: str = Form(""),
+    tb_order_source_channel_id: str = Form(""),
+    tb_order_role_id: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    values = {
+        "ping_channel_id": ping_channel_id,
+        "ping_role_id": ping_role_id,
+        "birthday_channel_id": birthday_channel_id,
+        "birthday_role_id": birthday_role_id,
+        "officer_channel_id": officer_channel_id,
+        "tb_plan_channel_id": tb_plan_channel_id,
+        "tb_order_source_channel_id": tb_order_source_channel_id,
+        "tb_order_role_id": tb_order_role_id,
+    }
+    cleaned = {}
+    for field, raw in values.items():
+        raw = raw.strip()
+        if raw and not raw.isdigit():
+            return RedirectResponse(
+                f"/settings?{urlencode({'error': f'ID должен состоять только из цифр ({field})'})}", status_code=303
+            )
+        cleaned[field] = raw or None
+    database.update_guild_config(user["guild_id"], **cleaned)
+    return RedirectResponse("/settings?saved=1", status_code=303)
