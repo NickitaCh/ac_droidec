@@ -3,8 +3,8 @@
 {% block content %}
     <h1>Настройки гильдии</h1>
     <p class="muted">
-        Каналы и роли, которые бот использует для автоматических уведомлений (теги на ротацию,
-        поздравления с ДР, отчёты по ТБ, автоордера). Включите режим разработчика в Discord
+        Каналы и роли, которые бот использует для автоматических уведомлений, сгруппированы ниже
+        по режиму, в котором бот их использует. Включите режим разработчика в Discord
         (Настройки пользователя → Расширенные), чтобы правой кнопкой скопировать ID канала,
         ветки или роли. Пустое поле — настройка не задана, соответствующая функция бота
         для гильдии отключена. То же самое можно задать командой <code>/настройки</code> в Discord.
@@ -17,22 +17,26 @@
         <p><span class="badge badge-ok">Сохранено</span></p>
     {% endif %}
 
-    <div class="panel" style="max-width: 32em;">
-        <form method="post" action="/settings">
-            {% for row in rows %}
-                <label>
-                    {{ row.label }}
-                    <input
-                        type="text"
-                        name="{{ row.field }}"
-                        value="{{ row.value }}"
-                        placeholder="ID {{ 'роли' if row.kind == 'role' else 'канала/ветки' }} (пусто — не задано)"
-                        inputmode="numeric"
-                        pattern="[0-9]*"
-                    >
-                </label>
-            {% endfor %}
-            <button type="submit">Сохранить</button>
-        </form>
-    </div>
+    <form method="post" action="/settings">
+        {% for group in groups %}
+            <div class="panel" style="max-width: 32em; margin-bottom: 1em;">
+                <h3 style="margin-top: 0;">{{ group.name }}</h3>
+                <p class="muted" style="margin-top: -0.5em;">{{ group.hint }}</p>
+                {% for row in group.rows %}
+                    <label>
+                        {{ row.label }}
+                        <input
+                            type="text"
+                            name="{{ row.field }}"
+                            value="{{ row.value }}"
+                            placeholder="ID {{ 'роли' if row.kind == 'role' else 'канала/ветки' }} (пусто — не задано)"
+                            inputmode="numeric"
+                            pattern="[0-9]*"
+                        >
+                    </label>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        <button type="submit">Сохранить</button>
+    </form>
 {% endblock %}
