@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+from command_catalog import COMMAND_GROUPS
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -129,4 +130,40 @@ async def access_log_page(request: Request, user: dict = Depends(require_super_a
     return templates.TemplateResponse(request, "admin_access_log.html", {
         "user": user,
         "entries": database.get_web_access_log(limit=200),
+    })
+
+
+@router.get("/command-usage", response_class=HTMLResponse)
+async def command_usage_page(request: Request, user: dict = Depends(require_super_admin)):
+    usage = database.get_command_usage_counts()
+    known_names = {name for _, cmds in COMMAND_GROUPS for name, _ in cmds}
+    groups = [
+        {
+            "title": title,
+            "rows": [
+                {
+                    "name": name,
+                    "description": description,
+                    "count": usage.get(name, {}).get("count", 0),
+                    "last_used_at": usage.get(name, {}).get("last_used_at"),
+                }
+                for name, description in cmds
+            ],
+        }
+        for title, cmds in COMMAND_GROUPS
+    ]
+    # Команды, вызванные ботом, но отсутствующие в каталоге (забыли добавить в
+    # command_catalog.py при новой команде, либо команда с тех пор удалена) —
+    # отдельной группой в конце, чтобы расхождение было видно, а не потеряно.
+    unknown_rows = [
+        {"name": name, "description": None, "count": data["count"], "last_used_at": data["last_used_at"]}
+        for name, data in usage.items()
+        if name not in known_names
+    ]
+    if unknown_rows:
+        groups.append({"title": "Не в каталоге (проверьте command_catalog.py)", "rows": unknown_rows})
+    return templates.TemplateResponse(request, "admin_command_usage.html", {
+        "user": user,
+        "groups": groups,
+        "total_calls": sum(r["count"] for g in groups for r in g["rows"]),
     })

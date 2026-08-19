@@ -395,6 +395,49 @@ def get_web_access_log(limit: int = 200) -> list:
         for r in rows
     ]
 
+# =====================================================================
+# СЧЁТЧИК ИСПОЛЬЗОВАНИЯ КОМАНД: инкрементится на каждое успешное выполнение
+# слэш-команды (main.py::on_slash_command_completion) по "чистому" qualified_name
+# (группа+сабкоманда, без параметров вызова — параметры не различаются).
+# Просмотр — только для супер-админов (web/routes/admin.py, /admin/command-usage),
+# полный список команд для страницы берётся из command_catalog.py, а не отсюда —
+# эта таблица содержит только те команды, что реально хоть раз вызывались.
+# =====================================================================
+def _ensure_command_usage_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS command_usage (
+            command_name TEXT PRIMARY KEY,
+            usage_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at TEXT
+        )
+    """)
+
+
+def log_command_usage(command_name: str) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_command_usage_table(cursor)
+    cursor.execute("""
+        INSERT INTO command_usage (command_name, usage_count, last_used_at)
+        VALUES (?, 1, datetime('now'))
+        ON CONFLICT(command_name) DO UPDATE SET
+            usage_count = usage_count + 1,
+            last_used_at = excluded.last_used_at
+    """, (command_name,))
+    conn.commit()
+    conn.close()
+
+
+def get_command_usage_counts() -> dict:
+    """{command_name: {"count": int, "last_used_at": str}} — только когда-либо вызывавшиеся команды."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_command_usage_table(cursor)
+    cursor.execute("SELECT command_name, usage_count, last_used_at FROM command_usage")
+    rows = cursor.fetchall()
+    conn.close()
+    return {r[0]: {"count": r[1], "last_used_at": r[2]} for r in rows}
+
 
 def get_username_for_discord_id(discord_id: str) -> str | None:
     """Лучшее известное отображаемое имя для чужого discord_id (не текущего
