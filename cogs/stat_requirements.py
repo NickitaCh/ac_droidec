@@ -121,6 +121,17 @@ def _unit_display_name(base_id: str) -> str:
     return database.get_game_unit_name(base_id) or base_id
 
 
+def _format_omicron_announcement(player_name: str, base_id: str) -> str:
+    """Общий формат для реального автообъявления (_announce_omicrons) и тестового
+    поста (/омикрон_текст тест) — чтобы тест реально показывал, как будет выглядеть
+    боевое сообщение, а не отдельно поддерживаемый шаблон."""
+    text = f"**{player_name}** выдал омикрон **{_unit_display_name(base_id)}**."
+    phrase = database.get_omicron_phrase(base_id)
+    if phrase:
+        text += f" {phrase}"
+    return text
+
+
 def _fmt_value(value: float) -> str:
     return f"{value:g}"
 
@@ -408,6 +419,23 @@ async def autocomplete_omicron_phrase_character(inter: disnake.ApplicationComman
     return options[:25]
 
 
+async def autocomplete_omicron_capable_character(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Только персонажи/корабли, у которых омикрон реально существует (кто-то из гильдии
+    уже разблокировал способность на омикрон-тире — см. database.get_omicron_capable_base_ids),
+    а не весь справочник game_units, где большинство юнитов омикрона не имеют вовсе."""
+    base_ids = database.get_omicron_capable_base_ids()
+    if not base_ids:
+        return ["❌ Пока нет данных — синхронизация ростеров ещё не находила омикронов."]
+    search = string.lower().strip()
+    options = []
+    for base_id in base_ids:
+        label = f"{_unit_display_name(base_id)} [{base_id}]"
+        if not search or search in label.lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=label))
+    options.sort(key=lambda o: o.name)
+    return options[:25]
+
+
 async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
     if guild_id is None:
@@ -503,7 +531,7 @@ class StatRequirementsCog(commands.Cog):
     async def _announce_omicrons(self, hits):
         """hits: [(ally_code, base_id, guild_id), ...] — новые омикроны, найденные за этот
         цикл синка. Постит в guilds.omicron_channel_id гильдии (если он настроен через
-        /омикрон канал); без настроенного канала для конкретной гильдии молча пропускает —
+        /омикрон_текст канал); без настроенного канала для конкретной гильдии молча пропускает —
         это НЕ ошибка, просто фича ещё не включена для этой гильдии."""
         names_by_guild = {}
         for ally_code, base_id, guild_id in hits:
@@ -517,13 +545,8 @@ class StatRequirementsCog(commands.Cog):
             if guild_id not in names_by_guild:
                 names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
-            unit_name = _unit_display_name(base_id)
-            text = f"**{player_name}** выдал омикрон **{unit_name}**."
-            phrase = database.get_omicron_phrase(base_id)
-            if phrase:
-                text += f" {phrase}"
             try:
-                await channel.send(text)
+                await channel.send(_format_omicron_announcement(player_name, base_id))
             except Exception as e:
                 print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
 
@@ -552,7 +575,7 @@ class StatRequirementsCog(commands.Cog):
     async def omicron_phrase_set(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        персонаж: str = commands.Param(description="Персонаж", autocomplete=units_autocomplete),
+        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_omicron_capable_character),
         текст: str = commands.Param(description="Текст, который бот допишет после шаблонного объявления"),
     ):
         base_id = _parse_bracket_id(персонаж)
@@ -560,6 +583,31 @@ class StatRequirementsCog(commands.Cog):
         текст = текст.strip()
         database.set_omicron_phrase(base_id, текст, str(inter.author.id))
         await inter.response.send_message(f"✅ Фраза для омикрона «{char_name}» сохранена: {текст}", ephemeral=True)
+
+    @omicron_group.sub_command(name="тест", description="Отправить тестовое объявление в настроенный канал (посмотреть, как это выглядит)")
+    async def omicron_test(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        игрок: str = commands.Param(description="Имя игрока, которое покажет бот в объявлении"),
+        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_omicron_capable_character),
+    ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+        guild_cfg = database.get_guild_config(guild_id)
+        channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
+        if not channel_id:
+            await inter.response.send_message("❌ Канал для объявлений не настроен — сначала `/омикрон_текст канал`.", ephemeral=True)
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            await inter.response.send_message("❌ Не удалось найти настроенный канал — проверь `/омикрон_текст канал`.", ephemeral=True)
+            return
+
+        base_id = _parse_bracket_id(персонаж)
+        await channel.send(_format_omicron_announcement(игрок.strip(), base_id))
+        await inter.response.send_message(f"✅ Тестовое объявление отправлено в {channel.mention}.", ephemeral=True)
 
     @omicron_group.sub_command(name="удалить_фразу", description="Убрать фразу-приписку для омикрона персонажа")
     async def omicron_phrase_delete(

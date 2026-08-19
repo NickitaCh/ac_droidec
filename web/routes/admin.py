@@ -200,10 +200,22 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_su
 
 @router.get("/omicron-phrases/api/units", response_class=JSONResponse)
 async def omicron_phrases_units_search(q: str = "", user: dict = Depends(require_super_admin)):
+    # Только юниты, у которых омикрон реально существует (кто-то из гильдии уже
+    # разблокировал способность на омикрон-тире) — как в автокомплите /омикрон_текст
+    # фраза (cogs/stat_requirements.py::autocomplete_omicron_capable_character), а не
+    # весь справочник game_units, где большинство персонажей омикрона не имеют вовсе.
     if not q or len(q.strip()) < 2:
         return []
-    rows = database.search_game_units(q.strip(), limit=20)
-    return [{"base_id": base_id, "name": name} for base_id, name in rows]
+    query = q.strip().lower()
+    capable_ids = database.get_omicron_capable_base_ids()
+    names = database.get_game_unit_names(list(capable_ids))
+    matches = [
+        {"base_id": base_id, "name": name}
+        for base_id, name in names.items()
+        if query in name.lower()
+    ]
+    matches.sort(key=lambda m: m["name"].lower())
+    return matches[:20]
 
 
 @router.post("/omicron-phrases/add", response_class=HTMLResponse)
