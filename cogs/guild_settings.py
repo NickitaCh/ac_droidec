@@ -26,6 +26,17 @@ SETTINGS_FIELDS = [
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
 ]
 
+# Те же поля, сгруппированные по режиму — используется только для отображения
+# в /настройки список (эмбед по секциям) и должно соответствовать
+# web/routes/guild_dashboard.py::GUILD_SETTINGS_GROUPS.
+SETTINGS_GROUPS = [
+    ("Ротация (тег перед ТБ)", ["ping_channel_id", "ping_role_id"]),
+    ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
+    ("Территориальная битва (ТБ)", ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
+    ("Офицерские уведомления", ["officer_channel_id"]),
+]
+_SETTINGS_LABELS = dict(SETTINGS_FIELDS)
+
 
 class GuildSettings(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -107,21 +118,20 @@ class GuildSettings(commands.Cog):
             await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
         guild_cfg = database.get_guild_config(guild_id)
-        lines = []
-        for field, label in SETTINGS_FIELDS:
-            raw = guild_cfg.get(field)
-            if not raw:
-                lines.append(f"• {label}: *не задано*")
-                continue
-            is_role = field.endswith("_role_id")
-            resolved = (inter.guild.get_role(int(raw)) if is_role else self.bot.get_channel(int(raw))) if inter.guild else None
-            shown = resolved.mention if resolved else f"`{raw}` (не найден)"
-            lines.append(f"• {label}: {shown}")
-        embed = disnake.Embed(
-            title="⚙️ Настройки гильдии",
-            description="\n".join(lines),
-            color=disnake.Color.blurple(),
-        )
+        embed = disnake.Embed(title="⚙️ Настройки гильдии", color=disnake.Color.blurple())
+        for group_name, fields in SETTINGS_GROUPS:
+            lines = []
+            for field in fields:
+                label = _SETTINGS_LABELS[field]
+                raw = guild_cfg.get(field)
+                if not raw:
+                    lines.append(f"• {label}: *не задано*")
+                    continue
+                is_role = field.endswith("_role_id")
+                resolved = (inter.guild.get_role(int(raw)) if is_role else self.bot.get_channel(int(raw))) if inter.guild else None
+                shown = resolved.mention if resolved else f"`{raw}` (не найден)"
+                lines.append(f"• {label}: {shown}")
+            embed.add_field(name=group_name, value="\n".join(lines), inline=False)
         await inter.response.send_message(embed=embed, ephemeral=True)
 
 

@@ -383,30 +383,66 @@ async def violation_delete(
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
 
 
-# (поле в guilds, человекочитаемое название, "channel"|"role") — те же поля,
-# что и в cogs/guild_settings.py::SETTINGS_FIELDS (веб-эквивалент /настройки).
-GUILD_SETTINGS_FIELDS = [
-    ("ping_channel_id", "Канал для тегов на ротацию", "channel"),
-    ("ping_role_id", "Роль для тегов на ротацию", "role"),
-    ("birthday_channel_id", "Канал для поздравлений с ДР", "channel"),
-    ("birthday_role_id", "Роль, выдаваемая в ДР", "role"),
-    ("officer_channel_id", "Офицерский канал (отчёты/уведомления)", "channel"),
-    ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)", "channel"),
-    ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ", "channel"),
-    ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ", "role"),
+# Поля сгруппированы по режиму бота, который их использует — те же группы и подписи,
+# что и в cogs/guild_settings.py::SETTINGS_GROUPS (веб-эквивалент /настройки список).
+# (поле в guilds, человекочитаемое название, "channel"|"role")
+GUILD_SETTINGS_GROUPS = [
+    {
+        "name": "Ротация (тег перед ТБ)",
+        "hint": "Раз в две недели (когда наступает «тегаемая» неделя цикла ТБ) бот в заданные дни/время "
+                "тегает роль в этом канале напоминаниями «взводы» и «ордер» — чтобы никто не забыл выставить "
+                "взвод и заказ перед стартом Территориальной битвы. Само расписание (дни/время/текст) и дата "
+                "старта цикла пока не выведены сюда — задаются в коде (main.py) и общие для всех гильдий.",
+        "fields": [
+            ("ping_channel_id", "Канал для тегов на ротацию", "channel"),
+            ("ping_role_id", "Роль для тегов на ротацию", "role"),
+        ],
+    },
+    {
+        "name": "День рождения",
+        "hint": "Канал, куда бот пишет поздравление, и роль, которую выдаёт имениннику в день рождения.",
+        "fields": [
+            ("birthday_channel_id", "Канал для поздравлений с ДР", "channel"),
+            ("birthday_role_id", "Роль, выдаваемая в ДР", "role"),
+        ],
+    },
+    {
+        "name": "Территориальная битва (ТБ)",
+        "hint": "Канал анонсов плана ТБ (туда же падают автоордера), канал/ветка, откуда бот берёт стратегию "
+                "по этапам, и роль, которую тегает в ежедневном автоордере.",
+        "fields": [
+            ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)", "channel"),
+            ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ", "channel"),
+            ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ", "role"),
+        ],
+    },
+    {
+        "name": "Офицерские уведомления",
+        "hint": "Канал для отчётов по ТБ и других уведомлений, адресованных офицерам.",
+        "fields": [
+            ("officer_channel_id", "Офицерский канал (отчёты/уведомления)", "channel"),
+        ],
+    },
 ]
 
 
 @router.get("/settings", response_class=HTMLResponse)
 async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
     guild_cfg = database.get_guild_config(user["guild_id"])
-    rows = [
-        {"field": field, "label": label, "kind": kind, "value": guild_cfg.get(field) or ""}
-        for field, label, kind in GUILD_SETTINGS_FIELDS
+    groups = [
+        {
+            "name": group["name"],
+            "hint": group["hint"],
+            "rows": [
+                {"field": field, "label": label, "kind": kind, "value": guild_cfg.get(field) or ""}
+                for field, label, kind in group["fields"]
+            ],
+        }
+        for group in GUILD_SETTINGS_GROUPS
     ]
     return templates.TemplateResponse(request, "guild_settings.html", {
         "user": user,
-        "rows": rows,
+        "groups": groups,
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
     })
