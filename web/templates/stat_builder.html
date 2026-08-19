@@ -16,17 +16,18 @@
     <h1>Конструктор</h1>
     <p class="muted">
         Прикидка статов персонажа, которого ещё никто не прокачал — под гипотетический набор
-        модов. Бонус сетов считается точно (реальные игровые данные), а вклад самих роллов
-        (primary + secondary у всех 6 модов) вы оцениваете сами и вписываете суммой по каждому
-        стату — движок не умеет посчитать это точно (нет игровых таблиц значений роллов),
-        поэтому здесь то же допущение, что и в пересчёте нормы плейта на другой релик.
+        модов. Primary-статы на 6 слотах — точные игровые константы для 6★ уровня 15
+        (добыты эмпирически из реальных модов гильдии, не угаданы), бонус сетов — тоже
+        точный (реальные игровые данные). Вручную оценить нужно только вклад ВТОРИЧНЫХ
+        статов — единственное, что действительно нельзя посчитать точно, потому что вторички
+        рандомны и у них нет фиксированной таблицы значений.
     </p>
 
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}
 
-    <div class="panel" style="max-width: 50em;">
+    <div class="panel" style="max-width: 54em;">
         <div class="panel-title"><span>Параметры</span></div>
         <form method="get" action="/mod-builder" class="builder-form">
             <label>
@@ -44,16 +45,16 @@
             </label>
 
             <div class="form-block">
-                <span>Моды — какой сет в каждом из 6 слотов</span>
+                <span>Моды — основной (primary) стат на каждом из 6 слотов, 6★ ур.15</span>
                 <div class="mod-slot-grid">
                     {% for key, label in mod_slots %}
-                        <div class="mod-slot-card{% if slot_values.get(key) %} filled{% endif %}">
+                        <div class="mod-slot-card{% if primaries.get(key) %} filled{% endif %}">
                             <div class="mod-slot-icon">{{ slot_icon(key) }}</div>
                             <div class="mod-slot-label">{{ label }}</div>
                             <select name="slot_{{ key }}">
                                 <option value="">—</option>
-                                {% for set_id, set_name in mod_sets %}
-                                    <option value="{{ set_id }}" {% if slot_values.get(key)|string == set_id|string %}selected{% endif %}>{{ set_name }}</option>
+                                {% for opt in mod_primary_options.get(key, []) %}
+                                    <option value="{{ opt.unit_stat }}" {% if primaries.get(key) == opt.unit_stat %}selected{% endif %}>{{ opt.label }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -61,8 +62,24 @@
                 </div>
             </div>
 
+            <div class="form-block">
+                <span>Сеты — сколько модов какого сета надето (максимум 6 модов всего)</span>
+                <div class="mod-set-picker" data-set-picker>
+                    <div class="mod-set-rows">
+                        {% for set_id, set_name in mod_sets %}
+                            <div class="mod-set-row">
+                                <span class="mod-set-name">{{ set_name }}</span>
+                                <span class="mod-set-need">нужно {{ mod_set_piece_count.get(set_id) }} шт. на бонус</span>
+                                <input type="number" name="set_{{ set_id }}" min="0" max="6" value="{{ set_counts.get(set_id, 0) }}" data-set-count>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <div class="mod-set-total">Выбрано модов: <span data-set-total>0</span>/6</div>
+                </div>
+            </div>
+
             <div class="form-block" data-row-group>
-                <span>Вклад в статы от роллов модов — сумма по всем 6 модам, в игровых единицах (проценты как проценты)</span>
+                <span>Вклад в статы от вторичных статов модов — сумма по всем 6 модам, в игровых единицах (проценты как проценты)</span>
                 <table class="stat-rows-table">
                     <thead>
                         <tr><th>Стат</th><th>Значение</th><th></th></tr>
@@ -113,8 +130,11 @@
         <div class="panel" style="max-width: 30em;">
             <div class="panel-title"><span>Сохранить как пресет</span></div>
             <form method="post" action="/mod-builder/presets/save" class="inline-form">
-                {% for key, set_id in slot_values.items() %}
-                    <input type="hidden" name="slot_{{ key }}" value="{{ set_id }}">
+                {% for set_id, count in set_counts.items() %}
+                    <input type="hidden" name="set_{{ set_id }}" value="{{ count }}">
+                {% endfor %}
+                {% for key, stat_id in primaries.items() %}
+                    <input type="hidden" name="slot_{{ key }}" value="{{ stat_id }}">
                 {% endfor %}
                 {% for name, value in manual_stat_rows %}
                     {% if name %}
@@ -131,20 +151,21 @@
     {% endif %}
 
     <div class="panel">
-        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">сеты + статы, применимые к любому персонажу</span></div>
+        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">моды + статы, применимые к любому персонажу</span></div>
         {% if not presets %}
             <p class="empty-state">Пока нет сохранённых пресетов — посчитайте сборку выше и сохраните.</p>
         {% else %}
             <div class="table-scroll">
                 <table class="data">
                     <thead>
-                        <tr><th>Название</th><th>Сеты</th><th>Статы</th><th></th></tr>
+                        <tr><th>Название</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for p in presets %}
                             <tr>
                                 <td>{{ p.name }}</td>
                                 <td>{{ p.sets_summary }}</td>
+                                <td>{{ p.primaries_summary }}</td>
                                 <td>{{ p.stats_summary }}</td>
                                 <td class="row-actions">
                                     <a class="link-btn" href="/mod-builder?preset_id={{ p.id }}">применить</a>
@@ -169,7 +190,7 @@
             <div class="table-scroll">
                 <table class="data">
                     <thead>
-                        <tr><th>Персонаж</th><th>Релик</th><th>Сеты</th><th>Статы</th><th>Когда</th><th></th></tr>
+                        <tr><th>Персонаж</th><th>Релик</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th>Когда</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for h in history %}
@@ -177,6 +198,7 @@
                                 <td>{{ h.char_name }}</td>
                                 <td>{{ h.relic }}</td>
                                 <td>{{ h.sets_summary }}</td>
+                                <td>{{ h.primaries_summary }}</td>
                                 <td>{{ h.stats_summary }}</td>
                                 <td>{{ h.created_at }}</td>
                                 <td><a class="link-btn" href="/mod-builder?history_id={{ h.id }}">открыть</a></td>
