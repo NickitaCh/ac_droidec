@@ -93,6 +93,14 @@ def init_db():
         cursor.execute("ALTER TABLE game_units ADD COLUMN cached_name_en TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Есть ли у юнита В ИГРЕ хотя бы одна способность на омикрон-тире (skill.tier[].
+        # isOmicronTier из Comlink SkillDefinitions) — не зависит от того, разблокировал
+        # ли её кто-то в гильдии. Обновляется целиком в services/units_sync.py::sync_units
+        # (database.set_omicron_capable_base_ids), на том же цикле, что и весь справочник.
+        cursor.execute("ALTER TABLE game_units ADD COLUMN has_omicron INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # Создаем индексы для быстродействия
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
@@ -2202,34 +2210,36 @@ def get_player_units_last_sync(ally_codes: list) -> str | None:
     return row[0] if row and row[0] else None
 
 
-def get_omicron_capable_base_ids() -> set:
-    """base_id персонажей/кораблей, у которых хотя бы у одного игрока в player_unit_cache
-    есть способность на омикрон-тире (tier >= 9, тот же порог, что OMICRON_MIN_TIER в
-    services/activity_diff.py — не импортируем его напрямую, чтобы не тянуть services в
-    database.py). Полный скан кэша при каждом вызове, а не отдельная поддерживаемая
-    таблица — player_unit_cache и так обновляется каждый час целиком, так что второй
-    денормализованный источник только рассинхронился бы. Используется для фильтрации
-    автокомплита в cogs/stat_requirements.py (/омикрон_текст) и web/routes/admin.py
-    (/admin/omicron-phrases) — не показывать юниты, у которых омикрона нет вообще."""
+def set_omicron_capable_base_ids(base_ids) -> None:
+    """Перезаписывает game_units.has_omicron целиком по актуальному набору base_id —
+    вызывается из services/units_sync.py::sync_units на каждом цикле синхронизации
+    справочника юнитов (при старте и раз в час, тот же цикл, что обновляет имена).
+    Раньше "есть ли омикрон" считалось по player_unit_cache (кто в гильдии уже
+    разблокировал) — заменено на игровой каталог (Comlink SkillDefinitions), т.к.
+    персонаж может иметь омикрон в игре, даже если в конкретной гильдии его никто
+    ещё не выдал (см. обсуждение в разговоре 2026-08-19)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    _ensure_player_unit_cache_table(cursor)
-    cursor.execute("SELECT base_id, unit_json FROM player_unit_cache")
+    cursor.execute("UPDATE game_units SET has_omicron = 0")
+    if base_ids:
+        placeholders = ", ".join("?" for _ in base_ids)
+        cursor.execute(f"UPDATE game_units SET has_omicron = 1 WHERE base_id IN ({placeholders})", list(base_ids))
+    conn.commit()
+    conn.close()
+
+
+def get_all_omicron_capable_units() -> list:
+    """[(base_id, name), ...] — все персонажи/корабли, у которых В ИГРЕ есть омикрон,
+    по алфавиту отображаемого имени. Используется для фильтрации автокомплита в
+    cogs/stat_requirements.py (/омикрон_текст фраза) и web/routes/admin.py
+    (/admin/omicron-phrases) — не весь справочник game_units, где омикрона у
+    большинства юнитов нет вообще."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT base_id, cached_name FROM game_units WHERE has_omicron = 1 ORDER BY cached_name")
     rows = cursor.fetchall()
     conn.close()
-    capable = set()
-    for base_id, unit_json in rows:
-        if base_id in capable:
-            continue
-        try:
-            unit = json.loads(unit_json)
-        except (TypeError, ValueError):
-            continue
-        for skill in unit.get("skill") or []:
-            if (skill.get("tier") or 0) >= 9:
-                capable.add(base_id)
-                break
-    return capable
+    return rows
 
 
 # =====================================================================
