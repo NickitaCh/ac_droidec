@@ -548,20 +548,45 @@ table.data td.num, table.data th.num {
     color: var(--fg-secondary);
 }
 
-/* ---- Конструктор (/mod-builder): сетка счётчиков сетов модов ---- */
-.mod-set-grid {
+/* ---- Конструктор (/mod-builder): 6 карточек-слотов модов (форма + какой сет надет) —
+   один слот каждой формы у персонажа всегда ровно один, поэтому по построению не
+   допускает невозможную сборку (в отличие от прежних 8 отдельных счётчиков сетов). ---- */
+.mod-slot-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(9em, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
     gap: 0.75em;
     max-width: none;
 }
-.mod-set-grid label { flex: none; }
+.mod-slot-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35em;
+    padding: 0.75em 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    transition: border-color 0.15s ease;
+}
+.mod-slot-card.filled { border-color: var(--accent); }
+.mod-slot-icon { color: var(--fg-muted); line-height: 0; }
+.mod-slot-card.filled .mod-slot-icon { color: var(--accent); }
+.mod-slot-label { font-size: 0.76em; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.mod-slot-card select { width: 100%; font-size: 0.85em; padding: 0.35em; }
 
-/* ---- Повторяемые строки формы (статы от модов на /mod-builder) ---- */
-.row-group-rows { display: flex; flex-direction: column; gap: 0.5em; }
-.row-group-row { display: flex; gap: 0.5em; align-items: center; }
-.row-group-row select { flex: 1 1 14em; }
-.row-group-row input { flex: 0 0 8em; }
+/* ---- Повторяемые строки формы (статы от модов на /mod-builder) — настоящая таблица,
+   а не список карточек, ради компактности при нескольких строках. ---- */
+.stat-rows-table { width: 100%; max-width: 30em; border-collapse: collapse; }
+.stat-rows-table th {
+    text-align: left;
+    font-size: 0.78em;
+    color: var(--fg-muted);
+    font-weight: 600;
+    padding: 0 0.4em 0.4em 0;
+}
+.stat-rows-table td { padding: 0.25em 0.4em 0.25em 0; vertical-align: middle; }
+.stat-rows-table select { width: 100%; }
+.stat-rows-table input[type="number"] { width: 7em; }
 .row-group-remove {
     flex: 0 0 auto;
     background: transparent;

@@ -27,6 +27,22 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
 
+# Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы,
+# поэтому 6 отдельных селектов "какой сет в этом слоте" одновременно нагляднее (как в
+# HotUtils-редакторе шаблонов, Template -> Squad Editor -> ... -> Edit -> Mods — так же
+# организовано по слотам) и по построению не даёт ввести невозможную сборку (не может
+# получиться сумма модов ≠ 6, в отличие от старых 8 отдельных счётчиков "сколько от
+# каждого сета"). Иконки — свои простые SVG (не растровые ассеты HotUtils).
+MOD_SLOT_DEFS = [
+    ("square", "Квадрат"),
+    ("arrow", "Стрела"),
+    ("diamond", "Ромб"),
+    ("triangle", "Треугольник"),
+    ("circle", "Круг"),
+    ("cross", "Крест"),
+]
+MOD_SLOT_KEYS = [key for key, _ in MOD_SLOT_DEFS]
+
 
 def _get_comlink():
     # Как в services/stat_forecast.py — веб-процесс не поднимает диска-клиента, строит свой.
@@ -75,19 +91,38 @@ def _history_rows(guild_id: int):
 
 
 def _parse_set_counts(mapping) -> dict:
-    """mapping — Starlette QueryParams (GET) или FormData (POST), обе умеют .get()."""
+    """mapping — Starlette QueryParams (GET) или FormData (POST), обе умеют .get().
+    Читает 6 полей slot_<shape> (значение — id сета или пусто) и сворачивает в
+    {set_id: количество}."""
+    valid_set_ids = {sid for sid, _ in MOD_SET_CHOICES}
     counts = {}
-    for set_id, _ in MOD_SET_CHOICES:
-        raw = mapping.get(f"set_{set_id}")
+    for slot_key in MOD_SLOT_KEYS:
+        raw = mapping.get(f"slot_{slot_key}")
         if not raw:
             continue
         try:
-            n = int(raw)
+            set_id = int(raw)
         except ValueError:
             continue
-        if n > 0:
-            counts[set_id] = n
+        if set_id in valid_set_ids:
+            counts[set_id] = counts.get(set_id, 0) + 1
     return counts
+
+
+def _slot_assignment(set_counts: dict) -> dict:
+    """Обратная операция для предзаполнения формы (из агрегированных счётчиков — пресет/
+    история — в конкретные слоты): раскладывает сеты по 6 слотам в фиксированном порядке.
+    Само распределение по формам произвольно (эта информация не хранится — форма слота не
+    влияет на расчёт, важны только счётчики), просто даёт валидную эквивалентную раскладку."""
+    slots = iter(MOD_SLOT_KEYS)
+    assignment = {}
+    for set_id, count in sorted(set_counts.items(), key=lambda kv: int(kv[0])):
+        for _ in range(int(count)):
+            slot_key = next(slots, None)
+            if slot_key is None:
+                return assignment
+            assignment[slot_key] = str(set_id)
+    return assignment
 
 
 def _parse_manual_stats(mapping) -> dict:
@@ -117,10 +152,10 @@ def _redirect_qs(mapping) -> str:
     relic = mapping.get("relic")
     if relic:
         pairs.append(("relic", relic))
-    for set_id, _ in MOD_SET_CHOICES:
-        val = mapping.get(f"set_{set_id}")
+    for slot_key in MOD_SLOT_KEYS:
+        val = mapping.get(f"slot_{slot_key}")
         if val:
-            pairs.append((f"set_{set_id}", val))
+            pairs.append((f"slot_{slot_key}", val))
     for name, value in zip(mapping.getlist("stat_name"), mapping.getlist("stat_value")):
         if name and value:
             pairs.append(("stat_name", name))
@@ -156,10 +191,16 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     # чтобы совпадало с MOD_SET_CHOICES/шаблоном; для set_counts из _parse_set_counts
     # ключи и так int, int(int) безвреден.
     set_counts = {int(k): v for k, v in set_counts.items()}
+    # Раскладка по слотам всегда выводится из счётчиков (а не из сырых slot_* полей
+    # запроса) — так пресет/история и обычная пересборка формы работают одинаково,
+    # см. докстринг _slot_assignment.
+    slot_values = _slot_assignment(set_counts)
 
     context = {
         "user": user,
         "mod_sets": MOD_SET_CHOICES,
+        "mod_slots": MOD_SLOT_DEFS,
+        "slot_values": slot_values,
         "stat_name_choices": STAT_NAME_CHOICES,
         "selected_character": character,
         "selected_character_label": _char_label(character) if character else "",

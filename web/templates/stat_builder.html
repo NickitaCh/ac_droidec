@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Конструктор — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
+
+{% macro slot_icon(key) -%}
+{% if key == 'square' %}<svg viewBox="0 0 28 28" width="26" height="26"><rect x="6" y="6" width="16" height="16" rx="2" fill="currentColor"/></svg>
+{% elif key == 'arrow' %}<svg viewBox="0 0 28 28" width="26" height="26"><polygon points="14,3 22,13 17,13 17,25 11,25 11,13 6,13" fill="currentColor"/></svg>
+{% elif key == 'diamond' %}<svg viewBox="0 0 28 28" width="26" height="26"><rect x="6" y="6" width="16" height="16" rx="2" fill="currentColor" transform="rotate(45 14 14)"/></svg>
+{% elif key == 'triangle' %}<svg viewBox="0 0 28 28" width="26" height="26"><polygon points="14,5 24,23 4,23" fill="currentColor"/></svg>
+{% elif key == 'circle' %}<svg viewBox="0 0 28 28" width="26" height="26"><circle cx="14" cy="14" r="9" fill="currentColor"/></svg>
+{% elif key == 'cross' %}<svg viewBox="0 0 28 28" width="26" height="26"><path d="M11 4h6v7h7v6h-7v7h-6v-7H4v-6h7z" fill="currentColor"/></svg>
+{% endif -%}
+{%- endmacro %}
+
 {% block content %}
     <h1>Конструктор</h1>
     <p class="muted">
@@ -15,13 +26,13 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
-    <div class="panel" style="max-width: 46em;">
+    <div class="panel" style="max-width: 50em;">
         <div class="panel-title"><span>Параметры</span></div>
         <form method="get" action="/mod-builder" class="builder-form">
             <label>
                 Персонаж
                 <div class="unit-search" data-unit-search>
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required value="{{ selected_character_label }}">
+                    <input type="text" class="unit-search-input" placeholder="Имя персонажа — можно на русском или английском…" autocomplete="off" required value="{{ selected_character_label }}">
                     <input type="hidden" name="character" class="unit-search-value" required value="{{ selected_character }}">
                     <div class="unit-search-results"></div>
                 </div>
@@ -33,33 +44,46 @@
             </label>
 
             <div class="form-block">
-                <span>Сеты модов — сколько модов каждого сета надето (сумма обычно 6)</span>
-                <div class="mod-set-grid">
-                    {% for set_id, set_name in mod_sets %}
-                        <label>
-                            {{ set_name }}
-                            <input type="number" name="set_{{ set_id }}" min="0" max="6" value="{{ set_counts.get(set_id, 0) }}">
-                        </label>
+                <span>Моды — какой сет в каждом из 6 слотов</span>
+                <div class="mod-slot-grid">
+                    {% for key, label in mod_slots %}
+                        <div class="mod-slot-card{% if slot_values.get(key) %} filled{% endif %}">
+                            <div class="mod-slot-icon">{{ slot_icon(key) }}</div>
+                            <div class="mod-slot-label">{{ label }}</div>
+                            <select name="slot_{{ key }}">
+                                <option value="">—</option>
+                                {% for set_id, set_name in mod_sets %}
+                                    <option value="{{ set_id }}" {% if slot_values.get(key)|string == set_id|string %}selected{% endif %}>{{ set_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     {% endfor %}
                 </div>
             </div>
 
             <div class="form-block" data-row-group>
-                <span>Вклад в статы от роллов модов (сумма по всем 6 модам, в игровых единицах — проценты как проценты)</span>
-                <div class="row-group-rows">
-                    {% for name, value in manual_stat_rows %}
-                        <div class="row-group-row">
-                            <select name="stat_name">
-                                <option value="">— стат —</option>
-                                {% for label, val in stat_name_choices %}
-                                    <option value="{{ val }}" {% if val == name %}selected{% endif %}>{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                            <input type="number" name="stat_value" step="any" value="{{ value }}" placeholder="0">
-                            <button type="button" class="row-group-remove" title="Убрать строку">✕</button>
-                        </div>
-                    {% endfor %}
-                </div>
+                <span>Вклад в статы от роллов модов — сумма по всем 6 модам, в игровых единицах (проценты как проценты)</span>
+                <table class="stat-rows-table">
+                    <thead>
+                        <tr><th>Стат</th><th>Значение</th><th></th></tr>
+                    </thead>
+                    <tbody class="row-group-rows">
+                        {% for name, value in manual_stat_rows %}
+                            <tr class="row-group-row">
+                                <td>
+                                    <select name="stat_name">
+                                        <option value="">— стат —</option>
+                                        {% for label, val in stat_name_choices %}
+                                            <option value="{{ val }}" {% if val == name %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td><input type="number" name="stat_value" step="any" value="{{ value }}" placeholder="0"></td>
+                                <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
                 <button type="button" class="row-group-add">+ добавить стат</button>
             </div>
 
@@ -89,8 +113,8 @@
         <div class="panel" style="max-width: 30em;">
             <div class="panel-title"><span>Сохранить как пресет</span></div>
             <form method="post" action="/mod-builder/presets/save" class="inline-form">
-                {% for set_id, count in set_counts.items() %}
-                    <input type="hidden" name="set_{{ set_id }}" value="{{ count }}">
+                {% for key, set_id in slot_values.items() %}
+                    <input type="hidden" name="slot_{{ key }}" value="{{ set_id }}">
                 {% endfor %}
                 {% for name, value in manual_stat_rows %}
                     {% if name %}

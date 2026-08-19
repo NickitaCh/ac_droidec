@@ -87,6 +87,12 @@ def init_db():
             unit_type TEXT NOT NULL DEFAULT 'character'
         )
     """)
+    try:
+        # Английское имя — только для поиска (data/mod-builder ищет персонажа и на
+        # английской раскладке), отображаемое имя везде остаётся cached_name (RUS_RU).
+        cursor.execute("ALTER TABLE game_units ADD COLUMN cached_name_en TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # Создаем индексы для быстродействия
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
@@ -628,31 +634,45 @@ def populate_initial_units(units_dict):
 
 
 def upsert_game_units(units_dict):
-    """units_dict: {base_id: (cached_name, unit_type)} — INSERT OR REPLACE, в отличие
-    от populate_initial_units обновляет имя/тип при повторной синхронизации."""
+    """units_dict: {base_id: (cached_name, unit_type, cached_name_en)} — INSERT OR REPLACE,
+    в отличие от populate_initial_units обновляет имя/тип при повторной синхронизации."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    data = [(base_id, name, unit_type) for base_id, (name, unit_type) in units_dict.items()]
+    data = [(base_id, name, unit_type, name_en) for base_id, (name, unit_type, name_en) in units_dict.items()]
     cursor.executemany("""
-        INSERT OR REPLACE INTO game_units (base_id, cached_name, unit_type)
-        VALUES (?, ?, ?)
+        INSERT OR REPLACE INTO game_units (base_id, cached_name, unit_type, cached_name_en)
+        VALUES (?, ?, ?, ?)
     """, data)
     conn.commit()
     conn.close()
 
 
 def search_game_units(query: str, limit: int = 25):
+    """Ищет и по русскому отображаемому имени, и по английскому (cached_name_en, может
+    быть NULL для юнитов, добавленных до этого поля), и по base_id — так можно найти
+    персонажа, набрав его имя на английской раскладке (см. web/routes/stat_builder.py).
+
+    Фильтрация в Python, не через SQL LIKE/LOWER: SQLite's LOWER() регистронезависимо
+    работает только для ASCII (кириллица не приводится к нижнему регистру вообще), из-за
+    чего 'LOWER(cached_name) LIKE %кэл%' не находил бы 'Кэл' — заглавная буква внутри имени
+    (не обязательно первая) оставалась как есть и переставала совпадать с уже гарантированно
+    lower-регистрным Python-запросом. Таблица небольшая (~1200 юнитов) — full-scan в Python
+    (со связностью Unicode-корректным str.lower()) дешевле и надёжнее, чем городить и
+    поддерживать в актуальном состоянии отдельные lower-колонки."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    like = f"%{query.lower()}%"
-    cursor.execute("""
-        SELECT base_id, cached_name FROM game_units
-        WHERE LOWER(cached_name) LIKE ? OR LOWER(base_id) LIKE ?
-        LIMIT ?
-    """, (like, like, limit))
+    cursor.execute("SELECT base_id, cached_name, cached_name_en FROM game_units")
     rows = cursor.fetchall()
     conn.close()
-    return rows
+
+    q = query.lower()
+    matches = []
+    for base_id, name, name_en in rows:
+        if q in name.lower() or q in base_id.lower() or (name_en and q in name_en.lower()):
+            matches.append((base_id, name))
+            if len(matches) >= limit:
+                break
+    return matches
 
 
 def get_game_unit_name(base_id: str) -> str | None:
