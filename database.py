@@ -1930,6 +1930,163 @@ def get_all_stat_requirements(guild_id: int = 1):
 
 
 # =====================================================================
+# КОНСТРУКТОР ГИПОТЕТИЧЕСКИХ СБОРОК МОДОВ (веб-only, /mod-builder): пресеты
+# (сет + вручную заданные суммы статов от модов, переиспользуемые на любом персонаже)
+# и история последних расчётов. sets_json/stats_json хранятся как есть (JSON-блоб в
+# одной строке, как unit_json в player_unit_cache ниже) — сетов/статов мало, отдельные
+# дочерние таблицы дали бы только лишние join'ы и каскадные удаления без пользы.
+# =====================================================================
+def _ensure_stat_mod_presets_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_mod_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            sets_json TEXT NOT NULL,
+            stats_json TEXT NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE (guild_id, name)
+        )
+    """)
+
+
+def create_stat_mod_preset(name: str, sets: dict, stats: dict, created_by: str, guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_mod_presets_table(cursor)
+    try:
+        cursor.execute(
+            "INSERT INTO stat_mod_presets (guild_id, name, sets_json, stats_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (guild_id, name, json.dumps(sets), json.dumps(stats), created_by),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def get_all_stat_mod_presets(guild_id: int = 1):
+    """Возвращает [(id, name, sets, stats, created_by, created_at), ...] отсортированные по имени,
+    sets/stats уже разобраны из JSON."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_mod_presets_table(cursor)
+    cursor.execute(
+        "SELECT id, name, sets_json, stats_json, created_by, created_at FROM stat_mod_presets WHERE guild_id = ? ORDER BY name",
+        (guild_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [(pid, name, json.loads(sets_json), json.loads(stats_json), created_by, created_at)
+            for pid, name, sets_json, stats_json, created_by, created_at in rows]
+
+
+def get_stat_mod_preset(preset_id: int, guild_id: int = 1):
+    """Возвращает (id, name, sets, stats, created_by, created_at) либо None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_mod_presets_table(cursor)
+    cursor.execute(
+        "SELECT id, name, sets_json, stats_json, created_by, created_at FROM stat_mod_presets WHERE id = ? AND guild_id = ?",
+        (preset_id, guild_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    pid, name, sets_json, stats_json, created_by, created_at = row
+    return pid, name, json.loads(sets_json), json.loads(stats_json), created_by, created_at
+
+
+def delete_stat_mod_preset(preset_id: int, guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_mod_presets_table(cursor)
+    cursor.execute("DELETE FROM stat_mod_presets WHERE id = ? AND guild_id = ?", (preset_id, guild_id))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+STAT_HYPOTHETICAL_HISTORY_KEEP = 20
+
+
+def _ensure_stat_hypothetical_history_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_hypothetical_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            character_key TEXT NOT NULL,
+            relic INTEGER NOT NULL,
+            sets_json TEXT NOT NULL,
+            stats_json TEXT NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def add_stat_hypothetical_history(character_key: str, relic: int, sets: dict, stats: dict, created_by: str,
+                                   guild_id: int = 1, keep: int = STAT_HYPOTHETICAL_HISTORY_KEEP):
+    """Пишет запись и сразу обрезает историю гильдии до последних `keep` (тот же приём,
+    что prune_tb_events, но без дочерних таблиц — тут нечего каскадно удалять)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_hypothetical_history_table(cursor)
+    cursor.execute(
+        "INSERT INTO stat_hypothetical_history (guild_id, character_key, relic, sets_json, stats_json, created_by, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+        (guild_id, character_key, relic, json.dumps(sets), json.dumps(stats), created_by),
+    )
+    cursor.execute("SELECT id FROM stat_hypothetical_history WHERE guild_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?", (guild_id, keep))
+    old_ids = [r[0] for r in cursor.fetchall()]
+    if old_ids:
+        placeholders = ",".join("?" * len(old_ids))
+        cursor.execute(f"DELETE FROM stat_hypothetical_history WHERE id IN ({placeholders})", old_ids)
+    conn.commit()
+    conn.close()
+
+
+def get_stat_hypothetical_history(guild_id: int = 1, limit: int = STAT_HYPOTHETICAL_HISTORY_KEEP):
+    """Возвращает [(id, character_key, relic, sets, stats, created_by, created_at), ...]
+    от новых к старым, sets/stats уже разобраны из JSON."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_hypothetical_history_table(cursor)
+    cursor.execute(
+        "SELECT id, character_key, relic, sets_json, stats_json, created_by, created_at "
+        "FROM stat_hypothetical_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+        (guild_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [(hid, char_key, relic, json.loads(sets_json), json.loads(stats_json), created_by, created_at)
+            for hid, char_key, relic, sets_json, stats_json, created_by, created_at in rows]
+
+
+def get_stat_hypothetical_history_entry(history_id: int, guild_id: int = 1):
+    """Возвращает (id, character_key, relic, sets, stats, created_by, created_at) либо None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_hypothetical_history_table(cursor)
+    cursor.execute(
+        "SELECT id, character_key, relic, sets_json, stats_json, created_by, created_at "
+        "FROM stat_hypothetical_history WHERE id = ? AND guild_id = ?",
+        (history_id, guild_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    hid, char_key, relic, sets_json, stats_json, created_by, created_at = row
+    return hid, char_key, relic, json.loads(sets_json), json.loads(stats_json), created_by, created_at
+
+
+# =====================================================================
 # КЭШ ЮНИТОВ ИГРОКОВ: сырой rosterUnit из comlink.get_player (для локального
 # расчёта статов через StatCalc — хранится как есть, без разбора по колонкам,
 # т.к. StatCalc.calc_char_stats принимает этот формат напрямую, см. cogs/stat_engine.py).
