@@ -11,11 +11,15 @@ from services.guild_admin import (
     add_grant,
     add_guild,
     add_super_admin,
+    add_web_credential,
     deactivate_guild,
     list_admins,
     list_guilds,
+    list_web_credentials,
     remove_grant,
     remove_super_admin,
+    remove_web_credential,
+    set_web_credential_password,
 )
 from web.deps import require_super_admin
 
@@ -123,6 +127,52 @@ async def grants_add(
 async def grants_remove(discord_id: str, user: dict = Depends(require_super_admin)):
     remove_grant(discord_id)
     return RedirectResponse("/admin/access", status_code=303)
+
+
+@router.get("/web-accounts", response_class=HTMLResponse)
+async def web_accounts_page(request: Request, user: dict = Depends(require_super_admin)):
+    # Голый discord_id нечитаем — резолвим в лучшее известное имя тем же
+    # способом, что и остальные /admin-страницы (database.get_username_for_discord_id).
+    accounts = [
+        {
+            **a,
+            "player_name": database.get_username_for_discord_id(a["discord_id"]),
+            "created_by_name": database.get_username_for_discord_id(a["created_by"]) if a["created_by"] else None,
+        }
+        for a in list_web_credentials()
+    ]
+    return templates.TemplateResponse(request, "admin_web_accounts.html", {
+        "user": user,
+        "accounts": accounts,
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/web-accounts/add", response_class=HTMLResponse)
+async def web_accounts_add(
+    login: str = Form(...),
+    discord_id: str = Form(...),
+    password: str = Form(...),
+    user: dict = Depends(require_super_admin),
+):
+    result = add_web_credential(login, discord_id, password, user["discord_id"])
+    if not result.ok:
+        return RedirectResponse(f"/admin/web-accounts?{urlencode({'error': result.error})}", status_code=303)
+    return RedirectResponse("/admin/web-accounts", status_code=303)
+
+
+@router.post("/web-accounts/{login}/password", response_class=HTMLResponse)
+async def web_accounts_set_password(login: str, password: str = Form(...), user: dict = Depends(require_super_admin)):
+    result = set_web_credential_password(login, password)
+    if not result.ok:
+        return RedirectResponse(f"/admin/web-accounts?{urlencode({'error': result.error})}", status_code=303)
+    return RedirectResponse("/admin/web-accounts", status_code=303)
+
+
+@router.post("/web-accounts/{login}/delete", response_class=HTMLResponse)
+async def web_accounts_delete(login: str, user: dict = Depends(require_super_admin)):
+    remove_web_credential(login)
+    return RedirectResponse("/admin/web-accounts", status_code=303)
 
 
 @router.get("/access-log", response_class=HTMLResponse)

@@ -8,16 +8,19 @@ guild_resolver.resolve_access (игровой ранг из Comlink, закэш�
 
 import os
 import secrets
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 
 import database
 import guild_resolver
 
 router = APIRouter()
+templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
 DISCORD_API = "https://discord.com/api/v10"
 
@@ -109,4 +112,46 @@ async def callback(request: Request):
 @router.get("/logout")
 async def logout(request: Request):
     request.session.clear()
+    return RedirectResponse("/")
+
+
+# =====================================================================
+# ВХОД ПО ЛОГИНУ/ПАРОЛЮ — второй способ входа рядом с Discord OAuth выше,
+# для офицеров, у которых нет доступа к Discord (блокировки РФ). Учётки
+# заводит только супер-админ (web/routes/admin.py, /admin/web-accounts,
+# database.create_web_credential) — самостоятельной регистрации нет.
+# Права после входа резолвятся ТАК ЖЕ, как при OAuth: по discord_id,
+# привязанному к учётке, через guild_resolver.resolve_access — учётка
+# логин/пароль сама по себе прав не несёт, это только альтернативный
+# способ подтвердить, что за discord_id стоит именно этот человек.
+# =====================================================================
+@router.get("/login/password", response_class=HTMLResponse)
+async def login_password_form(request: Request):
+    return templates.TemplateResponse(request, "login_password.html", {
+        "user": request.session.get("user"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/login/password")
+async def login_password_submit(request: Request, login: str = Form(...), password: str = Form(...)):
+    discord_id = database.verify_web_credential(login.strip(), password)
+    if not discord_id:
+        return RedirectResponse(f"/login/password?{urlencode({'error': 'Неверный логин или пароль.'})}", status_code=303)
+
+    access = guild_resolver.resolve_access(discord_id)
+    # У логин/паролевых учёток нет Discord username из OAuth — берём лучшее
+    # известное имя (см. database.get_username_for_discord_id), а если ни разу
+    # не встречался нигде (первый вход) — сам логин как временное отображаемое имя.
+    username = database.get_username_for_discord_id(discord_id) or login.strip()
+    database.log_web_access(discord_id, username, access["guild_id"], access["tier"], access["is_super_admin"])
+
+    request.session["user"] = {
+        "discord_id": discord_id,
+        "username": username,
+        "avatar": None,
+        "guild_id": access["guild_id"],
+        "tier": access["tier"],
+        "is_super_admin": access["is_super_admin"],
+    }
     return RedirectResponse("/")

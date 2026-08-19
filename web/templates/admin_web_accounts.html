@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Логин/пароль — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Вход по логину и паролю</h1>
+    <p class="muted">Второй способ входа в дашборд — для офицеров без доступа к Discord. Учётка привязывается к Discord ID: права (роль/гильдия) резолвятся так же, как при входе через Discord, по этому ID.</p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not accounts %}
+        <p class="empty-state">— учёток пока нет —</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Логин</th>
+                            <th data-sort="text">Discord ID</th>
+                            <th data-sort="text">Завёл</th>
+                            <th data-sort="text">Когда</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in accounts %}
+                            <tr>
+                                <td><strong>{{ a.login }}</strong></td>
+                                <td>
+                                    {{ a.player_name or "—" }}
+                                    <code class="cell-sub">{{ a.discord_id }}</code>
+                                </td>
+                                <td>{{ a.created_by_name or a.created_by or "—" }}</td>
+                                <td>{{ a.created_at }}</td>
+                                <td class="row-actions">
+                                    <form method="post" action="/admin/web-accounts/{{ a.login }}/password" style="display:inline-flex; gap:0.4em;">
+                                        <input type="password" name="password" placeholder="новый пароль" minlength="8" required>
+                                        <button type="submit">Сменить</button>
+                                    </form>
+                                    <form method="post" action="/admin/web-accounts/{{ a.login }}/delete"
+                                          onsubmit="return confirm('Удалить учётку «{{ a.login }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Завести учётку</span></div>
+        <form method="post" action="/admin/web-accounts/add">
+            <label>
+                Логин
+                <input type="text" name="login" required>
+            </label>
+            <label>
+                Discord ID (чьи права наследует эта учётка)
+                <input type="text" name="discord_id" required>
+            </label>
+            <label>
+                Пароль (не короче 8 символов)
+                <input type="password" name="password" minlength="8" required>
+            </label>
+            <button type="submit">Завести</button>
+        </form>
+    </div>
+{% endblock %}
