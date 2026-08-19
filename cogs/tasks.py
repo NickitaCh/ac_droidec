@@ -1,3 +1,4 @@
+import asyncio
 import disnake
 from disnake.ext import commands, tasks
 import re
@@ -73,7 +74,7 @@ class TasksCog(commands.Cog):
                     continue
 
                 try:
-                    player_data = self.bot.comlink.get_player(ally_code)
+                    player_data = await asyncio.to_thread(self.bot.comlink.get_player, ally_code)
                     roster = player_data.get('rosterUnit') or player_data.get('roster')
                     if not roster:
                         continue
