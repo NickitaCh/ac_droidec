@@ -395,6 +395,19 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
     return options[:25]
 
 
+async def autocomplete_omicron_phrase_character(inter: disnake.ApplicationCommandInteraction, string: str):
+    rows = database.get_all_omicron_phrases()
+    if not rows:
+        return ["❌ Список пуст — фразы ещё не заданы."]
+    search = string.lower().strip()
+    options = []
+    for _, base_id, phrase, _, _ in rows:
+        label = f"{_unit_display_name(base_id)} [{base_id}]"
+        if not search or search in label.lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=label))
+    return options[:25]
+
+
 async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
     if guild_id is None:
@@ -441,7 +454,7 @@ class StatRequirementsCog(commands.Cog):
     async def _before_stat_calc_loop(self):
         await self.bot.wait_until_ready()
 
-    @tasks.loop(hours=6)
+    @tasks.loop(hours=1)
     async def player_units_sync_loop(self):
         # player_unit_cache — не per-guild (ключ ally_code глобально уникален), поэтому
         # синхронизируем объединённый ростер по всем зарегистрированным гильдиям сразу.
@@ -465,23 +478,113 @@ class StatRequirementsCog(commands.Cog):
         print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
         synced = 0
         total_events = 0
+        all_omicron_hits = []  # (ally_code, base_id, guild_id)
         today = datetime.now(MSK).date().isoformat()
         for ally_code in ally_codes:
             try:
-                fetched, added = await activity_diff.sync_player(
+                fetched, added, omicron_hits = await activity_diff.sync_player(
                     self.bot.comlink, ally_code, ally_to_guilds[ally_code], today
                 )
                 if fetched:
                     synced += 1
                 total_events += added
+                all_omicron_hits.extend((ally_code, base_id, guild_id) for base_id, guild_id in omicron_hits)
             except Exception as e:
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)
         print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}, событий активности: {total_events}")
+        if all_omicron_hits:
+            await self._announce_omicrons(all_omicron_hits)
 
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):
         await self.bot.wait_until_ready()
+
+    async def _announce_omicrons(self, hits):
+        """hits: [(ally_code, base_id, guild_id), ...] — новые омикроны, найденные за этот
+        цикл синка. Постит в guilds.omicron_channel_id гильдии (если он настроен через
+        /омикрон канал); без настроенного канала для конкретной гильдии молча пропускает —
+        это НЕ ошибка, просто фича ещё не включена для этой гильдии."""
+        names_by_guild = {}
+        for ally_code, base_id, guild_id in hits:
+            guild_cfg = database.get_guild_config(guild_id)
+            channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
+            if not channel_id:
+                continue
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is None:
+                continue
+            if guild_id not in names_by_guild:
+                names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+            player_name = names_by_guild[guild_id].get(ally_code, ally_code)
+            unit_name = _unit_display_name(base_id)
+            text = f"**{player_name}** выдал омикрон **{unit_name}**."
+            phrase = database.get_omicron_phrase(base_id)
+            if phrase:
+                text += f" {phrase}"
+            try:
+                await channel.send(text)
+            except Exception as e:
+                print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
+
+    # ------------------ /омикрон_текст (автообъявления о выдаче омикронов) ------------------
+    # Сама выдача детектится автоматически в player_units_sync_loop/_announce_omicrons
+    # (сравнение снимков ростера, см. services/activity_diff.py) — эти команды только
+    # настраивают канал и фразы-приписки к нему, ничего не публикуют напрямую.
+    @commands.slash_command(name="омикрон_текст", description="Настройка автообъявлений о выдаче омикронов")
+    async def omicron_group(self, inter: disnake.ApplicationCommandInteraction):
+        pass
+
+    @omicron_group.sub_command(name="канал", description="Задать канал, куда бот пишет объявления о выдаче омикронов")
+    async def omicron_channel_set(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        канал: disnake.TextChannel = commands.Param(description="Канал для объявлений"),
+    ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
+            return
+        database.update_guild_config(guild_id, omicron_channel_id=str(канал.id))
+        await inter.response.send_message(f"✅ Объявления о выдаче омикронов теперь идут в {канал.mention}.", ephemeral=True)
+
+    @omicron_group.sub_command(name="фраза", description="Задать/обновить фразу-приписку для омикрона персонажа")
+    async def omicron_phrase_set(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        персонаж: str = commands.Param(description="Персонаж", autocomplete=units_autocomplete),
+        текст: str = commands.Param(description="Текст, который бот допишет после шаблонного объявления"),
+    ):
+        base_id = _parse_bracket_id(персонаж)
+        char_name = _unit_display_name(base_id)
+        текст = текст.strip()
+        database.set_omicron_phrase(base_id, текст, str(inter.author.id))
+        await inter.response.send_message(f"✅ Фраза для омикрона «{char_name}» сохранена: {текст}", ephemeral=True)
+
+    @omicron_group.sub_command(name="удалить_фразу", description="Убрать фразу-приписку для омикрона персонажа")
+    async def omicron_phrase_delete(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_omicron_phrase_character),
+    ):
+        base_id = _parse_bracket_id(персонаж)
+        char_name = _unit_display_name(base_id)
+        if database.delete_omicron_phrase(base_id):
+            await inter.response.send_message(f"✅ Фраза для «{char_name}» удалена.", ephemeral=True)
+        else:
+            await inter.response.send_message(f"❌ Для «{char_name}» фраза не была задана.", ephemeral=True)
+
+    @omicron_group.sub_command(name="список", description="Показать все настроенные фразы для омикронов")
+    async def omicron_phrase_list(self, inter: disnake.ApplicationCommandInteraction):
+        rows = database.get_all_omicron_phrases()
+        if not rows:
+            await inter.response.send_message("Список пуст — фразы ещё не заданы.", ephemeral=True)
+            return
+        lines = [f"**{_unit_display_name(char_key)}** — {phrase}" for _, char_key, phrase, _, _ in rows]
+        embeds = _lines_to_embeds("Фразы для омикронов", DATACRON_LIST_COLOR, lines)
+        await inter.response.send_message(embed=embeds[0], ephemeral=True)
+        for extra in embeds[1:]:
+            await inter.followup.send(embed=extra, ephemeral=True)
 
     # ------------------ /статы_требования ------------------
     # Проверка прав больше не висит на группе целиком: "список"/"плейты" открыты

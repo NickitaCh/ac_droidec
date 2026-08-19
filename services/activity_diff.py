@@ -87,26 +87,30 @@ def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool) -> list[t
     return events
 
 
-async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeout: float = 15.0) -> tuple[bool, int]:
+async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeout: float = 15.0) -> tuple[bool, int, list]:
     """Тянет живой ростер игрока (Comlink-вызов ограничен timeout секунд — тот же паттерн,
     что в web/routes/datacrons.py::_build_guild_report, а не голый to_thread без дедлайна),
     диффит против player_unit_cache, обновляет кэш и пишет новые события активности в
     guild_activity_events для каждой из guild_ids (обычно одна — но игрок теоретически может
     состоять в нескольких зарегистрированных гильдиях сразу).
 
-    Возвращает (fetched, added_events): fetched=False при таймауте или пустом ростере —
-    вызывающий код (player_units_sync_loop, /activity/sync) использует это для честного
-    счётчика "сколько игроков реально обновилось", а не считает таймаут за успех."""
+    Возвращает (fetched, added_events, omicron_hits): fetched=False при таймауте или пустом
+    ростере — вызывающий код (player_units_sync_loop, /activity/sync) использует это для
+    честного счётчика "сколько игроков реально обновилось", а не считает таймаут за успех.
+    omicron_hits — [(base_id, guild_id), ...] только для реально новых (не дублей) omicron-событий;
+    используется cogs/stat_requirements.py::_announce_omicrons для объявлений в Discord — веб-вызов
+    (/activity/sync) это поле игнорирует, т.к. веб-процесс не держит Discord-клиента и постить не может."""
     try:
         new_units = await asyncio.wait_for(fetch_player_units(comlink, ally_code), timeout=timeout)
     except asyncio.TimeoutError:
-        return False, 0
+        return False, 0, []
     if not new_units:
-        return False, 0
+        return False, 0, []
     old_units = database.get_player_units(ally_code)
     events = diff_roster(old_units, new_units, is_first_sync=not old_units)
     database.upsert_player_units(ally_code, new_units)
     added = 0
+    omicron_hits = []
     for base_id, action_type, old_value, new_value in events:
         for guild_id in guild_ids:
             if database.add_guild_activity_event(
@@ -115,4 +119,6 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeo
                 event_date=event_date,
             ):
                 added += 1
-    return True, added
+                if action_type == "omicron":
+                    omicron_hits.append((base_id, guild_id))
+    return True, added, omicron_hits

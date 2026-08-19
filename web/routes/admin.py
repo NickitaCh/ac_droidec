@@ -2,7 +2,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
@@ -167,3 +167,69 @@ async def command_usage_page(request: Request, user: dict = Depends(require_supe
         "groups": groups,
         "total_calls": sum(r["count"] for g in groups for r in g["rows"]),
     })
+
+
+# =====================================================================
+# ФРАЗЫ-ПРИПИСКИ ДЛЯ АВТООБЪЯВЛЕНИЙ О ВЫДАЧЕ ОМИКРОНОВ
+# Справочник глобальный (не per-guild, см. database.py::_ensure_omicron_phrases_table),
+# поэтому — как /admin/guilds и /admin/access — управляется супер-админами, а не
+# гильдийскими офицерами (в отличие от /plates, /datacrons и т.п.). Сама детекция
+# выдачи и отправка сообщения в Discord — cogs/stat_requirements.py::_announce_omicrons,
+# эта страница только редактирует соответствия персонаж → фраза, ничего не постит.
+# =====================================================================
+@router.get("/omicron-phrases", response_class=HTMLResponse)
+async def omicron_phrases_page(request: Request, user: dict = Depends(require_super_admin)):
+    rows = database.get_all_omicron_phrases()
+    phrases = [
+        {
+            "character_key": character_key,
+            "character_name": database.get_game_unit_name(character_key) or character_key,
+            "phrase": phrase,
+            "updated_by_name": database.get_username_for_discord_id(updated_by) if updated_by else None,
+            "updated_at": updated_at,
+        }
+        for _id, character_key, phrase, updated_by, updated_at in rows
+    ]
+    phrases.sort(key=lambda p: p["character_name"].lower())
+    return templates.TemplateResponse(request, "admin_omicron_phrases.html", {
+        "user": user,
+        "phrases": phrases,
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.get("/omicron-phrases/api/units", response_class=JSONResponse)
+async def omicron_phrases_units_search(q: str = "", user: dict = Depends(require_super_admin)):
+    if not q or len(q.strip()) < 2:
+        return []
+    rows = database.search_game_units(q.strip(), limit=20)
+    return [{"base_id": base_id, "name": name} for base_id, name in rows]
+
+
+@router.post("/omicron-phrases/add", response_class=HTMLResponse)
+async def omicron_phrases_add(
+    character_key: str = Form(...),
+    phrase: str = Form(...),
+    user: dict = Depends(require_super_admin),
+):
+    character_key = character_key.strip()
+    phrase = phrase.strip()
+    if not character_key or not phrase:
+        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': 'Персонаж и текст фразы обязательны.'})}", status_code=303)
+    database.set_omicron_phrase(character_key, phrase, user["discord_id"])
+    return RedirectResponse("/admin/omicron-phrases", status_code=303)
+
+
+@router.post("/omicron-phrases/{character_key}/edit", response_class=HTMLResponse)
+async def omicron_phrases_edit(character_key: str, phrase: str = Form(...), user: dict = Depends(require_super_admin)):
+    phrase = phrase.strip()
+    if not phrase:
+        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': 'Текст фразы не может быть пустым.'})}", status_code=303)
+    database.set_omicron_phrase(character_key, phrase, user["discord_id"])
+    return RedirectResponse("/admin/omicron-phrases", status_code=303)
+
+
+@router.post("/omicron-phrases/{character_key}/delete", response_class=HTMLResponse)
+async def omicron_phrases_delete(character_key: str, user: dict = Depends(require_super_admin)):
+    database.delete_omicron_phrase(character_key)
+    return RedirectResponse("/admin/omicron-phrases", status_code=303)
