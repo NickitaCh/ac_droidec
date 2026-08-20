@@ -63,13 +63,18 @@
                                     <th>Требуется</th>
                                     <th>У игрока</th>
                                     <th>Статы</th>
+                                    <th>Мин. % статов</th>
                                     <th>Комментарий</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for r in rows %}
                                     <tr>
-                                        <td>{% if r.matched %}<span class="badge badge-ok">✅</span>{% else %}<span class="badge badge-danger">❌</span>{% endif %}</td>
+                                        <td>
+                                            {% if not r.matched %}<span class="badge badge-danger">❌</span>
+                                            {% elif r.stat_warning %}<span class="badge badge-warn">⚠️</span>
+                                            {% else %}<span class="badge badge-ok">✅</span>{% endif %}
+                                        </td>
                                         {% if r.kind == "base" %}
                                             <td>{{ r.pack or "—" }}</td>
                                             <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}</td>
@@ -80,6 +85,13 @@
                                             <td>уровень {{ r.current_level }}</td>
                                         {% endif %}
                                         <td>{{ r.stats or "—" }}</td>
+                                        <td>
+                                            {% if r.kind == "base" and r.stat_checks %}
+                                                {% for c in r.stat_checks %}
+                                                    <div>{% if c.ok %}✅{% else %}⚠️{% endif %} {{ c.label }}: {{ "%.2f"|format(c.actual) if c.actual is not none else "нет" }}% (≥{{ c.min_value }}%)</div>
+                                                {% endfor %}
+                                            {% else %}—{% endif %}
+                                        </td>
                                         <td>{{ r.comment or "—" }}</td>
                                     </tr>
                                 {% endfor %}

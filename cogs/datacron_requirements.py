@@ -37,6 +37,27 @@ PRIORITY_EMOJI = {
     PRIORITY_USEFUL: "🟢",
 }
 
+# Проверено вживую 2026-08-20 (прямой запрос к comlink на проде, свежий player-json
+# + полный datacronAffixTemplateSet-каталог): "обычные" (base) датакроны катают % только
+# по этим 8 статам — statType в каждом d["affix"][i] (i != 2/5/8, те — способности
+# 3/6/9 уровня). raw statValue/DATACRON_STAT_SCALE = процент — тот же коэффициент/те же
+# числовые id, что уже используются в stat_engine.py для реальных подсчётов по модам
+# игроков (unit_stat 48/49/53/55/56 там же, подтверждено совпадением на "Offense +8.5%" →
+# unit_stat 48, unscaled_value "8500000"). Русские подписи — из официальной RUS_RU
+# локализации игры (ключи UnitStat_Offense/UnitStat_Defense/... и т.п.), не придуманы.
+DATACRON_STAT_SCALE = 1_000_000
+DATACRON_STAT_LABELS = {
+    16: "Критический урон",
+    17: "Эффективность",
+    18: "Стойкость",
+    48: "Атака",
+    49: "Оборона",
+    53: "Шанс на критический удар",
+    55: "Здоровье",
+    56: "Защита",
+}
+DATACRON_MAX_STAT_REQUIREMENTS = 5
+
 DATACRON_LIST_COLOR = 0x3498DB
 DATACRON_CHECK_COLOR_FULL = 0x2ECC71
 DATACRON_CHECK_COLOR_PARTIAL = 0xF1C40F
@@ -582,6 +603,33 @@ def _is_valid_focused_character(cache, set_id, character_key) -> bool:
     return any(key == character_key for key, _label, _max_tier in season_data.get("focused", []))
 
 
+def _parse_stat_pair_params(pairs):
+    """pairs: [(стат_str_or_None, значение_float_or_None), ...] — с 5 слотами
+    стат1..5/значение1..5 из /дк_требования добавить|редактировать. Возвращает
+    (result, error): result — [(stat_id, min_value), ...] на успех, error — текст
+    ошибки для ephemeral-ответа. Слот пуст только если оба поля None (иначе —
+    "стат без значения" или наоборот, тоже ошибка)."""
+    result = []
+    seen_ids = set()
+    for stat_str, value in pairs:
+        if stat_str is None and value is None:
+            continue
+        if stat_str is None or value is None:
+            return None, "❌ Каждый указанный стат должен идти в паре со значением (и наоборот) — либо оба поля в слоте, либо ни одного."
+        try:
+            stat_id = int(stat_str)
+        except (TypeError, ValueError):
+            return None, "❌ Некорректный стат — выберите вариант из списка автодополнения, не вводите текст вручную."
+        if stat_id not in DATACRON_STAT_LABELS:
+            return None, "❌ Некорректный стат — выберите вариант из списка автодополнения, не вводите текст вручную."
+        if stat_id in seen_ids:
+            label = DATACRON_STAT_LABELS[stat_id]
+            return None, f"❌ Стат «{label}» указан в нескольких слотах — у каждого стата в требовании должно быть только одно значение."
+        seen_ids.add(stat_id)
+        result.append((stat_id, value))
+    return result, None
+
+
 # =====================================================================
 # Построение красиво оформленных embed'ов для /дк_требования список и проверить —
 # группировка по приоритету (заголовок-разделитель + по одному полю на требование).
@@ -595,12 +643,15 @@ def _branch_fallback_name(l3_label, l6_label, l9_label) -> str:
     return "Без отряда"
 
 
-def _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats=None) -> list:
+def _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats=None, stat_reqs=None) -> list:
     lines = []
     for tier, label in ((3, l3_label), (6, l6_label), (9, l9_label)):
         if label == "-":
             continue
         lines.append(f"**{tier} ур.:** {label}")
+    if stat_reqs:
+        stat_line = ", ".join(_format_stat_requirement_line(sid, val) for sid, val in stat_reqs)
+        lines.append(f"📈 Статы (мин.): {stat_line}")
     if stats:
         lines.append(f"📊 *{stats}*")
     if comment:
@@ -608,9 +659,9 @@ def _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats=None) 
     return lines
 
 
-def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment, stats=None):
+def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment, stats=None, stat_reqs=None):
     name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
-    value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)) or "​"
+    value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment, stats, stat_reqs)) or "​"
     return name, value
 
 
@@ -622,13 +673,23 @@ def _focused_requirement_field(pack, char_label, required_level, comment):
     return name, "\n".join(lines)
 
 
-def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels, stats=None):
-    status = "✅" if matched else "❌"
+def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels, stats=None, stat_checks=None):
+    # ⚠️ вместо ✅ — способности закрыты, но хотя бы один стат ниже требуемого порога
+    # (мягкая проверка: не блокирует засчитывание требования, только рекомендация).
+    if not matched:
+        status = "❌"
+    elif stat_checks and not all(ok for *_rest, ok in stat_checks):
+        status = "⚠️"
+    else:
+        status = "✅"
     name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
     lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)
     if matched and closed_levels:
         closed_parts = [v for v in closed_levels if v != "—"]
         lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
+    if matched and stat_checks:
+        for stat_id, min_value, actual, ok in stat_checks:
+            lines.append(_format_stat_check_line(stat_id, min_value, actual, ok))
     return name, "\n".join(lines) or "​"
 
 
@@ -743,7 +804,22 @@ def _extract_player_base_datacrons(player_json: dict, set_id: int):
         levels = {}
         for level_num, idx in ((3, 2), (6, 5), (9, 8)):
             levels[level_num] = affix[idx].get("abilityId") if len(affix) > idx else None
-        result.append({"id": d.get("id"), "levels": levels})
+        # % статы этого конкретного датакрона — тиры без abilityId (не 3/6/9 уровень).
+        # Один и тот же stat_id может встретиться на нескольких тирах одного датакрона
+        # (найдено на реальных данных: два тира Здоровья на одном ДК) — суммируем.
+        stats = {}
+        for a in affix:
+            if a.get("abilityId"):
+                continue
+            stat_id = a.get("statType")
+            if stat_id not in DATACRON_STAT_LABELS:
+                continue
+            try:
+                value = int(a.get("statValue", 0)) / DATACRON_STAT_SCALE
+            except (TypeError, ValueError):
+                continue
+            stats[stat_id] = stats.get(stat_id, 0.0) + value
+        result.append({"id": d.get("id"), "levels": levels, "stats": stats})
     return result
 
 
@@ -800,6 +876,29 @@ def _match_requirements(requirements, owned_datacrons):
     return pairs
 
 
+def _check_requirement_stats(stat_requirements, actual_stats):
+    """Мягкая проверка: ДК засчитан по способностям независимо от статов, это только
+    рекомендация "статы стоит перекатать". stat_requirements: [(stat_id, min_value), ...].
+    actual_stats: {stat_id: value} подобранного датакрона ({} если ДК вообще не закрыт).
+    Возвращает [(stat_id, min_value, actual_or_None, ok), ...] в порядке requirements."""
+    return [
+        (stat_id, min_value, actual_stats.get(stat_id), actual_stats.get(stat_id) is not None and actual_stats.get(stat_id) >= min_value)
+        for stat_id, min_value in stat_requirements
+    ]
+
+
+def _format_stat_requirement_line(stat_id, min_value) -> str:
+    label = DATACRON_STAT_LABELS.get(stat_id, f"стат {stat_id}")
+    return f"{label} ≥{min_value:g}%"
+
+
+def _format_stat_check_line(stat_id, min_value, actual, ok) -> str:
+    label = DATACRON_STAT_LABELS.get(stat_id, f"стат {stat_id}")
+    icon = "✅" if ok else "⚠️"
+    actual_str = f"{actual:.2f}%" if actual is not None else "нет такого стата"
+    return f"{icon} {label}: {actual_str} (нужно ≥{min_value:g}%)"
+
+
 # =====================================================================
 # Автокомплиты (модульные функции — как autocomplete_players/autocomplete_violations)
 # =====================================================================
@@ -848,6 +947,16 @@ async def autocomplete_datacron_level6(inter, string):
 
 async def autocomplete_datacron_level9(inter, string):
     return await _autocomplete_datacron_level(inter, string, 9)
+
+
+async def autocomplete_datacron_stat(inter: disnake.ApplicationCommandInteraction, string: str):
+    search = string.lower().strip()
+    options = [
+        disnake.OptionChoice(name=label, value=str(stat_id))
+        for stat_id, label in DATACRON_STAT_LABELS.items()
+        if not search or search in label.lower()
+    ]
+    return options[:25]
 
 
 async def autocomplete_datacron_alt_value(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -1016,6 +1125,16 @@ class DatacronRequirementsCog(commands.Cog):
         уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level6),
         уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level9),
         статы: str = commands.Param(default=None, description="Приоритетные % статы (свободный текст, справочно, не проверяется автоматически)"),
+        стат1: str = commands.Param(default=None, description="Мин. % стата №1 — проверяется автоматически (мягко, не блокирует)", autocomplete=autocomplete_datacron_stat),
+        значение1: float = commands.Param(default=None, description="Минимальный % для стата №1", ge=0, le=100),
+        стат2: str = commands.Param(default=None, description="Мин. % стата №2", autocomplete=autocomplete_datacron_stat),
+        значение2: float = commands.Param(default=None, description="Минимальный % для стата №2", ge=0, le=100),
+        стат3: str = commands.Param(default=None, description="Мин. % стата №3", autocomplete=autocomplete_datacron_stat),
+        значение3: float = commands.Param(default=None, description="Минимальный % для стата №3", ge=0, le=100),
+        стат4: str = commands.Param(default=None, description="Мин. % стата №4", autocomplete=autocomplete_datacron_stat),
+        значение4: float = commands.Param(default=None, description="Минимальный % для стата №4", ge=0, le=100),
+        стат5: str = commands.Param(default=None, description="Мин. % стата №5", autocomplete=autocomplete_datacron_stat),
+        значение5: float = commands.Param(default=None, description="Минимальный % для стата №5", ge=0, le=100),
         комментарий: str = commands.Param(default=None, description="Прочая заметка (необязательно)"),
     ):
         guild_id = await guild_resolver.require_guild_id(inter)
@@ -1036,8 +1155,14 @@ class DatacronRequirementsCog(commands.Cog):
         if уровень3 == DATACRON_NONE and уровень6 == DATACRON_NONE and уровень9 == DATACRON_NONE:
             await inter.response.send_message("❌ Хотя бы один уровень (3/6/9) должен быть указан, иначе требование бессмысленно.", ephemeral=True)
             return
+        stat_pairs, stat_error = _parse_stat_pair_params([(стат1, значение1), (стат2, значение2), (стат3, значение3), (стат4, значение4), (стат5, значение5)])
+        if stat_error:
+            await inter.response.send_message(stat_error, ephemeral=True)
+            return
 
         req_id = database.add_datacron_requirement(set_id, отряд, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id, stats=статы)
+        if stat_pairs:
+            database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)
         summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=отряд)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
@@ -1132,6 +1257,17 @@ class DatacronRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="[Спец.] новый персонаж", autocomplete=autocomplete_datacron_focused_character),
         уровень: int = commands.Param(default=None, description="[Спец.] новый нужный уровень прокачки", ge=1, le=20),
         статы: str = commands.Param(default=None, description="[Обычное] новые приоритетные % статы (свободный текст)"),
+        стат1: str = commands.Param(default=None, description="[Обычное] заменить стат-требования, слот №1 (см. описание команды добавить)", autocomplete=autocomplete_datacron_stat),
+        значение1: float = commands.Param(default=None, description="Минимальный % для стата №1", ge=0, le=100),
+        стат2: str = commands.Param(default=None, description="[Обычное] заменить стат-требования, слот №2", autocomplete=autocomplete_datacron_stat),
+        значение2: float = commands.Param(default=None, description="Минимальный % для стата №2", ge=0, le=100),
+        стат3: str = commands.Param(default=None, description="[Обычное] заменить стат-требования, слот №3", autocomplete=autocomplete_datacron_stat),
+        значение3: float = commands.Param(default=None, description="Минимальный % для стата №3", ge=0, le=100),
+        стат4: str = commands.Param(default=None, description="[Обычное] заменить стат-требования, слот №4", autocomplete=autocomplete_datacron_stat),
+        значение4: float = commands.Param(default=None, description="Минимальный % для стата №4", ge=0, le=100),
+        стат5: str = commands.Param(default=None, description="[Обычное] заменить стат-требования, слот №5", autocomplete=autocomplete_datacron_stat),
+        значение5: float = commands.Param(default=None, description="Минимальный % для стата №5", ge=0, le=100),
+        очистить_статы: bool = commands.Param(default=False, description="[Обычное] убрать все стат-требования (без указания новых слотов выше)"),
         комментарий: str = commands.Param(default=None, description="Новая заметка"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
@@ -1185,6 +1321,17 @@ class DatacronRequirementsCog(commands.Cog):
                     ephemeral=True,
                 )
                 return
+
+        stat_slots = [(стат1, значение1), (стат2, значение2), (стат3, значение3), (стат4, значение4), (стат5, значение5)]
+        stat_slots_given = any(v is not None for pair in stat_slots for v in pair)
+        if stat_slots_given:
+            stat_pairs, stat_error = _parse_stat_pair_params(stat_slots)
+            if stat_error:
+                await inter.response.send_message(stat_error, ephemeral=True)
+                return
+            database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)
+        elif очистить_статы:
+            database.set_datacron_requirement_stats(req_id, [], guild_id=guild_id)
 
         database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id, stats=new_stats)
         summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=new_pack)
@@ -1407,8 +1554,9 @@ class DatacronRequirementsCog(commands.Cog):
         if requirements:
             owned = _extract_player_base_datacrons(player, set_id)
             pairs = _match_requirements(requirements, owned)
+            stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
             for req, match in pairs:
-                _, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
+                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
                 group = groups.get(priority, groups[PRIORITY_REQUIRED])
                 l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
                 closed_levels = None
@@ -1419,7 +1567,9 @@ class DatacronRequirementsCog(commands.Cog):
                         level_label(6, m[6]) if m[6] else "—",
                         level_label(9, m[9]) if m[9] else "—",
                     )
-                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels, stats))
+                stat_reqs = stats_by_req.get(req_id)
+                stat_checks = _check_requirement_stats(stat_reqs, match["stats"] if match else {}) if stat_reqs else None
+                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels, stats, stat_checks))
                 group["total"] += 1
                 if match:
                     group["matched"] += 1
@@ -1482,12 +1632,13 @@ class DatacronRequirementsCog(commands.Cog):
             any_found = True
 
             priority_items = {p: [] for p in PRIORITY_ORDER}
+            stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
             for row in base_reqs:
-                _, _, pack, l3, l6, l9, comment, _, _, priority, stats = row
+                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = row
                 l3_lbl = _level_label(season_data["level3"], l3)
                 l6_lbl = _level_label(season_data["level6"], l6)
                 l9_lbl = _level_label(season_data["level9"], l9)
-                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, stats)
+                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, stats, stats_by_req.get(req_id))
                 priority_items.get(priority, priority_items[PRIORITY_REQUIRED]).append(field)
             for row in focused_reqs:
                 _, _, pack, character_key, required_level, comment, _, _, priority = row

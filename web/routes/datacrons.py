@@ -26,13 +26,16 @@ import database
 from cogs.datacron_requirements import (
     DATACRON_ANY,
     DATACRON_ANY_LABEL,
+    DATACRON_MAX_STAT_REQUIREMENTS,
     DATACRON_NONE,
     DATACRON_NONE_LABEL,
+    DATACRON_STAT_LABELS,
     PRIORITY_CHOICES,
     PRIORITY_EMOJI,
     PRIORITY_LABELS,
     PRIORITY_ORDER,
     PRIORITY_REQUIRED,
+    _check_requirement_stats,
     _extract_player_base_datacrons,
     _extract_player_focused_datacrons,
     _focused_char_label,
@@ -42,6 +45,7 @@ from cogs.datacron_requirements import (
     _level_label,
     _match_counts,
     _match_requirements,
+    _parse_stat_pair_params,
 )
 from services import datacron_catalog
 from web.deps import require_officer_access
@@ -50,6 +54,10 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
+# Бонусное множество стат-каталога уже мало и известно заранее (8 записей) — как и с
+# level_options (см. datacron_season.html: "предпочитать plain <select>, когда набор
+# маленький и известен на момент рендера"), рендерится сразу как <select>, без live-search.
+STAT_OPTIONS = list(DATACRON_STAT_LABELS.items())  # [(stat_id, label), ...]
 
 
 def _get_comlink():
@@ -67,6 +75,14 @@ async def _safe_catalog():
     except Exception as e:
         print(f"⚠️ [web] Каталог датакронов недоступен: {e}")
         return None
+
+
+def _stat_pairs_from_form(stat_ids: list, values: list):
+    """Веб-форма шлёт до 5 пар (stat_id как строка или "", value как float или None) —
+    приводим "" к None и переиспользуем ту же валидацию, что и Discord-команды
+    (_parse_stat_pair_params), чтобы не дублировать правила (не более 1 раза на стат и т.п.)."""
+    pairs = [(sid or None, val) for sid, val in zip(stat_ids, values)]
+    return _parse_stat_pair_params(pairs)
 
 
 def _redirect_list(error: str = None, notice: str = None):
@@ -171,7 +187,7 @@ async def check_form(request: Request, user: dict = Depends(require_officer_acce
                     if ally_code is None:
                         error = f"Игрок «{player_name}» не найден среди зарегистрированных."
                 if ally_code and not error:
-                    result = await _build_player_report(catalog, set_id, ally_code, player_name, requirements, focused_requirements)
+                    result = await _build_player_report(catalog, set_id, ally_code, player_name, requirements, focused_requirements, guild_id)
                     if result and result.get("error"):
                         error = result["error"]
                         result = None
@@ -205,9 +221,11 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(requ
     base_rows = database.get_datacron_requirements_by_set(set_id, guild_id=guild_id)
     focused_rows = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
 
+    stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
     base_reqs = []
     for row in base_rows:
         req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority, stats = row
+        stat_reqs = stats_by_req.get(req_id, [])
         base_reqs.append({
             "id": req_id, "pack": pack,
             "level3": l3, "level6": l6, "level9": l9,
@@ -220,6 +238,7 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(requ
             # Уровни, к которым имеет смысл предложить "добавить альтернативу" —
             # только там, где уже стоит конкретная способность (не ANY/NONE).
             "alt_levels": [n for n, v in ((3, l3), (6, l6), (9, l9)) if v not in (DATACRON_ANY, DATACRON_NONE)],
+            "stat_reqs": [{"stat_id": sid, "label": DATACRON_STAT_LABELS.get(sid, str(sid)), "min_value": val} for sid, val in stat_reqs],
         })
     focused_reqs = []
     for row in focused_rows:
@@ -248,6 +267,8 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(requ
         "datacron_any_label": DATACRON_ANY_LABEL,
         "datacron_none": DATACRON_NONE,
         "datacron_none_label": DATACRON_NONE_LABEL,
+        "stat_options": STAT_OPTIONS,
+        "stat_slots": range(1, DATACRON_MAX_STAT_REQUIREMENTS + 1),
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
     })
@@ -265,6 +286,11 @@ async def add_base_requirement(
     level6: str = Form(DATACRON_NONE),
     level9: str = Form(DATACRON_NONE),
     stats: str = Form(""),
+    stat1: str = Form(""), value1: float = Form(None),
+    stat2: str = Form(""), value2: float = Form(None),
+    stat3: str = Form(""), value3: float = Form(None),
+    stat4: str = Form(""), value4: float = Form(None),
+    stat5: str = Form(""), value5: float = Form(None),
     comment: str = Form(""),
     user: dict = Depends(require_officer_access),
 ):
@@ -277,11 +303,16 @@ async def add_base_requirement(
             return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из подсказок.")
     if level3 == DATACRON_NONE and level6 == DATACRON_NONE and level9 == DATACRON_NONE:
         return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).")
+    stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
+    if stat_error:
+        return _redirect_season(set_id, error=stat_error)
 
-    database.add_datacron_requirement(
+    req_id = database.add_datacron_requirement(
         set_id, pack.strip() or None, level3, level6, level9, comment.strip() or None,
         user["discord_id"], priority, guild_id=guild_id, stats=stats.strip() or None,
     )
+    if stat_pairs:
+        database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)
     return _redirect_season(set_id, notice="Требование добавлено.")
 
 
@@ -358,6 +389,11 @@ async def edit_base_requirement(
     pack: str = Form(""),
     priority: str = Form(...),
     stats: str = Form(""),
+    stat1: str = Form(""), value1: float = Form(None),
+    stat2: str = Form(""), value2: float = Form(None),
+    stat3: str = Form(""), value3: float = Form(None),
+    stat4: str = Form(""), value4: float = Form(None),
+    stat5: str = Form(""), value5: float = Form(None),
     comment: str = Form(""),
     user: dict = Depends(require_officer_access),
 ):
@@ -366,7 +402,11 @@ async def edit_base_requirement(
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
     _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority, _cur_stats = row
+    stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
+    if stat_error:
+        return _redirect_season(set_id, error=stat_error)
     database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id, stats=stats.strip() or None)
+    database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)  # полная замена (веб = не патч-семантика)
     return _redirect_season(set_id, notice=f"Требование #{req_id} обновлено.")
 
 
@@ -442,7 +482,7 @@ async def focused_characters_search(season: int, q: str = "", user: dict = Depen
 # Проверка датакронов игрока/гильдии — GET-форма (в т.ч. чтобы результат
 # можно было передать ссылкой), результат считается на лету через живой Comlink.
 # =====================================================================
-async def _build_player_report(catalog, set_id, ally_code, player_name, requirements, focused_requirements):
+async def _build_player_report(catalog, set_id, ally_code, player_name, requirements, focused_requirements, guild_id):
     comlink = _get_comlink()
     try:
         player = await asyncio.wait_for(asyncio.to_thread(comlink.get_player, allycode=ally_code), timeout=15.0)
@@ -463,17 +503,26 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
     if requirements:
         owned = _extract_player_base_datacrons(player, set_id)
         pairs = _match_requirements(requirements, owned)
+        stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
         for req, match in pairs:
-            _, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
+            req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
             closed = []
             if match:
                 m = match["levels"]
                 closed = [level_label(n, m[n]) for n in (3, 6, 9) if m[n]]
+            stat_reqs = stats_by_req.get(req_id)
+            stat_checks = _check_requirement_stats(stat_reqs, match["stats"] if match else {}) if stat_reqs else []
+            stat_checks_labeled = [
+                {"label": DATACRON_STAT_LABELS.get(sid, str(sid)), "min_value": min_v, "actual": actual, "ok": ok}
+                for sid, min_v, actual, ok in stat_checks
+            ]
             bucket = rows_by_priority.get(priority, rows_by_priority[PRIORITY_REQUIRED])
             bucket.append({
                 "kind": "base", "pack": pack,
                 "l3": level_label(3, l3), "l6": level_label(6, l6), "l9": level_label(9, l9),
                 "comment": comment, "stats": stats, "matched": bool(match), "closed": closed,
+                "stat_checks": stat_checks_labeled,
+                "stat_warning": bool(match) and any(not c["ok"] for c in stat_checks_labeled),
             })
             tb = totals.get(priority, totals[PRIORITY_REQUIRED])
             tb["total"] += 1

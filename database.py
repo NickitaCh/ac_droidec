@@ -1567,6 +1567,8 @@ def delete_datacron_requirement(req_id: int, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
+    _ensure_datacron_requirement_stats_table(cursor)
+    cursor.execute("DELETE FROM datacron_requirement_stats WHERE req_id = ? AND guild_id = ?", (req_id, guild_id))
     cursor.execute("DELETE FROM datacron_requirements WHERE id = ? AND guild_id = ?", (req_id, guild_id))
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -1578,6 +1580,12 @@ def delete_datacron_requirements_by_set(set_id: int, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
+    _ensure_datacron_requirement_stats_table(cursor)
+    cursor.execute(
+        "DELETE FROM datacron_requirement_stats WHERE guild_id = ? AND req_id IN "
+        "(SELECT id FROM datacron_requirements WHERE set_id = ? AND guild_id = ?)",
+        (guild_id, set_id, guild_id),
+    )
     cursor.execute("DELETE FROM datacron_requirements WHERE set_id = ? AND guild_id = ?", (set_id, guild_id))
     conn.commit()
     deleted = cursor.rowcount
@@ -1634,6 +1642,77 @@ def get_all_datacron_requirements(guild_id: int = 1):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# =====================================================================
+# СТАТ-ТРЕБОВАНИЯ К ОБЫЧНЫМ ДАТАКРОНАМ: до 5 пар (stat_id из UnitStat-каталога,
+# минимальный % — мягкая проверка "больше или равно"). Отдельная дочерняя таблица,
+# а не колонка в datacron_requirements — на одно требование может быть до 5 строк.
+# stat_id — числовой код (см. cogs/datacron_requirements.py::DATACRON_STAT_LABELS),
+# смысл проверять/показывать имена берёт вызывающий код, здесь просто хранится пара.
+# =====================================================================
+def _ensure_datacron_requirement_stats_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datacron_requirement_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            req_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            stat_id INTEGER NOT NULL,
+            min_value REAL NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_stats_req ON datacron_requirement_stats(req_id, guild_id)")
+
+
+def set_datacron_requirement_stats(req_id: int, stat_pairs, guild_id: int = 1):
+    """Полностью заменяет набор стат-требований для req_id — удаляет старые строки и
+    вставляет новые. stat_pairs: [(stat_id:int, min_value:float), ...], максимум 5
+    (ограничение проверяет вызывающий код, здесь не дублируется)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirement_stats_table(cursor)
+    cursor.execute("DELETE FROM datacron_requirement_stats WHERE req_id = ? AND guild_id = ?", (req_id, guild_id))
+    cursor.executemany(
+        "INSERT INTO datacron_requirement_stats (req_id, guild_id, stat_id, min_value) VALUES (?, ?, ?, ?)",
+        [(req_id, guild_id, stat_id, min_value) for stat_id, min_value in stat_pairs],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_datacron_requirement_stats(req_id: int, guild_id: int = 1):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirement_stats_table(cursor)
+    cursor.execute(
+        "SELECT stat_id, min_value FROM datacron_requirement_stats WHERE req_id = ? AND guild_id = ? ORDER BY id",
+        (req_id, guild_id),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_datacron_requirement_stats_by_set(set_id: int, guild_id: int = 1):
+    """req_id -> [(stat_id, min_value), ...] для всех требований сезона одним запросом
+    (без N+1) — используется /дк_требования список и проверить."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    _ensure_datacron_requirement_stats_table(cursor)
+    cursor.execute("""
+        SELECT s.req_id, s.stat_id, s.min_value
+        FROM datacron_requirement_stats s
+        JOIN datacron_requirements r ON r.id = s.req_id AND r.guild_id = s.guild_id
+        WHERE r.set_id = ? AND s.guild_id = ?
+        ORDER BY s.req_id, s.id
+    """, (set_id, guild_id))
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for req_id, stat_id, min_value in rows:
+        result.setdefault(req_id, []).append((stat_id, min_value))
+    return result
 
 
 # =====================================================================

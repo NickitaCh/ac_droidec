@@ -53,16 +53,30 @@
                 </label>
             {% endfor %}
             <label>
-                Статы (необязательно)
+                Статы (заметка, необязательно)
                 <input type="text" name="stats" placeholder="Например: crit dmg / crit chance">
             </label>
+            <fieldset class="stat-req-fieldset">
+                <legend>Мин. % статов — мягкая проверка, до {{ stat_slots|length }} шт. (необязательно)</legend>
+                {% for i in stat_slots %}
+                    <div class="stat-req-slot">
+                        <select name="stat{{ i }}">
+                            <option value="">—</option>
+                            {% for sid, label in stat_options %}
+                                <option value="{{ sid }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="number" name="value{{ i }}" min="0" max="100" step="0.01" placeholder="мин. %">
+                    </div>
+                {% endfor %}
+            </fieldset>
             <label>
                 Комментарий (необязательно)
                 <input type="text" name="comment">
             </label>
             <button type="submit">Добавить</button>
         </form>
-        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования.</p>
+        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
     </div>
 
     {% if not base_reqs %}
@@ -80,6 +94,7 @@
                             <th class="dc-level-col">9 уровень</th>
                             <th>Приоритет</th>
                             <th>Статы</th>
+                            <th>Мин. % статов</th>
                             <th>Комментарий</th>
                             <th></th>
                         </tr>
@@ -93,6 +108,11 @@
                                 <td class="dc-level-col">{{ r.level9_label }}</td>
                                 <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
                                 <td>{{ r.stats or "—" }}</td>
+                                <td>
+                                    {% if r.stat_reqs %}
+                                        {% for sr in r.stat_reqs %}{{ sr.label }} ≥{{ sr.min_value }}%{% if not loop.last %}, {% endif %}{% endfor %}
+                                    {% else %}—{% endif %}
+                                </td>
                                 <td>{{ r.comment or "—" }}</td>
                                 <td class="row-actions">
                                     <details>
@@ -105,6 +125,21 @@
                                                 {% endfor %}
                                             </select>
                                             <input type="text" name="stats" value="{{ r.stats or '' }}" placeholder="Статы">
+                                            <fieldset class="stat-req-fieldset">
+                                                <legend>Мин. % статов (полная замена при сохранении)</legend>
+                                                {% for i in stat_slots %}
+                                                    {% set sr = r.stat_reqs[i-1] if i-1 < r.stat_reqs|length else None %}
+                                                    <div class="stat-req-slot">
+                                                        <select name="stat{{ i }}">
+                                                            <option value="">—</option>
+                                                            {% for sid, label in stat_options %}
+                                                                <option value="{{ sid }}" {% if sr and sr.stat_id == sid %}selected{% endif %}>{{ label }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                        <input type="number" name="value{{ i }}" min="0" max="100" step="0.01" placeholder="мин. %" value="{{ sr.min_value if sr else '' }}">
+                                                    </div>
+                                                {% endfor %}
+                                            </fieldset>
                                             <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
                                             <button type="submit">Сохранить</button>
                                         </form>
