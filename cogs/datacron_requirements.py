@@ -376,12 +376,21 @@ TRANSLATION_EXPORT_PATH = Path(__file__).resolve().parent.parent / "web" / "stat
 
 
 def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict) -> list:
-    """Пары {key, ability_id, en, ru} сгруппированы по сезону и по уровню бонуса (3/6/9)
-    — под каждый сезон отдельный элемент {set_id, display_name, levels: {"3": [...], ...}}.
-    Ключ локализации ищем по RU-словарю (это то, что реально показываем игрокам сейчас),
-    затем смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст
-    (на один ability_id может резолвиться разный ключ в зависимости от V-варианта,
-    см. _resolve_ability_desc_key).
+    """Пары {key, ability_id, target_key, target_en, target_ru, en, ru, en_resolved, ru_resolved}
+    сгруппированы по сезону и по уровню бонуса (3/6/9) — под каждый сезон отдельный элемент
+    {set_id, display_name, levels: {"3": [...], ...}}. Ключ локализации ищем по RU-словарю
+    (это то, что реально показываем игрокам сейчас), затем смотрим тот же ключ в EN — так
+    пара гарантированно про один и тот же текст (на один ability_id может резолвиться разный
+    ключ в зависимости от V-варианта, см. _resolve_ability_desc_key).
+
+    Сырой текст способности (en/ru) содержит буквальный плейсхолдер "{0}" — в игре он
+    подставляется целью бонуса (фракция/сторона/роль/конкретный персонаж, напр. "Когда
+    союзники из фракции \"{0}\" ..."), но САМА цель не хранится в тексте способности, а
+    берётся из targetRule ветки (общий для всех affix одного affixTemplateSetId — см.
+    branch_target_rule ниже, тот же приём, что в _fetch_datacron_cache). Резолвим её через
+    _resolve_target_label отдельно на EN и RU и отдаём и как есть (target_key/_en/_ru), и
+    уже подставленной в текст (en_resolved/ru_resolved) — без этого "{0}" в тексте способности
+    ничего не говорит внешнему инструменту.
 
     Ограничено активными сезонами (та же фильтрация по expirationTimeMs, что и в
     _fetch_datacron_cache) и обычными (не фокусными) шаблонами — у фокусных ДК своя
@@ -416,7 +425,20 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
                 affix_set = affix_sets.get(affix_set_id)
                 if not affix_set:
                     continue
-                for affix in affix_set.get("affix", []):
+                affixes = affix_set.get("affix", [])
+                if not affixes:
+                    continue
+                # Все affix одного affixTemplateSetId (одной ветки) делят один targetRule
+                # — тот же приём, что в _fetch_datacron_cache (branch_target_rule).
+                branch_target_rule = affixes[0].get("targetRule", "")
+                target_key = (
+                    branch_target_rule[len("target_datacron_"):]
+                    if branch_target_rule.startswith("target_datacron_")
+                    else ""
+                )
+                target_en = _resolve_target_label(target_key, loc_en_kv) if target_key else ""
+                target_ru = _resolve_target_label(target_key, loc_ru_kv) if target_key else ""
+                for affix in affixes:
                     ability_id = affix.get("abilityId")
                     if not ability_id:
                         continue
@@ -429,7 +451,17 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
                     ru = loc_ru_kv.get(key)
                     if en is None or ru is None:
                         continue  # нет полной пары EN/RU под этим ключом — сверять/переводить нечего
-                    seasons[set_id]["levels"][level].append({"key": key, "ability_id": ability_id, "en": en, "ru": ru})
+                    seasons[set_id]["levels"][level].append({
+                        "key": key,
+                        "ability_id": ability_id,
+                        "target_key": target_key,
+                        "target_en": target_en,
+                        "target_ru": target_ru,
+                        "en": en,
+                        "ru": ru,
+                        "en_resolved": en.replace("{0}", target_en) if target_key else en,
+                        "ru_resolved": ru.replace("{0}", target_ru) if target_key else ru,
+                    })
 
     result = []
     for set_id in sorted(seasons.keys(), reverse=True):
