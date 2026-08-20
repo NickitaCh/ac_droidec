@@ -1,6 +1,9 @@
 import asyncio
+import json
 import re
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import disnake
 from disnake.ext import commands, tasks
@@ -183,15 +186,19 @@ def _parse_loc_kv(loc_text: str) -> dict:
     return kv
 
 
-def _resolve_ability_desc(ability_id: str, loc_kv: dict):
+def _resolve_ability_desc_key(ability_id: str, loc_kv: dict):
+    """Возвращает не сам текст, а КЛЮЧ локализации, под которым он найден — нужен
+    отдельно от _resolve_ability_desc, чтобы найти тот же самый вариант текста
+    в другом loc_kv (напр. EN вместо RU) для экспорта пар перевода, см.
+    _build_translation_export."""
     prefix = f"{ability_id.upper()}_DESC"
-    best = loc_kv.get(prefix)
+    best_key = prefix if prefix in loc_kv else None
     for v in range(2, 8):
-        candidate = loc_kv.get(f"{prefix}_V{v}")
-        if candidate is not None:
-            best = candidate
-    if best is not None:
-        return best
+        candidate_key = f"{prefix}_V{v}"
+        if candidate_key in loc_kv:
+            best_key = candidate_key
+    if best_key is not None:
+        return best_key
     # Иногда номер варианта способности в abilityId не совпадает с номером
     # в ключе локализации (расхождение в данных EA — встречалось у Небита:
     # id оканчивается на _002, а описание есть только под _001, и наоборот
@@ -204,13 +211,18 @@ def _resolve_ability_desc(ability_id: str, loc_kv: dict):
         fallback_bases = sorted(k for k in loc_kv if base_pattern.match(k))
         if fallback_bases:
             fallback_prefix = fallback_bases[0]
-            best = loc_kv.get(fallback_prefix)
+            best_key = fallback_prefix
             for v in range(2, 8):
-                candidate = loc_kv.get(f"{fallback_prefix}_V{v}")
-                if candidate is not None:
-                    best = candidate
-            return best
+                candidate_key = f"{fallback_prefix}_V{v}"
+                if candidate_key in loc_kv:
+                    best_key = candidate_key
+            return best_key
     return None
+
+
+def _resolve_ability_desc(ability_id: str, loc_kv: dict):
+    key = _resolve_ability_desc_key(ability_id, loc_kv)
+    return loc_kv.get(key) if key else None
 
 
 def _auto_shorten(text: str, limit: int = 200) -> str:
@@ -348,6 +360,69 @@ async def _fetch_datacron_cache(comlink) -> dict:
             key=lambda t: t[1],
         )
     return {"seasons": result_seasons}
+
+
+# =====================================================================
+# Экспорт EN/RU текста способностей ДК для внешнего инструмента перевода —
+# инструмент живёт за пределами инфраструктуры бота и просто регулярно
+# скачивает готовый JSON по HTTP; сам файл раздаётся как обычная статика
+# через web/app.py (app.mount("/static", ...)), веб-процесс ничего не строит,
+# только отдаёт то, что сюда положил бот. Обновляется тем же 12-часовым
+# циклом, что и bot.datacron_cache, см. DatacronRequirementsCog.datacron_cache_loop.
+# =====================================================================
+TRANSLATION_EXPORT_PATH = Path(__file__).resolve().parent.parent / "web" / "static" / "datacron_translations.json"
+
+
+def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict) -> list:
+    """Пары {key, en, ru} по КЛЮЧУ локализации (не по abilityId — на один ability_id
+    может резолвиться разный ключ в зависимости от V-варианта, см. _resolve_ability_desc_key).
+    Ключ ищем по RU-словарю (это то, что реально показываем игрокам сейчас), затем
+    смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст."""
+    affix_sets = {a["id"]: a for a in game_data.get("datacronAffixTemplateSet", [])}
+    seen_keys = set()
+    pairs = []
+    for template in game_data.get("datacronTemplate", []):
+        for tier in template.get("tier", []):
+            for affix_set_id in tier.get("affixTemplateSetId", []):
+                affix_set = affix_sets.get(affix_set_id)
+                if not affix_set:
+                    continue
+                for affix in affix_set.get("affix", []):
+                    ability_id = affix.get("abilityId")
+                    if not ability_id:
+                        continue
+                    key = _resolve_ability_desc_key(ability_id, loc_ru_kv)
+                    if not key or key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    en = loc_en_kv.get(key)
+                    ru = loc_ru_kv.get(key)
+                    if en is None or ru is None:
+                        continue  # нет полной пары EN/RU под этим ключом — сверять/переводить нечего
+                    pairs.append({"key": key, "ability_id": ability_id, "en": en, "ru": ru})
+    pairs.sort(key=lambda p: p["key"])
+    return pairs
+
+
+async def _fetch_and_write_translation_export(comlink) -> int:
+    # Отдельные вызовы get_game_data/get_localization, а не переиспользование того,
+    # что уже дёрнула _fetch_datacron_cache — она вызывается независимо и только с RU;
+    # цена лишнего запроса раз в 12 часов незначительна, а раздельные функции проще
+    # держать в голове по отдельности.
+    game_data = await asyncio.to_thread(comlink.get_game_data, items=str(DATACRON_DEFINITIONS_FLAG))
+    loc_ru = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
+    loc_en = await asyncio.to_thread(comlink.get_localization, locale="ENG_US", unzip=True)
+    pairs = _build_translation_export(
+        game_data,
+        _parse_loc_kv(loc_en.get("Loc_ENG_US.txt", "")),
+        _parse_loc_kv(loc_ru.get("Loc_RUS_RU.txt", "")),
+    )
+    TRANSLATION_EXPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TRANSLATION_EXPORT_PATH.write_text(
+        json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(), "entries": pairs}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return len(pairs)
 
 
 # =====================================================================
@@ -844,6 +919,15 @@ class DatacronRequirementsCog(commands.Cog):
             if self.datacron_cache_loop.minutes != 5:
                 print("⚙️ [ДК] Сбой обновления справочника. Устанавливаем частый интервал проверки: 5 минут")
                 self.datacron_cache_loop.change_interval(hours=0, minutes=5)
+            return
+
+        # Экспорт EN/RU для внешнего инструмента перевода — отдельный try, чтобы его
+        # сбой не сбивал статус/интервал основного справочника выше.
+        try:
+            n = await _fetch_and_write_translation_export(self.bot.comlink)
+            print(f"✅ [ДК] Экспорт EN/RU для перевода обновлён: {n} записей")
+        except Exception as e:
+            print(f"⚠️ [ДК] Не удалось обновить экспорт перевода датакронов: {e}")
 
     @datacron_cache_loop.before_loop
     async def _before_datacron_cache_loop(self):

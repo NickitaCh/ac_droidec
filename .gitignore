@@ -8,6 +8,9 @@ __pycache__/
 # База данных SQLite (если она не должна быть в репозитории)
 guild_management.db
 
+# Сгенерированный экспорт для внешнего инструмента перевода (пересобирается ботом раз в 12ч)
+web/static/datacron_translations.json
+
 # IDE и системные файлы
 .vscode/
 .idea/
