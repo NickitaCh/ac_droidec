@@ -47,7 +47,7 @@
                         <option value="{{ datacron_none }}" selected>{{ datacron_none_label }}</option>
                         <option value="{{ datacron_any }}">{{ datacron_any_label }}</option>
                         {% for ability_id, label in level_options[lvl] %}
-                            <option value="{{ ability_id }}">{{ label }}</option>
+                            <option value="{{ ability_id }}" title="{{ label }}">{{ label|truncate(80, True, '…') }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -118,7 +118,7 @@
                                                     <select name="value" required>
                                                         <option value="" disabled selected>Ур. {{ lvl }}: ещё вариант…</option>
                                                         {% for ability_id, label in level_options[lvl] %}
-                                                            <option value="{{ ability_id }}">{{ label }}</option>
+                                                            <option value="{{ ability_id }}" title="{{ label }}">{{ label|truncate(80, True, '…') }}</option>
                                                         {% endfor %}
                                                     </select>
                                                     <button type="submit">Добавить</button>
