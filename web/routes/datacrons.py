@@ -241,6 +241,13 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(requ
         "has_focused_catalog": bool(season_data.get("focused")),
         "priority_options": PRIORITY_OPTIONS,
         "priority_default": PRIORITY_REQUIRED,
+        # Полный список бонусов по уровню — теперь рендерится сразу как <select>,
+        # без live-search виджета (был неочевиден: пустое поле, пока не начнёшь печатать).
+        "level_options": {3: season_data["level3"], 6: season_data["level6"], 9: season_data["level9"]},
+        "datacron_any": DATACRON_ANY,
+        "datacron_any_label": DATACRON_ANY_LABEL,
+        "datacron_none": DATACRON_NONE,
+        "datacron_none_label": DATACRON_NONE_LABEL,
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
     })
@@ -410,27 +417,12 @@ async def clear_season(set_id: int, user: dict = Depends(require_officer_access)
 
 
 # =====================================================================
-# Живой поиск способностей/фокус-персонажей (используется JS-виджетом data-live-search)
+# Живой поиск фокус-персонажей (используется JS-виджетом data-live-search) —
+# список бонусов уровня 3/6/9 больше не ищется через этот паттерн, см.
+# datacron_season.html: рендерится сразу как <select> из level_options
+# (season_detail), список фокус-персонажей обычно намного длиннее, там
+# live-search по-прежнему оправдан.
 # =====================================================================
-@router.get("/api/abilities/{season}/{level}", response_class=JSONResponse)
-async def abilities_search(season: int, level: int, q: str = "", user: dict = Depends(require_officer_access)):
-    if level not in (3, 6, 9):
-        return []
-    catalog = await _safe_catalog()
-    season_data = catalog["seasons"].get(season) if catalog else None
-    if not season_data:
-        return []
-    options = [
-        {"value": DATACRON_ANY, "label": DATACRON_ANY_LABEL},
-        {"value": DATACRON_NONE, "label": DATACRON_NONE_LABEL},
-    ]
-    search = q.lower().strip()
-    for ability_id, label in season_data[f"level{level}"]:
-        if not search or search in label.lower():
-            options.append({"value": ability_id, "label": label})
-    return options[:50]
-
-
 @router.get("/api/focused-characters/{season}", response_class=JSONResponse)
 async def focused_characters_search(season: int, q: str = "", user: dict = Depends(require_officer_access)):
     catalog = await _safe_catalog()

@@ -40,30 +40,18 @@
                     {% endfor %}
                 </select>
             </label>
-            <label>
-                Уровень 3
-                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/3" data-label-field="label">
-                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
-                    <input type="hidden" name="level3" class="unit-search-value" value="NONE">
-                    <div class="unit-search-results"></div>
-                </div>
-            </label>
-            <label>
-                Уровень 6
-                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/6" data-label-field="label">
-                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
-                    <input type="hidden" name="level6" class="unit-search-value" value="NONE">
-                    <div class="unit-search-results"></div>
-                </div>
-            </label>
-            <label>
-                Уровень 9
-                <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/9" data-label-field="label">
-                    <input type="text" class="unit-search-input" placeholder="- (не проверять)" autocomplete="off">
-                    <input type="hidden" name="level9" class="unit-search-value" value="NONE">
-                    <div class="unit-search-results"></div>
-                </div>
-            </label>
+            {% for lvl in (3, 6, 9) %}
+                <label>
+                    Уровень {{ lvl }}
+                    <select name="level{{ lvl }}">
+                        <option value="{{ datacron_none }}" selected>{{ datacron_none_label }}</option>
+                        <option value="{{ datacron_any }}">{{ datacron_any_label }}</option>
+                        {% for ability_id, label in level_options[lvl] %}
+                            <option value="{{ ability_id }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            {% endfor %}
             <label>
                 Статы (необязательно)
                 <input type="text" name="stats" placeholder="Например: crit dmg / crit chance">
@@ -74,7 +62,7 @@
             </label>
             <button type="submit">Добавить</button>
         </form>
-        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите способность из подсказок (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования.</p>
+        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования.</p>
     </div>
 
     {% if not base_reqs %}
@@ -127,11 +115,12 @@
                                             {% for lvl in r.alt_levels %}
                                                 <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/add-alt" class="inline-form">
                                                     <input type="hidden" name="level" value="{{ lvl }}">
-                                                    <div class="unit-search" data-live-search data-url="/datacrons/api/abilities/{{ set_id }}/{{ lvl }}" data-label-field="label">
-                                                        <input type="text" class="unit-search-input" placeholder="Ур. {{ lvl }}: ещё вариант…" autocomplete="off" required>
-                                                        <input type="hidden" name="value" class="unit-search-value" required>
-                                                        <div class="unit-search-results"></div>
-                                                    </div>
+                                                    <select name="value" required>
+                                                        <option value="" disabled selected>Ур. {{ lvl }}: ещё вариант…</option>
+                                                        {% for ability_id, label in level_options[lvl] %}
+                                                            <option value="{{ ability_id }}">{{ label }}</option>
+                                                        {% endfor %}
+                                                    </select>
                                                     <button type="submit">Добавить</button>
                                                 </form>
                                             {% endfor %}
