@@ -370,27 +370,26 @@ async def _fetch_datacron_cache(comlink) -> dict:
 # только отдаёт то, что сюда положил бот. Обновляется тем же 12-часовым
 # циклом, что и bot.datacron_cache, см. DatacronRequirementsCog.datacron_cache_loop.
 # Формат: {"generated_at": ..., "seasons": [{"set_id", "display_name",
-# "levels": {"3": [{key, ability_id, en, ru}, ...], "6": [...], "9": [...]}}, ...]}
+# "levels": {"3": [{en, ru}, ...], "6": [...], "9": [...]}}, ...]} — en/ru уже
+# финальный текст способности (плейсхолдер "{0}" подставлен), без ключей/id.
 # =====================================================================
 TRANSLATION_EXPORT_PATH = Path(__file__).resolve().parent.parent / "web" / "static" / "datacron_translations.json"
 
 
 def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict) -> list:
-    """Пары {key, ability_id, target_key, target_en, target_ru, en, ru, en_resolved, ru_resolved}
-    сгруппированы по сезону и по уровню бонуса (3/6/9) — под каждый сезон отдельный элемент
-    {set_id, display_name, levels: {"3": [...], ...}}. Ключ локализации ищем по RU-словарю
-    (это то, что реально показываем игрокам сейчас), затем смотрим тот же ключ в EN — так
-    пара гарантированно про один и тот же текст (на один ability_id может резолвиться разный
-    ключ в зависимости от V-варианта, см. _resolve_ability_desc_key).
+    """Пары {en, ru} — финальный (с уже подставленной целью бонуса вместо "{0}") текст
+    способности, сгруппированы по сезону и по уровню бонуса (3/6/9): под каждый сезон
+    отдельный элемент {set_id, display_name, levels: {"3": [...], ...}}. Никаких ключей
+    локализации/id способностей наружу не отдаём — только то, что реально нужно инструменту
+    перевода: сам текст на обоих языках.
 
-    Сырой текст способности (en/ru) содержит буквальный плейсхолдер "{0}" — в игре он
-    подставляется целью бонуса (фракция/сторона/роль/конкретный персонаж, напр. "Когда
-    союзники из фракции \"{0}\" ..."), но САМА цель не хранится в тексте способности, а
-    берётся из targetRule ветки (общий для всех affix одного affixTemplateSetId — см.
-    branch_target_rule ниже, тот же приём, что в _fetch_datacron_cache). Резолвим её через
-    _resolve_target_label отдельно на EN и RU и отдаём и как есть (target_key/_en/_ru), и
-    уже подставленной в текст (en_resolved/ru_resolved) — без этого "{0}" в тексте способности
-    ничего не говорит внешнему инструменту.
+    Сырой текст способности содержит буквальный плейсхолдер "{0}" — в игре он подставляется
+    целью бонуса (фракция/сторона/роль/конкретный персонаж, напр. "Когда союзники из фракции
+    \"{0}\" ..."), но САМА цель не хранится в тексте способности, а берётся из targetRule
+    ветки (общий для всех affix одного affixTemplateSetId — см. branch_target_rule ниже,
+    тот же приём, что в _fetch_datacron_cache). Резолвим её через _resolve_target_label
+    отдельно на EN и RU и сразу подставляем в текст — не резолвящиеся "сырые" варианты
+    с "{0}" в выдачу не идут.
 
     Ограничено активными сезонами (та же фильтрация по expirationTimeMs, что и в
     _fetch_datacron_cache) и обычными (не фокусными) шаблонами — у фокусных ДК своя
@@ -451,23 +450,17 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
                     ru = loc_ru_kv.get(key)
                     if en is None or ru is None:
                         continue  # нет полной пары EN/RU под этим ключом — сверять/переводить нечего
-                    seasons[set_id]["levels"][level].append({
-                        "key": key,
-                        "ability_id": ability_id,
-                        "target_key": target_key,
-                        "target_en": target_en,
-                        "target_ru": target_ru,
-                        "en": en,
-                        "ru": ru,
-                        "en_resolved": en.replace("{0}", target_en) if target_key else en,
-                        "ru_resolved": ru.replace("{0}", target_ru) if target_key else ru,
-                    })
+                    en_resolved = en.replace("{0}", target_en) if target_key else en
+                    ru_resolved = ru.replace("{0}", target_ru) if target_key else ru
+                    if "{0}" in en_resolved or "{0}" in ru_resolved:
+                        continue  # цель не резолвнулась (нет ключа в TARGET_LABEL_OVERRIDES/loc) — плейсхолдер остался бы в тексте
+                    seasons[set_id]["levels"][level].append({"en": en_resolved, "ru": ru_resolved})
 
     result = []
     for set_id in sorted(seasons.keys(), reverse=True):
         data = seasons[set_id]
         data["levels"] = {
-            str(level): sorted(entries, key=lambda p: p["key"])
+            str(level): sorted(entries, key=lambda p: p["en"])
             for level, entries in data["levels"].items()
         }
         result.append(data)
