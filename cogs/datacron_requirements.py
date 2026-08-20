@@ -448,28 +448,30 @@ def _is_valid_focused_character(cache, set_id, character_key) -> bool:
 # группировка по приоритету (заголовок-разделитель + по одному полю на требование).
 # =====================================================================
 def _branch_fallback_name(l3_label, l6_label, l9_label) -> str:
-    # Без указанного "пака" используем название ветки (до ": ") как заголовок поля —
-    # так у "Полезные" (без пака) отображается что-то осмысленное, а не пустота.
+    # Без указанного "отряда" используем название ветки (до ": ") как заголовок поля —
+    # так у "Полезные" (без отряда) отображается что-то осмысленное, а не пустота.
     for label in (l6_label, l3_label, l9_label):
         if label and label != "-" and ": " in label:
             return label.split(": ", 1)[0]
-    return "Без пака"
+    return "Без отряда"
 
 
-def _requirement_value_lines(l3_label, l6_label, l9_label, comment) -> list:
+def _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats=None) -> list:
     lines = []
     for tier, label in ((3, l3_label), (6, l6_label), (9, l9_label)):
         if label == "-":
             continue
         lines.append(f"**{tier} ур.:** {label}")
+    if stats:
+        lines.append(f"📊 *{stats}*")
     if comment:
         lines.append(f"💠 *{comment}*")
     return lines
 
 
-def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment):
+def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment, stats=None):
     name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
-    value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment)) or "​"
+    value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)) or "​"
     return name, value
 
 
@@ -481,10 +483,10 @@ def _focused_requirement_field(pack, char_label, required_level, comment):
     return name, "\n".join(lines)
 
 
-def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels):
+def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels, stats=None):
     status = "✅" if matched else "❌"
     name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
-    lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment)
+    lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)
     if matched and closed_levels:
         closed_parts = [v for v in closed_levels if v != "—"]
         lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
@@ -504,9 +506,9 @@ def _build_priority_description(priority_items, footer_totals=None) -> list:
     """priority_items: {priority: [(name, value), ...]}, в порядке PRIORITY_ORDER.
     Embed-поля (fields) в Discord не поддерживают markdown-заголовки (## text
     рендерится буквально), поэтому текст собирается как markdown для embed.description.
-    # Категория приоритета — самый крупный заголовок (H1), ## Пак — крупный, но
+    # Категория приоритета — самый крупный заголовок (H1), ## Отряд — крупный, но
     поменьше (H2). Двойной отступ между категориями, без пустой строки сразу под
-    заголовком категории (следом сразу первый пак)."""
+    заголовком категории (следом сразу первый отряд)."""
     lines = []
     any_group_emitted = False
     for priority in PRIORITY_ORDER:
@@ -529,7 +531,7 @@ def _build_priority_description(priority_items, footer_totals=None) -> list:
             lines.append(f"## {name}")
             lines.extend(value.split("\n"))
             if idx != len(items) - 1:
-                lines.append("")  # пустая строка между паками внутри одной категории
+                lines.append("")  # пустая строка между отрядами внутри одной категории
 
     return lines
 
@@ -633,7 +635,7 @@ def _level_matches(requirement_value, owned_ability_id) -> bool:
 
 
 def _requirement_specificity(row) -> int:
-    _, _, _, l3, l6, l9, _, _, _, _ = row
+    _, _, _, l3, l6, l9, *_rest = row
     return sum(v not in (DATACRON_ANY, DATACRON_NONE) for v in (l3, l6, l9))
 
 
@@ -643,7 +645,7 @@ def _match_requirements(requirements, owned_datacrons):
     used_ids = set()
     pairs = []
     for req in sorted_reqs:
-        _, _, _, l3, l6, l9, _, _, _, _ = req
+        _, _, _, l3, l6, l9, *_rest = req
         match = None
         for dc in owned_datacrons:
             if dc["id"] in used_ids:
@@ -777,7 +779,7 @@ async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteract
     search = string.lower().strip()
     options = []
     for row in base_rows:
-        req_id, set_id, pack, l3, l6, l9, comment, created_by, created_at, priority = row
+        req_id, set_id, pack, l3, l6, l9, comment, created_by, created_at, priority, stats = row
         label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] — {_format_requirement_summary(set_id, l3, l6, l9, cache, pack=pack)}"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=f"#{req_id}"))
@@ -861,15 +863,15 @@ class DatacronRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         сезон: str = commands.Param(description="Сезон датакрона", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
-        пак: str = commands.Param(default=None, description="На какой пак/персонажа этот датакрон (справочно, не проверяется)"),
+        отряд: str = commands.Param(default=None, description="На какой отряд/персонажа этот датакрон (справочно, не проверяется)"),
         уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level3),
         уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level6),
         уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level9),
-        комментарий: str = commands.Param(default=None, description="Заметка по приоритетным % статам (не проверяется автоматически)"),
+        статы: str = commands.Param(default=None, description="Приоритетные % статы (свободный текст, справочно, не проверяется автоматически)"),
+        комментарий: str = commands.Param(default=None, description="Прочая заметка (необязательно)"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         set_id = _parse_trailing_bracket_int(сезон)
@@ -887,8 +889,8 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message("❌ Хотя бы один уровень (3/6/9) должен быть указан, иначе требование бессмысленно.", ephemeral=True)
             return
 
-        req_id = database.add_datacron_requirement(set_id, пак, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id)
-        summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=пак)
+        req_id = database.add_datacron_requirement(set_id, отряд, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id, stats=статы)
+        summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=отряд)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
     @datacron_req.sub_command(
@@ -902,9 +904,8 @@ class DatacronRequirementsCog(commands.Cog):
         уровень: int = commands.Param(description="Какой уровень дополнить", choices=[3, 6, 9]),
         вариант: str = commands.Param(description="Ещё один допустимый бонус для этого уровня", autocomplete=autocomplete_datacron_alt_value),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         req_id = _parse_leading_hash_int(id)
@@ -916,7 +917,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
             return
 
-        _, set_id, pack, l3, l6, l9, comment, _, _, priority = row
+        _, set_id, pack, l3, l6, l9, comment, _, _, priority, stats = row
         current = {3: l3, 6: l6, 9: l9}.get(уровень, DATACRON_NONE)
         if not _is_valid_level_value(self.bot.datacron_cache, set_id, уровень, вариант):
             await inter.response.send_message("❌ Некорректный вариант — выберите из списка автодополнения, не вводите текст вручную.", ephemeral=True)
@@ -938,7 +939,7 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             new_l9 = new_value
 
-        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id)
+        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats)
         summary = _format_requirement_summary(set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=pack)
         await inter.response.send_message(f"✅ Требование #{req_id} дополнено: {summary}", ephemeral=True)
 
@@ -950,12 +951,11 @@ class DatacronRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(description="Персонаж фокусного датакрона", autocomplete=autocomplete_datacron_focused_character),
         уровень: int = commands.Param(description="Нужный уровень прокачки (обычно 1-9, у некоторых персонажей больше)", ge=1, le=20),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
-        пак: str = commands.Param(default=None, description="На какой пак/персонажа этот датакрон (справочно, не проверяется)"),
+        отряд: str = commands.Param(default=None, description="На какой отряд/персонажа этот датакрон (справочно, не проверяется)"),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         set_id = _parse_trailing_bracket_int(сезон)
@@ -966,8 +966,8 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message("❌ Некорректный персонаж — выберите вариант из списка автодополнения, не вводите текст вручную.", ephemeral=True)
             return
 
-        req_id = database.add_datacron_focused_requirement(set_id, пак, персонаж, уровень, комментарий, str(inter.author.id), приоритет, guild_id=guild_id)
-        summary = _format_focused_requirement_summary(set_id, персонаж, уровень, self.bot.datacron_cache, pack=пак)
+        req_id = database.add_datacron_focused_requirement(set_id, отряд, персонаж, уровень, комментарий, str(inter.author.id), приоритет, guild_id=guild_id)
+        summary = _format_focused_requirement_summary(set_id, персонаж, уровень, self.bot.datacron_cache, pack=отряд)
         await inter.response.send_message(f"✅ Спец. требование F{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
     @datacron_req.sub_command(name="редактировать", description="Изменить требование (обычное или спец.) или удалить его из списка")
@@ -977,24 +977,24 @@ class DatacronRequirementsCog(commands.Cog):
         id: str = commands.Param(description="Требование для изменения", autocomplete=autocomplete_datacron_req_id),
         сезон: str = commands.Param(default=None, description="Новый сезон", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=None, description="Новый приоритет требования", choices=PRIORITY_CHOICES),
-        пак: str = commands.Param(default=None, description="Новый пак/персонаж, для которого этот датакрон (справочно, не проверяется)"),
+        отряд: str = commands.Param(default=None, description="Новый отряд/персонаж, для которого этот датакрон (справочно, не проверяется)"),
         уровень3: str = commands.Param(default=None, description="[Обычное] новый бонус 3 уровня", autocomplete=autocomplete_datacron_level3),
         уровень6: str = commands.Param(default=None, description="[Обычное] новый бонус 6 уровня", autocomplete=autocomplete_datacron_level6),
         уровень9: str = commands.Param(default=None, description="[Обычное] новый бонус 9 уровня", autocomplete=autocomplete_datacron_level9),
         персонаж: str = commands.Param(default=None, description="[Спец.] новый персонаж", autocomplete=autocomplete_datacron_focused_character),
         уровень: int = commands.Param(default=None, description="[Спец.] новый нужный уровень прокачки", ge=1, le=20),
+        статы: str = commands.Param(default=None, description="[Обычное] новые приоритетные % статы (свободный текст)"),
         комментарий: str = commands.Param(default=None, description="Новая заметка"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         focused_id = _parse_focused_id(id)
         if focused_id is not None:
             await self._edit_focused_requirement(
-                inter, focused_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить, guild_id
+                inter, focused_id, сезон, приоритет, отряд, персонаж, уровень, комментарий, удалить, guild_id
             )
             return
 
@@ -1012,7 +1012,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
-        _, cur_set_id, cur_pack, cur_l3, cur_l6, cur_l9, cur_comment, _, _, cur_priority = row
+        _, cur_set_id, cur_pack, cur_l3, cur_l6, cur_l9, cur_comment, _, _, cur_priority, cur_stats = row
 
         new_set_id = cur_set_id
         if сезон is not None:
@@ -1023,11 +1023,12 @@ class DatacronRequirementsCog(commands.Cog):
             new_set_id = parsed
 
         new_priority = приоритет if приоритет is not None else cur_priority
-        new_pack = пак if пак is not None else cur_pack
+        new_pack = отряд if отряд is not None else cur_pack
         new_l3 = уровень3 if уровень3 is not None else cur_l3
         new_l6 = уровень6 if уровень6 is not None else cur_l6
         new_l9 = уровень9 if уровень9 is not None else cur_l9
         new_comment = комментарий if комментарий is not None else cur_comment
+        new_stats = статы if статы is not None else cur_stats
 
         for level_num, value in ((3, new_l3), (6, new_l6), (9, new_l9)):
             if not _is_valid_level_value(self.bot.datacron_cache, new_set_id, level_num, value):
@@ -1037,11 +1038,11 @@ class DatacronRequirementsCog(commands.Cog):
                 )
                 return
 
-        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id)
+        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id, stats=new_stats)
         summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=new_pack)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS.get(new_priority, new_priority)}] обновлено: {summary}", ephemeral=True)
 
-    async def _edit_focused_requirement(self, inter, req_id, сезон, приоритет, пак, персонаж, уровень, комментарий, удалить, guild_id=1):
+    async def _edit_focused_requirement(self, inter, req_id, сезон, приоритет, отряд, персонаж, уровень, комментарий, удалить, guild_id=1):
         row = database.get_datacron_focused_requirement(req_id, guild_id=guild_id)
         if not row:
             await inter.response.send_message(f"❌ Спец. требование F{req_id} не найдено.", ephemeral=True)
@@ -1063,7 +1064,7 @@ class DatacronRequirementsCog(commands.Cog):
             new_set_id = parsed
 
         new_priority = приоритет if приоритет is not None else cur_priority
-        new_pack = пак if пак is not None else cur_pack
+        new_pack = отряд if отряд is not None else cur_pack
         new_char = персонаж if персонаж is not None else cur_char
         new_level = уровень if уровень is not None else cur_level
         new_comment = комментарий if комментарий is not None else cur_comment
@@ -1083,9 +1084,8 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон для очистки", autocomplete=autocomplete_datacron_season),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         set_id = _parse_trailing_bracket_int(сезон)
@@ -1192,9 +1192,8 @@ class DatacronRequirementsCog(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         set_id = _parse_trailing_bracket_int(сезон)
@@ -1261,7 +1260,7 @@ class DatacronRequirementsCog(commands.Cog):
             owned = _extract_player_base_datacrons(player, set_id)
             pairs = _match_requirements(requirements, owned)
             for req, match in pairs:
-                _, _, pack, l3, l6, l9, comment, _, _, priority = req
+                _, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
                 group = groups.get(priority, groups[PRIORITY_REQUIRED])
                 l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
                 closed_levels = None
@@ -1272,7 +1271,7 @@ class DatacronRequirementsCog(commands.Cog):
                         level_label(6, m[6]) if m[6] else "—",
                         level_label(9, m[9]) if m[9] else "—",
                     )
-                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels))
+                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels, stats))
                 group["total"] += 1
                 if match:
                     group["matched"] += 1
@@ -1315,9 +1314,8 @@ class DatacronRequirementsCog(commands.Cog):
     async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=False)
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         cache = self.bot.datacron_cache
@@ -1337,11 +1335,11 @@ class DatacronRequirementsCog(commands.Cog):
 
             priority_items = {p: [] for p in PRIORITY_ORDER}
             for row in base_reqs:
-                _, _, pack, l3, l6, l9, comment, _, _, priority = row
+                _, _, pack, l3, l6, l9, comment, _, _, priority, stats = row
                 l3_lbl = _level_label(season_data["level3"], l3)
                 l6_lbl = _level_label(season_data["level6"], l6)
                 l9_lbl = _level_label(season_data["level9"], l9)
-                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment)
+                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, stats)
                 priority_items.get(priority, priority_items[PRIORITY_REQUIRED]).append(field)
             for row in focused_reqs:
                 _, _, pack, character_key, required_level, comment, _, _, priority = row

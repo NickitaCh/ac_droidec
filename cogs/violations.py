@@ -231,9 +231,8 @@ class ViolationsCog(commands.Cog):
         комментарий_3: str = commands.Param(description="Детали для третьего нарушения (опционально)", default=None),
         дата: str = commands.Param(description="Формат: ДД.ММ или ДД.ММ.ГГГГ. По умолчанию — сегодня", default=None)
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         if дата is None:
@@ -328,9 +327,8 @@ class ViolationsCog(commands.Cog):
         await inter.response.defer(ephemeral=False)
         three_months_ago = datetime.now() - timedelta(days=90)
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.followup.send("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         if тег is not None or игрок:
@@ -431,9 +429,8 @@ class ViolationsCog(commands.Cog):
         игрок: str = commands.Param(default=None, description="Игрок, у которого хотите аннулировать нарушение (или укажите тег ниже)", autocomplete=autocomplete_players),
         тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         if тег is not None:

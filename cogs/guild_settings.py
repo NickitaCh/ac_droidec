@@ -45,9 +45,8 @@ class GuildSettings(commands.Cog):
         self.bot = bot
 
     async def _set_field(self, inter: disnake.ApplicationCommandInteraction, field: str, value, human_label: str):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
         database.update_guild_config(guild_id, **{field: str(value.id)})
         await inter.response.send_message(f"✅ {human_label} теперь: {value.mention}", ephemeral=True)
@@ -115,9 +114,8 @@ class GuildSettings(commands.Cog):
 
     @settings_group.sub_command(name="список", description="Показать текущие настройки каналов и ролей гильдии")
     async def settings_list(self, inter: disnake.ApplicationCommandInteraction):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
         guild_cfg = database.get_guild_config(guild_id)
         embed = disnake.Embed(title="⚙️ Настройки гильдии", color=disnake.Color.blurple())

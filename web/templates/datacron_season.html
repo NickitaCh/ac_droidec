@@ -29,7 +29,7 @@
         <div class="panel-title"><span>Добавить обычное требование</span></div>
         <form method="post" action="/datacrons/{{ set_id }}/add" class="requirement-form">
             <label>
-                Пак/персонаж (справочно)
+                Отряд/персонаж (справочно)
                 <input type="text" name="pack">
             </label>
             <label>
@@ -65,6 +65,10 @@
                 </div>
             </label>
             <label>
+                Статы (необязательно)
+                <input type="text" name="stats" placeholder="Например: crit dmg / crit chance">
+            </label>
+            <label>
                 Комментарий (необязательно)
                 <input type="text" name="comment">
             </label>
@@ -82,9 +86,12 @@
                 <table class="data">
                     <thead>
                         <tr>
-                            <th>Пак</th>
-                            <th>3 → 6 → 9 уровень</th>
+                            <th>Отряд</th>
+                            <th class="dc-level-col">3 уровень</th>
+                            <th class="dc-level-col">6 уровень</th>
+                            <th class="dc-level-col">9 уровень</th>
                             <th>Приоритет</th>
+                            <th>Статы</th>
                             <th>Комментарий</th>
                             <th></th>
                         </tr>
@@ -93,19 +100,23 @@
                         {% for r in base_reqs %}
                             <tr>
                                 <td>#{{ r.id }} {{ r.pack or "—" }}</td>
-                                <td>{{ r.level3_label }} → {{ r.level6_label }} → {{ r.level9_label }}</td>
+                                <td class="dc-level-col">{{ r.level3_label }}</td>
+                                <td class="dc-level-col">{{ r.level6_label }}</td>
+                                <td class="dc-level-col">{{ r.level9_label }}</td>
                                 <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                                <td>{{ r.stats or "—" }}</td>
                                 <td>{{ r.comment or "—" }}</td>
                                 <td class="row-actions">
                                     <details>
                                         <summary class="link-btn">править</summary>
                                         <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/edit" class="inline-form">
-                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Пак">
+                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Отряд">
                                             <select name="priority">
                                                 {% for label, value in priority_options %}
                                                     <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
                                                 {% endfor %}
                                             </select>
+                                            <input type="text" name="stats" value="{{ r.stats or '' }}" placeholder="Статы">
                                             <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
                                             <button type="submit">Сохранить</button>
                                         </form>
@@ -164,7 +175,7 @@
                     </select>
                 </label>
                 <label>
-                    Пак (справочно)
+                    Отряд (справочно)
                     <input type="text" name="pack">
                 </label>
                 <label>
@@ -183,7 +194,7 @@
                 <table class="data">
                     <thead>
                         <tr>
-                            <th>Пак</th>
+                            <th>Отряд</th>
                             <th>Персонаж</th>
                             <th class="num">Нужен уровень</th>
                             <th>Приоритет</th>
@@ -204,7 +215,7 @@
                                         <summary class="link-btn">править</summary>
                                         <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/edit" class="inline-form">
                                             <input type="number" name="required_level" min="1" max="20" value="{{ r.required_level }}" required>
-                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Пак">
+                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Отряд">
                                             <select name="priority">
                                                 {% for label, value in priority_options %}
                                                     <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>

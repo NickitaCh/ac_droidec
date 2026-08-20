@@ -132,6 +132,20 @@ h1, h2 { letter-spacing: -0.01em; }
     font-size: 0.9em;
 }
 
+/* ---- Переключатель гильдии в шапке (супер-админы, см. base.html) — form
+   по умолчанию flex-column/max-width:20em (см. правило form{} ниже), тут нужен
+   узкий инлайн-элемент внутри строки nav. ---- */
+.guild-switch-form {
+    display: inline-flex;
+    max-width: none;
+    margin: 0;
+}
+.guild-switch-form select {
+    padding: 0.4em 0.6em;
+    font-size: 0.9em;
+    border-radius: 6px;
+}
+
 main {
     max-width: 40em;
     margin: 2em auto;
@@ -317,6 +331,13 @@ table.data td.num, table.data th.num {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
+/* ---- /datacrons/<season>: колонки уровней 3/6/9 — полные описания бонусов
+   (не сокращаем текст), перенос строк внутри разумной ширины столбца вместо
+   растягивания таблицы вширь. ---- */
+table.data .dc-level-col {
+    max-width: 18em;
+    white-space: normal;
+}
 .muted { color: var(--fg-muted); }
 /* ---- Вторичная строка в ячейке таблицы (напр. сырой ID под резолвленным именем) ---- */
 .cell-sub { display: block; color: var(--fg-muted); font-size: 0.8em; margin-top: 0.15em; }
@@ -408,6 +429,19 @@ table.data td.num, table.data th.num {
 .builder-form { max-width: 42em; gap: 1.25em; }
 .builder-form label { max-width: 20em; }
 .builder-form .form-block > span { display: block; margin-bottom: 0.5em; }
+
+/* ---- /settings: группы каналов/ролей в сетку (было зажато дефолтным
+   form{max-width:20em}, из-за чего вся страница схлопывалась в узкую колонку
+   уже дальше max-width:32em самих панелей внутри). ---- */
+.settings-form {
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(22em, 1fr));
+    gap: 1em;
+    align-items: start;
+}
+.settings-form .settings-group { margin-bottom: 0; }
+.settings-form > button { grid-column: 1 / -1; justify-self: start; }
 
 /* ---- Плейты: форма добавления требования (шире, в сетку, не колонка) ---- */
 .requirement-form {

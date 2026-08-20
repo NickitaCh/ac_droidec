@@ -93,6 +93,23 @@ def resolve_guild_id(author) -> int | None:
     return resolve_access(author)["guild_id"]
 
 
+async def require_guild_id(inter):
+    """resolve_guild_id + стандартный null-check + ответ об ошибке одним вызовом —
+    раньше эти 3-4 строки были скопированы в каждую сабкоманду по отдельности
+    (guild_settings.py, datacron_requirements.py, guild_events.py и др.). Сама
+    отвечает пользователю и возвращает None, если гильдию определить не удалось —
+    вызывающий код в этом случае просто return'ит. Работает как до, так и после
+    inter.response.defer() (проверяет inter.response.is_done())."""
+    guild_id = resolve_guild_id(inter.author)
+    if guild_id is None:
+        msg = "❌ Не удалось определить, к какой гильдии вы относитесь."
+        if inter.response.is_done():
+            await inter.edit_original_response(msg)
+        else:
+            await inter.response.send_message(msg, ephemeral=True)
+    return guild_id
+
+
 def is_officer_for_resolved_guild(author) -> bool:
     """Сигнатура не менялась — используется в @commands.check на офицерских
     сабкомандах (birthday.py, stat_requirements.py, datacron_requirements.py,

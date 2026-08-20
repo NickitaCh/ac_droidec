@@ -43,6 +43,28 @@ async def guilds_page(request: Request, user: dict = Depends(require_super_admin
     })
 
 
+# =====================================================================
+# Переключатель "войти как гильдия N" в шапке (base.html, только для
+# супер-админов) — см. web/deps.py::_apply_guild_switch за тем, как это влияет
+# на guild_id/tier во всех остальных роутах. Здесь только пишем/чистим
+# session["impersonate_guild_id"] и возвращаем на ту же страницу.
+# =====================================================================
+@router.post("/switch-guild", response_class=RedirectResponse)
+async def switch_guild(request: Request, guild_id: str = Form(...), user: dict = Depends(require_super_admin)):
+    if guild_id == "__self__":
+        request.session.pop("impersonate_guild_id", None)
+    else:
+        try:
+            gid = int(guild_id)
+        except ValueError:
+            gid = None
+        if gid is None or not any(g["id"] == gid for g in list_guilds(active_only=True)):
+            return RedirectResponse(f"/admin/guilds?{urlencode({'error': 'Некорректная гильдия.'})}", status_code=303)
+        request.session["impersonate_guild_id"] = gid
+    referer = request.headers.get("referer") or "/"
+    return RedirectResponse(referer, status_code=303)
+
+
 @router.post("/guilds/add", response_class=HTMLResponse)
 async def guilds_add(
     request: Request,
