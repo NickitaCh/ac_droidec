@@ -436,7 +436,7 @@ table.data .dc-level-col {
 .settings-form {
     max-width: none;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(22em, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(26em, 1fr));
     gap: 1em;
     align-items: start;
 }

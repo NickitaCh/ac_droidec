@@ -28,13 +28,14 @@ SETTINGS_FIELDS = [
 
 # Те же поля, сгруппированные по режиму — используется только для отображения
 # в /настройки список (эмбед по секциям) и должно соответствовать
-# web/routes/guild_dashboard.py::GUILD_SETTINGS_GROUPS.
+# web/routes/guild_dashboard.py::GUILD_SETTINGS_GROUPS. Внутри ТБ раньше был
+# один блок на все 6 полей — разбит на тег/план+ордер/отчёт вслед за тем, как
+# уже названы сабкоманды (тб_ротация_*/тб_план_*/тб_ордер_*/тб_отчет_*), иначе
+# один блок на 6 разнородных полей читался плохо что в Discord, что в вебе.
 SETTINGS_GROUPS = [
-    ("Территориальная битва (ТБ)", [
-        "ping_channel_id", "ping_role_id",
-        "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
-        "officer_channel_id",
-    ]),
+    ("ТБ — тег на подготовку", ["ping_channel_id", "ping_role_id"]),
+    ("ТБ — план и ордер", ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
+    ("ТБ — итоговый отчёт", ["officer_channel_id"]),
     ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
