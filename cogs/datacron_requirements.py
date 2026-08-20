@@ -377,11 +377,26 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
     """Пары {key, en, ru} по КЛЮЧУ локализации (не по abilityId — на один ability_id
     может резолвиться разный ключ в зависимости от V-варианта, см. _resolve_ability_desc_key).
     Ключ ищем по RU-словарю (это то, что реально показываем игрокам сейчас), затем
-    смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст."""
+    смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст.
+
+    Ограничено активными сезонами (та же фильтрация по expirationTimeMs, что и в
+    _fetch_datacron_cache) — иначе в экспорт попадали бы и завершённые сезоны."""
+    now_ms = int(time.time() * 1000)
+    active_set_ids = set()
+    for dset in game_data.get("datacronSet", []):
+        try:
+            expiration_ms = int(dset.get("expirationTimeMs", 0))
+        except (TypeError, ValueError):
+            expiration_ms = 0
+        if expiration_ms >= now_ms:
+            active_set_ids.add(dset.get("id"))
+
     affix_sets = {a["id"]: a for a in game_data.get("datacronAffixTemplateSet", [])}
     seen_keys = set()
     pairs = []
     for template in game_data.get("datacronTemplate", []):
+        if template.get("setId") not in active_set_ids:
+            continue
         for tier in template.get("tier", []):
             for affix_set_id in tier.get("affixTemplateSetId", []):
                 affix_set = affix_sets.get(affix_set_id)
