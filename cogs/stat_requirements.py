@@ -558,9 +558,8 @@ class StatRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         канал: disnake.TextChannel = commands.Param(description="Канал для объявлений"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
         database.update_guild_config(guild_id, omicron_channel_id=str(канал.id))
         await inter.response.send_message(f"✅ Объявления о выдаче омикронов теперь идут в {канал.mention}.", ephemeral=True)
@@ -624,9 +623,8 @@ class StatRequirementsCog(commands.Cog):
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         if плейт not in database.get_all_stat_requirement_plates(guild_id=guild_id):
@@ -655,9 +653,8 @@ class StatRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Новый комментарий"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         req_id = _parse_req_id(id)
@@ -692,9 +689,8 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
     ):
         await inter.response.defer(ephemeral=True)
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         char_keys = [_parse_bracket_id(персонаж)] if персонаж else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
@@ -728,9 +724,8 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Название нового плейта (как в HotUtils, например AC_ALL)"),
         описание: str = commands.Param(default=None, description="Заметка о плейте"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         created = database.create_stat_plate(плейт, описание, str(inter.author.id), guild_id=guild_id)
@@ -743,9 +738,8 @@ class StatRequirementsCog(commands.Cog):
     @stat_req.sub_command(name="плейты", description="Показать список всех плейтов")
     async def stat_req_list_plates(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         rows = database.get_all_stat_plates_detailed(guild_id=guild_id)
@@ -770,9 +764,8 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт для переименования", autocomplete=autocomplete_stat_plate),
         новое_имя: str = commands.Param(description="Новое название плейта"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         ok = database.rename_stat_plate(плейт, новое_имя, guild_id=guild_id)
@@ -791,9 +784,8 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт для удаления", autocomplete=autocomplete_stat_plate),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         count = database.count_stat_requirements_by_plate(плейт, guild_id=guild_id)
@@ -824,9 +816,8 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         if not self.bot.stat_calc:
@@ -906,9 +897,8 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         if not self.bot.stat_calc:

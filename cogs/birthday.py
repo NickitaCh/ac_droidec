@@ -165,9 +165,8 @@ class Birthday(commands.Cog):
         user: disnake.User = commands.Param(description="Пользователь"),
         date: str = commands.Param(description="Дата в формате ДД-ММ-ГГГГ или ДД-ММ")
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         try:
@@ -190,9 +189,8 @@ class Birthday(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         user: disnake.User = commands.Param(description="Пользователь")
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         database.remove_birthday(str(user.id), guild_id=guild_id)
@@ -202,9 +200,8 @@ class Birthday(commands.Cog):
     async def birthday_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         all_bdays = database.get_all_birthdays(guild_id=guild_id)

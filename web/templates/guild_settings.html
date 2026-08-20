@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Настройки гильдии — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Настройки гильдии</h1>
     <p class="muted">
@@ -17,9 +18,9 @@
         <p><span class="badge badge-ok">Сохранено</span></p>
     {% endif %}
 
-    <form method="post" action="/settings">
+    <form method="post" action="/settings" class="settings-form">
         {% for group in groups %}
-            <div class="panel" style="max-width: 32em; margin-bottom: 1em;">
+            <div class="panel settings-group">
                 <h3 style="margin-top: 0;">{{ group.name }}</h3>
                 <p class="muted" style="margin-top: -0.5em;">{{ group.hint }}</p>
                 {% for row in group.rows %}

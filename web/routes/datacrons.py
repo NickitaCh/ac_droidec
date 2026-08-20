@@ -207,14 +207,14 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(requ
 
     base_reqs = []
     for row in base_rows:
-        req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority = row
+        req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority, stats = row
         base_reqs.append({
             "id": req_id, "pack": pack,
             "level3": l3, "level6": l6, "level9": l9,
             "level3_label": _level_label(season_data["level3"], l3),
             "level6_label": _level_label(season_data["level6"], l6),
             "level9_label": _level_label(season_data["level9"], l9),
-            "comment": comment, "priority": priority,
+            "comment": comment, "stats": stats, "priority": priority,
             "priority_label": PRIORITY_LABELS.get(priority, priority),
             "priority_emoji": PRIORITY_EMOJI.get(priority, ""),
             # Уровни, к которым имеет смысл предложить "добавить альтернативу" —
@@ -257,6 +257,7 @@ async def add_base_requirement(
     level3: str = Form(DATACRON_NONE),
     level6: str = Form(DATACRON_NONE),
     level9: str = Form(DATACRON_NONE),
+    stats: str = Form(""),
     comment: str = Form(""),
     user: dict = Depends(require_officer_access),
 ):
@@ -272,7 +273,7 @@ async def add_base_requirement(
 
     database.add_datacron_requirement(
         set_id, pack.strip() or None, level3, level6, level9, comment.strip() or None,
-        user["discord_id"], priority, guild_id=guild_id,
+        user["discord_id"], priority, guild_id=guild_id, stats=stats.strip() or None,
     )
     return _redirect_season(set_id, notice="Требование добавлено.")
 
@@ -314,7 +315,7 @@ async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str =
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
-    _, row_set_id, pack, l3, l6, l9, comment, _, _, priority = row
+    _, row_set_id, pack, l3, l6, l9, comment, _, _, priority, stats = row
 
     catalog = await _safe_catalog()
     if value in (DATACRON_ANY, DATACRON_NONE) or not _is_valid_level_value(catalog, row_set_id, level, value):
@@ -336,7 +337,7 @@ async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str =
     else:
         new_l9 = new_value
 
-    database.update_datacron_requirement(req_id, row_set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id)
+    database.update_datacron_requirement(req_id, row_set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats)
     return _redirect_season(set_id, notice=f"Требование #{req_id} дополнено альтернативой.")
 
 
@@ -349,6 +350,7 @@ async def edit_base_requirement(
     req_id: int,
     pack: str = Form(""),
     priority: str = Form(...),
+    stats: str = Form(""),
     comment: str = Form(""),
     user: dict = Depends(require_officer_access),
 ):
@@ -356,8 +358,8 @@ async def edit_base_requirement(
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
-    _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority = row
-    database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id)
+    _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority, _cur_stats = row
+    database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id, stats=stats.strip() or None)
     return _redirect_season(set_id, notice=f"Требование #{req_id} обновлено.")
 
 
@@ -470,7 +472,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
         owned = _extract_player_base_datacrons(player, set_id)
         pairs = _match_requirements(requirements, owned)
         for req, match in pairs:
-            _, _, pack, l3, l6, l9, comment, _, _, priority = req
+            _, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
             closed = []
             if match:
                 m = match["levels"]
@@ -479,7 +481,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
             bucket.append({
                 "kind": "base", "pack": pack,
                 "l3": level_label(3, l3), "l6": level_label(6, l6), "l9": level_label(9, l9),
-                "comment": comment, "matched": bool(match), "closed": closed,
+                "comment": comment, "stats": stats, "matched": bool(match), "closed": closed,
             })
             tb = totals.get(priority, totals[PRIORITY_REQUIRED])
             tb["total"] += 1

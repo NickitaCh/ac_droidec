@@ -1522,19 +1522,24 @@ def _ensure_datacron_requirements_table(cursor):
         cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN stats TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_guild_set ON datacron_requirements(guild_id, set_id)")
 
 
 def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_value: str, level9_value: str,
-                              comment: str, created_by: str, priority: str = "required", guild_id: int = 1) -> int:
+                              comment: str, created_by: str, priority: str = "required", guild_id: int = 1,
+                              stats: str = None) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO datacron_requirements
-            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, guild_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, priority, guild_id))
+            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, guild_id, stats)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, priority, guild_id, stats))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -1542,15 +1547,16 @@ def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_v
 
 
 def update_datacron_requirement(req_id: int, set_id: int, pack: str, level3_value: str, level6_value: str,
-                                 level9_value: str, comment: str, priority: str, guild_id: int = 1) -> bool:
+                                 level9_value: str, comment: str, priority: str, guild_id: int = 1,
+                                 stats: str = None) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         UPDATE datacron_requirements
-        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?, priority = ?
+        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?, priority = ?, stats = ?
         WHERE id = ? AND guild_id = ?
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, priority, req_id, guild_id))
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, priority, stats, req_id, guild_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
@@ -1596,7 +1602,7 @@ def get_datacron_requirement(req_id: int, guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
         FROM datacron_requirements WHERE id = ? AND guild_id = ?
     """, (req_id, guild_id))
     row = cursor.fetchone()
@@ -1609,7 +1615,7 @@ def get_datacron_requirements_by_set(set_id: int, guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
         FROM datacron_requirements WHERE set_id = ? AND guild_id = ? ORDER BY id
     """, (set_id, guild_id))
     rows = cursor.fetchall()
@@ -1622,7 +1628,7 @@ def get_all_datacron_requirements(guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
         FROM datacron_requirements WHERE guild_id = ? ORDER BY set_id, id
     """, (guild_id,))
     rows = cursor.fetchall()

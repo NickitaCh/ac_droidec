@@ -42,6 +42,17 @@
                             <a href="/admin/omicron-phrases">Фразы для омикронов</a>
                         </div>
                     </details>
+                    {% if user.switchable_guilds %}
+                        <form method="post" action="/admin/switch-guild" class="guild-switch-form">
+                            <select name="guild_id" onchange="this.form.submit()">
+                                <option value="__self__" {% if user.guild_id == user.own_guild_id %}selected{% endif %}>— своя гильдия —</option>
+                                {% for g in user.switchable_guilds %}
+                                    <option value="{{ g.id }}" {% if user.guild_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <noscript><button type="submit">Переключить</button></noscript>
+                        </form>
+                    {% endif %}
                 {% endif %}
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout">Выйти</a>

@@ -931,9 +931,8 @@ class GuildEvents(commands.Cog):
     async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         events = database.get_recent_tb_events(guild_id=guild_id)
@@ -959,9 +958,8 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_message("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         cache = self.bot.guild_roster_caches.get(guild_id, {})
@@ -1029,9 +1027,8 @@ class GuildEvents(commands.Cog):
         ),
         планета: str = commands.Param(description="Название планеты"),
     ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.response.send_message("❌ Не удалось определить, к какой гильдии вы относитесь.", ephemeral=True)
             return
 
         planet_name = планета.strip()

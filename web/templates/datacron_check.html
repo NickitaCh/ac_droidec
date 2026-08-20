@@ -59,9 +59,10 @@
                             <thead>
                                 <tr>
                                     <th></th>
-                                    <th>Пак / персонаж</th>
+                                    <th>Отряд / персонаж</th>
                                     <th>Требуется</th>
                                     <th>У игрока</th>
+                                    <th>Статы</th>
                                     <th>Комментарий</th>
                                 </tr>
                             </thead>
@@ -78,6 +79,7 @@
                                             <td>{{ r.character_label }} — {{ r.required_level }}+</td>
                                             <td>уровень {{ r.current_level }}</td>
                                         {% endif %}
+                                        <td>{{ r.stats or "—" }}</td>
                                         <td>{{ r.comment or "—" }}</td>
                                     </tr>
                                 {% endfor %}

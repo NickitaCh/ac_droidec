@@ -84,9 +84,8 @@ class SelfRegistrationCog(commands.Cog):
     async def registration_report(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить, к какой гильдии вы относитесь.")
             return
 
         cache = self.bot.guild_roster_caches.get(guild_id)
