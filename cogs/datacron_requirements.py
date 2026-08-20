@@ -369,35 +369,49 @@ async def _fetch_datacron_cache(comlink) -> dict:
 # через web/app.py (app.mount("/static", ...)), веб-процесс ничего не строит,
 # только отдаёт то, что сюда положил бот. Обновляется тем же 12-часовым
 # циклом, что и bot.datacron_cache, см. DatacronRequirementsCog.datacron_cache_loop.
+# Формат: {"generated_at": ..., "seasons": [{"set_id", "display_name",
+# "levels": {"3": [{key, ability_id, en, ru}, ...], "6": [...], "9": [...]}}, ...]}
 # =====================================================================
 TRANSLATION_EXPORT_PATH = Path(__file__).resolve().parent.parent / "web" / "static" / "datacron_translations.json"
 
 
 def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict) -> list:
-    """Пары {key, en, ru} по КЛЮЧУ локализации (не по abilityId — на один ability_id
-    может резолвиться разный ключ в зависимости от V-варианта, см. _resolve_ability_desc_key).
-    Ключ ищем по RU-словарю (это то, что реально показываем игрокам сейчас), затем
-    смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст.
+    """Пары {key, ability_id, en, ru} сгруппированы по сезону и по уровню бонуса (3/6/9)
+    — под каждый сезон отдельный элемент {set_id, display_name, levels: {"3": [...], ...}}.
+    Ключ локализации ищем по RU-словарю (это то, что реально показываем игрокам сейчас),
+    затем смотрим тот же ключ в EN — так пара гарантированно про один и тот же текст
+    (на один ability_id может резолвиться разный ключ в зависимости от V-варианта,
+    см. _resolve_ability_desc_key).
 
     Ограничено активными сезонами (та же фильтрация по expirationTimeMs, что и в
-    _fetch_datacron_cache) — иначе в экспорт попадали бы и завершённые сезоны."""
+    _fetch_datacron_cache) и обычными (не фокусными) шаблонами — у фокусных ДК своя
+    шкала уровней (1..N по конкретному персонажу), а не общие 3/6/9."""
     now_ms = int(time.time() * 1000)
-    active_set_ids = set()
+    seasons = {}
     for dset in game_data.get("datacronSet", []):
         try:
             expiration_ms = int(dset.get("expirationTimeMs", 0))
         except (TypeError, ValueError):
             expiration_ms = 0
-        if expiration_ms >= now_ms:
-            active_set_ids.add(dset.get("id"))
+        if expiration_ms < now_ms:
+            continue
+        set_id = dset.get("id")
+        seasons[set_id] = {
+            "set_id": set_id,
+            "display_name": loc_ru_kv.get(dset.get("displayName", ""), f"Сезон {set_id}"),
+            "levels": {level: [] for level in DATACRON_LEVELS},
+        }
 
     affix_sets = {a["id"]: a for a in game_data.get("datacronAffixTemplateSet", [])}
-    seen_keys = set()
-    pairs = []
+    seen_keys = set()  # (set_id, level, key) — один и тот же текст способности может повторяться на разных уровнях/сезонах
     for template in game_data.get("datacronTemplate", []):
-        if template.get("setId") not in active_set_ids:
+        set_id = template.get("setId")
+        if set_id not in seasons or template.get("focused"):
             continue
         for tier in template.get("tier", []):
+            level = tier.get("id")
+            if level not in DATACRON_LEVELS:
+                continue
             for affix_set_id in tier.get("affixTemplateSetId", []):
                 affix_set = affix_sets.get(affix_set_id)
                 if not affix_set:
@@ -407,16 +421,25 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
                     if not ability_id:
                         continue
                     key = _resolve_ability_desc_key(ability_id, loc_ru_kv)
-                    if not key or key in seen_keys:
+                    dedup_key = (set_id, level, key)
+                    if not key or dedup_key in seen_keys:
                         continue
-                    seen_keys.add(key)
+                    seen_keys.add(dedup_key)
                     en = loc_en_kv.get(key)
                     ru = loc_ru_kv.get(key)
                     if en is None or ru is None:
                         continue  # нет полной пары EN/RU под этим ключом — сверять/переводить нечего
-                    pairs.append({"key": key, "ability_id": ability_id, "en": en, "ru": ru})
-    pairs.sort(key=lambda p: p["key"])
-    return pairs
+                    seasons[set_id]["levels"][level].append({"key": key, "ability_id": ability_id, "en": en, "ru": ru})
+
+    result = []
+    for set_id in sorted(seasons.keys(), reverse=True):
+        data = seasons[set_id]
+        data["levels"] = {
+            str(level): sorted(entries, key=lambda p: p["key"])
+            for level, entries in data["levels"].items()
+        }
+        result.append(data)
+    return result
 
 
 async def _fetch_and_write_translation_export(comlink) -> int:
@@ -427,17 +450,18 @@ async def _fetch_and_write_translation_export(comlink) -> int:
     game_data = await asyncio.to_thread(comlink.get_game_data, items=str(DATACRON_DEFINITIONS_FLAG))
     loc_ru = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
     loc_en = await asyncio.to_thread(comlink.get_localization, locale="ENG_US", unzip=True)
-    pairs = _build_translation_export(
+    seasons = _build_translation_export(
         game_data,
         _parse_loc_kv(loc_en.get("Loc_ENG_US.txt", "")),
         _parse_loc_kv(loc_ru.get("Loc_RUS_RU.txt", "")),
     )
+    total = sum(len(entries) for season in seasons for entries in season["levels"].values())
     TRANSLATION_EXPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     TRANSLATION_EXPORT_PATH.write_text(
-        json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(), "entries": pairs}, ensure_ascii=False, indent=2),
+        json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(), "seasons": seasons}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return len(pairs)
+    return total
 
 
 # =====================================================================
