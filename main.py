@@ -20,6 +20,11 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ Ошибка: Переменная DISCORD_TOKEN не найдена в файле .env!")
 
+# Ключ для Gemini API (vision-разбор картинок ТБ-планирования, cogs/tb_order_image.py).
+# Бесплатный тариф, без биллинга. Опционален — без него просто недоступна одна
+# команда /тб_ордер_из_картинки, бот не падает.
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
 COMLINK_URL = "http://localhost:3000" 
 
 TUSA_GUILD_ID = 1105914797054238830
@@ -129,6 +134,8 @@ class GuildManagerBot(commands.Bot):
         self.TB_ORDER_ROLE_ID = TB_ORDER_ROLE_ID
 
         self.PLAYER_STATS_SYNC_HOURS = PLAYER_STATS_SYNC_HOURS
+
+        self.google_api_key = GOOGLE_API_KEY
 
 bot = GuildManagerBot()
 
