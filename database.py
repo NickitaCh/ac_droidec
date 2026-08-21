@@ -158,6 +158,7 @@ GUILD_CONFIG_COLUMNS = [
     "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
     "swgoh_gg_guild_id",
     "omicron_channel_id",
+    "tw_guide_forum_channel_id",
     "is_active",
 ]
 
@@ -192,6 +193,10 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN omicron_channel_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tw_guide_forum_channel_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -2575,3 +2580,150 @@ def delete_omicron_phrase(character_key: str) -> bool:
     deleted = cursor.rowcount > 0
     conn.close()
     return deleted
+
+
+# =====================================================================
+# КОНТРЫ ПО ВГ: зеркало форум-канала гайдов (guilds.tw_guide_forum_channel_id) —
+# каждый тред форума = один вражеский пак, каждое сообщение внутри = один вариант
+# контры на этот пак (или его конкретный вариант, если заголовок сообщения '## ...'
+# отличается от названия треда — см. пример "Хондо" / "Хондо с вейнокроном").
+# Наполняется периодическим синком (cogs/tw_counters.py::sync_loop), не руками —
+# см. _parse_counter_message для формата, который парсится в структурированные поля.
+# =====================================================================
+def _ensure_tw_counter_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_counter_threads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            thread_id TEXT NOT NULL,
+            enemy_label TEXT NOT NULL,
+            tag TEXT,
+            updated_at TEXT NOT NULL,
+            UNIQUE(guild_id, thread_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_counters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            thread_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            enemy_variant TEXT NOT NULL,
+            counter_leader TEXT,
+            composition TEXT,
+            datacron_note TEXT,
+            battle_plan TEXT,
+            team_code TEXT,
+            video_url TEXT,
+            parsed_ok INTEGER NOT NULL DEFAULT 0,
+            raw_text TEXT,
+            author TEXT,
+            posted_at TEXT,
+            updated_at TEXT NOT NULL,
+            UNIQUE(guild_id, message_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_counters_guild_variant ON tw_counters(guild_id, enemy_variant)")
+
+
+def upsert_tw_counter_thread(guild_id: int, thread_id: str, enemy_label: str, tag: str = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("""
+        INSERT INTO tw_counter_threads (guild_id, thread_id, enemy_label, tag, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id, thread_id) DO UPDATE SET
+            enemy_label = excluded.enemy_label,
+            tag = excluded.tag,
+            updated_at = excluded.updated_at
+    """, (guild_id, thread_id, enemy_label, tag))
+    conn.commit()
+    conn.close()
+
+
+def upsert_tw_counter(guild_id: int, thread_id: str, message_id: str, enemy_variant: str,
+                       counter_leader: str = None, composition: str = None, datacron_note: str = None,
+                       battle_plan: str = None, team_code: str = None, video_url: str = None,
+                       parsed_ok: bool = False, raw_text: str = None, author: str = None,
+                       posted_at: str = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("""
+        INSERT INTO tw_counters (
+            guild_id, thread_id, message_id, enemy_variant, counter_leader, composition,
+            datacron_note, battle_plan, team_code, video_url, parsed_ok, raw_text, author,
+            posted_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id, message_id) DO UPDATE SET
+            enemy_variant = excluded.enemy_variant,
+            counter_leader = excluded.counter_leader,
+            composition = excluded.composition,
+            datacron_note = excluded.datacron_note,
+            battle_plan = excluded.battle_plan,
+            team_code = excluded.team_code,
+            video_url = excluded.video_url,
+            parsed_ok = excluded.parsed_ok,
+            raw_text = excluded.raw_text,
+            author = excluded.author,
+            posted_at = excluded.posted_at,
+            updated_at = excluded.updated_at
+    """, (guild_id, thread_id, message_id, enemy_variant, counter_leader, composition, datacron_note,
+          battle_plan, team_code, video_url, int(parsed_ok), raw_text, author, posted_at))
+    conn.commit()
+    conn.close()
+
+
+def get_tw_counter_packs(guild_id: int, query: str = "") -> list:
+    """Уникальные названия паков (enemy_variant) для автокомплита — с фильтром по подстроке."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("""
+        SELECT DISTINCT enemy_variant FROM tw_counters
+        WHERE guild_id = ? AND enemy_variant LIKE ?
+        ORDER BY enemy_variant
+    """, (guild_id, f"%{query}%"))
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_tw_counters_for_pack(guild_id: int, enemy_variant: str) -> list:
+    """Все известные контры на конкретный пак — (id, counter_leader, composition, datacron_note,
+    battle_plan, team_code, video_url, parsed_ok)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("""
+        SELECT id, counter_leader, composition, datacron_note, battle_plan, team_code, video_url, parsed_ok, raw_text
+        FROM tw_counters WHERE guild_id = ? AND enemy_variant = ?
+        ORDER BY parsed_ok DESC, id
+    """, (guild_id, enemy_variant))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_tw_counter_by_id(guild_id: int, counter_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("""
+        SELECT id, enemy_variant, counter_leader, composition, datacron_note, battle_plan, team_code, video_url, parsed_ok, raw_text
+        FROM tw_counters WHERE guild_id = ? AND id = ?
+    """, (guild_id, counter_id))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def count_tw_counters(guild_id: int) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("SELECT COUNT(*) FROM tw_counters WHERE guild_id = ?", (guild_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count

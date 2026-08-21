@@ -24,6 +24,7 @@ SETTINGS_FIELDS = [
     ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)"),
     ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ"),
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
+    ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ (для /вг_ордер)"),
 ]
 
 # Те же поля, сгруппированные по режиму — используется только для отображения
@@ -37,6 +38,7 @@ SETTINGS_GROUPS = [
     ("ТБ — план и ордер", ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
     ("ТБ — итоговый отчёт", ["officer_channel_id"]),
     ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
+    ("Территориальная Война (ВГ)", ["tw_guide_forum_channel_id"]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
 
@@ -112,6 +114,13 @@ class GuildSettings(commands.Cog):
         роль: disnake.Role = commands.Param(description="Тегаемая роль в ордере"),
     ):
         await self._set_field(inter, "tb_order_role_id", роль, "Роль, тегаемая в автоордере ТБ")
+
+    @settings_group.sub_command(name="вг_гайды_канал", description="Форум-канал с гайдами по контрам ВГ, откуда бот берёт данные для /вг_ордер")
+    async def set_tw_guide_forum_channel(
+        self, inter: disnake.ApplicationCommandInteraction,
+        канал: disnake.ForumChannel = commands.Param(description="Форум-канал гайдов по контрам ВГ"),
+    ):
+        await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
     @settings_group.sub_command(name="список", description="Показать текущие настройки каналов и ролей гильдии")
     async def settings_list(self, inter: disnake.ApplicationCommandInteraction):
