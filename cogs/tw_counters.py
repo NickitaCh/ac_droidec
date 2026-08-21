@@ -17,6 +17,16 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 
+# Фиксированные 10 локаций карты ВГ (зоны 1/2 делятся только на верх/низ, зоны
+# 3/4 — на флот/центр/низ) — сверено со скриншотом карты, одинаково для всех
+# гильдий (сама структура карты ВГ в игре, а не что-то настраиваемое per-guild).
+TW_LOCATIONS = [
+    "1 Верх", "1 Низ",
+    "2 Верх", "2 Низ",
+    "3 Флот", "3 Центр", "3 Низ",
+    "4 Флот", "4 Центр", "4 Низ",
+]
+
 # ------------------ Разбор сообщений с контрами ------------------
 # Формат сообщений в гайд-канале неоднороден (разные офицеры, годы): от строгого
 # "## <вариант>" / "### - <лидер>" / "**Состав:**" / "**Датакрон:**" / "**Ход
@@ -183,6 +193,11 @@ def _chunk_message(text: str, limit: int = 2000):
 
 
 # ------------------ Автокомплиты ------------------
+async def autocomplete_tw_location(inter: disnake.ApplicationCommandInteraction, string: str):
+    search = string.lower().strip()
+    return [loc for loc in TW_LOCATIONS if not search or search in loc.lower()][:25]
+
+
 async def autocomplete_tw_pack(inter: disnake.ApplicationCommandInteraction, string: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
     if guild_id is None:
@@ -342,19 +357,19 @@ class TWCounters(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         пак1: str = commands.Param(description="Вражеский пак №1", autocomplete=autocomplete_tw_pack),
         контра1: str = commands.Param(default=None, description="Наша контра на пак №1", autocomplete=autocomplete_tw_counter1),
-        локация1: str = commands.Param(default=None, description="Где бить пак №1 (например 'верх', '2 низ')"),
+        локация1: str = commands.Param(default=None, description="Где бить пак №1", autocomplete=autocomplete_tw_location),
         пак2: str = commands.Param(default=None, description="Вражеский пак №2", autocomplete=autocomplete_tw_pack),
         контра2: str = commands.Param(default=None, description="Наша контра на пак №2", autocomplete=autocomplete_tw_counter2),
-        локация2: str = commands.Param(default=None, description="Где бить пак №2"),
+        локация2: str = commands.Param(default=None, description="Где бить пак №2", autocomplete=autocomplete_tw_location),
         пак3: str = commands.Param(default=None, description="Вражеский пак №3", autocomplete=autocomplete_tw_pack),
         контра3: str = commands.Param(default=None, description="Наша контра на пак №3", autocomplete=autocomplete_tw_counter3),
-        локация3: str = commands.Param(default=None, description="Где бить пак №3"),
+        локация3: str = commands.Param(default=None, description="Где бить пак №3", autocomplete=autocomplete_tw_location),
         пак4: str = commands.Param(default=None, description="Вражеский пак №4", autocomplete=autocomplete_tw_pack),
         контра4: str = commands.Param(default=None, description="Наша контра на пак №4", autocomplete=autocomplete_tw_counter4),
-        локация4: str = commands.Param(default=None, description="Где бить пак №4"),
+        локация4: str = commands.Param(default=None, description="Где бить пак №4", autocomplete=autocomplete_tw_location),
         пак5: str = commands.Param(default=None, description="Вражеский пак №5", autocomplete=autocomplete_tw_pack),
         контра5: str = commands.Param(default=None, description="Наша контра на пак №5", autocomplete=autocomplete_tw_counter5),
-        локация5: str = commands.Param(default=None, description="Где бить пак №5"),
+        локация5: str = commands.Param(default=None, description="Где бить пак №5", autocomplete=autocomplete_tw_location),
     ):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
