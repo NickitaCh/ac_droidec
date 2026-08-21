@@ -2719,6 +2719,18 @@ def get_tw_counter_by_id(guild_id: int, counter_id: int):
     return row
 
 
+def delete_tw_counter(guild_id: int, message_id: str) -> None:
+    """Используется синком при повторном ресинке, если сообщение при разборе
+    оказалось мусорным дублем заголовка треда (см. cogs/tw_counters.py) — убирает
+    ранее сохранённую по этому message_id запись, если она была."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("DELETE FROM tw_counters WHERE guild_id = ? AND message_id = ?", (guild_id, message_id))
+    conn.commit()
+    conn.close()
+
+
 def count_tw_counters(guild_id: int) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()

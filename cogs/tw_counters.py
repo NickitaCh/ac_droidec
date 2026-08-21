@@ -202,6 +202,17 @@ class TWCounters(commands.Cog):
                 if str(message.id) == str(thread.id):
                     continue
                 parsed = _parse_counter_message(message.content, thread.name)
+                # Отдельное сообщение, дословно повторяющее название треда (не
+                # стартовый пост, но текст = название) — мусорный дубль темы, не
+                # контра. Иначе он попадал бы в базу как отдельный "пак" с именем
+                # треда, дублируя реальные варианты из ##-заголовков (см. живой
+                # баг: тред "Хондо" давал лже-пак "Король пиратов Хондо Онака" без
+                # контр вместо настоящих "Хондо"/"Хондо с вейнокроном"). Не просто
+                # пропускаем — ещё и чистим, если такая запись уже была сохранена
+                # прошлым синком.
+                if not parsed["parsed_ok"] and (message.content or "").strip() == thread.name.strip():
+                    database.delete_tw_counter(gid, str(message.id))
+                    continue
                 database.upsert_tw_counter(
                     gid, str(thread.id), str(message.id),
                     enemy_variant=parsed["enemy_variant"],
@@ -308,12 +319,16 @@ class TWCounters(commands.Cog):
                 try:
                     row = database.get_tw_counter_by_id(guild_id, int(counter_id))
                 except ValueError:
+                    # Значение не число — это не ID из подсказки автокомплита, а
+                    # текст, который ввели/вставили руками мимо выбора варианта.
                     row = None
-                if row:
-                    _, _enemy_variant, counter_leader, composition, *_ = row
-                    counter_label = counter_leader or composition or "см. гайд"
+                    counter_label = "⚠️ введено вручную — выберите вариант из подсказки, а не печатайте его"
                 else:
-                    counter_label = "⚠️ контра не найдена"
+                    if row:
+                        _, _enemy_variant, counter_leader, composition, *_ = row
+                        counter_label = counter_leader or composition or "см. гайд"
+                    else:
+                        counter_label = "⚠️ контра не найдена (устаревший ID — выберите заново из подсказки)"
             lines.append(f"{i}. {pack} — {counter_label} ({loc})")
 
         if len(lines) == 1:
