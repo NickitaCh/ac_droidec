@@ -20,10 +20,20 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ Ошибка: Переменная DISCORD_TOKEN не найдена в файле .env!")
 
-# Ключ для Gemini API (vision-разбор картинок ТБ-планирования, cogs/tb_order_image.py).
-# Бесплатный тариф, без биллинга. Опционален — без него просто недоступна одна
-# команда /тб_ордер_из_картинки, бот не падает.
+# Ключ для Gemini API — не используется сейчас (бесплатный тариф Google блокирует
+# запросы с датацентр-IP VPS, см. CLAUDE.md/память), но оставлен в .env на будущее.
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# Ключ для Mistral API (vision-разбор картинок ТБ-планирования, cogs/tb_order_image.py,
+# модель mistral-medium-latest). Бесплатный тариф, работает с VPS (проверено 2026-08-21,
+# в отличие от Gemini). Опционален — без него просто недоступна одна команда
+# /тб_ордер_из_картинки, бот не падает.
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+
+# Ключ для Groq API — не используется сейчас (их единственная vision-модель
+# llama-4-scout была deprecated 2026-06-17, замены без vision), оставлен в .env
+# на случай, если понадобится их текстовые/audio модели.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 COMLINK_URL = "http://localhost:3000" 
 
@@ -136,6 +146,8 @@ class GuildManagerBot(commands.Bot):
         self.PLAYER_STATS_SYNC_HOURS = PLAYER_STATS_SYNC_HOURS
 
         self.google_api_key = GOOGLE_API_KEY
+        self.mistral_api_key = MISTRAL_API_KEY
+        self.groq_api_key = GROQ_API_KEY
 
 bot = GuildManagerBot()
 

@@ -1,9 +1,16 @@
 """/тб_ордер_из_картинки — по ссылке на тред достаёт первое сообщение с картинкой
 "Strategy Summary" (планировщик ТБ, вкладка со сводной таблицей Round 1..6 x
-Dark/Mixed/Light/Bonus), распознаёт её через Gemini vision (GOOGLE_API_KEY,
-бесплатный тариф — см. main.py) и публикует в тот же тред 6 сообщений, по одному
-на этап, в формате, которым офицеры уже пишут ордер вручную (см. тред "43*",
-TB_ORDER_SOURCE_CHANNEL_ID).
+Dark/Mixed/Light/Bonus), распознаёт её через Mistral vision (MISTRAL_API_KEY,
+бесплатный тариф, модель mistral-medium-latest — см. main.py) и публикует в тот
+же тред 6 сообщений, по одному на этап, в формате, которым офицеры уже пишут
+ордер вручную (см. тред "43*", TB_ORDER_SOURCE_CHANNEL_ID).
+
+Изначально был реализован на Gemini (google-genai, GOOGLE_API_KEY), но бесплатный
+тариф Google блокирует запросы с датацентр-IP VPS (проверено 2026-08-21 — тот же
+ключ работает локально и падает изнутри контейнера на VPS с "location not
+supported"). Mistral с того же VPS работает (подтверждено live-пробником). Точность
+чуть ниже Gemini (у Mistral изредка промах на 1 звезду в одной ячейке из ~30 — см.
+sanity-check по сумме звёзд ниже), но приемлема.
 
 Правило перевода звёзд с картинки в текст ордера (подтверждено пользователем
 2026-08-21, на примере треда "44тест"):
@@ -138,19 +145,32 @@ def _overall_contribution(zone: str, stars: int) -> int:
 
 
 def _parse_strategy_summary_sync(image_bytes: bytes, mime_type: str, api_key: str) -> dict:
-    # google-generativeai официально прекратил поддержку (deprecation warning
-    # при импорте) — используем его замену, google-genai (проверено живым
-    # запросом 2026-08-21: тот же бесплатный ключ, та же модель работают).
-    from google import genai
-    from google.genai import types
+    import base64
 
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=[PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    import requests
+
+    b64 = base64.b64encode(image_bytes).decode()
+    response = requests.post(
+        "https://api.mistral.ai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": "mistral-medium-latest",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": PROMPT},
+                        {"type": "image_url", "image_url": f"data:{mime_type};base64,{b64}"},
+                    ],
+                }
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        },
+        timeout=60,
     )
-    text = (response.text or "").strip()
+    response.raise_for_status()
+    text = response.json()["choices"][0]["message"]["content"].strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     return json.loads(text)
@@ -205,9 +225,9 @@ class TBOrderImage(commands.Cog):
         ссылка: str = commands.Param(description="Ссылка на тред с картинкой Strategy Summary в первом сообщении"),
         звёзды: int = commands.Param(description="Total Stars с картинки — для проверки, что распознано верно"),
     ):
-        if not self.bot.google_api_key:
+        if not self.bot.mistral_api_key:
             await inter.response.send_message(
-                "❌ GOOGLE_API_KEY не настроен на сервере — обратитесь к администратору бота.",
+                "❌ MISTRAL_API_KEY не настроен на сервере — обратитесь к администратору бота.",
                 ephemeral=True,
             )
             return
@@ -247,7 +267,7 @@ class TBOrderImage(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                _parse_strategy_summary_sync, image_bytes, mime_type, self.bot.google_api_key
+                _parse_strategy_summary_sync, image_bytes, mime_type, self.bot.mistral_api_key
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")
