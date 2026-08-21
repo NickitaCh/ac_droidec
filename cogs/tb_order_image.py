@@ -138,13 +138,17 @@ def _overall_contribution(zone: str, stars: int) -> int:
 
 
 def _parse_strategy_summary_sync(image_bytes: bytes, mime_type: str, api_key: str) -> dict:
-    import google.generativeai as genai
+    # google-generativeai официально прекратил поддержку (deprecation warning
+    # при импорте) — используем его замену, google-genai (проверено живым
+    # запросом 2026-08-21: тот же бесплатный ключ, та же модель работают).
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-flash-latest")
-    response = model.generate_content(
-        [PROMPT, {"mime_type": mime_type, "data": image_bytes}],
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=[PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
     text = (response.text or "").strip()
     if text.startswith("```"):

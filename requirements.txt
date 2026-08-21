@@ -10,4 +10,4 @@ python-multipart
 httpx
 aiohttp
 beautifulsoup4
-google-generativeai
+google-genai
