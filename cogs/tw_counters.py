@@ -123,6 +123,65 @@ def _tw_counter_label(counter_leader, composition, team_code, parsed_ok, raw_tex
     return f"{main} [{team_code}]" if team_code else main
 
 
+def _format_counter_block(pack_name: str, location: str, row, warning: str = None) -> str:
+    """Собирает один блок готового к вставке ордера — точно в том же виде,
+    в каком офицеры сами пишут его в #ac-вг-оповещения: '# Локация' / '## Пак' /
+    построчная цитата с лидером/составом/датакроном/ходом боя/командой."""
+    lines = []
+    if location:
+        lines.append(f"# {location}")
+    lines.append(f"## {pack_name}")
+
+    if warning:
+        lines.append(f"> {warning}")
+        return "\n".join(lines)
+
+    _, _enemy_variant, counter_leader, composition, datacron_note, battle_plan, team_code, video_url, parsed_ok, raw_text = row
+
+    if not parsed_ok:
+        # Гайд не размечен структурно — вставляем как есть, той же цитатой.
+        for line in (raw_text or "").split("\n"):
+            lines.append(f"> {line}" if line else ">")
+        return "\n".join(lines)
+
+    if counter_leader:
+        lines.append(f"> ### - {counter_leader}")
+    if composition:
+        lines.append(f"> Состав: {composition}")
+    if datacron_note:
+        lines.append(f"> Датакрон: {datacron_note}")
+    if battle_plan:
+        lines.append("> Ход боя:")
+        for line in battle_plan.split("\n"):
+            lines.append(f"> {line}" if line else ">")
+    if team_code:
+        lines.append(f"> Команда в хб: {team_code}")
+    if video_url:
+        lines.append(f"> Видео: {video_url}")
+    return "\n".join(lines)
+
+
+def _chunk_message(text: str, limit: int = 2000):
+    """На случай, если суммарный текст ордера на несколько локаций перерастёт
+    лимит Discord в 2000 символов — режем по строкам, а не обрезаем молча
+    (тот же приём, что и в guild_events.py::_chunk_message)."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            if current:
+                chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 # ------------------ Автокомплиты ------------------
 async def autocomplete_tw_pack(inter: disnake.ApplicationCommandInteraction, string: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
@@ -309,33 +368,39 @@ class TWCounters(commands.Cog):
             (пак5, контра5, локация5),
         ]
 
-        lines = ["📋 **Ордер по ВГ**"]
-        for i, (pack, counter_id, location) in enumerate(slots, start=1):
+        blocks = []
+        for pack, counter_id, location in slots:
             if not pack:
                 continue
-            loc = location or "—"
-            counter_label = "⚠️ контра не выбрана"
-            if counter_id:
+            row, warning = None, None
+            if not counter_id:
+                warning = "⚠️ контра не выбрана — впишите вручную"
+            else:
                 try:
                     row = database.get_tw_counter_by_id(guild_id, int(counter_id))
                 except ValueError:
                     # Значение не число — это не ID из подсказки автокомплита, а
                     # текст, который ввели/вставили руками мимо выбора варианта.
-                    row = None
-                    counter_label = "⚠️ введено вручную — выберите вариант из подсказки, а не печатайте его"
+                    warning = "⚠️ введено вручную — выберите вариант из подсказки, а не печатайте его"
                 else:
-                    if row:
-                        _, _enemy_variant, counter_leader, composition, *_ = row
-                        counter_label = counter_leader or composition or "см. гайд"
-                    else:
-                        counter_label = "⚠️ контра не найдена (устаревший ID — выберите заново из подсказки)"
-            lines.append(f"{i}. {pack} — {counter_label} ({loc})")
+                    if row is None:
+                        warning = "⚠️ контра не найдена (устаревший ID — выберите заново из подсказки)"
+            blocks.append(_format_counter_block(pack, location, row, warning))
 
-        if len(lines) == 1:
+        if not blocks:
             await inter.response.send_message("Не указано ни одного пака.", ephemeral=True)
             return
 
-        await inter.response.send_message("\n".join(lines), ephemeral=True)
+        full_text = "\n\n".join(blocks)
+        guild_cfg = database.get_guild_config(guild_id)
+        role_id = guild_cfg.get("tb_order_role_id") if guild_cfg else None
+        if role_id:
+            full_text += f"\n\n<@&{role_id}>"
+
+        chunks = _chunk_message(full_text)
+        await inter.response.send_message(chunks[0], ephemeral=True)
+        for chunk in chunks[1:]:
+            await inter.followup.send(chunk, ephemeral=True)
 
 
 def setup(bot: commands.Bot):
