@@ -494,6 +494,9 @@ class StatRequirementsCog(commands.Cog):
         # сбивала бы эту оценку, не переставляя реальный внутренний таймер disnake tasks.loop.
         database.set_bot_state("player_units_sync_loop_last_auto_run", datetime.now(MSK).isoformat())
         print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
+        # Грузим один раз на весь цикл (не на каждого из ~50 игроков) — таблица общая,
+        # см. database.get_all_skill_tier_thresholds.
+        skill_tier_map = database.get_all_skill_tier_thresholds()
         synced = 0
         total_events = 0
         all_omicron_hits = []  # (ally_code, base_id, guild_id)
@@ -501,7 +504,7 @@ class StatRequirementsCog(commands.Cog):
         for ally_code in ally_codes:
             try:
                 fetched, added, omicron_hits = await activity_diff.sync_player(
-                    self.bot.comlink, ally_code, ally_to_guilds[ally_code], today
+                    self.bot.comlink, ally_code, ally_to_guilds[ally_code], today, skill_tier_map
                 )
                 if fetched:
                     synced += 1

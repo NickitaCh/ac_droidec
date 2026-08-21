@@ -226,6 +226,7 @@ async def activity_sync(
     comlink = _get_comlink()
     today = datetime.now(MSK).date().isoformat()
     semaphore = asyncio.Semaphore(6)
+    skill_tier_map = database.get_all_skill_tier_thresholds()
 
     async def sync_one(ally_code):
         async with semaphore:
@@ -237,7 +238,7 @@ async def activity_sync(
                 guild_ids = database.get_guild_ids_for_ally_code(ally_code) or {guild_id}
                 # Объявления в Discord из omicron_hits тут не постим — у веб-процесса нет
                 # Discord-клиента, см. services/activity_diff.py::sync_player.
-                _, added, _ = await activity_diff.sync_player(comlink, ally_code, guild_ids, today)
+                _, added, _ = await activity_diff.sync_player(comlink, ally_code, guild_ids, today, skill_tier_map)
                 return added
             except Exception as e:
                 print(f"⚠️ [/activity/sync] Не удалось обновить ростер {ally_code}: {e}")

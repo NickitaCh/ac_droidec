@@ -19,13 +19,17 @@ UNIT_DEFINITIONS_FLAG = 137438953472
 SKILL_DEFINITIONS_FLAG = 4
 
 
-async def _fetch_omicron_capable_base_ids(comlink, units_list: list) -> set:
-    """base_id всех юнитов, у которых хотя бы одна реферснутая (unit.skillReference)
-    способность имеет тир с isOmicronTier=True (comlink SkillDefinitions). units_list
-    переиспользуется из уже сделанного в sync_units() вызова UnitDefinitions, чтобы не
-    тянуть тот же справочник второй раз."""
+async def _fetch_skill_definitions(comlink) -> list:
+    """Сырой список способностей (comlink SkillDefinitions) — общий фетч для
+    _omicron_capable_base_ids и _skill_tier_thresholds ниже, чтобы не тянуть один и тот же
+    справочник дважды за цикл синка."""
     skill_data = await asyncio.to_thread(comlink.get_game_data, items=str(SKILL_DEFINITIONS_FLAG))
-    skills_list = skill_data.get("skill") or []
+    return skill_data.get("skill") or []
+
+
+def _omicron_capable_base_ids(skills_list: list, units_list: list) -> set:
+    """base_id всех юнитов, у которых хотя бы одна реферснутая (unit.skillReference)
+    способность имеет тир с isOmicronTier=True."""
     omicron_skill_ids = {
         sk["id"] for sk in skills_list
         if any(t.get("isOmicronTier") for t in (sk.get("tier") or []))
@@ -40,6 +44,32 @@ async def _fetch_omicron_capable_base_ids(comlink, units_list: list) -> set:
                 capable.add(bid)
                 break
     return capable
+
+
+def _skill_tier_thresholds(skills_list: list) -> dict:
+    """{skill_id: (zeta_tier|None, omicron_tier|None)} — 0-based индекс ступени способности,
+    на которой она помечена isZetaTier/isOmicronTier=True. Проверено живыми данными
+    2026-08-21 (docker exec на проде): число ступеней и позиция зета/омикрона свои у КАЖДОЙ
+    способности (напр. у одной способности зета на индексе 6 из 7, у другой омикрон на
+    индексе 7 из 8) — глобального порога вроде "tier >= 8" не существует, что и было
+    причиной бага "дзеты/омикроны не пишутся в активности" (services/activity_diff.py
+    раньше сравнивал с константами ZETA_TIER=8/OMICRON_MIN_TIER=9, которых игра никогда
+    не достигает)."""
+    thresholds = {}
+    for sk in skills_list:
+        skill_id = sk.get("id")
+        if not skill_id:
+            continue
+        zeta_tier = None
+        omicron_tier = None
+        for idx, t in enumerate(sk.get("tier") or []):
+            if t.get("isZetaTier"):
+                zeta_tier = idx
+            if t.get("isOmicronTier"):
+                omicron_tier = idx
+        if zeta_tier is not None or omicron_tier is not None:
+            thresholds[skill_id] = (zeta_tier, omicron_tier)
+    return thresholds
 
 
 async def sync_units(comlink) -> int:
@@ -81,9 +111,10 @@ async def sync_units(comlink) -> int:
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление
     # имён важнее и не должно срываться из-за флага "есть ли омикрон".
     try:
-        omicron_ids = await _fetch_omicron_capable_base_ids(comlink, units_list)
-        database.set_omicron_capable_base_ids(omicron_ids)
+        skills_list = await _fetch_skill_definitions(comlink)
+        database.set_omicron_capable_base_ids(_omicron_capable_base_ids(skills_list, units_list))
+        database.set_skill_tier_thresholds(_skill_tier_thresholds(skills_list))
     except Exception as e:
-        print(f"⚠️ [Справочник] Не удалось обновить флаг has_omicron: {e}")
+        print(f"⚠️ [Справочник] Не удалось обновить данные об омикронах/зетах: {e}")
 
     return len(units_to_db)

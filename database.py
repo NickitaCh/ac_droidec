@@ -2438,6 +2438,51 @@ def get_all_omicron_capable_units() -> list:
     return rows
 
 
+def _ensure_skill_tier_thresholds_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS skill_tier_thresholds (
+            skill_id TEXT PRIMARY KEY,
+            zeta_tier INTEGER,
+            omicron_tier INTEGER
+        )
+    """)
+
+
+def set_skill_tier_thresholds(thresholds: dict) -> None:
+    """thresholds: {skill_id: (zeta_tier|None, omicron_tier|None)} — индекс (0-based, тот же,
+    что player rosterUnit.skill[].tier) ступени способности, помеченной isZetaTier/
+    isOmicronTier=True в comlink SkillDefinitions. Число ступеней и позиция зета/омикрона
+    свои у каждой способности (подтверждено живыми данными 2026-08-21) — единого порога
+    вроде "tier >= 8" не существует, поэтому services/activity_diff.py сравнивает per-skill,
+    а не с константой. Перезаписывается целиком раз в час из
+    services/units_sync.py::sync_units (тот же цикл, что game_units.has_omicron)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    cursor.execute("DELETE FROM skill_tier_thresholds")
+    if thresholds:
+        rows = [(skill_id, zeta_tier, omicron_tier) for skill_id, (zeta_tier, omicron_tier) in thresholds.items()]
+        cursor.executemany(
+            "INSERT INTO skill_tier_thresholds (skill_id, zeta_tier, omicron_tier) VALUES (?, ?, ?)",
+            rows,
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_all_skill_tier_thresholds() -> dict:
+    """{skill_id: (zeta_tier|None, omicron_tier|None)}, весь справочник разом — грузится один
+    раз за цикл синка (не по разу на игрока), см. cogs/stat_requirements.py::player_units_sync_loop
+    и web/routes/guild_dashboard.py::activity_sync."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    cursor.execute("SELECT skill_id, zeta_tier, omicron_tier FROM skill_tier_thresholds")
+    rows = cursor.fetchall()
+    conn.close()
+    return {skill_id: (zeta_tier, omicron_tier) for skill_id, zeta_tier, omicron_tier in rows}
+
+
 # =====================================================================
 # АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
 # =====================================================================

@@ -17,9 +17,6 @@ import asyncio
 import database
 import stat_engine
 
-ZETA_TIER = 8
-OMICRON_MIN_TIER = 9
-
 
 async def fetch_player_units(comlink, ally_code: str) -> dict:
     """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
@@ -33,8 +30,12 @@ async def fetch_player_units(comlink, ally_code: str) -> dict:
     return units
 
 
-def diff_unit(old: dict, new: dict) -> list[tuple[str, str, str]]:
-    """(action_type, old_value, new_value) для одного юнита между двумя снимками."""
+def diff_unit(old: dict, new: dict, skill_tier_map: dict) -> list[tuple[str, str, str]]:
+    """(action_type, old_value, new_value) для одного юнита между двумя снимками.
+    skill_tier_map: {skill_id: (zeta_tier|None, omicron_tier|None)} из
+    database.get_all_skill_tier_thresholds() — per-skill 0-based индекс зета/омикрон-ступени
+    (services/units_sync.py::_skill_tier_thresholds), т.к. эти индексы разные у каждой
+    способности, единого порога вроде tier>=8 не существует (см. комментарий там)."""
     events = []
 
     old_gear = old.get("currentTier")
@@ -61,15 +62,16 @@ def diff_unit(old: dict, new: dict) -> list[tuple[str, str, str]]:
         old_tier = old_skills.get(skill_id)
         if new_tier == old_tier:
             continue
-        if new_tier >= OMICRON_MIN_TIER and (old_tier is None or old_tier < OMICRON_MIN_TIER):
+        zeta_tier, omicron_tier = skill_tier_map.get(skill_id, (None, None))
+        if omicron_tier is not None and new_tier >= omicron_tier and (old_tier is None or old_tier < omicron_tier):
             events.append(("omicron", "", skill_id))
-        elif new_tier == ZETA_TIER and (old_tier is None or old_tier < ZETA_TIER):
+        elif zeta_tier is not None and new_tier >= zeta_tier and (old_tier is None or old_tier < zeta_tier):
             events.append(("zeta", "", skill_id))
 
     return events
 
 
-def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool) -> list[tuple[str, str, str, str]]:
+def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool, skill_tier_map: dict) -> list[tuple[str, str, str, str]]:
     """(base_id, action_type, old_value, new_value) по всем юнитам игрока.
     is_first_sync=True (для игрока ещё нет ни одной записи в player_unit_cache) —
     только сидируем кэш, без unlock-события на весь стартовый ростер сразу."""
@@ -82,17 +84,21 @@ def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool) -> list[t
             rarity = new_unit.get("currentRarity", 1)
             events.append((base_id, "unlock", "", f"{rarity}★"))
             continue
-        for action_type, old_value, new_value in diff_unit(old_unit, new_unit):
+        for action_type, old_value, new_value in diff_unit(old_unit, new_unit, skill_tier_map):
             events.append((base_id, action_type, old_value, new_value))
     return events
 
 
-async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeout: float = 15.0) -> tuple[bool, int, list]:
+async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill_tier_map: dict, timeout: float = 15.0) -> tuple[bool, int, list]:
     """Тянет живой ростер игрока (Comlink-вызов ограничен timeout секунд — тот же паттерн,
     что в web/routes/datacrons.py::_build_guild_report, а не голый to_thread без дедлайна),
     диффит против player_unit_cache, обновляет кэш и пишет новые события активности в
     guild_activity_events для каждой из guild_ids (обычно одна — но игрок теоретически может
     состоять в нескольких зарегистрированных гильдиях сразу).
+
+    skill_tier_map — database.get_all_skill_tier_thresholds(), загружается ОДИН раз за весь
+    цикл синка вызывающим кодом (не на каждого игрока — таблица одна на всех), и прокидывается
+    сюда явным параметром, а не читается из database прямо тут.
 
     Возвращает (fetched, added_events, omicron_hits): fetched=False при таймауте или пустом
     ростере — вызывающий код (player_units_sync_loop, /activity/sync) использует это для
@@ -107,7 +113,7 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, timeo
     if not new_units:
         return False, 0, []
     old_units = database.get_player_units(ally_code)
-    events = diff_roster(old_units, new_units, is_first_sync=not old_units)
+    events = diff_roster(old_units, new_units, is_first_sync=not old_units, skill_tier_map=skill_tier_map)
     database.upsert_player_units(ally_code, new_units)
     added = 0
     omicron_hits = []
