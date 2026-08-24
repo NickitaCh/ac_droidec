@@ -50,6 +50,7 @@ from disnake.ext import commands
 import guild_resolver
 
 LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)(?:/(\d+))?")
+ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
 
 ZONE_EMOJI = {"dark": "🔴", "mixed": "🟡", "light": "🔵", "bonus": "⚪"}
 
@@ -131,6 +132,20 @@ def _guess_mime_type(a: disnake.Attachment) -> str:
         return a.content_type.split(";")[0].strip()
     guessed, _ = mimetypes.guess_type(a.filename)
     return guessed or "image/png"
+
+
+async def _find_existing_order_phases(thread: disnake.Thread, bot_user_id: int) -> list:
+    """Сканирует историю треда на уже опубликованные блоки ордера (заголовки
+    "## ... — N этап" от самого бота) — используется для защиты от повторной
+    публикации дублей при повторном запуске команды в том же треде."""
+    phases = set()
+    async for msg in thread.history(limit=200):
+        if msg.author.id != bot_user_id:
+            continue
+        m = ORDER_HEADER_RE.match(msg.content or "")
+        if m:
+            phases.add(int(m.group(1)))
+    return sorted(phases)
 
 
 def _translate_planet(name: str) -> str:
@@ -245,6 +260,10 @@ class TBOrderImage(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         ссылка: str = commands.Param(description="Ссылка на тред с картинкой Strategy Summary в первом сообщении"),
         звёзды: int = commands.Param(description="Total Stars с картинки — для проверки, что распознано верно"),
+        принудительно: bool = commands.Param(
+            default=False,
+            description="Опубликовать заново, даже если ордер для этих этапов уже есть в треде (будут дубли)",
+        ),
     ):
         if not self.bot.mistral_api_key:
             await inter.response.send_message(
@@ -282,6 +301,17 @@ class TBOrderImage(commands.Cog):
         if image_attachment is None:
             await inter.edit_original_response("❌ В первом сообщении треда нет картинки.")
             return
+
+        if not принудительно:
+            existing_phases = await _find_existing_order_phases(thread, self.bot.user.id)
+            if existing_phases:
+                phases_str = ", ".join(str(p) for p in existing_phases)
+                await inter.edit_original_response(
+                    f"⚠️ В треде уже есть ордер для этапов: {phases_str}. "
+                    "Повторный запуск создаст дубли. Если это осознанно (например, план поменялся) — "
+                    "повторите команду с параметром `принудительно: True`."
+                )
+                return
 
         image_bytes = await image_attachment.read()
         mime_type = _guess_mime_type(image_attachment)
