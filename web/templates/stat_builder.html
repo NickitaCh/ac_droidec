@@ -117,7 +117,7 @@
                 <div class="mod-set-row">
                     <select name="target_stat">
                         <option value="">— стат —</option>
-                        {% for label, val, is_percent in stat_name_choices %}
+                        {% for label, val, is_percent in target_stat_choices %}
                             <option value="{{ val }}" {% if val == selected_target_stat %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>

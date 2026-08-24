@@ -47,6 +47,13 @@ STAT_NAME_CHOICES_WITH_UNIT = [
     (_DEFENSE_ROUTED_LABELS.get(value) or (f"{name} (%)" if value in _STAT_UNIT_IS_PERCENT else f"{name} (число)"), value, value in _STAT_UNIT_IS_PERCENT)
     for name, value in STAT_NAME_CHOICES
 ]
+# "Целевое значение" выбирает ИТОГОВЫЙ стат (в т.ч. Armor/Resistance как обычный %,
+# см. stat_engine.PERCENT_STATS), а не единицы измерения вторички мода — поэтому тут
+# без _DEFENSE_ROUTED_LABELS (та подпись верна только для поля ввода вклада вторичек).
+STAT_TARGET_CHOICES = [
+    (f"{name} (%)" if value in _STAT_UNIT_IS_PERCENT else f"{name} (число)", value, value in _STAT_UNIT_IS_PERCENT)
+    for name, value in STAT_NAME_CHOICES
+]
 
 # Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы.
 # Иконки — свои простые SVG (не растровые ассеты HotUtils).
@@ -265,6 +272,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         "mod_slots": MOD_SLOT_DEFS,
         "mod_primary_options": stat_engine.MOD_PRIMARY_OPTIONS,
         "stat_name_choices": STAT_NAME_CHOICES_WITH_UNIT,
+        "target_stat_choices": STAT_TARGET_CHOICES,
         "selected_character": character,
         "selected_character_label": _char_label(character) if character else "",
         "selected_relic": relic_raw,
