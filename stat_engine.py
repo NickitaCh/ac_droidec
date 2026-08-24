@@ -178,14 +178,23 @@ def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, pr
 # рейтинга "Defense" (swgoh_comlink/StatCalc/calculator.py::_convert_flat_def_to_percent):
 # armor% = defense / (level_effect + defense), level_effect = level * 7.5 для персонажей.
 # build_hypothetical_unit всегда строит юнита на 85 уровне (см. выше) => level_effect = 637.5.
-# Наивное сложение процентов (как для остальных статов PERCENT_STATS — те складываются
-# напрямую, это подтверждено тем, что только id 8/9 (Armor/Resistance) проходят через
-# _convert_flat_def_to_percent в исходниках StatCalc, остальные % статы мод добавляет как
-# уже готовый %) завышает итог тем больше, чем выше базовая броня — подтверждено чтением
-# исходников библиотеки, не угадано. Формула/константа 637.5 сверены с пользователем
-# (2026-08-24) и совпали один в один с тем, что реально использует StatCalc.
+# Формула/константа 637.5 сверены с пользователем (2026-08-24) и совпали один в один с тем,
+# что реально использует StatCalc.
+#
+# На модах "Defense" (unitStatId 49, тот же, что у %-primary "Defense +20%" в
+# MOD_PRIMARY_OPTIONS) — это процент от БАЗОВОГО Defense-рейтинга (id 8/9), а не от уже
+# отображаемой Брони/Сопротивления и не независимая "броня сама по себе" — подтверждено
+# чтением исходников _calculate_mod_stats: id 49 обрабатывается ТЕМ ЖЕ способом, что и id
+# 48/55/56/57 (Offense%/Health%/Protection%/Speed%, см. PERCENT_OF_BASE_STATS ниже) —
+# `base_stats[8] * value`, просто база тут — Defense-рейтинг, а не сам финальный стат
+# (тот появляется только ПОСЛЕ одной итоговой нелинейной конвертации). Поэтому ввод для
+# Armor/Resistance — это тоже "% от базы", но базой служит Defense-рейтинг ДО этой
+# конвертации, а не отображаемый %, и итог требует round-trip через
+# _armor_pct_to_defense/_defense_to_armor_pct вместо прямого умножения (первая версия
+# 2026-08-24 ошибочно трактовала ввод как независимый армор%, конвертируемый в Defense и
+# складываемый — поправлено по уточнению пользователя тем же днём).
 _ARMOR_LEVEL_EFFECT = 85 * 7.5
-_NONLINEAR_DEFENSE_STATS = frozenset({"Armor", "Resistance"})
+NONLINEAR_DEFENSE_STATS = frozenset({"Armor", "Resistance"})
 
 
 def _armor_pct_to_defense(pct: float) -> float:
@@ -218,21 +227,21 @@ def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
     введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов модов (единственное,
     что действительно нельзя посчитать точно — вторички рандомны, у них нет фиксированной
     таблицы значений, в отличие от primary-статов выше). Все статы, кроме Speed, вводятся
-    в игровых % (см. PERCENT_OF_BASE_STATS/_NONLINEAR_DEFENSE_STATS выше и PERCENT_STATS
+    в игровых % (см. PERCENT_OF_BASE_STATS/NONLINEAR_DEFENSE_STATS выше и PERCENT_STATS
     для родных %-статов StatCalc) — Speed остаётся числом (штуками), т.к. вторичка Speed% в
     игре не встречается.
 
-    Armor/Resistance — особый случай (_NONLINEAR_DEFENSE_STATS): вклад пересчитывается
-    через промежуточный "Defense"-рейтинг вместо прямого сложения %.
+    Armor/Resistance — особый случай (NONLINEAR_DEFENSE_STATS): вклад — процент от
+    базового Defense-рейтинга (не от самой Брони/Сопротивления), пересчитывается через
+    промежуточный "Defense"-рейтинг, а не прямым сложением/умножением %.
     Health/Protection/Physical Damage/Special Damage (PERCENT_OF_BASE_STATS): вклад —
     процент от текущего (до этой вторички) значения стата, переводится в штуки и
     прибавляется."""
     result = dict(final_stats)
     for name, value in manual_totals.items():
-        if name in _NONLINEAR_DEFENSE_STATS:
+        if name in NONLINEAR_DEFENSE_STATS:
             base_defense = _armor_pct_to_defense(result.get(name, 0))
-            added_defense = _armor_pct_to_defense(value)
-            result[name] = _defense_to_armor_pct(base_defense + added_defense)
+            result[name] = _defense_to_armor_pct(base_defense * (1 + value / 100))
         elif name in PERCENT_OF_BASE_STATS:
             base = result.get(name, 0)
             result[name] = base + base * (value / 100)
@@ -249,10 +258,12 @@ def required_manual_contribution(base_value: float, target_value: float, stat_na
     target_value уже достигнут на одной базе — возвращает 0 (а не отрицательное число)."""
     if target_value <= base_value:
         return 0.0
-    if stat_name in _NONLINEAR_DEFENSE_STATS:
+    if stat_name in NONLINEAR_DEFENSE_STATS:
         base_defense = _armor_pct_to_defense(base_value)
+        if base_defense <= 0:
+            return 0.0
         target_defense = _armor_pct_to_defense(target_value)
-        return _defense_to_armor_pct(target_defense - base_defense)
+        return (target_defense / base_defense - 1) * 100
     if stat_name in PERCENT_OF_BASE_STATS:
         if base_value <= 0:
             return 0.0

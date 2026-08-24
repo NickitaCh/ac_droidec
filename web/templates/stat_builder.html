@@ -154,7 +154,7 @@
                 {% if target.already_reached %}
                     <p>{{ target.stat_label }}: цель {{ target.target_value_fmt }}{{ target.unit }} уже достигнута без вторичек (сеты+основы дают {{ target.base_value_fmt }}{{ target.unit }}).</p>
                 {% else %}
-                    <p>Чтобы получить <strong>{{ target.target_value_fmt }}{{ target.unit }} {{ target.stat_label }}</strong> (сейчас без вторичек: {{ target.base_value_fmt }}{{ target.unit }}), нужно набрать во вторичках модов суммарно <strong>+{{ target.needed_fmt }}{{ target.unit }}</strong>.</p>
+                    <p>Чтобы получить <strong>{{ target.target_value_fmt }}{{ target.unit }} {{ target.stat_label }}</strong> (сейчас без вторичек: {{ target.base_value_fmt }}{{ target.unit }}), нужно набрать во вторичках модов суммарно <strong>+{{ target.needed_fmt }}{{ target.needed_unit }} {{ target.needed_label }}</strong>.</p>
                 {% endif %}
             </div>
         {% endif %}

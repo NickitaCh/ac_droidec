@@ -35,11 +35,16 @@ STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Reli
 # apply_manual_stat_totals, где именно так и обрабатывается). Единственное исключение —
 # Speed: вторичка Speed% в игре не встречается, только штуками.
 _STAT_UNIT_IS_PERCENT = stat_engine.PERCENT_STATS | stat_engine.PERCENT_OF_BASE_STATS
+# Armor/Resistance — единственные статы, где сам ввод не в единицах ИТОГОВОГО стата: на
+# модах это "Defense %" (вторичка от базового Defense-рейтинга, см.
+# stat_engine.NONLINEAR_DEFENSE_STATS), а не "Armor %"/"Resistance %" напрямую — подпись
+# явно это называет, чтобы не завести пользователя суммировать неправильные числа.
+_DEFENSE_ROUTED_LABELS = {"Armor": "Defense % (влияет на Armor)", "Resistance": "Defense % (влияет на Resistance)"}
 # Подпись зашита прямо в текст опции (не только рядом с полем через JS) — так видно сразу
 # при выборе стата в выпадашке, не полагаясь на то, что пользователь заметит мелкую
 # подсказку у поля ввода после выбора.
 STAT_NAME_CHOICES_WITH_UNIT = [
-    (f"{name} (%)" if value in _STAT_UNIT_IS_PERCENT else f"{name} (число)", value, value in _STAT_UNIT_IS_PERCENT)
+    (_DEFENSE_ROUTED_LABELS.get(value) or (f"{name} (%)" if value in _STAT_UNIT_IS_PERCENT else f"{name} (число)"), value, value in _STAT_UNIT_IS_PERCENT)
     for name, value in STAT_NAME_CHOICES
 ]
 
@@ -326,13 +331,24 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
             # уже введённого" (см. запрос пользователя 2026-08-24).
             base_value = base_final_stats.get(target_stat, 0)
             needed = stat_engine.required_manual_contribution(base_value, target_value, target_stat)
-            is_percent = target_stat in _STAT_UNIT_IS_PERCENT
+            # ВАЖНО: две разные единицы, не путать. target_value/base_value — это САМ стат
+            # в его родном виде (Health/Physical Damage и т.п. — всегда число, даже когда их
+            # вторичка вводится в %; см. stat_engine.PERCENT_STATS, а не более широкий
+            # _STAT_UNIT_IS_PERCENT). needed — это то, что реально набирается во вторичках,
+            # там единица всегда % (кроме Speed). Armor/Resistance — особый случай: needed
+            # там в % Defense (см. stat_engine.NONLINEAR_DEFENSE_STATS), не в % самой Брони/
+            # Сопротивления, поэтому подпись результата называет это явно.
+            value_unit = "%" if target_stat in stat_engine.PERCENT_STATS else ""
+            needed_unit = "%" if target_stat in _STAT_UNIT_IS_PERCENT else ""
+            needed_label = "Defense" if target_stat in stat_engine.NONLINEAR_DEFENSE_STATS else dict((v, l) for l, v in STAT_NAME_CHOICES).get(target_stat, target_stat)
             context["target"] = {
                 "stat_label": dict((v, l) for l, v in STAT_NAME_CHOICES).get(target_stat, target_stat),
+                "needed_label": needed_label,
                 "base_value_fmt": _fmt_value(base_value),
                 "target_value_fmt": _fmt_value(target_value),
                 "needed_fmt": _fmt_value(needed),
-                "unit": "%" if is_percent else "",
+                "unit": value_unit,
+                "needed_unit": needed_unit,
                 "already_reached": needed <= 0,
             }
 
