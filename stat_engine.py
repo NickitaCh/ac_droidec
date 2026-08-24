@@ -57,12 +57,26 @@ def calc_final_stats(stat_calc: StatCalc, unit: dict) -> dict:
 
 def calc_base_stats(stat_calc: StatCalc, unit: dict) -> dict:
     """Статы юнита ДО модов (без сетов/primary) — {"Health": ..., "Armor": <Defense-рейтинг>,
-    ...}, не мутирует unit. В отличие от calc_final_stats НЕ домножает PERCENT_STATS на 100:
-    на этой стадии id 8/9 (Armor/Resistance) — ещё сырой Defense-рейтинг, не итоговый %
-    (нелинейная конвертация происходит только для final). Нужна для apply_manual_stat_totals/
-    required_manual_contribution — %-вторички считаются от ЭТОЙ базы, не от final."""
-    result = stat_calc.calc_char_stats(copy.deepcopy(unit))
-    return dict(result["stats"]["base"])
+    ...}, не мутирует unit. В отличие от calc_final_stats НЕ домножает PERCENT_STATS на 100 —
+    id 8/9 (Armor/Resistance) тут переведены обратно в сырой Defense-рейтинг (round-trip через
+    _armor_pct_to_defense/_defense_to_armor_pct — тот же приём, что и в apply_manual_stat_totals
+    ниже), не итоговый %. Нужна для apply_manual_stat_totals/required_manual_contribution —
+    %-вторички считаются от ЭТОЙ базы, не от final.
+
+    Реализовано через calc_final_stats на копии юнита БЕЗ единого мода (equippedStatMod=[]),
+    а НЕ через result["stats"]["base"] — swgoh_comlink.StatCalc собирает ответ в "game style"
+    формате (_FIXED_GAME_STYLE=True — хардкод-константа класса в самой библиотеке, не
+    настраивается), при котором calc_char_stats вообще не возвращает промежуточный подсловарь
+    "base" (только "final") — прямое чтение result["stats"]["base"] падало KeyError на любом
+    реальном обращении к /mod-builder (прод-инцидент, найден 2026-08-24 сразу после того как
+    эта функция была впервые добавлена — см. git log)."""
+    modless_unit = copy.deepcopy(unit)
+    modless_unit["equippedStatMod"] = []
+    base = calc_final_stats(stat_calc, modless_unit)
+    for name in NONLINEAR_DEFENSE_STATS:
+        if name in base:
+            base[name] = _armor_pct_to_defense(base[name])
+    return base
 
 
 # Для веб-only "Конструктора" (/mod-builder, web/routes/stat_builder.py): гипотетическая
