@@ -221,7 +221,27 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         };
 
-        rows.querySelectorAll(".row-group-row").forEach(bindRemove);
+        // Подпись единицы (%/число) у поля "Значение" — определяется выбранным статом в
+        // той же строке (option.dataset.percent, см. stat_engine.PERCENT_STATS на бэкенде):
+        // статы вроде Potency/Armor/Crit Chance вводятся в игровых %, Speed/Health — числом.
+        const syncUnit = (row) => {
+            const select = row.querySelector('select[name="stat_name"]');
+            const unit = row.querySelector(".stat-value-unit");
+            if (!select || !unit) return;
+            const opt = select.options[select.selectedIndex];
+            unit.textContent = opt && opt.dataset.percent === "1" ? "%" : "";
+        };
+
+        rows.querySelectorAll(".row-group-row").forEach((row) => {
+            bindRemove(row);
+            syncUnit(row);
+        });
+
+        group.addEventListener("change", (e) => {
+            if (e.target.matches('select[name="stat_name"]')) {
+                syncUnit(e.target.closest(".row-group-row"));
+            }
+        });
 
         addBtn.addEventListener("click", () => {
             const last = rows.querySelector(".row-group-row:last-child");
@@ -230,6 +250,7 @@ document.addEventListener("DOMContentLoaded", () => {
             clone.querySelectorAll("input, select").forEach((el) => { el.value = ""; });
             bindRemove(clone);
             rows.appendChild(clone);
+            syncUnit(clone);
         });
     });
 

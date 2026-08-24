@@ -640,6 +640,8 @@ table.data .dc-level-col {
 .stat-rows-table td { padding: 0.25em 0.4em 0.25em 0; vertical-align: middle; }
 .stat-rows-table select { width: 100%; }
 .stat-rows-table input[type="number"] { width: 7em; }
+.stat-value-cell { display: flex; align-items: center; gap: 0.3em; }
+.stat-value-unit { color: var(--fg-muted); font-size: 0.85em; min-width: 1em; }
 .row-group-remove {
     flex: 0 0 auto;
     background: transparent;

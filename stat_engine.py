@@ -131,7 +131,7 @@ MOD_SET_PIECE_COUNT = {
 }
 
 
-def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, primary_picks: list | None = None) -> dict:
+def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, primary_picks: list | None = None, rarity: int = 7) -> dict:
     """set_counts: {mod_set_id (int, см. MOD_SET_IDS): количество модов этого сета}.
     primary_picks: список словарей из MOD_PRIMARY_OPTIONS (или None на пустых позициях) —
     один на физический мод. Сет и primary комбинируются позиционно в один и тот же список
@@ -145,8 +145,10 @@ def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, pr
     Позиция без сета получает definitionId с первой цифрой "0" — такого setId не существует
     в modSetData, _calculate_mod_stats тихо не начисляет бонус (не падает), ровно то, что
     нужно для "выбран primary, но сет для этого мода ещё не назначен".
-    7★/85/шмот13 — как _build_synthetic_unit в cogs/stat_requirements.py (тот же смысл,
-    не переиспользуется напрямую: тот вариант принципиально без модов)."""
+    Звёздность (rarity) настраиваема (1-7★, по умолчанию 7★ — как раньше, до 2026-08-24)
+    отдельным параметром формы, наравне с релик-уровнем; 85/шмот13 — как _build_synthetic_unit
+    в cogs/stat_requirements.py (тот же смысл, не переиспользуется напрямую: тот вариант
+    принципиально без модов)."""
     primary_picks = list(primary_picks or [])
     slot_sets = [set_id for set_id, count in set_counts.items() for _ in range(count)][:6]
     n = min(max(len(primary_picks), len(slot_sets)), 6)
@@ -162,7 +164,7 @@ def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, pr
 
     return {
         "defId": base_id,
-        "rarity": 7,
+        "rarity": rarity,
         "level": 85,
         "gear": 13,
         "equipped": [],

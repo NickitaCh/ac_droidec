@@ -18,6 +18,35 @@ UNIT_DEFINITIONS_FLAG = 137438953472
 # объёма ответа; раздельные запросы отрабатывают надёжно.
 SKILL_DEFINITIONS_FLAG = 4
 
+# Comlink's UnitDefinitions ('units') содержит НЕСКОЛЬКО записей на один baseId: по одной
+# на каждый уровень редкости (rarity 1..7, только у реальных юнитов растёт baseStat с
+# редкостью) плюс NPC/PVE-only боевые копии того же персонажа (PVE_-префикс, "_DUEL",
+# "_GLEVENT", "_STARKILLER" и т.п. суффиксы), использующиеся в кампаниях/дуэлях/ивентах —
+# они делят то же nameKey (то же отображаемое имя), из-за чего наивная синхронизация без
+# фильтра сажает в game_units 4-8 дублей на популярного персонажа (найдено 2026-08-24 на
+# "Верховный лидер Кайло Рен" — 5 baseId с одинаковым именем). Найдено эмпирически (не
+# угадано): это ровно тот же фильтр, что уже применяет сама swgoh_comlink при построении
+# калькулятора статов — swgoh_comlink/StatCalc/data_builder/_builder_base.py::_build_unit_data
+# берёт `unit.obtainable and unit.obtainableTime == "0"`, затем оставляет только запись с
+# rarity == 1 как каноническую на baseId. Переиспользуем его один-в-один, а не изобретаем
+# свой (например по PVE_-префиксу — он ловит не все случаи, "_DUEL"/"_GLEVENT" NPC-варианты
+# без этого префикса тоже встречаются) — так game_units всегда содержит ровно те baseId,
+# для которых StatCalc реально умеет считать статы (см. stat_engine.build_stat_calc), не
+# больше и не меньше.
+_RARITY_ENUM = {
+    "ONE_STAR": 1, "TWO_STAR": 2, "THREE_STAR": 3, "FOUR_STAR": 4,
+    "FIVE_STAR": 5, "SIX_STAR": 6, "SEVEN_STAR": 7,
+}
+
+
+def _is_canonical_playable_unit(unit: dict) -> bool:
+    if not unit.get("obtainable", False) or unit.get("obtainableTime") != "0":
+        return False
+    rarity = unit.get("rarity", 0)
+    if isinstance(rarity, str):
+        rarity = _RARITY_ENUM.get(rarity, 0)
+    return rarity == 1
+
 
 async def _fetch_skill_definitions(comlink) -> list:
     """Сырой список способностей (comlink SkillDefinitions) — общий фетч для
@@ -96,6 +125,8 @@ async def sync_units(comlink) -> int:
 
     units_to_db = {}
     for unit in units_list:
+        if not _is_canonical_playable_unit(unit):
+            continue
         bid = unit.get('baseId')
         if not bid:
             continue
@@ -106,6 +137,9 @@ async def sync_units(comlink) -> int:
         units_to_db[bid] = (name, unit_type, name_en)
 
     database.upsert_game_units(units_to_db)
+    # Убираем из справочника то, что осталось от синков до фильтра выше (NPC/дубли по
+    # редкости) — без этого upsert (INSERT OR REPLACE) их не тронет, они просто зависнут.
+    database.prune_game_units(units_to_db.keys())
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление

@@ -44,6 +44,11 @@
                 <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
             </label>
 
+            <label>
+                Звёздность персонажа
+                <input type="number" name="rarity" min="1" max="7" value="{{ selected_rarity }}" required>
+            </label>
+
             <div class="form-block">
                 <span>Моды — основной (primary) стат на каждом из 6 слотов, 6★ ур.15</span>
                 <div class="mod-slot-grid">
@@ -90,12 +95,15 @@
                                 <td>
                                     <select name="stat_name">
                                         <option value="">— стат —</option>
-                                        {% for label, val in stat_name_choices %}
-                                            <option value="{{ val }}" {% if val == name %}selected{% endif %}>{{ label }}</option>
+                                        {% for label, val, is_percent in stat_name_choices %}
+                                            <option value="{{ val }}" data-percent="{{ 1 if is_percent else 0 }}" {% if val == name %}selected{% endif %}>{{ label }}</option>
                                         {% endfor %}
                                     </select>
                                 </td>
-                                <td><input type="number" name="stat_value" step="any" value="{{ value }}" placeholder="0"></td>
+                                <td class="stat-value-cell">
+                                    <input type="number" name="stat_value" step="any" value="{{ value }}" placeholder="0">
+                                    <span class="stat-value-unit"></span>
+                                </td>
                                 <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
                             </tr>
                         {% endfor %}
@@ -144,6 +152,7 @@
                 {% endfor %}
                 <input type="hidden" name="character" value="{{ selected_character }}">
                 <input type="hidden" name="relic" value="{{ selected_relic }}">
+                <input type="hidden" name="rarity" value="{{ selected_rarity }}">
                 <input type="text" name="name" placeholder="Название пресета" required>
                 <button type="submit">Сохранить</button>
             </form>
@@ -190,13 +199,14 @@
             <div class="table-scroll">
                 <table class="data">
                     <thead>
-                        <tr><th>Персонаж</th><th>Релик</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th>Когда</th><th></th></tr>
+                        <tr><th>Персонаж</th><th>Релик</th><th>Звёзды</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th>Когда</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for h in history %}
                             <tr>
                                 <td>{{ h.char_name }}</td>
                                 <td>{{ h.relic }}</td>
+                                <td>{{ h.rarity }}★</td>
                                 <td>{{ h.sets_summary }}</td>
                                 <td>{{ h.primaries_summary }}</td>
                                 <td>{{ h.stats_summary }}</td>

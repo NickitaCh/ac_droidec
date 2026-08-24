@@ -28,6 +28,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
+# Для подписи единицы измерения (%/число) у поля ввода вторички — тот же PERCENT_STATS,
+# что stat_engine.calc_final_stats уже использует для перевода долей StatCalc в игровой %.
+STAT_NAME_CHOICES_WITH_UNIT = [(name, value, value in stat_engine.PERCENT_STATS) for name, value in STAT_NAME_CHOICES]
 
 # Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы.
 # Иконки — свои простые SVG (не растровые ассеты HotUtils).
@@ -108,11 +111,11 @@ def _preset_rows(guild_id: int):
 def _history_rows(guild_id: int):
     return [
         {
-            "id": hid, "char_name": _char_label(char_key), "relic": relic,
+            "id": hid, "char_name": _char_label(char_key), "relic": relic, "rarity": rarity,
             "sets_summary": _sets_summary(sets), "primaries_summary": _primaries_summary(primaries),
             "stats_summary": _stats_summary(stats), "created_at": created_at,
         }
-        for hid, char_key, relic, sets, primaries, stats, _created_by, created_at in database.get_stat_hypothetical_history(guild_id=guild_id)
+        for hid, char_key, relic, sets, primaries, stats, _created_by, created_at, rarity in database.get_stat_hypothetical_history(guild_id=guild_id)
     ]
 
 
@@ -167,8 +170,9 @@ def _parse_manual_stats(mapping) -> dict:
 
 
 def _redirect_qs(mapping) -> str:
-    """Пересобирает querystring из текущего запроса (character/relic/сеты/primary-статы/
-    вторички) — чтобы после сохранения пресета редирект вернул пользователя на тот же расчёт."""
+    """Пересобирает querystring из текущего запроса (character/relic/звёздность/сеты/
+    primary-статы/вторички) — чтобы после сохранения пресета редирект вернул пользователя
+    на тот же расчёт."""
     pairs = []
     character = mapping.get("character")
     if character:
@@ -176,6 +180,9 @@ def _redirect_qs(mapping) -> str:
     relic = mapping.get("relic")
     if relic:
         pairs.append(("relic", relic))
+    rarity = mapping.get("rarity")
+    if rarity:
+        pairs.append(("rarity", rarity))
     for set_id, _ in MOD_SET_CHOICES:
         val = mapping.get(f"set_{set_id}")
         if val:
@@ -198,6 +205,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
 
     character = qp.get("character", "")
     relic_raw = qp.get("relic", "")
+    rarity_raw = qp.get("rarity", "7")
     set_counts = _parse_set_counts(qp)
     primaries = _parse_primary_picks(qp)
     manual_stats = _parse_manual_stats(qp)
@@ -208,8 +216,9 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     if history_id:
         entry = database.get_stat_hypothetical_history_entry(int(history_id), guild_id=guild_id)
         if entry:
-            _, character, relic_int, set_counts, primaries, manual_stats, _, _ = entry
+            _, character, relic_int, set_counts, primaries, manual_stats, _, _, rarity_int = entry
             relic_raw = str(relic_int)
+            rarity_raw = str(rarity_int)
             reopened_from_history = True
     elif preset_id:
         preset = database.get_stat_mod_preset(int(preset_id), guild_id=guild_id)
@@ -227,10 +236,11 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         "mod_set_piece_count": stat_engine.MOD_SET_PIECE_COUNT,
         "mod_slots": MOD_SLOT_DEFS,
         "mod_primary_options": stat_engine.MOD_PRIMARY_OPTIONS,
-        "stat_name_choices": STAT_NAME_CHOICES,
+        "stat_name_choices": STAT_NAME_CHOICES_WITH_UNIT,
         "selected_character": character,
         "selected_character_label": _char_label(character) if character else "",
         "selected_relic": relic_raw,
+        "selected_rarity": rarity_raw,
         "set_counts": set_counts,
         "primaries": primaries,
         "manual_stat_rows": [(name, _fmt_value(value)) for name, value in manual_stats.items()] if manual_stats else [("", "")],
@@ -254,6 +264,15 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         return templates.TemplateResponse(request, "stat_builder.html", context)
 
     try:
+        rarity = int(rarity_raw)
+    except ValueError:
+        context["error"] = "Некорректная звёздность."
+        return templates.TemplateResponse(request, "stat_builder.html", context)
+    if not (1 <= rarity <= 7):
+        context["error"] = "Звёздность должна быть от 1 до 7."
+        return templates.TemplateResponse(request, "stat_builder.html", context)
+
+    try:
         comlink = _get_comlink()
         stat_calc = await stat_forecast.get_stat_calc(comlink)
     except Exception:
@@ -261,7 +280,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         return templates.TemplateResponse(request, "stat_builder.html", context)
 
     primary_list = _primaries_to_list(primaries)
-    unit = stat_engine.build_hypothetical_unit(character, relic, set_counts, primary_list)
+    unit = stat_engine.build_hypothetical_unit(character, relic, set_counts, primary_list, rarity=rarity)
     final_stats = stat_engine.calc_final_stats(stat_calc, unit)
     final_stats = stat_engine.apply_manual_stat_totals(final_stats, manual_stats)
 
@@ -271,7 +290,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     }
 
     if not reopened_from_history:
-        database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id)
+        database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id, rarity=rarity)
         context["history"] = _history_rows(guild_id)
 
     return templates.TemplateResponse(request, "stat_builder.html", context)
