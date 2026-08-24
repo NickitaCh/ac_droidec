@@ -28,13 +28,18 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
-# Единица измерения (%/число) у поля ввода вторички — тот же PERCENT_STATS, что
-# stat_engine.calc_final_stats уже использует для перевода долей StatCalc в игровой %.
+# Единица измерения (%/число) у поля ввода вторички для этого инструмента — шире, чем
+# родной stat_engine.PERCENT_STATS (тот только про итоговые %-статы StatCalc): Health/
+# Protection/Physical Damage/Special Damage тоже вводятся в %, т.к. на модах реально
+# бывают Health%/Protection%/Offense%-вторички (см. stat_engine.PERCENT_OF_BASE_STATS и
+# apply_manual_stat_totals, где именно так и обрабатывается). Единственное исключение —
+# Speed: вторичка Speed% в игре не встречается, только штуками.
+_STAT_UNIT_IS_PERCENT = stat_engine.PERCENT_STATS | stat_engine.PERCENT_OF_BASE_STATS
 # Подпись зашита прямо в текст опции (не только рядом с полем через JS) — так видно сразу
 # при выборе стата в выпадашке, не полагаясь на то, что пользователь заметит мелкую
 # подсказку у поля ввода после выбора.
 STAT_NAME_CHOICES_WITH_UNIT = [
-    (f"{name} (%)" if value in stat_engine.PERCENT_STATS else f"{name} (число)", value, value in stat_engine.PERCENT_STATS)
+    (f"{name} (%)" if value in _STAT_UNIT_IS_PERCENT else f"{name} (число)", value, value in _STAT_UNIT_IS_PERCENT)
     for name, value in STAT_NAME_CHOICES
 ]
 
@@ -101,7 +106,12 @@ def _primaries_summary(primaries: dict) -> str:
 
 
 def _stats_summary(manual_stats: dict) -> str:
-    return ", ".join(f"{name} +{_fmt_value(value)}" for name, value in manual_stats.items()) if manual_stats else "—"
+    if not manual_stats:
+        return "—"
+    return ", ".join(
+        f"{name} +{_fmt_value(value)}{'%' if name in _STAT_UNIT_IS_PERCENT else ''}"
+        for name, value in manual_stats.items()
+    )
 
 
 def _preset_rows(guild_id: int):

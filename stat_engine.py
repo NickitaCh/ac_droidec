@@ -197,21 +197,45 @@ def _defense_to_armor_pct(defense: float) -> float:
     return (defense * 100) / (defense + _ARMOR_LEVEL_EFFECT)
 
 
+# Health/Protection/Physical Damage/Special Damage — на модах тоже реально встречаются как
+# %-вторички (Health%/Protection%/Offense%, тот же unitStatId, что у %-primary в
+# MOD_PRIMARY_OPTIONS: 55/56/48), а не только флэт-числом. Подтверждено чтением исходников
+# swgoh_comlink/StatCalc/calculator.py::_calculate_mod_stats: вклад id 48/55/56/57
+# (Offense%/Health%/Protection%/Speed%) считается как процент от БАЗОВОГО (до модов)
+# значения соответствующего стата, а не от уже посчитанного финала — но т.к. со всех 6
+# модов такие % сначала суммируются в одну цифру и только потом одним движением
+# применяются к базе (не компаундятся друг на друга), результат эквивалентен применению
+# процента к уже готовому final_stats ДО текущей ручной вторички (после primary-статов,
+# которые в этом инструменте уже посчитаны отдельно через сам StatCalc) — тот же принцип,
+# что уже используется для Armor/Resistance выше. Speed сюда не входит: у модов
+# технически есть unitStatId для Speed% (57), но в игре им ни разу не пользуются — Speed
+# реально катается только флэт-числом, поэтому остаётся вводом в штуках.
+PERCENT_OF_BASE_STATS = frozenset({"Health", "Protection", "Physical Damage", "Special Damage"})
+
+
 def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
     """final_stats — результат calc_final_stats. manual_totals — {stat_name: value},
     введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов модов (единственное,
     что действительно нельзя посчитать точно — вторички рандомны, у них нет фиксированной
-    таблицы значений, в отличие от primary-статов выше), в тех же единицах, что
-    final_stats (проценты — в игровых %, не долях).
+    таблицы значений, в отличие от primary-статов выше). Все статы, кроме Speed, вводятся
+    в игровых % (см. PERCENT_OF_BASE_STATS/_NONLINEAR_DEFENSE_STATS выше и PERCENT_STATS
+    для родных %-статов StatCalc) — Speed остаётся числом (штуками), т.к. вторичка Speed% в
+    игре не встречается.
 
-    Armor/Resistance — особый случай (см. _NONLINEAR_DEFENSE_STATS выше): вклад
-    пересчитывается через промежуточный "Defense"-рейтинг вместо прямого сложения %."""
+    Armor/Resistance — особый случай (_NONLINEAR_DEFENSE_STATS): вклад пересчитывается
+    через промежуточный "Defense"-рейтинг вместо прямого сложения %.
+    Health/Protection/Physical Damage/Special Damage (PERCENT_OF_BASE_STATS): вклад —
+    процент от текущего (до этой вторички) значения стата, переводится в штуки и
+    прибавляется."""
     result = dict(final_stats)
     for name, value in manual_totals.items():
         if name in _NONLINEAR_DEFENSE_STATS:
             base_defense = _armor_pct_to_defense(result.get(name, 0))
             added_defense = _armor_pct_to_defense(value)
             result[name] = _defense_to_armor_pct(base_defense + added_defense)
+        elif name in PERCENT_OF_BASE_STATS:
+            base = result.get(name, 0)
+            result[name] = base + base * (value / 100)
         else:
             result[name] = result.get(name, 0) + value
     return result
