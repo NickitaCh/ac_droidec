@@ -321,7 +321,8 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     primary_list = _primaries_to_list(primaries)
     unit = stat_engine.build_hypothetical_unit(character, relic, set_counts, primary_list, rarity=rarity)
     base_final_stats = stat_engine.calc_final_stats(stat_calc, unit)
-    final_stats = stat_engine.apply_manual_stat_totals(base_final_stats, manual_stats)
+    raw_base_stats = stat_engine.calc_base_stats(stat_calc, unit)
+    final_stats = stat_engine.apply_manual_stat_totals(base_final_stats, manual_stats, raw_base_stats)
 
     context["result"] = {
         "char_name": _char_label(character),
@@ -338,7 +339,8 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
             # вторичек) — "сколько ещё нужно набрать в допах", а не "сколько ещё сверху
             # уже введённого" (см. запрос пользователя 2026-08-24).
             base_value = base_final_stats.get(target_stat, 0)
-            needed = stat_engine.required_manual_contribution(base_value, target_value, target_stat)
+            raw_base = raw_base_stats.get(target_stat, 0)
+            needed = stat_engine.required_manual_contribution(base_value, target_value, target_stat, raw_base)
             # ВАЖНО: две разные единицы, не путать. target_value/base_value — это САМ стат
             # в его родном виде (Health/Physical Damage и т.п. — всегда число, даже когда их
             # вторичка вводится в %; см. stat_engine.PERCENT_STATS, а не более широкий

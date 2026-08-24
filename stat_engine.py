@@ -55,6 +55,16 @@ def calc_final_stats(stat_calc: StatCalc, unit: dict) -> dict:
     return {k: (v * 100 if k in PERCENT_STATS else v) for k, v in final.items()}
 
 
+def calc_base_stats(stat_calc: StatCalc, unit: dict) -> dict:
+    """Статы юнита ДО модов (без сетов/primary) — {"Health": ..., "Armor": <Defense-рейтинг>,
+    ...}, не мутирует unit. В отличие от calc_final_stats НЕ домножает PERCENT_STATS на 100:
+    на этой стадии id 8/9 (Armor/Resistance) — ещё сырой Defense-рейтинг, не итоговый %
+    (нелинейная конвертация происходит только для final). Нужна для apply_manual_stat_totals/
+    required_manual_contribution — %-вторички считаются от ЭТОЙ базы, не от final."""
+    result = stat_calc.calc_char_stats(copy.deepcopy(unit))
+    return dict(result["stats"]["base"])
+
+
 # Для веб-only "Конструктора" (/mod-builder, web/routes/stat_builder.py): гипотетическая
 # сборка модов для персонажа, которого никто ещё не прокачал.
 #
@@ -222,50 +232,67 @@ def _defense_to_armor_pct(defense: float) -> float:
 PERCENT_OF_BASE_STATS = frozenset({"Health", "Protection", "Physical Damage", "Special Damage"})
 
 
-def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
-    """final_stats — результат calc_final_stats. manual_totals — {stat_name: value},
-    введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов модов (единственное,
-    что действительно нельзя посчитать точно — вторички рандомны, у них нет фиксированной
-    таблицы значений, в отличие от primary-статов выше). Все статы, кроме Speed, вводятся
-    в игровых % (см. PERCENT_OF_BASE_STATS/NONLINEAR_DEFENSE_STATS выше и PERCENT_STATS
-    для родных %-статов StatCalc) — Speed остаётся числом (штуками), т.к. вторичка Speed% в
-    игре не встречается.
+def apply_manual_stat_totals(final_stats: dict, manual_totals: dict, base_stats: dict) -> dict:
+    """final_stats — результат calc_final_stats (сеты+primary+relic+звёздность, БЕЗ ручных
+    вторичек). base_stats — результат calc_base_stats ТОГО ЖЕ юнита (статы без единого мода) —
+    именно от неё, а не от final_stats, считается %-вклад вторичек ниже (см. why). manual_totals
+    — {stat_name: value}, введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов
+    модов (единственное, что действительно нельзя посчитать точно — вторички рандомны, у них
+    нет фиксированной таблицы значений, в отличие от primary-статов выше). Все статы, кроме
+    Speed, вводятся в игровых % (см. PERCENT_OF_BASE_STATS/NONLINEAR_DEFENSE_STATS выше и
+    PERCENT_STATS для родных %-статов StatCalc) — Speed остаётся числом (штуками), т.к.
+    вторичка Speed% в игре не встречается.
+
+    Почему процент берётся от base_stats, а не от final_stats (баг, найденный в #ас-задачи
+    2026-08-24 NicolozZ — Кайло считало 180к HP вместо верных 174к): игра сама складывает ВСЕ
+    %-источники (primary/сет/вторички) в один коэффициент и применяет его к сырой базе ОДИН
+    раз — final = raw_base * (1 + primary_pct + сет_pct + вторичка_pct). final_stats уже равен
+    raw_base * (1 + primary_pct + сет_pct); если умножить его ЕЩЁ раз на (1 + вторичка_pct), это
+    компаундит (final*(1+в) = raw_base*(1+p+s)*(1+в) != raw_base*(1+p+s+в)) и завышает итог.
+    Эквивалентно: правильная прибавка от вторички — raw_base * вторичка_pct (плюсом к
+    final_stats), не final_stats * вторичка_pct.
 
     Armor/Resistance — особый случай (NONLINEAR_DEFENSE_STATS): вклад — процент от
     базового Defense-рейтинга (не от самой Брони/Сопротивления), пересчитывается через
-    промежуточный "Defense"-рейтинг, а не прямым сложением/умножением %.
+    промежуточный "Defense"-рейтинг тем же линейным сложением (не умножением).
     Health/Protection/Physical Damage/Special Damage (PERCENT_OF_BASE_STATS): вклад —
-    процент от текущего (до этой вторички) значения стата, переводится в штуки и
-    прибавляется."""
+    процент от СЫРОГО (до модов) значения стата, переводится в штуки и прибавляется
+    к final_stats."""
     result = dict(final_stats)
     for name, value in manual_totals.items():
         if name in NONLINEAR_DEFENSE_STATS:
-            base_defense = _armor_pct_to_defense(result.get(name, 0))
-            result[name] = _defense_to_armor_pct(base_defense * (1 + value / 100))
+            raw_base_defense = base_stats.get(name, 0)
+            current_defense = _armor_pct_to_defense(result.get(name, 0))
+            result[name] = _defense_to_armor_pct(current_defense + raw_base_defense * (value / 100))
         elif name in PERCENT_OF_BASE_STATS:
-            base = result.get(name, 0)
-            result[name] = base + base * (value / 100)
+            raw_base = base_stats.get(name, 0)
+            result[name] = result.get(name, 0) + raw_base * (value / 100)
         else:
             result[name] = result.get(name, 0) + value
     return result
 
 
-def required_manual_contribution(base_value: float, target_value: float, stat_name: str) -> float:
+def required_manual_contribution(base_value: float, target_value: float, stat_name: str, raw_base: float) -> float:
     """Обратная функция к apply_manual_stat_totals для ОДНОГО стата: сколько нужно набрать
     в вторичках (в тех же единицах, что и manual_totals там — % для всего, кроме Speed),
-    чтобы поднять stat_name с base_value (без вторичек — только сеты+primary+relic+
-    звёздность, т.е. final_stats ДО apply_manual_stat_totals) до target_value. Если
-    target_value уже достигнут на одной базе — возвращает 0 (а не отрицательное число)."""
+    чтобы поднять stat_name с base_value (final_stats ДО apply_manual_stat_totals — сеты+
+    primary+relic+звёздность) до target_value. raw_base — calc_base_stats того же стата
+    (статы БЕЗ единого мода) — та же база, от которой считается %-вклад в
+    apply_manual_stat_totals (см. её докстринг за подробным разбором бага); базовая
+    для % и raw_base для % — разные числа, если на юните уже есть %-primary/сет-бонусы,
+    поэтому нужны оба параметра. Если target_value уже достигнут на одной базе — возвращает
+    0 (а не отрицательное число)."""
     if target_value <= base_value:
         return 0.0
     if stat_name in NONLINEAR_DEFENSE_STATS:
-        base_defense = _armor_pct_to_defense(base_value)
-        if base_defense <= 0:
+        raw_base_defense = raw_base
+        if raw_base_defense <= 0:
             return 0.0
+        current_defense = _armor_pct_to_defense(base_value)
         target_defense = _armor_pct_to_defense(target_value)
-        return (target_defense / base_defense - 1) * 100
+        return (target_defense - current_defense) / raw_base_defense * 100
     if stat_name in PERCENT_OF_BASE_STATS:
-        if base_value <= 0:
+        if raw_base <= 0:
             return 0.0
-        return (target_value / base_value - 1) * 100
+        return (target_value - base_value) / raw_base * 100
     return target_value - base_value
