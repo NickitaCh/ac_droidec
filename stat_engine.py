@@ -174,13 +174,44 @@ def build_hypothetical_unit(base_id: str, relic_level: int, set_counts: dict, pr
     }
 
 
+# Armor/Resistance — НЕ независимые % статы, а нелинейное производное от внутреннего
+# рейтинга "Defense" (swgoh_comlink/StatCalc/calculator.py::_convert_flat_def_to_percent):
+# armor% = defense / (level_effect + defense), level_effect = level * 7.5 для персонажей.
+# build_hypothetical_unit всегда строит юнита на 85 уровне (см. выше) => level_effect = 637.5.
+# Наивное сложение процентов (как для остальных статов PERCENT_STATS — те складываются
+# напрямую, это подтверждено тем, что только id 8/9 (Armor/Resistance) проходят через
+# _convert_flat_def_to_percent в исходниках StatCalc, остальные % статы мод добавляет как
+# уже готовый %) завышает итог тем больше, чем выше базовая броня — подтверждено чтением
+# исходников библиотеки, не угадано. Формула/константа 637.5 сверены с пользователем
+# (2026-08-24) и совпали один в один с тем, что реально использует StatCalc.
+_ARMOR_LEVEL_EFFECT = 85 * 7.5
+_NONLINEAR_DEFENSE_STATS = frozenset({"Armor", "Resistance"})
+
+
+def _armor_pct_to_defense(pct: float) -> float:
+    pct = min(pct, 99.999)
+    return (pct * _ARMOR_LEVEL_EFFECT) / (100 - pct)
+
+
+def _defense_to_armor_pct(defense: float) -> float:
+    return (defense * 100) / (defense + _ARMOR_LEVEL_EFFECT)
+
+
 def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
     """final_stats — результат calc_final_stats. manual_totals — {stat_name: value},
     введённая пользователем оценка суммарного вклада ВТОРИЧНЫХ статов модов (единственное,
     что действительно нельзя посчитать точно — вторички рандомны, у них нет фиксированной
     таблицы значений, в отличие от primary-статов выше), в тех же единицах, что
-    final_stats (проценты — в игровых %, не долях)."""
+    final_stats (проценты — в игровых %, не долях).
+
+    Armor/Resistance — особый случай (см. _NONLINEAR_DEFENSE_STATS выше): вклад
+    пересчитывается через промежуточный "Defense"-рейтинг вместо прямого сложения %."""
     result = dict(final_stats)
     for name, value in manual_totals.items():
-        result[name] = result.get(name, 0) + value
+        if name in _NONLINEAR_DEFENSE_STATS:
+            base_defense = _armor_pct_to_defense(result.get(name, 0))
+            added_defense = _armor_pct_to_defense(value)
+            result[name] = _defense_to_armor_pct(base_defense + added_defense)
+        else:
+            result[name] = result.get(name, 0) + value
     return result
