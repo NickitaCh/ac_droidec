@@ -30,9 +30,13 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # /тб_ордер_из_картинки, бот не падает.
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
-# Ключ для Groq API — не используется сейчас (их единственная vision-модель
-# llama-4-scout была deprecated 2026-06-17, замены без vision), оставлен в .env
-# на случай, если понадобится их текстовые/audio модели.
+# Ключ для Groq API — не используется: их API целиком (не только vision) блокирует
+# запросы с датацентр-IP этого VPS (проверено 2026-08-24 изнутри контейнера,
+# GET /models -> 403 "Access denied. Please check your network settings.",
+# тот же класс блокировки, что у бесплатного Gemini, см. CLAUDE.md/память).
+# Раньше здесь было "не используется из-за deprecated vision-модели llama-4-scout" —
+# это тоже верно, но не первопричина: даже текстовые модели недоступны с этой сети.
+# Ключ оставлен в .env на случай смены VPS/сети.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 COMLINK_URL = "http://localhost:3000" 
