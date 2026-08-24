@@ -2804,3 +2804,46 @@ def count_tw_counters(guild_id: int) -> int:
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+
+# =====================================================================
+# QA-ЧЕКЛИСТ ПО СТРАНИЦАМ ВЕБ-ДАШБОРДА (временная страница, web/routes/qa_checklist.py)
+# — офицеры отмечают, какие страницы уже проверены/отполированы. Список
+# страниц сам по себе хардкожен в роуте (не в БД); тут хранится только
+# состояние галочки по page_key.
+# =====================================================================
+def _ensure_qa_checklist_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS qa_checklist (
+            page_key TEXT PRIMARY KEY,
+            checked INTEGER NOT NULL DEFAULT 0,
+            checked_by TEXT,
+            checked_at TEXT
+        )
+    """)
+
+
+def get_qa_checklist_state() -> dict:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_qa_checklist_table(cursor)
+    cursor.execute("SELECT page_key, checked, checked_by, checked_at FROM qa_checklist")
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        r[0]: {"checked": bool(r[1]), "checked_by": r[2], "checked_at": r[3]}
+        for r in rows
+    }
+
+
+def set_qa_checklist_item(page_key: str, checked: bool, checked_by: str) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_qa_checklist_table(cursor)
+    cursor.execute("""
+        INSERT INTO qa_checklist (page_key, checked, checked_by, checked_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(page_key) DO UPDATE SET checked = excluded.checked, checked_by = excluded.checked_by, checked_at = excluded.checked_at
+    """, (page_key, int(checked), checked_by))
+    conn.commit()
+    conn.close()

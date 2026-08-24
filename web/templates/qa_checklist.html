@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}QA-чеклист — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>QA-чеклист страниц</h1>
+    <p class="muted">Отмечайте страницу, когда прошлись по ней и она выглядит/работает нормально. Отметки видны всем, кто заходит сюда — обновляются сразу.</p>
+    <p class="muted">Проверено: <strong>{{ checked_count }} / {{ total }}</strong></p>
+
+    <div class="panel" style="max-width: 24em;">
+        <label>
+            Ваше имя (для колонки "Кем")
+            <input type="text" id="qa-name" placeholder="например Ricardo">
+        </label>
+    </div>
+
+    <div class="panel">
+        <div class="table-scroll">
+            <table class="data">
+                <thead>
+                    <tr>
+                        <th>Страница</th>
+                        <th>Ссылка</th>
+                        <th>Проверено</th>
+                        <th>Кем / когда</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.name }}</td>
+                            <td><a href="{{ row.path }}" target="_blank" rel="noopener">{{ row.path }}</a></td>
+                            <td>
+                                <form method="post" action="/qa-checklist/{{ row.key }}/toggle" class="inline-form" onsubmit="qaFillName(this)">
+                                    <input type="hidden" name="checked_by">
+                                    <input type="checkbox" onchange="this.form.requestSubmit()" {% if row.checked %}checked{% endif %}>
+                                </form>
+                            </td>
+                            <td>
+                                {% if row.checked_by %}
+                                    <span class="muted" style="font-size: 0.85em;">{{ row.checked_by }} · {{ row.checked_at }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var nameInput = document.getElementById('qa-name');
+            nameInput.value = localStorage.getItem('qa_checklist_name') || '';
+            nameInput.addEventListener('change', function () {
+                localStorage.setItem('qa_checklist_name', nameInput.value);
+            });
+        })();
+        function qaFillName(form) {
+            form.querySelector('input[name=checked_by]').value =
+                document.getElementById('qa-name').value.trim() || 'Аноним';
+        }
+    </script>
+{% endblock %}
