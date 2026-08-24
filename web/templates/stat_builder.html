@@ -112,6 +112,19 @@
                 <button type="button" class="row-group-add">+ добавить стат</button>
             </div>
 
+            <div class="form-block">
+                <span>Целевое значение (необязательно) — сколько ещё нужно набрать в допах сверху сетов+основ, чтобы достичь этого числа</span>
+                <div class="mod-set-row">
+                    <select name="target_stat">
+                        <option value="">— стат —</option>
+                        {% for label, val, is_percent in stat_name_choices %}
+                            <option value="{{ val }}" {% if val == selected_target_stat %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" name="target_value" step="any" placeholder="желаемое значение" value="{{ selected_target_value }}">
+                </div>
+            </div>
+
             <button type="submit">Посчитать</button>
         </form>
     </div>
@@ -135,6 +148,17 @@
             </div>
         </div>
 
+        {% if target %}
+            <div class="panel" style="max-width: 30em;">
+                <div class="panel-title"><span>Требуется во вторичках</span></div>
+                {% if target.already_reached %}
+                    <p>{{ target.stat_label }}: цель {{ target.target_value_fmt }}{{ target.unit }} уже достигнута без вторичек (сеты+основы дают {{ target.base_value_fmt }}{{ target.unit }}).</p>
+                {% else %}
+                    <p>Чтобы получить <strong>{{ target.target_value_fmt }}{{ target.unit }} {{ target.stat_label }}</strong> (сейчас без вторичек: {{ target.base_value_fmt }}{{ target.unit }}), нужно набрать во вторичках модов суммарно <strong>+{{ target.needed_fmt }}{{ target.unit }}</strong>.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
         <div class="panel" style="max-width: 30em;">
             <div class="panel-title"><span>Сохранить как пресет</span></div>
             <form method="post" action="/mod-builder/presets/save" class="inline-form">
@@ -153,6 +177,10 @@
                 <input type="hidden" name="character" value="{{ selected_character }}">
                 <input type="hidden" name="relic" value="{{ selected_relic }}">
                 <input type="hidden" name="rarity" value="{{ selected_rarity }}">
+                {% if selected_target_stat %}
+                    <input type="hidden" name="target_stat" value="{{ selected_target_stat }}">
+                    <input type="hidden" name="target_value" value="{{ selected_target_value }}">
+                {% endif %}
                 <input type="text" name="name" placeholder="Название пресета" required>
                 <button type="submit">Сохранить</button>
             </form>

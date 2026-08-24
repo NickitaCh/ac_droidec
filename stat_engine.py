@@ -239,3 +239,22 @@ def apply_manual_stat_totals(final_stats: dict, manual_totals: dict) -> dict:
         else:
             result[name] = result.get(name, 0) + value
     return result
+
+
+def required_manual_contribution(base_value: float, target_value: float, stat_name: str) -> float:
+    """Обратная функция к apply_manual_stat_totals для ОДНОГО стата: сколько нужно набрать
+    в вторичках (в тех же единицах, что и manual_totals там — % для всего, кроме Speed),
+    чтобы поднять stat_name с base_value (без вторичек — только сеты+primary+relic+
+    звёздность, т.е. final_stats ДО apply_manual_stat_totals) до target_value. Если
+    target_value уже достигнут на одной базе — возвращает 0 (а не отрицательное число)."""
+    if target_value <= base_value:
+        return 0.0
+    if stat_name in _NONLINEAR_DEFENSE_STATS:
+        base_defense = _armor_pct_to_defense(base_value)
+        target_defense = _armor_pct_to_defense(target_value)
+        return _defense_to_armor_pct(target_defense - base_defense)
+    if stat_name in PERCENT_OF_BASE_STATS:
+        if base_value <= 0:
+            return 0.0
+        return (target_value / base_value - 1) * 100
+    return target_value - base_value
