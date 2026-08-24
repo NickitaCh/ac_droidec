@@ -37,9 +37,33 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 COMLINK_URL = "http://localhost:3000" 
 
-TUSA_GUILD_ID = 1105914797054238830
-SNG_GUILD_ID = 931280548402442310
-test_guilds_list = [TUSA_GUILD_ID, SNG_GUILD_ID]
+TUSA_GUILD_ID = 1105914797054238830  # dev/тестовый Discord-сервер, не привязан к SWGOH-гильдии
+SNG_GUILD_ID = 931280548402442310    # Discord-сервер AbsoluteChaos — используется и для seed_default_guild ниже
+
+
+def _build_test_guilds_list() -> list:
+    """Discord-серверы (НЕ SWGOH-гильдии — Discord API тоже называет сервер "guild",
+    отсюда путаница), которым disnake регистрирует слэш-команды. Раньше это были 2
+    захардкоженных ID (TUSA/SNG) — при онбординге 3-й реальной SWGOH-гильдии через
+    "/гильдия добавить" на новом Discord-сервере команды там не появлялись вообще,
+    пока кто-то вручную не добавлял её discord_guild_id сюда и не делал деплой кода.
+    Теперь список = TUSA_GUILD_ID (фолбэк на случай пустой БД при самом первом
+    запуске, до seed_default_guild) + SNG_GUILD_ID + discord_guild_id каждой строки
+    в таблице guilds — так что новый Discord-сервер подхватывается после обычного
+    РЕСТАРТА бота (плюс обычный ручной REST-пуш команд на него, см. CLAUDE.md про
+    отключённый автосинк), без правки этого файла."""
+    guild_ids = {TUSA_GUILD_ID, SNG_GUILD_ID}
+    try:
+        for guild_config in database.get_all_guild_configs():
+            discord_id = guild_config.get("discord_guild_id")
+            if discord_id:
+                guild_ids.add(int(discord_id))
+    except Exception as e:
+        print(f"⚠️ Не удалось прочитать discord_guild_id гильдий из БД для test_guilds — используются только TUSA/SNG: {e}")
+    return list(guild_ids)
+
+
+test_guilds_list = _build_test_guilds_list()
 
 ALLY_CODE = "572624393"  
 N_LIMIT = 3              
