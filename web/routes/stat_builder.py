@@ -28,9 +28,15 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
-# Для подписи единицы измерения (%/число) у поля ввода вторички — тот же PERCENT_STATS,
-# что stat_engine.calc_final_stats уже использует для перевода долей StatCalc в игровой %.
-STAT_NAME_CHOICES_WITH_UNIT = [(name, value, value in stat_engine.PERCENT_STATS) for name, value in STAT_NAME_CHOICES]
+# Единица измерения (%/число) у поля ввода вторички — тот же PERCENT_STATS, что
+# stat_engine.calc_final_stats уже использует для перевода долей StatCalc в игровой %.
+# Подпись зашита прямо в текст опции (не только рядом с полем через JS) — так видно сразу
+# при выборе стата в выпадашке, не полагаясь на то, что пользователь заметит мелкую
+# подсказку у поля ввода после выбора.
+STAT_NAME_CHOICES_WITH_UNIT = [
+    (f"{name} (%)" if value in stat_engine.PERCENT_STATS else f"{name} (число)", value, value in stat_engine.PERCENT_STATS)
+    for name, value in STAT_NAME_CHOICES
+]
 
 # Реальные 6 форм модов в игре — у персонажа всегда ровно по одному слоту каждой формы.
 # Иконки — свои простые SVG (не растровые ассеты HotUtils).
