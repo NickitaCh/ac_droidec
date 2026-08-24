@@ -5,6 +5,23 @@ Dark/Mixed/Light/Bonus), распознаёт её через Mistral vision (MI
 же тред 6 сообщений, по одному на этап, в формате, которым офицеры уже пишут
 ордер вручную (см. тред "43*", TB_ORDER_SOURCE_CHANNEL_ID).
 
+После публикации, если в треде нашлись все 6 заголовков этапов (см.
+_find_existing_order_phases — это и есть "проверка, что ордер появился"), команда
+сохраняет план (обязательный параметр "название" + ветка + сумма звёзд) в
+database.tb_saved_plans. /тб_план — отдельная группа команд поверх этой таблицы
+(список / выбрать / удалить): "выбрать" пишет id плана в guilds.tb_active_plan_id,
+и tb_order_loop (cogs/guild_events.py) с этого момента берёт ежедневный блок
+этапа из ветки выбранного плана, а не из статического guilds.tb_order_source_
+channel_id. Так на одну ТБ можно держать несколько разобранных планов (например,
+если план поменяли) и переключаться между ними без обращения к /настройки.
+
+"/тб_план сохранить" — то же самое сохранение в tb_saved_plans, но без картинки/
+Mistral: для ветки, где ордер на все 6 этапов уже есть (написан вручную офицером
+или собран этой же командой раньше) — просто регистрирует её под названием и
+звёздами. Проверка на "появился ли ордер" здесь ищет заголовки этапов по тому же
+паттерну, что и tb_order_loop (guild_events.TB_PLAN_HEADER_RE), а не только среди
+сообщений бота — офицерский текст тоже считается.
+
 Изначально был реализован на Gemini (google-genai, GOOGLE_API_KEY), но бесплатный
 тариф Google блокирует запросы с датацентр-IP VPS (проверено 2026-08-21 — тот же
 ключ работает локально и падает изнутри контейнера на VPS с "location not
@@ -47,7 +64,9 @@ import re
 import disnake
 from disnake.ext import commands
 
+import database
 import guild_resolver
+from cogs.guild_events import TB_PLAN_HEADER_RE
 
 LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)(?:/(\d+))?")
 ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
@@ -246,6 +265,26 @@ def _build_order_blocks(data: dict):
     return blocks, total
 
 
+async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
+    """Как _find_existing_order_phases, но не привязано к автору-боту — использует тот
+    же паттерн заголовка, что и tb_order_loop (guild_events.TB_PLAN_HEADER_RE), чтобы
+    можно было вручную сохранить план, где текст ордера писали офицеры, а не бот."""
+    phases = set()
+    async for msg in thread.history(limit=None):
+        match = TB_PLAN_HEADER_RE.search(msg.content or "")
+        if match:
+            phases.add(int(match.group(1)))
+    return sorted(phases)
+
+
+async def autocomplete_tb_plans(inter: disnake.ApplicationCommandInteraction, user_input: str):
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    user_input = (user_input or "").lower()
+    return [p["name"] for p in database.get_tb_saved_plans(guild_id) if user_input in p["name"].lower()][:25]
+
+
 class TBOrderImage(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -259,6 +298,7 @@ class TBOrderImage(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         ссылка: str = commands.Param(description="Ссылка на тред с картинкой Strategy Summary в первом сообщении"),
+        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план выбрать"),
         звёзды: int = commands.Param(description="Total Stars с картинки — для проверки, что распознано верно"),
         принудительно: bool = commands.Param(
             default=False,
@@ -343,10 +383,137 @@ class TBOrderImage(commands.Cog):
                 f"а вы указали {звёзды}. Проверьте текст в треде перед тем, как тегать гильдию.\n\n"
             )
 
-        for block in blocks:
-            await thread.send(block)
+        try:
+            for block in blocks:
+                await thread.send(block)
+        except (disnake.Forbidden, disnake.HTTPException) as e:
+            await inter.edit_original_response(
+                f"{warning}❌ Публикация прервалась на середине (не всё могло уйти в тред): {e}\n"
+                "План не сохранён — проверьте тред вручную и, если нужно, повторите с `принудительно: True`."
+            )
+            return
 
-        await inter.edit_original_response(f"{warning}✅ Опубликовано 6 сообщений в тред «{thread.name}».")
+        # Проверяем, что все 6 этапов реально появились в треде (не просто что
+        # thread.send не бросил исключение), прежде чем сохранять план в память.
+        posted_phases = await _find_existing_order_phases(thread, self.bot.user.id)
+        if posted_phases != [1, 2, 3, 4, 5, 6]:
+            missing = sorted(set(range(1, 7)) - set(posted_phases))
+            await inter.edit_original_response(
+                f"{warning}⚠️ Сообщения отправлены, но в треде не нашлись все 6 этапов "
+                f"(не хватает: {', '.join(map(str, missing))}). План не сохранён — проверьте тред вручную."
+            )
+            return
+
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        database.save_tb_plan(guild_id, название, thread.id, total, created_by=str(inter.author.id))
+
+        await inter.edit_original_response(
+            f"{warning}✅ Опубликовано 6 сообщений в тред «{thread.name}».\n"
+            f"💾 План сохранён как «{название}» ({total} ★) — выбрать его для ежедневной публикации: "
+            f"`/тб_план выбрать`."
+        )
+
+
+    # ------------------ Управление сохранёнными планами ------------------
+    @commands.slash_command(name="тб_план", description="Управление сохранёнными планами ордера ТБ")
+    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
+    async def tb_plan_group(self, inter: disnake.ApplicationCommandInteraction):
+        pass
+
+    @tb_plan_group.sub_command(name="список", description="Список сохранённых планов ордера ТБ")
+    async def tb_plan_list(self, inter: disnake.ApplicationCommandInteraction):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        plans = database.get_tb_saved_plans(guild_id)
+        if not plans:
+            await inter.response.send_message(
+                "Сохранённых планов пока нет — соберите ордер через `/тб_ордер_из_картинки`.", ephemeral=True
+            )
+            return
+        guild_cfg = database.get_guild_config(guild_id) or {}
+        active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
+        lines = []
+        for p in plans:
+            mark = " — 🟢 активен" if p["id"] == active_id else ""
+            lines.append(f"**{p['name']}** — {p['total_stars']} ★, <#{p['thread_id']}>{mark}")
+        await inter.response.send_message("\n".join(lines), ephemeral=True)
+
+    @tb_plan_group.sub_command(
+        name="выбрать", description="Выбрать план, из которого будет постится ежедневный ордер ТБ"
+    )
+    async def tb_plan_select(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
+    ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        plan = database.get_tb_saved_plan_by_name(guild_id, название)
+        if plan is None:
+            await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
+            return
+        database.update_guild_config(guild_id, tb_active_plan_id=plan["id"])
+        await inter.response.send_message(
+            f"✅ Активный план ордера ТБ: «{plan['name']}» ({plan['total_stars']} ★, <#{plan['thread_id']}>). "
+            "Ежедневная публикация будет брать текст этапов из этой ветки.",
+            ephemeral=True,
+        )
+
+    @tb_plan_group.sub_command(
+        name="сохранить",
+        description="Сохранить как план уже готовую ветку с ордером на 6 этапов (например, дописанную вручную)",
+    )
+    async def tb_plan_save_manual(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        ссылка: str = commands.Param(description="Ссылка на тред, где уже есть ордер на все 6 этапов"),
+        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план выбрать"),
+        звёзды: int = commands.Param(description="Total Stars по этому плану — для списка планов"),
+    ):
+        await inter.response.defer(ephemeral=True)
+
+        channel_id = _extract_channel_id(ссылка)
+        if channel_id is None:
+            await inter.edit_original_response("❌ Не удалось распознать ссылку на тред.")
+            return
+
+        try:
+            thread = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+        except disnake.NotFound:
+            await inter.edit_original_response("❌ Тред не найден — проверьте ссылку.")
+            return
+        except disnake.Forbidden:
+            await inter.edit_original_response("❌ Нет доступа к этому треду.")
+            return
+
+        posted_phases = await _find_posted_phases_any_author(thread)
+        if posted_phases != [1, 2, 3, 4, 5, 6]:
+            missing = sorted(set(range(1, 7)) - set(posted_phases))
+            found = ", ".join(map(str, posted_phases)) or "ни одного"
+            await inter.edit_original_response(
+                f"⚠️ В треде нашлись заголовки этапов: {found}. Не хватает: {', '.join(map(str, missing))}. "
+                "План не сохранён — в треде должен быть текст ордера на все 6 этапов "
+                "(заголовки вида «Восход Империи — N этап»)."
+            )
+            return
+
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        database.save_tb_plan(guild_id, название, thread.id, звёзды, created_by=str(inter.author.id))
+        await inter.edit_original_response(
+            f"💾 План сохранён как «{название}» ({звёзды} ★, <#{thread.id}>) — выбрать его для ежедневной "
+            f"публикации: `/тб_план выбрать`."
+        )
+
+    @tb_plan_group.sub_command(name="удалить", description="Удалить сохранённый план ордера ТБ")
+    async def tb_plan_delete(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
+    ):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        deleted = database.delete_tb_saved_plan(guild_id, название)
+        if not deleted:
+            await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
+            return
+        await inter.response.send_message(f"🗑️ План «{название}» удалён.", ephemeral=True)
 
 
 def setup(bot: commands.Bot):

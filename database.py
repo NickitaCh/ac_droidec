@@ -156,6 +156,7 @@ GUILD_CONFIG_COLUMNS = [
     "birthday_channel_id", "birthday_role_id",
     "officer_channel_id",
     "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id",
+    "tb_active_plan_id",
     "swgoh_gg_guild_id",
     "omicron_channel_id",
     "tw_guide_forum_channel_id",
@@ -197,6 +198,10 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tw_guide_forum_channel_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tb_active_plan_id INTEGER")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -1499,6 +1504,118 @@ def get_tb_event_planet_names(event_id: int):
     rows = cursor.fetchall()
     conn.close()
     return {(phase, conflict_key): planet_name for phase, conflict_key, planet_name in rows}
+
+
+# =====================================================================
+# СОХРАНЁННЫЕ ПЛАНЫ ОРДЕРА ТБ: именованные ссылки на ветки, где /тб_ордер_из_
+# картинки уже собрал готовый ордер на 6 этапов. Одна из них помечается
+# "активной" (guilds.tb_active_plan_id) — именно её тред tb_order_loop
+# (cogs/guild_events.py) читает при ежедневной публикации вместо статического
+# guilds.tb_order_source_channel_id — так офицер может завести вторую ветку
+# под новый план ТБ и переключиться на неё одной командой, не трогая настройки.
+# =====================================================================
+def _ensure_tb_saved_plans_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_saved_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            total_stars INTEGER,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def save_tb_plan(guild_id: int, name: str, thread_id: int, total_stars: int, created_by: str = None) -> int:
+    """Upsert по (guild_id, name) — повторный прогон /тб_ордер_из_картинки под тем
+    же названием (например, план поправили и перепубликовали в ту же ветку с
+    принудительно=True) обновляет запись, а не плодит дубли."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute("SELECT id FROM tb_saved_plans WHERE guild_id = ? AND name = ?", (guild_id, name))
+    row = cursor.fetchone()
+    if row:
+        plan_id = row[0]
+        cursor.execute("""
+            UPDATE tb_saved_plans SET thread_id = ?, total_stars = ?, created_by = ?, created_at = datetime('now')
+            WHERE id = ?
+        """, (str(thread_id), total_stars, created_by, plan_id))
+    else:
+        cursor.execute("""
+            INSERT INTO tb_saved_plans (guild_id, name, thread_id, total_stars, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+        """, (guild_id, name, str(thread_id), total_stars, created_by))
+        plan_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return plan_id
+
+
+def get_tb_saved_plans(guild_id: int) -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute(
+        "SELECT id, name, thread_id, total_stars, created_at FROM tb_saved_plans WHERE guild_id = ? ORDER BY created_at DESC",
+        (guild_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "name": r[1], "thread_id": r[2], "total_stars": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
+def get_tb_saved_plan(plan_id: int) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute(
+        "SELECT id, guild_id, name, thread_id, total_stars, created_at FROM tb_saved_plans WHERE id = ?", (plan_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "guild_id": row[1], "name": row[2], "thread_id": row[3], "total_stars": row[4], "created_at": row[5]}
+
+
+def get_tb_saved_plan_by_name(guild_id: int, name: str) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute(
+        "SELECT id, guild_id, name, thread_id, total_stars, created_at FROM tb_saved_plans WHERE guild_id = ? AND name = ?",
+        (guild_id, name)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "guild_id": row[1], "name": row[2], "thread_id": row[3], "total_stars": row[4], "created_at": row[5]}
+
+
+def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
+    """Если удаляемый план был активным (guilds.tb_active_plan_id) — сбрасывает
+    указатель, чтобы tb_order_loop не ссылался на несуществующую запись."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute("SELECT id FROM tb_saved_plans WHERE guild_id = ? AND name = ?", (guild_id, name))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    plan_id = row[0]
+    cursor.execute("DELETE FROM tb_saved_plans WHERE id = ?", (plan_id,))
+    cursor.execute("UPDATE guilds SET tb_active_plan_id = NULL WHERE tb_active_plan_id = ?", (plan_id,))
+    conn.commit()
+    conn.close()
+    return True
 
 
 def get_user_mapping_by_name(name: str, guild_id: int = 1):

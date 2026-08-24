@@ -175,9 +175,12 @@ class GuildEvents(commands.Cog):
         return (phase, mapping) if mapping else None
 
     # ------------------ Ежедневная публикация ордера на актуальный этап ------------------
-    # Офицеры выкладывают план на все 6 этапов разом, одной веткой (guilds.tb_order_
-    # source_channel_id), а не по дням — поэтому бот сам режет её на блоки по заголовкам
-    # "Восход Империи — N этап" и публикует нужный блок каждый день. Какой этап
+    # Источник ордера — одна ветка с планом на все 6 этапов разом (не по дням), которую
+    # бот сам режет на блоки по заголовкам "Восход Империи — N этап" и публикует нужный
+    # блок каждый день. Какая это ветка: если офицер выбрал сохранённый план командой
+    # /тб_план выбрать (см. cogs/tb_order_image.py) — берётся его тред (guilds.tb_
+    # active_plan_id → tb_saved_plans.thread_id); иначе фолбэк на старый статический
+    # guilds.tb_order_source_channel_id, куда офицеры писали план текстом вручную. Какой этап
     # актуален "сегодня" определяем не по датам ТБ (бот их не знает), а по дню
     # недели внутри "тегаемой" недели: этап 1 — в тот день, что идёт первым в
     # расписании "ордер" (guilds.ping_schedule_json), этап 2 — во второй и т.д. Так
@@ -284,7 +287,18 @@ class GuildEvents(commands.Cog):
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
-            if not guild_cfg.get("tb_plan_channel_id") or not guild_cfg.get("tb_order_source_channel_id") \
+            # Источник блока ордера: если офицер выбрал сохранённый план
+            # (/тб_план выбрать) — берём его ветку, иначе фолбэк на старый
+            # статический guilds.tb_order_source_channel_id (ручная ветка-план).
+            source_channel_id = None
+            if guild_cfg.get("tb_active_plan_id"):
+                active_plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
+                if active_plan:
+                    source_channel_id = int(active_plan["thread_id"])
+            if source_channel_id is None and guild_cfg.get("tb_order_source_channel_id"):
+                source_channel_id = int(guild_cfg["tb_order_source_channel_id"])
+
+            if not guild_cfg.get("tb_plan_channel_id") or not source_channel_id \
                     or not guild_cfg.get("tb_order_role_id"):
                 continue
             if not self._is_ping_week(guild_cfg, now_msk.date()):
@@ -306,7 +320,7 @@ class GuildEvents(commands.Cog):
                 continue
 
             try:
-                messages = await self._fetch_tb_order_source_messages(int(guild_cfg["tb_order_source_channel_id"]))
+                messages = await self._fetch_tb_order_source_messages(source_channel_id)
                 block = self._extract_tb_order_block(messages, phase)
                 if not block:
                     print(f"❌ [TBOrder] [{gname}] Не нашёл блок {phase} этапа в ветке-плане")

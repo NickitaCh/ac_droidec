@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Планы ордера ТБ — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/tb">← Назад к ТБ</a></p>
+    <h1>Планы ордера ТБ</h1>
+    <p class="muted">
+        Именованные ветки с готовым ордером на 6 этапов. Активный план — тот, из которого
+        бот ежедневно постит нужный этап в канал плана ТБ (см. <a href="/settings">настройки</a>,
+        блок «ТБ — план и ордер»). Собрать план из картинки Strategy Summary можно только
+        через бот-команду <code>/тб_ордер_из_картинки</code> — здесь можно выбрать активный,
+        удалить или вручную зарегистрировать уже готовую ветку.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Сохранённые планы</span></div>
+        {% if not rows %}
+            <p class="empty-state">Планов пока нет — соберите ордер через <code>/тб_ордер_из_картинки</code>
+                в Discord, либо зарегистрируйте уже готовую ветку формой ниже.</p>
+        {% else %}
+            <table class="data">
+                <thead><tr><th>Название</th><th>★</th><th>Ветка</th><th></th></tr></thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</td>
+                            <td>{{ row.total_stars }}</td>
+                            <td>
+                                {% if row.thread_link %}
+                                    <a href="{{ row.thread_link }}" target="_blank" rel="noopener">открыть тред →</a>
+                                {% else %}
+                                    <span class="muted">{{ row.thread_id }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="row-actions">
+                                {% if not row.active %}
+                                    <form method="post" action="/tb/order-plans/select">
+                                        <input type="hidden" name="plan_id" value="{{ row.id }}">
+                                        <button type="submit">Выбрать активным</button>
+                                    </form>
+                                {% endif %}
+                                <form method="post" action="/tb/order-plans/delete"
+                                      onsubmit="return confirm('Удалить план «{{ row.name }}»?');">
+                                    <input type="hidden" name="name" value="{{ row.name }}">
+                                    <button type="submit" class="button-danger">Удалить</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+
+    <div class="panel" style="max-width: 32em;">
+        <div class="panel-title"><span>Зарегистрировать готовую ветку</span></div>
+        <p class="muted">
+            Для ветки, где ордер на все 6 этапов уже написан (вручную офицером или собран
+            командой раньше). Проверка, что в ветке реально есть все 6 этапов, здесь не
+            выполняется — доступна только у бот-команды <code>/тб_план сохранить</code>.
+        </p>
+        <form method="post" action="/tb/order-plans/save">
+            <label>
+                Название плана
+                <input type="text" name="name" required>
+            </label>
+            <label>
+                Ссылка на тред
+                <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
+            </label>
+            <label>
+                Total Stars
+                <input type="number" name="stars" min="0" required>
+            </label>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+{% endblock %}

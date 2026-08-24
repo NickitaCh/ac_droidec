@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -95,6 +96,22 @@ TB_PLAN_CONFLICT_OPTIONS = [
     {"value": "bonus", "label": "Бонус/ОЗ-зона"},
 ]
 
+# Тот же паттерн, что и cogs/tb_order_image.py::LINK_RE — продублирован, а не
+# импортирован, чтобы веб-процесс (без доступа к Discord-клиенту) не тянул за
+# собой cogs/guild_events.py целиком ради одной регулярки (см. коммент выше про
+# TB_PLAN_CONFLICT_OPTIONS — здесь тот же принцип дублирования ради развязки).
+TB_THREAD_LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)")
+
+
+def _extract_thread_id(value: str) -> int | None:
+    value = (value or "").strip()
+    m = TB_THREAD_LINK_RE.search(value)
+    if m:
+        return int(m.group(2))
+    if value.isdigit():
+        return int(value)
+    return None
+
 
 @router.get("/roster", response_class=HTMLResponse)
 async def roster(request: Request, user: dict = Depends(require_guild_access)):
@@ -177,6 +194,65 @@ async def tb_plan_save(
         return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Некорректная ветка'})}", status_code=303)
     database.set_tb_planet_name(str(phase), conflict_key, planet_name, source="manual", guild_id=user["guild_id"])
     return RedirectResponse("/tb/plan?saved=1", status_code=303)
+
+
+@router.get("/tb/order-plans", response_class=HTMLResponse)
+async def tb_order_plans(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
+    discord_guild_id = guild_cfg.get("discord_guild_id")
+    rows = []
+    for p in database.get_tb_saved_plans(guild_id):
+        rows.append({
+            **p,
+            "active": p["id"] == active_id,
+            "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
+        })
+    return templates.TemplateResponse(request, "tb_order_plans.html", {
+        "user": user,
+        "rows": rows,
+        "error": request.query_params.get("error"),
+        "saved": request.query_params.get("saved"),
+    })
+
+
+@router.post("/tb/order-plans/select", response_class=HTMLResponse)
+async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(require_guild_access)):
+    plan = database.get_tb_saved_plan(plan_id)
+    if plan is None or plan["guild_id"] != user["guild_id"]:
+        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'План не найден'})}", status_code=303)
+    database.update_guild_config(user["guild_id"], tb_active_plan_id=plan_id)
+    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+
+
+@router.post("/tb/order-plans/delete", response_class=HTMLResponse)
+async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(require_guild_access)):
+    database.delete_tb_saved_plan(user["guild_id"], name)
+    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+
+
+@router.post("/tb/order-plans/save", response_class=HTMLResponse)
+async def tb_order_plans_save_manual(
+    name: str = Form(...),
+    thread_link: str = Form(...),
+    stars: int = Form(...),
+    user: dict = Depends(require_guild_access),
+):
+    # Веб-процесс не держит Discord-клиент (см. web/app.py — "без промежуточного
+    # API у бота"), поэтому, в отличие от бот-команды /тб_план сохранить, здесь
+    # НЕТ проверки, что в ветке реально лежит ордер на все 6 этапов — только
+    # синтаксическая валидация ссылки. Шаблон явно предупреждает об этом.
+    name = name.strip()
+    if not name:
+        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+    thread_id = _extract_thread_id(thread_link)
+    if thread_id is None:
+        return RedirectResponse(
+            f"/tb/order-plans?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
+        )
+    database.save_tb_plan(user["guild_id"], name, thread_id, stars, created_by=f"web:{user['discord_id']}")
+    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
 
 
 @router.get("/activity", response_class=HTMLResponse)
