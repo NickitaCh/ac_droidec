@@ -14,11 +14,11 @@
     {% else %}
         <div class="panel">
             <div class="table-scroll">
-                <table class="data">
+                <table class="data" id="birthdays-table">
                     <thead>
                         <tr>
-                            <th>Игрок</th>
-                            <th>Дата</th>
+                            <th data-sort="text">Игрок</th>
+                            <th data-sort="text">Дата</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -32,7 +32,7 @@
                                         <span class="badge badge-neutral">не опознан</span> {{ row.discord_id }}
                                     {% endif %}
                                 </td>
-                                <td>{{ row.date_str }}</td>
+                                <td data-value="{{ row.next_birthday.isoformat() }}">{{ row.date_str }}</td>
                                 <td class="row-actions">
                                     <details>
                                         <summary class="link-btn">редактировать</summary>
