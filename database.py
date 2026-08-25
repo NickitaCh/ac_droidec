@@ -40,6 +40,10 @@ def init_db():
         cursor.execute("ALTER TABLE user_mapping ADD COLUMN member_level INTEGER")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE user_mapping ADD COLUMN comlink_player_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # 2. Таблица нарушений
     cursor.execute("""
@@ -1009,20 +1013,39 @@ def get_guild_ids_for_ally_code(ally_code: str) -> set:
 
 def sync_guild_roster(guild_id: int, roster_rows):
     """Полная замена состава гильдии guild_id в user_mapping: roster_rows —
-    [(discord_id, ally_code, ingame_name, member_level), ...]. member_level —
+    [(discord_id, ally_code, ingame_name, member_level, comlink_player_id), ...]. member_level —
     сырое значение Comlink (4=лидер, 3=офицер, 2=рядовой участник), используется
-    guild_resolver.resolve_access для прав по игровому рангу. Используется часовым
+    guild_resolver.resolve_access для прав по игровому рангу. comlink_player_id — сырой Comlink
+    playerId, хранится отдельно от ally_code, чтобы при следующем синке можно было опознать
+    того же игрока и подставить его последние известные имя/код союзника, если Comlink в этот
+    раз не отдал allyCode/playerName (см. get_roster_by_player_id). Используется часовым
     рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("DELETE FROM user_mapping WHERE guild_id = ?", (guild_id,))
     cursor.executemany(
-        "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name, member_level) VALUES (?, ?, ?, ?, ?)",
-        [(guild_id, discord_id, ally_code, ingame_name, member_level) for discord_id, ally_code, ingame_name, member_level in roster_rows]
+        "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name, member_level, comlink_player_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [(guild_id, discord_id, ally_code, ingame_name, member_level, comlink_player_id)
+         for discord_id, ally_code, ingame_name, member_level, comlink_player_id in roster_rows]
     )
     conn.commit()
     conn.close()
+
+
+def get_roster_by_player_id(guild_id: int) -> dict:
+    """{comlink_player_id: (ally_code, ingame_name)} для текущего состава guild_id —
+    снимок ДО следующего sync_guild_roster, используется им же, чтобы не перетереть
+    хорошо известного игрока мусором при временном сбое Comlink (см. sync_guild_roster)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT comlink_player_id, ally_code, ingame_name FROM user_mapping WHERE guild_id = ? AND comlink_player_id IS NOT NULL",
+        (guild_id,)
+    )
+    rows = {pid: (ally_code, ingame_name) for pid, ally_code, ingame_name in cursor.fetchall()}
+    conn.close()
+    return rows
 
 
 def get_member_level(guild_id: int, ally_code: str) -> int | None:

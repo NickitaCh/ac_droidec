@@ -136,29 +136,50 @@ class ViolationsCog(commands.Cog):
                     database.update_guild_config(gid, swgoh_guild_id=str(swgoh_guild_id))
 
                 print(f"🔎 [{gname}] Шаг 3: Запрос данных гильдии из comlink...")
-                guild = await asyncio.to_thread(self.bot.comlink.get_guild, guild_id=swgoh_guild_id)
+                guild = await asyncio.to_thread(
+                    self.bot.comlink.get_guild, guild_id=swgoh_guild_id, include_recent_guild_activity_info=True
+                )
                 members = guild.get("guild", guild).get("member", [])
                 print(f"✅ [{gname}] Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
 
                 print(f"🌐 [{gname}] Сбор детальных профилей игроков из сети...")
+                # Снимок предыдущего состава по playerId — если Comlink в этот раз не отдаст
+                # allyCode/имя для кого-то (известный глюк "зануления" участников ростера),
+                # подставляем последнее известное значение вместо мусора (сырого playerId).
+                previous_by_pid = database.get_roster_by_player_id(gid)
                 temp_roster_data = []
                 new_cache = {}
 
                 for member in members:
                     p_id = member.get("playerId")
-                    p_name = member.get("playerName", f"Игрок {p_id[:8]}")
-                    a_code = str(member.get("allyCode", p_id))
-                    member_level = member.get("memberLevel")
+                    p_name = member.get("playerName") or ""
+                    a_code = str(member.get("allyCode") or "")
 
-                    try:
-                        prof = await asyncio.to_thread(self.bot.comlink.get_player, player_id=p_id)
-                        p_name = prof.get("name", p_name)
-                        a_code = str(prof.get("allyCode", a_code))
-                    except:
-                        pass
+                    for lookup_attempt in range(2):
+                        try:
+                            prof = await asyncio.to_thread(self.bot.comlink.get_player, player_id=p_id)
+                            p_name = prof.get("name") or p_name
+                            a_code = str(prof.get("allyCode") or a_code)
+                            break
+                        except Exception as e:
+                            print(f"⚠️ [{gname}] get_player({p_id}) попытка {lookup_attempt + 1} не удалась: {e!r}")
+                            if lookup_attempt == 0:
+                                await asyncio.sleep(1)
+
+                    if not a_code or not p_name:
+                        prev_code, prev_name = previous_by_pid.get(p_id, (None, None))
+                        if not a_code and prev_code:
+                            a_code = prev_code
+                            print(f"↩️ [{gname}] {p_id}: allyCode не пришёл, использован предыдущий {prev_code}")
+                        if not p_name and prev_name:
+                            p_name = prev_name
+                        if not a_code:
+                            a_code = p_id  # последний резерв — хотя бы не потерять строку
+                        if not p_name:
+                            p_name = f"Игрок {p_id[:8]}"
 
                     new_cache[p_name] = a_code
-                    temp_roster_data.append((a_code, a_code, p_name, member_level))
+                    temp_roster_data.append((a_code, a_code, p_name, member.get("memberLevel"), p_id))
                     await asyncio.sleep(0.1)
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
