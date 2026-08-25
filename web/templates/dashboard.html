@@ -14,45 +14,225 @@
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="error">Доступ к веб-дашборду есть только у офицеров/лидеров гильдии (по игровому рангу) — у вас {% if user.tier == "member" %}уровень обычного участника{% else %}пока нет доступа{% endif %}.</p>
+    {% elif not guild_cfg %}
+        <h1>Привет, {{ user.username }}</h1>
+        <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>
     {% else %}
         <h1>{{ guild_cfg.name }}</h1>
-        <ul class="card-grid">
-            <li><a class="card" href="/roster">
-                <div class="card-title">👥 Состав гильдии</div>
-                <div class="card-desc">Игроки и коды союзника</div>
-            </a></li>
-            <li><a class="card" href="/tb">
-                <div class="card-title">⚔️ Территориальные битвы</div>
-                <div class="card-desc">Последняя ТБ и история по игрокам</div>
-            </a></li>
-            <li><a class="card" href="/violations">
-                <div class="card-title">🚨 Нарушения</div>
-                <div class="card-desc">Таблица нарушений за 90 дней</div>
-            </a></li>
-            <li><a class="card" href="/activity">
-                <div class="card-title">📈 Активность</div>
-                <div class="card-desc">Прогресс гильдии: шмот, реликвии, звёзды, зеты</div>
-            </a></li>
-            <li><a class="card" href="/plates">
-                <div class="card-title">🧬 Плейты статов</div>
-                <div class="card-desc">Нормы статов персонажей по билдам</div>
-            </a></li>
-            <li><a class="card" href="/datacrons">
-                <div class="card-title">🔮 Датакроны</div>
-                <div class="card-desc">Требования к билдам и проверка по составу</div>
-            </a></li>
-            <li><a class="card" href="/stats-check">
-                <div class="card-title">📊 Статы</div>
-                <div class="card-desc">Проверка статов персонажей у игроков</div>
-            </a></li>
-            <li><a class="card" href="/birthdays">
-                <div class="card-title">🎂 Дни рождения</div>
-                <div class="card-desc">Список и ближайшие поздравления</div>
-            </a></li>
-            <li><a class="card" href="/registration">
-                <div class="card-title">📝 Моя регистрация</div>
-                <div class="card-desc">Привязать Discord ↔ код союзника</div>
-            </a></li>
-        </ul>
+
+        <div class="dashboard-grid">
+            <div class="widget">
+                <div class="widget-header">
+                    <h2>👥 Состав гильдии</h2>
+                    <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
+                </div>
+                {% if not widgets.roster_rows %}
+                    <p class="widget-empty">Состав пуст — кэш ростера ещё не синхронизировался с Comlink.</p>
+                {% else %}
+                    <div class="table-toolbar" style="margin-bottom: 0.6em;">
+                        <input type="search" placeholder="Поиск по имени или коду союзника…" data-table-search="dashboard-roster-table">
+                    </div>
+                    <div class="table-scroll">
+                        <table class="data" id="dashboard-roster-table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="text">Игрок</th>
+                                    <th data-sort="text">Ранг</th>
+                                    <th data-sort="text">Код союзника</th>
+                                    <th data-sort="text">Discord</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in widgets.roster_rows %}
+                                    <tr data-search="{{ (row.ingame_name ~ ' ' ~ row.ally_code)|lower }}">
+                                        <td><a href="{{ row.swgoh_gg_url }}" target="_blank" rel="noopener">{{ row.ingame_name }}</a></td>
+                                        <td>
+                                            {% if row.rank_label == "ГМ" %}
+                                                <span class="badge badge-warn">{{ row.rank_label }}</span>
+                                            {% elif row.rank_label == "Офицер" %}
+                                                <span class="badge badge-ok">{{ row.rank_label }}</span>
+                                            {% else %}
+                                                <span class="badge badge-neutral">{{ row.rank_label }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td><code>{{ row.ally_code }}</code></td>
+                                        <td>
+                                            {% if row.registered %}
+                                                <span class="badge badge-ok">привязан</span>
+                                            {% else %}
+                                                <span class="badge badge-neutral">не привязан</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>⚔️ Очки территории — ТБ</h2>
+                    <a class="widget-link" href="/tb">Подробный отчёт →</a>
+                </div>
+                {% if not widgets.tb_report or widgets.tb_report.event_totals|length < 2 %}
+                    <p class="widget-empty">Пока недостаточно сохранённых ТБ для графика.</p>
+                {% else %}
+                    <div class="trend-chart-wrap">
+                        <div class="trend-chart-plot">
+                            <svg class="trend-chart" viewBox="0 0 100 40" preserveAspectRatio="none">
+                                <polyline class="trend-area" points="{{ widgets.tb_report.trend_area_points }}"></polyline>
+                                <polyline points="{{ widgets.tb_report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
+                            </svg>
+                            {% for x, y, completed_at, value in widgets.tb_report.trend_coords %}
+                                <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
+                            {% endfor %}
+                        </div>
+                        <div class="trend-chart-labels">
+                            {% for completed_at, value in widgets.tb_report.event_totals %}
+                                <span>{{ completed_at[:10] }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>🛡️ Территориальные войны</h2>
+                    <a class="widget-link" href="/tw">Вся история →</a>
+                </div>
+                {% if not widgets.tw_rows %}
+                    <p class="widget-empty">История ВГ пока пуста.</p>
+                {% else %}
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Результат</th>
+                                    <th class="num">Счёт</th>
+                                    <th>Соперник</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in widgets.tw_rows %}
+                                    <tr>
+                                        <td>{{ row.date_label }}</td>
+                                        <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
+                                        <td class="num">{{ row.own_score }}:{{ row.opponent_score }}</td>
+                                        <td>
+                                            {% if row.opponent_url %}
+                                                <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
+                                            {% else %}
+                                                {{ row.opponent_name }}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>🚨 Топ нарушителей (90 дней)</h2>
+                    <a class="widget-link" href="/violations">Все нарушения →</a>
+                </div>
+                {% if not widgets.top_violators %}
+                    <p class="widget-empty">😇 Нарушений за последние 90 дней не найдено.</p>
+                {% else %}
+                    <div class="bar-chart">
+                        {% for row in widgets.top_violators %}
+                            <div class="bar-chart-row">
+                                <div class="bar-chart-name"><a href="/violations/{{ row.ally_code }}">{{ row.name }}</a></div>
+                                <div class="bar-chart-track">
+                                    <div class="bar-chart-fill" data-tip="{{ row.name }}: {{ row.recent_total }}" style="width: {{ (row.recent_total / widgets.max_violator * 100) if widgets.max_violator else 0 }}%;"></div>
+                                </div>
+                                <div class="bar-chart-value">{{ row.recent_total }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>📈 Последняя активность</h2>
+                    <a class="widget-link" href="/activity">Вся активность →</a>
+                </div>
+                {% if not widgets.activity_rows %}
+                    <p class="widget-empty">Событий пока нет.</p>
+                {% else %}
+                    <div class="table-scroll">
+                        {% for row in widgets.activity_rows %}
+                            <div class="activity-event-row">
+                                <span class="activity-unit-name">{{ row.player_name }} · {{ row.unit_name }}</span>
+                                <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
+                                <span class="activity-change">
+                                    {% if row.old_value %}
+                                        <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
+                                    {% elif row.skill_url %}
+                                        <strong><a href="{{ row.skill_url }}" target="_blank" rel="noopener">{{ row.new_value }}</a></strong>
+                                    {% else %}
+                                        <strong>{{ row.new_value }}</strong>
+                                    {% endif %}
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>🔮 Текущий сезон датакронов</h2>
+                    {% if widgets.datacron_season %}
+                        <a class="widget-link" href="/datacrons/{{ widgets.datacron_season.set_id }}">Требования сезона →</a>
+                    {% endif %}
+                </div>
+                {% if not widgets.datacron_season %}
+                    <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
+                {% else %}
+                    <p>{{ widgets.datacron_season.display_name }} <span class="muted">[{{ widgets.datacron_season.set_id }}]</span></p>
+                    <div class="stats-grid" style="margin-bottom: 0;">
+                        <div class="stat-tile">
+                            <div class="stat-value">{{ widgets.datacron_season.base_count }}</div>
+                            <div class="stat-label">Обычных требований</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-value">{{ widgets.datacron_season.focused_count }}</div>
+                            <div class="stat-label">Точечных требований</div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-6">
+                <div class="widget-header">
+                    <h2>🎂 Ближайшие дни рождения</h2>
+                    <a class="widget-link" href="/birthdays">Весь список →</a>
+                </div>
+                {% if not widgets.birthdays %}
+                    <p class="widget-empty">Дней рождения пока не сохранено.</p>
+                {% else %}
+                    <div class="table-scroll">
+                        <table class="data">
+                            <tbody>
+                                {% for row in widgets.birthdays %}
+                                    <tr>
+                                        <td>{{ row.display_name }}</td>
+                                        <td class="num">{{ row.date_str }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
     {% endif %}
 {% endblock %}

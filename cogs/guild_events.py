@@ -160,7 +160,6 @@ class GuildEvents(commands.Cog):
         # лениво подгружается из bot_state при первом тике monitor_loop для каждой
         # гильдии), последний статус ВГ, ключ последней отправки ордера ТБ.
         self.last_reported_tb_fingerprint = {}
-        self.last_tw_status = {}
         self._tb_order_sent_key = {}
         self.monitor_loop.start()
         self.tb_order_loop.start()
@@ -444,13 +443,12 @@ class GuildEvents(commands.Cog):
             except Exception as e:
                 print(f"❌ [{gname}] Ошибка обработки отчёта по ТБ: {e}")
 
-            tw_status = guild.get("territoryWarStatus", [])
-            current_tw = tw_status[0] if tw_status else None
-            prev_tw = self.last_tw_status.get(gid)
-            if current_tw and prev_tw and current_tw.get("status") != prev_tw.get("status"):
-                if current_tw.get("status") == "completed":
-                    await self.generate_tw_report(guild)
-            self.last_tw_status[gid] = current_tw
+            try:
+                tw_results = guild.get("recentTerritoryWarResult", [])
+                if tw_results:
+                    self.generate_tw_report(gid, tw_results)
+            except Exception as e:
+                print(f"❌ [{gname}] Ошибка обработки истории ВГ: {e}")
 
     async def generate_tb_report(self, guild, guild_cfg, fingerprint=None):
         gid = guild_cfg["id"]
@@ -477,8 +475,40 @@ class GuildEvents(commands.Cog):
         if channel:
             await self.send_as_file(channel, report, "tb_report.txt")
 
-    async def generate_tw_report(self, guild):
-        pass
+    def generate_tw_report(self, guild_id: int, tw_results: list):
+        """Сохраняет всю доступную историю ВГ (comlink отдаёт только последние ~8) в
+        tw_events — database.upsert_tw_event дедупит по (guild_id, start_time), так что
+        безопасно вызывать на каждом тике monitor_loop сразу всем списком: одновременно
+        подхватывает новые завершения и (на первом тике после деплоя фичи) бэкфиллит
+        историю без отдельного скрипта. Гильдийский уровень данных, без разбивки по
+        игрокам — см. память project_territory_war_report_gap за подтверждённым потолком
+        Comlink API."""
+        for tw in tw_results:
+            try:
+                own_score = int(tw.get("score", 0))
+                opponent_score = int(tw.get("opponentScore", 0))
+                if own_score > opponent_score:
+                    result = "win"
+                elif own_score < opponent_score:
+                    result = "loss"
+                else:
+                    result = "draw"
+                opponent = tw.get("opponentGuildProfile") or {}
+                database.upsert_tw_event(
+                    guild_id=guild_id,
+                    territory_war_id=tw.get("territoryWarId"),
+                    own_score=own_score,
+                    opponent_score=opponent_score,
+                    own_power=int(tw.get("power", 0)),
+                    opponent_name=opponent.get("name"),
+                    opponent_guild_id=opponent.get("id"),
+                    opponent_gp=int(opponent.get("guildGalacticPower", 0)),
+                    start_time=int(tw.get("startTime", 0)),
+                    end_time=int(tw.get("endTimeSeconds", 0)),
+                    result=result,
+                )
+            except (TypeError, ValueError) as e:
+                print(f"❌ Не удалось разобрать запись recentTerritoryWarResult: {e} — {tw}")
 
     async def notify_officers(self, guild_cfg, message):
         if not guild_cfg.get("officer_channel_id"):

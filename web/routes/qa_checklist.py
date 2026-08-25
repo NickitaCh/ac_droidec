@@ -22,9 +22,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 # (ключ, название, путь) — по одному на каждую реальную GET/HTML-страницу сайта.
 PAGES = [
     ("home", "Главная", "/"),
-    ("roster", "Состав", "/roster"),
     ("tb", "ТБ — отчёт", "/tb"),
     ("tb_plan", "ТБ — план", "/tb/plan"),
+    ("tw", "ВГ — отчёт", "/tw"),
     ("violations", "Нарушения", "/violations"),
     ("activity", "Активность", "/activity"),
     ("datacrons", "Датакроны", "/datacrons"),

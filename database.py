@@ -1039,6 +1039,20 @@ def get_all_user_mappings(guild_id: int = 1):
     return rows
 
 
+def get_all_user_mappings_with_rank(guild_id: int = 1):
+    """Как get_all_user_mappings, но с member_level (см. sync_guild_roster) — отдельная
+    функция, а не расширение существующей, чтобы не ломать 3-элементную распаковку у
+    её текущих вызывающих (violations.py, tasks.py и т.д.)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT ally_code, ingame_name, member_level FROM user_mapping WHERE guild_id = ?", (guild_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def get_guild_ids_for_ally_code(ally_code: str) -> set:
     """Все guild_id, где зарегистрирован этот ally_code (обычно один, но игрок теоретически
     может состоять в нескольких зарегистрированных гильдиях сразу — см. player_units_sync_loop
@@ -1459,6 +1473,73 @@ def get_tb_player_detail(event_id, member_id):
     row = cursor.fetchone()
     conn.close()
     return row
+
+
+# =====================================================================
+# ИСТОРИЯ ВГ (Territory War): comlink отдаёт только последние ~8 завершённых
+# ВГ на гильдию (recentTerritoryWarResult, только гильдийский уровень —
+# нет пер-игрока разбивки, см. память project_territory_war_report_gap), так
+# что мы сохраняем их себе, чтобы история не терялась после того, как окно
+# comlink укатится дальше. territory_war_id ("tw01A"-"tw01D") — это код
+# матчап-банда, а НЕ уникальный id конкретной ВГ (повторяется у разных ВГ) —
+# дедуп идёт по (guild_id, start_time), start_time уникален на инстанс войны.
+# =====================================================================
+def _ensure_tw_events_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            territory_war_id TEXT,
+            own_score INTEGER,
+            opponent_score INTEGER,
+            own_power INTEGER,
+            opponent_name TEXT,
+            opponent_guild_id TEXT,
+            opponent_gp INTEGER,
+            start_time INTEGER,
+            end_time INTEGER,
+            result TEXT,
+            recorded_at TEXT DEFAULT (datetime('now')),
+            UNIQUE (guild_id, start_time)
+        )
+    """)
+
+
+def upsert_tw_event(guild_id: int, territory_war_id: str, own_score: int, opponent_score: int,
+                     own_power: int, opponent_name: str, opponent_guild_id: str, opponent_gp: int,
+                     start_time: int, end_time: int, result: str):
+    """INSERT OR IGNORE по (guild_id, start_time) — вызывается на каждом тике monitor_loop
+    (см. cogs/guild_events.py::generate_tw_report) со всем recentTerritoryWarResult разом,
+    поэтому одновременно и подхватывает новые завершённые ВГ, и на первом же тике после
+    деплоя фичи бэкфиллит все ~8 доступных в comlink историй без отдельного скрипта."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_events_table(cursor)
+    cursor.execute("""
+        INSERT OR IGNORE INTO tw_events
+            (guild_id, territory_war_id, own_score, opponent_score, own_power,
+             opponent_name, opponent_guild_id, opponent_gp, start_time, end_time, result)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (guild_id, territory_war_id, own_score, opponent_score, own_power,
+          opponent_name, opponent_guild_id, opponent_gp, start_time, end_time, result))
+    conn.commit()
+    conn.close()
+
+
+def get_recent_tw_events(guild_id: int, limit: int = 10):
+    """[(territory_war_id, own_score, opponent_score, own_power, opponent_name,
+    opponent_guild_id, opponent_gp, start_time, end_time, result), ...] от новых к старым."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_events_table(cursor)
+    cursor.execute("""
+        SELECT territory_war_id, own_score, opponent_score, own_power, opponent_name,
+               opponent_guild_id, opponent_gp, start_time, end_time, result
+        FROM tw_events WHERE guild_id = ? ORDER BY start_time DESC LIMIT ?
+    """, (guild_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 
 # =====================================================================

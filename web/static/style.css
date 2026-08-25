@@ -214,6 +214,37 @@ select { background: var(--page); }
 .card .card-title { font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
 .card .card-desc { margin-top: 0.35em; color: var(--fg-muted); font-size: 0.9em; }
 
+/* ---- Дашборд: сетка виджетов (редизайн 2026-08-25) ---- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 1.25em;
+    align-items: start;
+}
+.widget {
+    grid-column: span 12;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 1.1em 1.25em;
+    min-width: 0; /* иначе широкие таблицы внутри узкой колонки распирают весь грид */
+}
+@media (min-width: 60em) {
+    .widget-6 { grid-column: span 6; }
+}
+.widget-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75em;
+    margin-bottom: 0.85em;
+}
+.widget-header h2 { margin: 0; font-size: 1.05em; }
+.widget-header a.widget-link { font-size: 0.85em; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.widget-header a.widget-link:hover { text-decoration: underline; }
+.widget .table-scroll { border: none; }
+.widget-empty { color: var(--fg-muted); font-size: 0.9em; padding: 0.5em 0; }
+
 /* ---- Статы-плашки ---- */
 .stats-grid {
     display: grid;

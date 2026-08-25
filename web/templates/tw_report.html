@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Территориальные войны</h1>
+    <p class="muted">Только гильдийский уровень — Comlink не отдаёт разбивку по игрокам для ВГ (в отличие от ТБ).</p>
+
+    {% if not rows %}
+        <p class="empty-state">История ВГ пока пуста — бот сохраняет её из данных Comlink каждые 5 минут, первая запись появится после ближайшего опроса.</p>
+    {% else %}
+        <div class="stats-grid">
+            <div class="stat-tile">
+                <div class="stat-value">{{ rows|length }}</div>
+                <div class="stat-label">Сохранено ВГ</div>
+            </div>
+            <div class="stat-tile">
+                <div class="stat-value">{{ wins }} / {{ rows|length }}</div>
+                <div class="stat-label">Побед</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Результат</th>
+                            <th class="num">Наш счёт</th>
+                            <th class="num">Счёт соперника</th>
+                            <th>Соперник</th>
+                            <th class="num">GP соперника</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                <td>{{ row.date_label }}</td>
+                                <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
+                                <td class="num">{{ "{:,}".format(row.own_score).replace(",", " ") }}</td>
+                                <td class="num">{{ "{:,}".format(row.opponent_score).replace(",", " ") }}</td>
+                                <td>
+                                    {% if row.opponent_url %}
+                                        <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
+                                    {% else %}
+                                        {{ row.opponent_name }}
+                                    {% endif %}
+                                </td>
+                                <td class="num">{{ "{:,}".format(row.opponent_gp).replace(",", " ") if row.opponent_gp else "—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

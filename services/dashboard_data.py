@@ -27,21 +27,34 @@ N_LIMIT = 3
 WARN_CATEGORIES = ("ТБ", "ВГ", "Рейд")
 
 
+RANK_LABELS = {4: "ГМ", 3: "Офицер", 2: "Участник"}
+
+
 @dataclass
 class RosterRow:
     ally_code: str
     ingame_name: str
     registered: bool
+    rank_label: str = "—"
+    swgoh_gg_url: str = ""
 
 
 def get_roster(guild_id: int) -> list[RosterRow]:
-    mappings = database.get_all_user_mappings(guild_id)  # (discord_id_placeholder, ally_code, ingame_name)
+    mappings = database.get_all_user_mappings_with_rank(guild_id)  # (ally_code, ingame_name, member_level)
     registered_codes = {ally_code for _, ally_code, _, _ in database.get_all_registrations(guild_id)}
     rows = [
-        RosterRow(ally_code=ally_code, ingame_name=ingame_name or "?", registered=ally_code in registered_codes)
-        for _, ally_code, ingame_name in mappings
+        RosterRow(
+            ally_code=ally_code,
+            ingame_name=ingame_name or "?",
+            registered=ally_code in registered_codes,
+            rank_label=RANK_LABELS.get(member_level, "—"),
+            swgoh_gg_url=f"https://swgoh.gg/p/{ally_code}/",
+        )
+        for ally_code, ingame_name, member_level in mappings
     ]
-    rows.sort(key=lambda r: r.ingame_name.lower())
+    # ГМ/офицеры выше по списку, дальше по имени — раз это теперь виджет на главной,
+    # а не отдельная страница с сортировкой по клику, порядок по умолчанию важнее.
+    rows.sort(key=lambda r: (-{"ГМ": 2, "Офицер": 1}.get(r.rank_label, 0), r.ingame_name.lower()))
     return rows
 
 
@@ -646,3 +659,60 @@ def get_activity_sync_status(guild_id: int) -> dict:
             pass
 
     return {"last_sync": last_sync, "next_auto": next_auto, "sync_hours": PLAYER_STATS_SYNC_HOURS}
+
+
+def get_top_violators(guild_id: int, limit: int = 10) -> list[ViolationRow]:
+    """Для виджета дашборда — get_violations_overview уже сортирует по recent_total убыв.
+    и по умолчанию не включает игроков без нарушений за 90 дней, просто берём первые N."""
+    return get_violations_overview(guild_id, include_zero=False)[:limit]
+
+
+TW_RESULT_LABELS = {"win": "Победа", "loss": "Поражение", "draw": "Ничья"}
+TW_RESULT_CLASSES = {"win": "ok", "loss": "danger", "draw": "neutral"}
+
+
+@dataclass
+class TwEventRow:
+    territory_war_id: str
+    own_score: int
+    opponent_score: int
+    own_power: int
+    opponent_name: str
+    opponent_guild_id: str
+    opponent_gp: int
+    date_label: str
+    result: str
+    result_label: str
+    result_class: str
+    opponent_url: str = ""
+
+
+def get_recent_tw_results(guild_id: int, limit: int = 10) -> list[TwEventRow]:
+    """История ВГ, накопленная ботом из recentTerritoryWarResult (см. cogs/guild_events.py::
+    generate_tw_report) — только гильдийский уровень, без пер-игрока разбивки, см. память
+    project_territory_war_report_gap за подтверждённым потолком Comlink API."""
+    rows = database.get_recent_tw_events(guild_id, limit=limit)
+    result = []
+    for (territory_war_id, own_score, opponent_score, own_power, opponent_name,
+         opponent_guild_id, opponent_gp, start_time, end_time, tw_result) in rows:
+        try:
+            date_label = datetime.fromtimestamp(end_time or start_time, tz=timezone.utc).astimezone(MSK).strftime("%d.%m.%Y")
+        except (ValueError, OSError, OverflowError):
+            date_label = "—"
+        result.append(TwEventRow(
+            territory_war_id=territory_war_id,
+            own_score=own_score,
+            opponent_score=opponent_score,
+            own_power=own_power,
+            opponent_name=opponent_name or "—",
+            opponent_guild_id=opponent_guild_id,
+            opponent_gp=opponent_gp,
+            date_label=date_label,
+            result=tw_result,
+            result_label=TW_RESULT_LABELS.get(tw_result, tw_result or "—"),
+            result_class=TW_RESULT_CLASSES.get(tw_result, "neutral"),
+            # swgoh.gg принимает сырой comlink guild id прямо в URL, без отдельного
+            # маппинга на свой внутренний id (подтверждено примером от пользователя).
+            opponent_url=f"https://swgoh.gg/g/{opponent_guild_id}/" if opponent_guild_id else "",
+        ))
+    return result

@@ -102,16 +102,14 @@ def _extract_thread_id(value: str) -> int | None:
     return None
 
 
-@router.get("/roster", response_class=HTMLResponse)
-async def roster(request: Request, user: dict = Depends(require_guild_access)):
-    rows = dashboard_data.get_roster(user["guild_id"])
-    registered_count = sum(1 for r in rows if r.registered)
-    registered_pct = round(registered_count / len(rows) * 100) if rows else 0
-    return templates.TemplateResponse(request, "roster.html", {
+@router.get("/tw", response_class=HTMLResponse)
+async def tw_report(request: Request, user: dict = Depends(require_guild_access)):
+    rows = dashboard_data.get_recent_tw_results(user["guild_id"], limit=50)
+    wins = sum(1 for r in rows if r.result == "win")
+    return templates.TemplateResponse(request, "tw_report.html", {
         "user": user,
         "rows": rows,
-        "registered_count": registered_count,
-        "registered_pct": registered_pct,
+        "wins": wins,
     })
 
 
