@@ -2757,7 +2757,30 @@ def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action
     return inserted
 
 
-def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit: int = 300,
+def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, action_type: str | None,
+                                       date_from: str | None, date_to: str | None):
+    """Общий WHERE для get_guild_activity_events/get_guild_activity_events_count — чтобы
+    подсчёт страниц (COUNT) и сама выборка (SELECT ... LIMIT/OFFSET) всегда фильтровали
+    одинаково, иначе номера страниц разъедутся с реальным числом строк."""
+    clauses = ["guild_id = ?"]
+    params = [guild_id]
+    if ally_code:
+        clauses.append("ally_code = ?")
+        params.append(ally_code)
+    if action_type:
+        clauses.append("action_type = ?")
+        params.append(action_type)
+    if date_from:
+        clauses.append("event_date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("event_date <= ?")
+        params.append(date_to)
+    return " AND ".join(clauses), params
+
+
+def get_guild_activity_events(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                               limit: int = 300, offset: int = 0,
                                date_from: str | None = None, date_to: str | None = None):
     """Возвращает [(ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at), ...],
     новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми).
@@ -2765,23 +2788,42 @@ def get_guild_activity_events(guild_id: int, ally_code: str | None = None, limit
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    query = """
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    cursor.execute(f"""
         SELECT ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at
-        FROM guild_activity_events WHERE guild_id = ?
-    """
-    params = [guild_id]
-    if ally_code:
-        query += " AND ally_code = ?"
-        params.append(ally_code)
-    if date_from:
-        query += " AND event_date >= ?"
-        params.append(date_from)
-    if date_to:
-        query += " AND event_date <= ?"
-        params.append(date_to)
-    query += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-    cursor.execute(query, params)
+        FROM guild_activity_events WHERE {where_sql}
+        ORDER BY id DESC LIMIT ? OFFSET ?
+    """, params + [limit, offset])
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                                     date_from: str | None = None, date_to: str | None = None) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    cursor.execute(f"SELECT COUNT(*) FROM guild_activity_events WHERE {where_sql}", params)
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_guild_activity_type_counts(guild_id: int, ally_code: str | None = None,
+                                    date_from: str | None = None, date_to: str | None = None):
+    """[(action_type, count), ...] по игроку/периоду, БЕЗ фильтра по типу события —
+    это данные для панели "по типу изменения", которая должна показывать полную картину
+    независимо от того, каким типом сейчас отфильтрована сама лента."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, None, date_from, date_to)
+    cursor.execute(f"""
+        SELECT action_type, COUNT(*) FROM guild_activity_events WHERE {where_sql}
+        GROUP BY action_type
+    """, params)
     rows = cursor.fetchall()
     conn.close()
     return rows

@@ -1,6 +1,5 @@
 import asyncio
 import re
-from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -23,16 +22,6 @@ def _get_comlink():
     # не поднимает бота, строит свой SwgohComlink на тот же comlink-сайдкар.
     from swgoh_comlink import SwgohComlink
     return SwgohComlink(url="http://localhost:3000")
-
-
-def _valid_iso_date(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        datetime.strptime(value, "%Y-%m-%d")
-        return value
-    except ValueError:
-        return None
 
 
 def _format_delta(delta: timedelta) -> str:
@@ -255,21 +244,52 @@ async def tb_order_plans_save_manual(
     return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
 
 
+ACTIVITY_PAGE_SIZE = 50
+ACTIVITY_PERIOD_DAYS = {"7": 7, "30": 30, "90": 90}  # пресеты вместо ручного выбора дат — см. обсуждение в гайд-канале 2026-08-25
+
+
+def _period_to_date_from(period: str | None) -> str | None:
+    days = ACTIVITY_PERIOD_DAYS.get(period or "")
+    if not days:
+        return None
+    return (datetime.now(MSK).date() - timedelta(days=days)).isoformat()
+
+
 @router.get("/activity", response_class=HTMLResponse)
 async def activity(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
     player_filter = request.query_params.get("player") or None
-    date_from = _valid_iso_date(request.query_params.get("date_from"))
-    date_to = _valid_iso_date(request.query_params.get("date_to"))
-    rows = dashboard_data.get_guild_activity(user["guild_id"], ally_code=player_filter,
-                                              date_from=date_from, date_to=date_to)
-    players = dashboard_data.get_guild_activity_players(user["guild_id"])
+    action_type_filter = request.query_params.get("action_type") or None
+    period = request.query_params.get("period") or ""
+    if period not in ACTIVITY_PERIOD_DAYS:
+        period = ""
+    date_from = _period_to_date_from(period)
+
+    total_count = dashboard_data.get_guild_activity_count(
+        guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
+    )
+    total_pages = max(1, -(-total_count // ACTIVITY_PAGE_SIZE))  # ceil-деление без импорта math
+    try:
+        page = int(request.query_params.get("page", "1"))
+    except ValueError:
+        page = 1
+    page = min(max(page, 1), total_pages)
+
+    rows = dashboard_data.get_guild_activity(
+        guild_id, ally_code=player_filter, action_type=action_type_filter,
+        limit=ACTIVITY_PAGE_SIZE, offset=(page - 1) * ACTIVITY_PAGE_SIZE, date_from=date_from,
+    )
+    players = dashboard_data.get_guild_activity_players(guild_id)
     grouped = dashboard_data.group_activity(rows)
-    sync_status = dashboard_data.get_activity_sync_status(user["guild_id"])
+    sync_status = dashboard_data.get_activity_sync_status(guild_id)
     sync_status_text = _sync_status_text(sync_status)
 
-    breakdown = Counter(r.action_label for r in rows)
-    breakdown_rows = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)
+    # Панель "по типу изменения" — по всему фильтру (игрок/период), не по одной странице,
+    # иначе бары скакали бы при перелистывании и не отражали реальную картину.
+    breakdown_rows = dashboard_data.get_guild_activity_breakdown(guild_id, ally_code=player_filter, date_from=date_from)
     max_breakdown = breakdown_rows[0][1] if breakdown_rows else 0
+
+    base_params = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period}.items() if v}
 
     return templates.TemplateResponse(request, "activity.html", {
         "user": user,
@@ -277,12 +297,19 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "grouped": grouped,
         "players": players,
         "player_filter": player_filter,
-        "date_from": date_from or "",
-        "date_to": date_to or "",
+        "action_type_filter": action_type_filter,
+        "action_types": dashboard_data.ACTIVITY_ACTION_LABELS.items(),
+        "period": period,
         "breakdown_rows": breakdown_rows,
         "max_breakdown": max_breakdown,
         "sync_status": sync_status_text,
         "synced_now": request.query_params.get("synced"),
+        "total_count": total_count,
+        "page": page,
+        "total_pages": total_pages,
+        "prev_page_url": f"/activity?{urlencode({**base_params, 'page': page - 1})}" if page > 1 else None,
+        "next_page_url": f"/activity?{urlencode({**base_params, 'page': page + 1})}" if page < total_pages else None,
+        "reset_url": "/activity",
     })
 
 
@@ -290,8 +317,8 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
 async def activity_sync(
     request: Request,
     player: str = Form(""),
-    date_from: str = Form(""),
-    date_to: str = Form(""),
+    action_type: str = Form(""),
+    period: str = Form(""),
     user: dict = Depends(require_guild_access),
 ):
     # Ограниченная параллельность (semaphore) + таймаут внутри sync_player — тот же паттерн,
@@ -322,10 +349,10 @@ async def activity_sync(
 
     results = await asyncio.gather(*(sync_one(ac) for ac in ally_codes))
     params = {"synced": sum(results)}
-    if _valid_iso_date(date_from):
-        params["date_from"] = date_from
-    if _valid_iso_date(date_to):
-        params["date_to"] = date_to
+    if period in ACTIVITY_PERIOD_DAYS:
+        params["period"] = period
+    if action_type:
+        params["action_type"] = action_type
     if player:
         params["player"] = player
     return RedirectResponse(f"/activity?{urlencode(params)}", status_code=303)

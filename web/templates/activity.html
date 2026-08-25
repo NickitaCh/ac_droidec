@@ -18,8 +18,8 @@
             </div>
             <form method="post" action="/activity/sync">
                 <input type="hidden" name="player" value="{{ player_filter or '' }}">
-                <input type="hidden" name="date_from" value="{{ date_from }}">
-                <input type="hidden" name="date_to" value="{{ date_to }}">
+                <input type="hidden" name="action_type" value="{{ action_type_filter or '' }}">
+                <input type="hidden" name="period" value="{{ period }}">
                 <button type="submit">🔄 Обновить сейчас</button>
             </form>
         </div>
@@ -39,8 +39,8 @@
     {% else %}
         <div class="stats-grid">
             <div class="stat-tile">
-                <div class="stat-value">{{ rows|length }}</div>
-                <div class="stat-label">{{ "Событий по фильтру" if (player_filter or date_from or date_to) else "Событий в ленте" }}</div>
+                <div class="stat-value">{{ total_count }}</div>
+                <div class="stat-label">{{ "Событий по фильтру" if (player_filter or action_type_filter or period) else "Событий всего" }}</div>
             </div>
             <div class="stat-tile">
                 <div class="stat-value">{{ players|length }}</div>
@@ -72,12 +72,21 @@
                     <option value="{{ ally_code }}" {% if ally_code == player_filter %}selected{% endif %}>{{ name }}</option>
                 {% endfor %}
             </select>
-            <input type="date" name="date_from" value="{{ date_from }}" title="С даты">
-            <span>—</span>
-            <input type="date" name="date_to" value="{{ date_to }}" title="По дату">
+            <select name="action_type">
+                <option value="">Все типы событий</option>
+                {% for action_type, label in action_types %}
+                    <option value="{{ action_type }}" {% if action_type == action_type_filter %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="period">
+                <option value="" {% if not period %}selected{% endif %}>Всё время</option>
+                <option value="7" {% if period == '7' %}selected{% endif %}>7 дней</option>
+                <option value="30" {% if period == '30' %}selected{% endif %}>30 дней</option>
+                <option value="90" {% if period == '90' %}selected{% endif %}>90 дней</option>
+            </select>
             <button type="submit">Применить</button>
-            {% if player_filter or date_from or date_to %}
-                <a href="/activity">Сбросить фильтр</a>
+            {% if player_filter or action_type_filter or period %}
+                <a href="{{ reset_url }}">Сбросить фильтр</a>
             {% endif %}
         </form>
 
@@ -114,6 +123,18 @@
                     </div>
                 {% endfor %}
             </div>
+
+            {% if total_pages > 1 %}
+                <div class="table-toolbar" style="justify-content: center; margin-top: 1em; gap: 1em;">
+                    {% if prev_page_url %}
+                        <a class="button" href="{{ prev_page_url }}">← Новее</a>
+                    {% endif %}
+                    <span class="muted">стр. {{ page }} из {{ total_pages }}</span>
+                    {% if next_page_url %}
+                        <a class="button" href="{{ next_page_url }}">Старее →</a>
+                    {% endif %}
+                </div>
+            {% endif %}
         {% endif %}
     {% endif %}
 {% endblock %}
