@@ -21,7 +21,7 @@
         <h1>{{ guild_cfg.name }}</h1>
 
         <div class="dashboard-grid">
-            <div class="widget widget-6">
+            <div class="widget widget-roster">
                 <div class="widget-header">
                     <h2>👥 Состав гильдии</h2>
                     <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
@@ -32,7 +32,7 @@
                     <div class="table-toolbar" style="margin-bottom: 0.6em;">
                         <input type="search" placeholder="Поиск по имени или коду союзника…" data-table-search="dashboard-roster-table">
                     </div>
-                    <div class="table-scroll widget-table-scroll">
+                    <div class="table-scroll">
                         <table class="data" id="dashboard-roster-table">
                             <thead>
                                 <tr>
@@ -71,7 +71,8 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget-secondary">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>⚔️ Очки территории — ТБ</h2>
                     <a class="widget-link" href="/tb">Подробный отчёт →</a>
@@ -98,7 +99,7 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>🛡️ Территориальные войны</h2>
                     <a class="widget-link" href="/tw">Вся история →</a>
@@ -137,7 +138,7 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>🚨 Топ нарушителей (90 дней)</h2>
                     <a class="widget-link" href="/violations">Все нарушения →</a>
@@ -159,7 +160,7 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>📈 Последняя активность</h2>
                     <a class="widget-link" href="/activity">Вся активность →</a>
@@ -187,7 +188,7 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>🔮 Активные сезоны датакронов</h2>
                     <a class="widget-link" href="/datacrons">Все сезоны →</a>
@@ -218,7 +219,7 @@
                 {% endif %}
             </div>
 
-            <div class="widget widget-6">
+            <div class="widget">
                 <div class="widget-header">
                     <h2>🎂 Ближайшие дни рождения</h2>
                     <a class="widget-link" href="/birthdays">Весь список →</a>
@@ -239,6 +240,7 @@
                         </table>
                     </div>
                 {% endif %}
+            </div>
             </div>
         </div>
     {% endif %}

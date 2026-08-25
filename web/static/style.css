@@ -214,23 +214,35 @@ select { background: var(--page); }
 .card .card-title { font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
 .card .card-desc { margin-top: 0.35em; color: var(--fg-muted); font-size: 0.9em; }
 
-/* ---- Дашборд: сетка виджетов (редизайн 2026-08-25, уплотнено 2026-08-25) ---- */
+/* ---- Дашборд: сетка виджетов (редизайн 2026-08-25, перекомпоновка 2026-08-25:
+   состав гильдии — высокая колонка слева на всю высоту без внутренней прокрутки,
+   остальные виджеты — 2-колоночная сетка справа, запрос пользователя) ---- */
 .dashboard-grid {
-    display: grid;
-    grid-template-columns: repeat(12, 1fr);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
     gap: 1em;
-    align-items: start;
 }
 .widget {
-    grid-column: span 12;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface);
     padding: 0.9em 1.1em;
     min-width: 0; /* иначе широкие таблицы внутри узкой колонки распирают весь грид */
 }
-@media (min-width: 60em) {
-    .widget-6 { grid-column: span 6; }
+.widget-roster {
+    flex: 1 1 380px;
+    max-width: 30em;
+}
+.widget-secondary {
+    flex: 2 1 560px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    align-items: start;
+    gap: 1em;
+}
+@media (max-width: 60em) {
+    .widget-secondary { grid-template-columns: 1fr; }
 }
 .widget-header {
     display: flex;
@@ -244,12 +256,6 @@ select { background: var(--page); }
 .widget-header a.widget-link:hover { text-decoration: underline; }
 .widget .table-scroll { border: none; }
 .widget-empty { color: var(--fg-muted); font-size: 0.9em; padding: 0.5em 0; }
-/* ---- Состав гильдии на дашборде теперь в половину ширины (рядом с другим виджетом,
-   "разместить несколько таблиц рядом" — запрос пользователя 2026-08-25) — без
-   ограничения высоты 50+ строк ростера растягивали бы всю страницу выше остальных
-   виджетов на добрый экран прокрутки, поэтому сам список скроллится внутри своих
-   ~9 строк, шапка таблицы остаётся прилипшей (position:sticky уже есть в table.data). */
-.widget-table-scroll { max-height: 22em; overflow-y: auto; }
 
 /* ---- Статы-плашки ---- */
 .stats-grid {
