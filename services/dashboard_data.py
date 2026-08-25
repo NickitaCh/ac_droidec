@@ -1,10 +1,13 @@
 """Read-only агрегации для веб-дашборда (состав/ТБ/нарушения) — только запросы
 к database.py и подсчёты, без HTML (шаблоны — в web/routes/guild_dashboard.py).
-Логика подсчётов (регрессия по ТБ, "последние 90 дней", порог 🚨) намеренно
-скопирована 1:1 из cogs/guild_events.py и cogs/violations.py, чтобы дашборд
-показывал те же цифры, что и команды бота в Discord."""
+Логика подсчётов ("последние 90 дней", порог 🚨 нарушений) намеренно скопирована
+1:1 из cogs/guild_events.py и cogs/violations.py, чтобы дашборд показывал те же
+цифры, что и команды бота в Discord. Просадка по ТБ — исключение: считается общей
+функцией compute_tb_regressions из cogs/guild_events.py (было 2 независимые копии
+до 2026-08-25, разошлись бы при следующей правке порога)."""
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -12,17 +15,16 @@ from zoneinfo import ZoneInfo
 import database
 
 MSK = ZoneInfo("Europe/Moscow")
-from cogs.guild_events import TB_ACTION_LABELS, TB_CONFLICT_LABELS, TB_HIDDEN_ZONE_ACTIONS
+from cogs.guild_events import (
+    TB_ACTION_LABELS, TB_CONFLICT_LABELS, TB_HIDDEN_ZONE_ACTIONS,
+    TB_REGRESSION_BASELINE_SIZE, compute_tb_regressions,
+)
 
 # Дублирует main.py::N_LIMIT (порог 🚨 для нарушений) — тот же паттерн
 # дублирования операторских констант, что и COMLINK_URL/officer-роль (см. CLAUDE.md).
 N_LIMIT = 3
 
 WARN_CATEGORIES = ("ТБ", "ВГ", "Рейд")
-
-# см. cogs/guild_events.py::_compute_tb_regressions
-TB_REGRESSION_METRICS = ("summary", "covert_attempt", "strike_encounter")
-TB_REGRESSION_BASELINE_SIZE = 3
 
 
 @dataclass
@@ -98,28 +100,6 @@ def _points_str(coords: list) -> str:
     return " ".join(f"{x},{y}" for x, y in coords)
 
 
-def _compute_tb_regressions(event_ids: list[int], by_member: dict) -> set:
-    if len(event_ids) < 2:
-        return set()
-    latest_id = event_ids[-1]
-    baseline_ids = event_ids[max(0, len(event_ids) - 1 - TB_REGRESSION_BASELINE_SIZE):-1]
-
-    regressed = set()
-    for member_id, entry in by_member.items():
-        latest_data = entry.get(latest_id)
-        if not latest_data:
-            continue
-        baseline_values = [entry[eid] for eid in baseline_ids if eid in entry]
-        if len(baseline_values) < 2:
-            continue
-        for metric in TB_REGRESSION_METRICS:
-            baseline_avg = sum(getattr(v, metric) for v in baseline_values) / len(baseline_values)
-            if baseline_avg > 0 and getattr(latest_data, metric) < baseline_avg:
-                regressed.add(member_id)
-                break
-    return regressed
-
-
 def get_tb_report(guild_id: int) -> TbReport | None:
     events = database.get_recent_tb_events(guild_id=guild_id)  # старые -> новые
     if not events:
@@ -135,7 +115,13 @@ def get_tb_report(guild_id: int) -> TbReport | None:
         by_member.setdefault(member_id, {})[event_id] = row
         totals_by_event[event_id] = totals_by_event.get(event_id, 0) + summary
 
-    regressed = _compute_tb_regressions(event_ids, by_member)
+    # compute_tb_regressions ждёт голые dict'ы метрик, а не TbSummaryRow —
+    # нормализуем только для этого вызова, остальной код ниже работает с dataclass'ами.
+    by_member_metrics = {
+        member_id: {eid: {"summary": row.summary} for eid, row in rows.items()}
+        for member_id, rows in by_member.items()
+    }
+    regressed = compute_tb_regressions(event_ids, by_member_metrics)
 
     latest_event_id = event_ids[-1]
     latest = sorted(
@@ -533,10 +519,12 @@ class ActivityEventRow:
     skill_url: str | None = None
 
 
-def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int = 500,
+def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                        limit: int = 500, offset: int = 0,
                         date_from: str | None = None, date_to: str | None = None) -> list[ActivityEventRow]:
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-    rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, limit=limit,
+    rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, action_type=action_type,
+                                                limit=limit, offset=offset,
                                                 date_from=date_from, date_to=date_to)
     unit_names = database.get_game_unit_names([r[1] for r in rows])
     # zeta/omicron хранят raw skill_id в new_value (см. services/activity_diff.py) — резолвим
@@ -566,6 +554,26 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int =
             skill_url=skill_url,
         ))
     return result
+
+
+def get_guild_activity_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                              date_from: str | None = None, date_to: str | None = None) -> int:
+    """Общее число событий по текущему фильтру (без учёта limit/offset) — для пагинации."""
+    return database.get_guild_activity_events_count(guild_id, ally_code=ally_code, action_type=action_type,
+                                                      date_from=date_from, date_to=date_to)
+
+
+def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
+                                  date_from: str | None = None, date_to: str | None = None) -> list:
+    """[(action_label, count), ...] отсортировано по убыванию — намеренно игнорирует фильтр
+    по типу события (см. get_guild_activity_type_counts), иначе выбор одного типа в фильтре
+    ленты схлопывал бы эту панель до единственного столбика."""
+    counts = database.get_guild_activity_type_counts(guild_id, ally_code=ally_code,
+                                                       date_from=date_from, date_to=date_to)
+    labeled = Counter()
+    for action_type, count in counts:
+        labeled[ACTIVITY_ACTION_LABELS.get(action_type, action_type)] += count
+    return sorted(labeled.items(), key=lambda kv: kv[1], reverse=True)
 
 
 def get_guild_activity_players(guild_id: int) -> list:

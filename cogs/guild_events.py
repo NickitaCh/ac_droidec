@@ -58,6 +58,49 @@ TB_ZONE_RE = re.compile(
 )
 TB_ROUND_RE = re.compile(r"^(?P<action>[a-z_]+)_round_(?P<round>\d+)$")
 
+# ------------------ Просадка на ТБ (используется и ботом, и веб-дашбордом) ------------------
+# Единственная метрика — очки территории (summary), по явному указанию пользователя
+# 2026-08-25: ОЗ-попытки/волны БЗ раньше тоже участвовали и давали ложные срабатывания
+# (см. TB_REGRESSION_THRESHOLD_PCT ниже) — очки территории самодостаточны как сигнал.
+TB_REGRESSION_METRICS = ("summary",)
+TB_REGRESSION_BASELINE_SIZE = 3  # игрок сравнивается со своим средним за 3 ТБ до последней
+# Порог найден эмпирически 2026-08-25 на реальных данных (TEO Nod): личный лучший результат
+# по очкам территории за 3 ТБ всё равно помечался 🚨 — на тот момент метрик было три (очки
+# территории/ОЗ/БЗ), и флаг сработал по ОЗ-попыткам (5), чуть-чуть не дотянувшим до дробного
+# среднего baseline (5.5). Сравнение "< baseline_avg" без допуска гарантированно триггерится
+# на любой целочисленной серии, где среднее не целое, даже если игрок фактически стабилен —
+# порог остаётся и после сужения до одной метрики, чтобы то же самое не повторилось на очках
+# территории.
+TB_REGRESSION_THRESHOLD_PCT = 0.15
+
+
+def compute_tb_regressions(event_ids, by_member):
+    """Помечает member_id, у кого последняя ТБ хуже среднего за TB_REGRESSION_BASELINE_SIZE
+    предыдущих ТБ минимум на TB_REGRESSION_THRESHOLD_PCT хотя бы по одной из
+    TB_REGRESSION_METRICS. Нужно минимум baseline(2) + текущая(1) сохранённых ТБ с данными
+    игрока, иначе не оцениваем.
+    event_ids: [id, ...] от старых к новым. by_member: {member_id: {event_id: {metric: value}}}."""
+    if len(event_ids) < 2:
+        return set()
+
+    latest_id = event_ids[-1]
+    baseline_ids = event_ids[max(0, len(event_ids) - 1 - TB_REGRESSION_BASELINE_SIZE):-1]
+
+    regressed = set()
+    for member_id, entry in by_member.items():
+        latest_data = entry.get(latest_id)
+        if not latest_data:
+            continue
+        baseline_values = [entry[eid] for eid in baseline_ids if eid in entry]
+        if len(baseline_values) < 2:
+            continue
+        for metric in TB_REGRESSION_METRICS:
+            baseline_avg = sum(v[metric] for v in baseline_values) / len(baseline_values)
+            if baseline_avg > 0 and latest_data[metric] < baseline_avg * (1 - TB_REGRESSION_THRESHOLD_PCT):
+                regressed.add(member_id)
+                break
+    return regressed
+
 # ------------------ Реальные названия планет (из офицерских анонсов) ------------------
 # Comlink не отдаёт название планеты — только фазу и код ветки (01/02/03 = Dark/Mixed/
 # Light, см. TB_ZONE_RE/TB_CONFLICT_LABELS). Офицеры перед каждой фазой вручную постят в
@@ -489,38 +532,6 @@ class GuildEvents(commands.Cog):
             lines.append(row)
         return "\n".join(lines)
 
-    # Метрики, по которым ловим "просадку" (атеншен): очки территории (вдруг не залил
-    # склад), попытки ОЗ, волны БЗ — см. project_registration_bulk_import и обсуждение
-    # с пользователем 2026-08-13.
-    TB_REGRESSION_METRICS = ("summary", "covert_attempt", "strike_encounter")
-    TB_REGRESSION_BASELINE_SIZE = 3  # игрок сравнивается со своим средним за 3 ТБ до последней
-
-    def _compute_tb_regressions(self, events, by_member):
-        """Помечает member_id, у кого последняя ТБ хуже среднего за TB_REGRESSION_BASELINE_SIZE
-        предыдущих ТБ хотя бы по одной из TB_REGRESSION_METRICS. Нужно минимум
-        baseline(2) + текущая(1) сохранённых ТБ с данными игрока, иначе не оцениваем."""
-        event_ids = [e[0] for e in events]
-        if len(event_ids) < 2:
-            return set()
-
-        latest_id = event_ids[-1]
-        baseline_ids = event_ids[max(0, len(event_ids) - 1 - self.TB_REGRESSION_BASELINE_SIZE):-1]
-
-        regressed = set()
-        for member_id, entry in by_member.items():
-            latest_data = entry.get(latest_id)
-            if not latest_data:
-                continue
-            baseline_values = [entry[eid] for eid in baseline_ids if eid in entry]
-            if len(baseline_values) < 2:
-                continue
-            for metric in self.TB_REGRESSION_METRICS:
-                baseline_avg = sum(v[metric] for v in baseline_values) / len(baseline_values)
-                if baseline_avg > 0 and latest_data[metric] < baseline_avg:
-                    regressed.add(member_id)
-                    break
-        return regressed
-
     def _format_tb_compare_table(self, events, summary_rows):
         """events: [(event_id, completed_at), ...] от старых к новым (до TB_HISTORY_KEEP).
         summary_rows: строки из get_tb_player_summary_for_events."""
@@ -544,7 +555,7 @@ class GuildEvents(commands.Cog):
                 "strike_encounter": strike_encounter, "strike_attempt": strike_attempt,
             }
 
-        regressed = self._compute_tb_regressions(events, by_member)
+        regressed = compute_tb_regressions([e[0] for e in events], by_member)
 
         n = len(events)
         header1 = " " * mark_width + f"{'Игрок':<{name_width}}"
@@ -576,7 +587,7 @@ class GuildEvents(commands.Cog):
 
         if regressed:
             lines.append("")
-            lines.append(f"🚨 — последняя ТБ ниже среднего за {self.TB_REGRESSION_BASELINE_SIZE} предыдущих (очки территории / ОЗ / волны БЗ)")
+            lines.append(f"🚨 — очки территории на последней ТБ минимум на {int(TB_REGRESSION_THRESHOLD_PCT * 100)}% ниже среднего за {TB_REGRESSION_BASELINE_SIZE} предыдущих")
 
         return "\n".join(lines)
 
