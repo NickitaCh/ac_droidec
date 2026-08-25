@@ -17,6 +17,18 @@ UNIT_DEFINITIONS_FLAG = 137438953472
 # запрос (Unit+Skill сразу) периодически возвращает HTTP 400 от comlink, видимо из-за
 # объёма ответа; раздельные запросы отрабатывают надёжно.
 SKILL_DEFINITIONS_FLAG = 4
+# 'AbilityDefinitions' — тоже добыто через comlink.get_enums()["GameDataItemsEnum"], нужно
+# ради человекочитаемых названий зет/омикронов (см. services/activity_diff.py). Проверено
+# живыми данными на VPS 2026-08-24: skill.nameKey у SkillDefinitions — НЕ настоящее имя
+# способности, а общий "DEFENSE_UP_NAME_KEY"/плейсхолдер, одинаковый у ВСЕХ способностей
+# одного персонажа — использовать его нельзя. Настоящее имя лежит в отдельном каталоге
+# способностей (ability.nameKey), который резолвится через
+# skill.abilityReference -> ability.id (напр. "uniqueskill_GENERALSYNDULLA01" ->
+# "uniqueability_generalsyndulla01"). Этот же ability.id (в нижнем регистре, как есть в
+# данных) — точный слаг ссылки на swgoh.gg: https://swgoh.gg/units/{BASE_ID}/ability/{ability_id}/1/
+# (подтверждено поиском реальных проиндексированных URL). Payload тяжёлый (~19 МБ, ~3 c на
+# VPS) — обёрнут в тот же try/except, что и SkillDefinitions ниже, чтобы не валить весь sync_units.
+ABILITY_DEFINITIONS_FLAG = 2097152
 
 # Comlink's UnitDefinitions ('units') содержит НЕСКОЛЬКО записей на один baseId: по одной
 # на каждый уровень редкости (rarity 1..7, только у реальных юнитов растёт baseStat с
@@ -56,6 +68,25 @@ async def _fetch_skill_definitions(comlink) -> list:
     return skill_data.get("skill") or []
 
 
+async def _fetch_ability_definitions(comlink) -> list:
+    """Сырой каталог способностей (comlink AbilityDefinitions) — источник настоящих имён
+    зет/омикронов для активности гильдии, см. ABILITY_DEFINITIONS_FLAG выше."""
+    ability_data = await asyncio.to_thread(comlink.get_game_data, items=str(ABILITY_DEFINITIONS_FLAG))
+    return ability_data.get("ability") or []
+
+
+def _ability_names(abilities_list: list, loc_kv: dict) -> dict:
+    """{ability_id: человекочитаемое имя} через ability.nameKey -> локализация."""
+    names = {}
+    for a in abilities_list:
+        ability_id = a.get("id")
+        if not ability_id:
+            continue
+        name_key = a.get("nameKey")
+        names[ability_id] = loc_kv.get(name_key, ability_id) if name_key else ability_id
+    return names
+
+
 def _omicron_capable_base_ids(skills_list: list, units_list: list) -> set:
     """base_id всех юнитов, у которых хотя бы одна реферснутая (unit.skillReference)
     способность имеет тир с isOmicronTier=True."""
@@ -75,15 +106,19 @@ def _omicron_capable_base_ids(skills_list: list, units_list: list) -> set:
     return capable
 
 
-def _skill_tier_thresholds(skills_list: list) -> dict:
-    """{skill_id: (zeta_tier|None, omicron_tier|None)} — 0-based индекс ступени способности,
-    на которой она помечена isZetaTier/isOmicronTier=True. Проверено живыми данными
-    2026-08-21 (docker exec на проде): число ступеней и позиция зета/омикрона свои у КАЖДОЙ
-    способности (напр. у одной способности зета на индексе 6 из 7, у другой омикрон на
-    индексе 7 из 8) — глобального порога вроде "tier >= 8" не существует, что и было
-    причиной бага "дзеты/омикроны не пишутся в активности" (services/activity_diff.py
+def _skill_tier_thresholds(skills_list: list, ability_names: dict) -> dict:
+    """{skill_id: (zeta_tier|None, omicron_tier|None, name, ability_id)} — 0-based индекс
+    ступени способности, на которой она помечена isZetaTier/isOmicronTier=True. Проверено
+    живыми данными 2026-08-21 (docker exec на проде): число ступеней и позиция зета/омикрона
+    свои у КАЖДОЙ способности (напр. у одной способности зета на индексе 6 из 7, у другой
+    омикрон на индексе 7 из 8) — глобального порога вроде "tier >= 8" не существует, что и
+    было причиной бага "дзеты/омикроны не пишутся в активности" (services/activity_diff.py
     раньше сравнивал с константами ZETA_TIER=8/OMICRON_MIN_TIER=9, которых игра никогда
-    не достигает)."""
+    не достигает).
+
+    name/ability_id — для отображения на /activity вместо сырого skill_id и для ссылки на
+    swgoh.gg (https://swgoh.gg/units/{base_id}/ability/{ability_id}/1/); резолвятся через
+    skill.abilityReference -> ability_names (см. ABILITY_DEFINITIONS_FLAG выше)."""
     thresholds = {}
     for sk in skills_list:
         skill_id = sk.get("id")
@@ -97,7 +132,9 @@ def _skill_tier_thresholds(skills_list: list) -> dict:
             if t.get("isOmicronTier"):
                 omicron_tier = idx
         if zeta_tier is not None or omicron_tier is not None:
-            thresholds[skill_id] = (zeta_tier, omicron_tier)
+            ability_id = sk.get("abilityReference") or ""
+            name = ability_names.get(ability_id, skill_id)
+            thresholds[skill_id] = (zeta_tier, omicron_tier, name, ability_id)
     return thresholds
 
 
@@ -147,7 +184,9 @@ async def sync_units(comlink) -> int:
     try:
         skills_list = await _fetch_skill_definitions(comlink)
         database.set_omicron_capable_base_ids(_omicron_capable_base_ids(skills_list, units_list))
-        database.set_skill_tier_thresholds(_skill_tier_thresholds(skills_list))
+        abilities_list = await _fetch_ability_definitions(comlink)
+        ability_names = _ability_names(abilities_list, loc_ru_kv)
+        database.set_skill_tier_thresholds(_skill_tier_thresholds(skills_list, ability_names))
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить данные об омикронах/зетах: {e}")
 

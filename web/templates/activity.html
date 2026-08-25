@@ -101,6 +101,8 @@
                                         <span class="activity-change">
                                             {% if row.old_value %}
                                                 <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
+                                            {% elif row.skill_url %}
+                                                <strong><a href="{{ row.skill_url }}" target="_blank" rel="noopener">{{ row.new_value }}</a></strong>
                                             {% else %}
                                                 <strong>{{ row.new_value }}</strong>
                                             {% endif %}

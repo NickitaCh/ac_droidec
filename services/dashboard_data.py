@@ -530,6 +530,7 @@ class ActivityEventRow:
     old_value: str | None
     new_value: str
     event_date: str
+    skill_url: str | None = None
 
 
 def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int = 500,
@@ -538,8 +539,19 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int =
     rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, limit=limit,
                                                 date_from=date_from, date_to=date_to)
     unit_names = database.get_game_unit_names([r[1] for r in rows])
+    # zeta/omicron хранят raw skill_id в new_value (см. services/activity_diff.py) — резолвим
+    # в человекочитаемое имя способности + слаг для ссылки на swgoh.gg разом на весь батч.
+    skill_ids = {new_value for _, _, action_type, _, new_value, _, _ in rows if action_type in ("zeta", "omicron")}
+    skill_info = database.get_skill_display_info(list(skill_ids))
     result = []
     for ac, base_id, action_type, old_value, new_value, event_date, scraped_at in rows:
+        skill_url = None
+        display_value = new_value
+        if action_type in ("zeta", "omicron"):
+            name, ability_id = skill_info.get(new_value, (new_value, None))
+            display_value = name
+            if ability_id:
+                skill_url = f"https://swgoh.gg/units/{base_id}/ability/{ability_id}/1/"
         result.append(ActivityEventRow(
             ally_code=ac,
             player_name=names_by_code.get(ac, ac),
@@ -549,8 +561,9 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, limit: int =
             action_label=ACTIVITY_ACTION_LABELS.get(action_type, action_type),
             action_class=ACTIVITY_ACTION_CLASSES.get(action_type, "neutral"),
             old_value=old_value,
-            new_value=new_value,
+            new_value=display_value,
             event_date=event_date,
+            skill_url=skill_url,
         ))
     return result
 

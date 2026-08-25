@@ -2580,27 +2580,43 @@ def _ensure_skill_tier_thresholds_table(cursor):
         CREATE TABLE IF NOT EXISTS skill_tier_thresholds (
             skill_id TEXT PRIMARY KEY,
             zeta_tier INTEGER,
-            omicron_tier INTEGER
+            omicron_tier INTEGER,
+            name TEXT,
+            ability_id TEXT
         )
     """)
+    # name/ability_id добавлены 2026-08-24 (человекочитаемые имена зет/омикронов + ссылка
+    # на swgoh.gg на /activity) — ALTER для баз, где таблица уже была создана без них.
+    for column in ("name TEXT", "ability_id TEXT"):
+        try:
+            cursor.execute(f"ALTER TABLE skill_tier_thresholds ADD COLUMN {column}")
+        except sqlite3.OperationalError:
+            pass
 
 
 def set_skill_tier_thresholds(thresholds: dict) -> None:
-    """thresholds: {skill_id: (zeta_tier|None, omicron_tier|None)} — индекс (0-based, тот же,
-    что player rosterUnit.skill[].tier) ступени способности, помеченной isZetaTier/
-    isOmicronTier=True в comlink SkillDefinitions. Число ступеней и позиция зета/омикрона
-    свои у каждой способности (подтверждено живыми данными 2026-08-21) — единого порога
-    вроде "tier >= 8" не существует, поэтому services/activity_diff.py сравнивает per-skill,
-    а не с константой. Перезаписывается целиком раз в час из
-    services/units_sync.py::sync_units (тот же цикл, что game_units.has_omicron)."""
+    """thresholds: {skill_id: (zeta_tier|None, omicron_tier|None, name, ability_id)} —
+    zeta_tier/omicron_tier: индекс (0-based, тот же, что player rosterUnit.skill[].tier)
+    ступени способности, помеченной isZetaTier/isOmicronTier=True в comlink SkillDefinitions.
+    Число ступеней и позиция зета/омикрона свои у каждой способности (подтверждено живыми
+    данными 2026-08-21) — единого порога вроде "tier >= 8" не существует, поэтому
+    services/activity_diff.py сравнивает per-skill, а не с константой.
+    name/ability_id — человекочитаемое имя способности и её id в каталоге AbilityDefinitions
+    (используется как слаг ссылки на swgoh.gg), см. services/units_sync.py::_skill_tier_thresholds.
+    Перезаписывается целиком раз в час из services/units_sync.py::sync_units (тот же цикл,
+    что game_units.has_omicron)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_skill_tier_thresholds_table(cursor)
     cursor.execute("DELETE FROM skill_tier_thresholds")
     if thresholds:
-        rows = [(skill_id, zeta_tier, omicron_tier) for skill_id, (zeta_tier, omicron_tier) in thresholds.items()]
+        rows = [
+            (skill_id, zeta_tier, omicron_tier, name, ability_id)
+            for skill_id, (zeta_tier, omicron_tier, name, ability_id) in thresholds.items()
+        ]
         cursor.executemany(
-            "INSERT INTO skill_tier_thresholds (skill_id, zeta_tier, omicron_tier) VALUES (?, ?, ?)",
+            "INSERT INTO skill_tier_thresholds (skill_id, zeta_tier, omicron_tier, name, ability_id) "
+            "VALUES (?, ?, ?, ?, ?)",
             rows,
         )
     conn.commit()
@@ -2618,6 +2634,26 @@ def get_all_skill_tier_thresholds() -> dict:
     rows = cursor.fetchall()
     conn.close()
     return {skill_id: (zeta_tier, omicron_tier) for skill_id, zeta_tier, omicron_tier in rows}
+
+
+def get_skill_display_info(skill_ids: list[str]) -> dict:
+    """{skill_id: (name, ability_id)} для отображения зет/омикронов на /activity —
+    имя способности вместо сырого skill_id + ability_id для ссылки на swgoh.gg
+    (https://swgoh.gg/units/{base_id}/ability/{ability_id}/1/). См.
+    services/dashboard_data.py::get_guild_activity."""
+    if not skill_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    placeholders = ",".join("?" * len(skill_ids))
+    cursor.execute(
+        f"SELECT skill_id, name, ability_id FROM skill_tier_thresholds WHERE skill_id IN ({placeholders})",
+        skill_ids,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {skill_id: (name, ability_id) for skill_id, name, ability_id in rows}
 
 
 # =====================================================================
