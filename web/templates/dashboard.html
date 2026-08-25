@@ -21,7 +21,7 @@
         <h1>{{ guild_cfg.name }}</h1>
 
         <div class="dashboard-grid">
-            <div class="widget">
+            <div class="widget widget-6">
                 <div class="widget-header">
                     <h2>👥 Состав гильдии</h2>
                     <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
@@ -32,7 +32,7 @@
                     <div class="table-toolbar" style="margin-bottom: 0.6em;">
                         <input type="search" placeholder="Поиск по имени или коду союзника…" data-table-search="dashboard-roster-table">
                     </div>
-                    <div class="table-scroll">
+                    <div class="table-scroll widget-table-scroll">
                         <table class="data" id="dashboard-roster-table">
                             <thead>
                                 <tr>
@@ -189,24 +189,31 @@
 
             <div class="widget widget-6">
                 <div class="widget-header">
-                    <h2>🔮 Текущий сезон датакронов</h2>
-                    {% if widgets.datacron_season %}
-                        <a class="widget-link" href="/datacrons/{{ widgets.datacron_season.set_id }}">Требования сезона →</a>
-                    {% endif %}
+                    <h2>🔮 Активные сезоны датакронов</h2>
+                    <a class="widget-link" href="/datacrons">Все сезоны →</a>
                 </div>
-                {% if not widgets.datacron_season %}
+                {% if not widgets.datacron_seasons %}
                     <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
                 {% else %}
-                    <p>{{ widgets.datacron_season.display_name }} <span class="muted">[{{ widgets.datacron_season.set_id }}]</span></p>
-                    <div class="stats-grid" style="margin-bottom: 0;">
-                        <div class="stat-tile">
-                            <div class="stat-value">{{ widgets.datacron_season.base_count }}</div>
-                            <div class="stat-label">Обычных требований</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-value">{{ widgets.datacron_season.focused_count }}</div>
-                            <div class="stat-label">Точечных требований</div>
-                        </div>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th>Сезон</th>
+                                    <th class="num">Обычных</th>
+                                    <th class="num">Спец.</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for s in widgets.datacron_seasons %}
+                                    <tr>
+                                        <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
+                                        <td class="num">{{ s.base_count }}</td>
+                                        <td class="num">{{ s.focused_count }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 {% endif %}
             </div>

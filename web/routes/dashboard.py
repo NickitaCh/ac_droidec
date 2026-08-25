@@ -20,24 +20,27 @@ def _get_comlink():
     return SwgohComlink(url="http://localhost:3000")
 
 
-async def _current_datacron_season(guild_id: int):
-    """Сезон с наибольшим set_id из каталога (самый свежий) — None, если каталог
-    ещё не собрался ни разу (Comlink недоступен на первом запуске)."""
+async def _active_datacron_seasons(guild_id: int):
+    """Все активные (незавершённые) сезоны из каталога, самый свежий первым —
+    пустой список, если каталог ещё не собрался ни разу (Comlink недоступен на
+    первом запуске). Тот же каталог, что и /datacrons (datacrons.py::datacrons_list)."""
     try:
         catalog = await datacron_catalog.get_catalog(_get_comlink())
     except Exception as e:
         print(f"⚠️ [/] Каталог датакронов недоступен для виджета дашборда: {e}")
-        return None
+        return []
     if not catalog or not catalog.get("seasons"):
-        return None
-    set_id = max(catalog["seasons"].keys())
-    data = catalog["seasons"][set_id]
-    return {
-        "set_id": set_id,
-        "display_name": data["display_name"],
-        "base_count": database.count_datacron_requirements_by_set(set_id, guild_id=guild_id),
-        "focused_count": database.count_datacron_focused_requirements_by_set(set_id, guild_id=guild_id),
-    }
+        return []
+    seasons = []
+    for set_id in sorted(catalog["seasons"].keys(), reverse=True):
+        data = catalog["seasons"][set_id]
+        seasons.append({
+            "set_id": set_id,
+            "display_name": data["display_name"],
+            "base_count": database.count_datacron_requirements_by_set(set_id, guild_id=guild_id),
+            "focused_count": database.count_datacron_focused_requirements_by_set(set_id, guild_id=guild_id),
+        })
+    return seasons
 
 
 def _next_birthdays(guild_id: int, limit: int = 10):
@@ -80,7 +83,7 @@ async def home(request: Request):
             "top_violators": top_violators,
             "max_violator": top_violators[0].recent_total if top_violators else 0,
             "activity_rows": activity_rows,
-            "datacron_season": await _current_datacron_season(guild_id),
+            "datacron_seasons": await _active_datacron_seasons(guild_id),
             "birthdays": _next_birthdays(guild_id, limit=10),
         }
 

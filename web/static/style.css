@@ -214,11 +214,11 @@ select { background: var(--page); }
 .card .card-title { font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
 .card .card-desc { margin-top: 0.35em; color: var(--fg-muted); font-size: 0.9em; }
 
-/* ---- Дашборд: сетка виджетов (редизайн 2026-08-25) ---- */
+/* ---- Дашборд: сетка виджетов (редизайн 2026-08-25, уплотнено 2026-08-25) ---- */
 .dashboard-grid {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
-    gap: 1.25em;
+    gap: 1em;
     align-items: start;
 }
 .widget {
@@ -226,7 +226,7 @@ select { background: var(--page); }
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface);
-    padding: 1.1em 1.25em;
+    padding: 0.9em 1.1em;
     min-width: 0; /* иначе широкие таблицы внутри узкой колонки распирают весь грид */
 }
 @media (min-width: 60em) {
@@ -237,13 +237,19 @@ select { background: var(--page); }
     align-items: baseline;
     justify-content: space-between;
     gap: 0.75em;
-    margin-bottom: 0.85em;
+    margin-bottom: 0.7em;
 }
 .widget-header h2 { margin: 0; font-size: 1.05em; }
 .widget-header a.widget-link { font-size: 0.85em; color: var(--accent); text-decoration: none; white-space: nowrap; }
 .widget-header a.widget-link:hover { text-decoration: underline; }
 .widget .table-scroll { border: none; }
 .widget-empty { color: var(--fg-muted); font-size: 0.9em; padding: 0.5em 0; }
+/* ---- Состав гильдии на дашборде теперь в половину ширины (рядом с другим виджетом,
+   "разместить несколько таблиц рядом" — запрос пользователя 2026-08-25) — без
+   ограничения высоты 50+ строк ростера растягивали бы всю страницу выше остальных
+   виджетов на добрый экран прокрутки, поэтому сам список скроллится внутри своих
+   ~9 строк, шапка таблицы остаётся прилипшей (position:sticky уже есть в table.data). */
+.widget-table-scroll { max-height: 22em; overflow-y: auto; }
 
 /* ---- Статы-плашки ---- */
 .stats-grid {
@@ -329,6 +335,13 @@ select { background: var(--page); }
 }
 .table-toolbar input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+/* ---- .table-toolbar как <form> (фильтры /activity) — генеральное правило `form`
+   ниже задаёт flex-direction:column и max-width:20em для всех форм сайта, что
+   при равной специфичности (один класс) проигрывает по свойствам, которых нет в
+   .table-toolbar (flex-direction), и схлопывает фильтр в узкий вертикальный
+   столбик вместо строки. Явно переопределяем оба свойства здесь. ---- */
+form.table-toolbar { flex-direction: row; max-width: none; }
+form.table-toolbar select { min-width: 10em; }
 
 table.data {
     width: 100%;
@@ -485,6 +498,14 @@ table.data .dc-level-col {
 }
 .requirement-form label { flex: 1 1 12em; min-width: 10em; }
 .requirement-form button { flex: 0 0 auto; height: 2.6em; }
+/* ---- Пары "нарушение + комментарий" внутри requirement-form (/нарушения) — без
+   этого правила .violation-pair оставался обычным <div> и как flex-item родителя
+   получал flex-basis:auto по контенту, а его два <label> внутри стекались по
+   вертикали (form label { flex-direction:column } не помогает контейнеру-родителю
+   div'а) — визуально ломало ритм строки рядом с Игрок/Режим/Дата. Теперь пара сама
+   занимает всю строку и раскладывает свои 2 поля в ряд, как остальная форма. ---- */
+.violation-pair { display: flex; flex-wrap: wrap; gap: 1em; flex: 1 1 100%; }
+.violation-pair label { flex: 1 1 14em; min-width: 10em; }
 
 /* ---- Строчные мини-формы (переименовать / править требование) — <details>
    раскрывается в обычном потоке (не поповер: внутри .table-scroll оверфлоу
@@ -590,12 +611,23 @@ table.data .dc-level-col {
 }
 .activity-date-header::before { left: 0; }
 .activity-date-header::after { right: 0; }
+/* ---- Карточки игроков внутри одной даты — сетка, не вертикальный список
+   (было: каждая карточка на всю ширину страницы, даже если внутри одна строка
+   события — на дне с 15+ игроками превращалось в длиннющий скролл). Заголовок
+   даты остаётся во всю ширину (grid-column: 1/-1). ---- */
+.activity-date-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(19em, 1fr));
+    gap: 0.75em;
+    align-items: start;
+}
+.activity-date-header { grid-column: 1 / -1; }
 .activity-player-card {
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface);
     padding: 0.9em 1.1em;
-    margin-bottom: 0.75em;
+    margin-bottom: 0;
 }
 .activity-player-name { font-weight: 700; font-size: 0.9em; margin-bottom: 0.5em; }
 .activity-event-row {
