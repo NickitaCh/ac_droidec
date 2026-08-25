@@ -103,8 +103,10 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
     Возвращает (fetched, added_events, omicron_hits): fetched=False при таймауте или пустом
     ростере — вызывающий код (player_units_sync_loop, /activity/sync) использует это для
     честного счётчика "сколько игроков реально обновилось", а не считает таймаут за успех.
-    omicron_hits — [(base_id, guild_id), ...] только для реально новых (не дублей) omicron-событий;
-    используется cogs/stat_requirements.py::_announce_omicrons для объявлений в Discord — веб-вызов
+    omicron_hits — [(base_id, skill_id, guild_id), ...] только для реально новых (не дублей)
+    omicron-событий (skill_id нужен вызывающему коду, чтобы резолвить имя/тип способности и
+    игровой режим через database.get_skill_display_info — см. services/units_sync.py); используется
+    cogs/stat_requirements.py::_announce_omicrons для объявлений в Discord — веб-вызов
     (/activity/sync) это поле игнорирует, т.к. веб-процесс не держит Discord-клиента и постить не может."""
     try:
         new_units = await asyncio.wait_for(fetch_player_units(comlink, ally_code), timeout=timeout)
@@ -126,5 +128,5 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
             ):
                 added += 1
                 if action_type == "omicron":
-                    omicron_hits.append((base_id, guild_id))
+                    omicron_hits.append((base_id, new_value, guild_id))
     return True, added, omicron_hits

@@ -549,7 +549,7 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type:
         skill_url = None
         display_value = new_value
         if action_type in ("zeta", "omicron"):
-            name, ability_id = skill_info.get(new_value, (new_value, None))
+            name, ability_id, _ability_type, _omicron_mode = skill_info.get(new_value, (new_value, None, None, None))
             display_value = name
             if ability_id:
                 skill_url = f"https://swgoh.gg/units/{base_id}/ability/{ability_id}/1/"

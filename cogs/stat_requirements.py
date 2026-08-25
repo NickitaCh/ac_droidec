@@ -499,7 +499,7 @@ class StatRequirementsCog(commands.Cog):
         skill_tier_map = database.get_all_skill_tier_thresholds()
         synced = 0
         total_events = 0
-        all_omicron_hits = []  # (ally_code, base_id, guild_id)
+        all_omicron_hits = []  # (ally_code, base_id, skill_id, guild_id)
         today = datetime.now(MSK).date().isoformat()
         for ally_code in ally_codes:
             try:
@@ -509,7 +509,9 @@ class StatRequirementsCog(commands.Cog):
                 if fetched:
                     synced += 1
                 total_events += added
-                all_omicron_hits.extend((ally_code, base_id, guild_id) for base_id, guild_id in omicron_hits)
+                all_omicron_hits.extend(
+                    (ally_code, base_id, skill_id, guild_id) for base_id, skill_id, guild_id in omicron_hits
+                )
             except Exception as e:
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)
@@ -522,12 +524,18 @@ class StatRequirementsCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _announce_omicrons(self, hits):
-        """hits: [(ally_code, base_id, guild_id), ...] — новые омикроны, найденные за этот
-        цикл синка. Постит в guilds.omicron_channel_id гильдии (если он настроен через
+        """hits: [(ally_code, base_id, skill_id, guild_id), ...] — новые омикроны, найденные за
+        этот цикл синка. Постит в guilds.omicron_channel_id гильдии (если он настроен через
         /омикрон_текст канал); без настроенного канала для конкретной гильдии молча пропускает —
-        это НЕ ошибка, просто фича ещё не включена для этой гильдии."""
+        это НЕ ошибка, просто фича ещё не включена для этой гильдии.
+        Формат ("**{игрок}** выдал омикрон **{способность}** ({тип}) для {режим} на
+        **{персонаж}**.") — тип/режим резолвятся из skill_tier_thresholds (см.
+        services/units_sync.py::_skill_tier_thresholds); если справочник ещё не успел
+        досинкать конкретный skill_id (гонка с hourly sync_units), молча опускаем скобки/
+        "для ..." вместо кривого текста с пустышками."""
+        skill_info = database.get_skill_display_info([skill_id for _, _, skill_id, _ in hits])
         names_by_guild = {}
-        for ally_code, base_id, guild_id in hits:
+        for ally_code, base_id, skill_id, guild_id in hits:
             guild_cfg = database.get_guild_config(guild_id)
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
@@ -538,7 +546,15 @@ class StatRequirementsCog(commands.Cog):
             if guild_id not in names_by_guild:
                 names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
-            text = f"**{player_name}** выдал омикрон **{_unit_display_name(base_id)}**."
+            ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
+            text = f"**{player_name}** выдал омикрон"
+            if ability_name:
+                text += f" **{ability_name}**"
+                if ability_type:
+                    text += f" ({ability_type})"
+            if omicron_mode:
+                text += f" для {omicron_mode}"
+            text += f" на **{_unit_display_name(base_id)}**."
             phrase = database.get_omicron_phrase(base_id)
             if phrase:
                 text += f" {phrase}"

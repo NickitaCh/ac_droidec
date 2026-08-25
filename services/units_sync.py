@@ -106,19 +106,77 @@ def _omicron_capable_base_ids(skills_list: list, units_list: list) -> set:
     return capable
 
 
+# Тип способности (лидерка/базовая/особая/уникальная) не хранится отдельным полем в
+# comlink SkillDefinitions — единственный надёжный сигнал: префикс skill.id, устойчивая
+# конвенция игровых данных (подтверждено сторонними инструментами, разбирающими те же
+# данные comlink, напр. github.com/nyk9/nextjs-swgoh — те же 4 префикса на реальных
+# данных). Уникальных способностей у персонажа может быть несколько ("uniqueskill_BB801",
+# "uniqueskill_BB802") — порядковый номер зашит двумя последними цифрами id, отрезаем их.
+_SKILL_TYPE_PREFIXES = (
+    ("leaderskill_", "Лидерка"),
+    ("basicskill_", "Базовая"),
+    ("specialskill_", "Особая"),
+    ("uniqueskill_", "Уникальная"),
+)
+
+# 'OmicronMode' — enum из comlink.get_enums()["OmicronMode"] (не в этом репо, добыто через
+# GitHub-поиск по реальному дампу enums.json стороннего проекта, т.к. VPS с живым comlink был
+# недоступен в момент реализации 2026-08-25): TERRITORYWAROMICRON=8, TERRITORYBATTLEBOTHOMICRON=7
+# (+5/6 — однобоковые ТБ-омикроны), GUILDRAIDOMICRON=4, TERRITORYTOURNAMENTOMICRON=9 (кодовое
+# имя разработчиков для Гранд Арены/ГАК, тоже 14/15 — версии для лиг 3+/5+). Список неполный
+# специально — используются только 4 режима, которые видно в объявлениях о выдаче омикронов
+# (см. cogs/stat_requirements.py::_announce_omicrons); остальные (PvE/арена/покорение/
+# галактический вызов) в объявлениях пока не нужны, но помечены на случай будущей выдачи.
+_OMICRON_MODE_LABELS = {
+    1: "все режимы",
+    2: "PvE",
+    3: "арена",
+    4: "рейд",
+    5: "ТБ",
+    6: "ТБ",
+    7: "ТБ",
+    8: "ВГ",
+    9: "ВА",
+    10: "ВГ",
+    11: "покорение",
+    12: "галактический вызов",
+    13: "PvE-ивент",
+    14: "ВА",
+    15: "ВА",
+    16: "галактический вызов",
+    17: "галактический вызов",
+}
+
+
+def _skill_ability_type(skill_id: str) -> str:
+    """'Лидерка'/'Базовая'/'Особая'/'Уникальная N' по префиксу skill.id — см. комментарий
+    у _SKILL_TYPE_PREFIXES. Пустая строка, если префикс не распознан (доп. способности от
+    снаряжения/контракта и т.п. — они не выдаются как омикроны игроками, здесь не нужны)."""
+    for prefix, label in _SKILL_TYPE_PREFIXES:
+        if skill_id.startswith(prefix):
+            if prefix == "uniqueskill_":
+                suffix = skill_id[len(prefix):]
+                if len(suffix) >= 2 and suffix[-2:].isdigit():
+                    return f"{label} {int(suffix[-2:])}"
+            return label
+    return ""
+
+
 def _skill_tier_thresholds(skills_list: list, ability_names: dict) -> dict:
-    """{skill_id: (zeta_tier|None, omicron_tier|None, name, ability_id)} — 0-based индекс
-    ступени способности, на которой она помечена isZetaTier/isOmicronTier=True. Проверено
-    живыми данными 2026-08-21 (docker exec на проде): число ступеней и позиция зета/омикрона
-    свои у КАЖДОЙ способности (напр. у одной способности зета на индексе 6 из 7, у другой
-    омикрон на индексе 7 из 8) — глобального порога вроде "tier >= 8" не существует, что и
-    было причиной бага "дзеты/омикроны не пишутся в активности" (services/activity_diff.py
+    """{skill_id: (zeta_tier|None, omicron_tier|None, name, ability_id, ability_type, omicron_mode)}
+    — 0-based индекс ступени способности, на которой она помечена isZetaTier/isOmicronTier=True.
+    Проверено живыми данными 2026-08-21 (docker exec на проде): число ступеней и позиция зета/
+    омикрона свои у КАЖДОЙ способности (напр. у одной способности зета на индексе 6 из 7, у
+    другой омикрон на индексе 7 из 8) — глобального порога вроде "tier >= 8" не существует, что
+    и было причиной бага "дзеты/омикроны не пишутся в активности" (services/activity_diff.py
     раньше сравнивал с константами ZETA_TIER=8/OMICRON_MIN_TIER=9, которых игра никогда
     не достигает).
 
     name/ability_id — для отображения на /activity вместо сырого skill_id и для ссылки на
     swgoh.gg (https://swgoh.gg/units/{base_id}/ability/{ability_id}/1/); резолвятся через
-    skill.abilityReference -> ability_names (см. ABILITY_DEFINITIONS_FLAG выше)."""
+    skill.abilityReference -> ability_names (см. ABILITY_DEFINITIONS_FLAG выше).
+    ability_type/omicron_mode — для текста объявления о выдаче омикрона в Discord (см.
+    _skill_ability_type/_OMICRON_MODE_LABELS выше), считаются только для скиллов с омикроном."""
     thresholds = {}
     for sk in skills_list:
         skill_id = sk.get("id")
@@ -134,7 +192,9 @@ def _skill_tier_thresholds(skills_list: list, ability_names: dict) -> dict:
         if zeta_tier is not None or omicron_tier is not None:
             ability_id = sk.get("abilityReference") or ""
             name = ability_names.get(ability_id, skill_id)
-            thresholds[skill_id] = (zeta_tier, omicron_tier, name, ability_id)
+            ability_type = _skill_ability_type(skill_id) if omicron_tier is not None else ""
+            omicron_mode = _OMICRON_MODE_LABELS.get(sk.get("omicronMode"), "") if omicron_tier is not None else ""
+            thresholds[skill_id] = (zeta_tier, omicron_tier, name, ability_id, ability_type, omicron_mode)
     return thresholds
 
 
