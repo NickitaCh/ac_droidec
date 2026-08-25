@@ -49,9 +49,11 @@ class Birthday(commands.Cog):
         # Защита от дублирования: (guild_id, discord_id) -> дата, для которой уже поздравляли
         self.last_congratulated = {}
         self.check_loop.start()
+        self.refresh_member_cache_loop.start()
 
     def cog_unload(self):
         self.check_loop.cancel()
+        self.refresh_member_cache_loop.cancel()
 
     @tasks.loop(seconds=30)
     async def check_loop(self):
@@ -150,6 +152,34 @@ class Birthday(commands.Cog):
 
     @check_loop.before_loop
     async def before_loop(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=1)
+    async def refresh_member_cache_loop(self):
+        """Часовой снимок discord_id -> display_name по всем участникам Discord-серверов
+        гильдий бота, в database.discord_member_cache. Живёт здесь (не в отдельном cog'е),
+        потому что раньше страдал именно /др — веб-дашборд не может резолвить имя игрока,
+        у которого сохранён день рождения, но который ни разу не логинился в веб и не
+        проходил /регистрация (см. get_username_for_discord_id). Собирается по всем
+        гильдиям сразу, а не только с настроенным birthday-каналом, чтобы не зависеть
+        от birthday-конфига — ДР можно добавить любому участнику через /др добавить."""
+        members = []
+        seen_guild_ids = set()
+        for guild_cfg in database.get_all_guild_configs():
+            discord_guild_id = guild_cfg.get("discord_guild_id")
+            if not discord_guild_id or discord_guild_id in seen_guild_ids:
+                continue
+            seen_guild_ids.add(discord_guild_id)
+            discord_guild = self.bot.get_guild(int(discord_guild_id))
+            if discord_guild is None:
+                continue
+            for member in discord_guild.members:
+                members.append((str(member.id), member.display_name))
+        if members:
+            database.sync_discord_member_cache(members)
+
+    @refresh_member_cache_loop.before_loop
+    async def before_refresh_member_cache_loop(self):
         await self.bot.wait_until_ready()
 
     # -------------------- Slash-команды --------------------

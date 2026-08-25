@@ -583,10 +583,14 @@ def get_username_for_discord_id(discord_id: str) -> str | None:
     залогиненного user — для него имя уже есть в сессии) — используется в
     веб-таблицах, чтобы показывать имя вместо голого ID (added_by/granted_by
     и т.п.). Источники по приоритету: username супер-админа (задаётся явно
-    при выдаче статуса), затем самое свежее имя из web_access_log (пишется
-    при каждом логине). Возвращает None, если ни разу не встречался —
-    вызывающий код в этом случае показывает сырой ID как есть (например,
-    для сид-меток вида "startup-seed", которые не являются discord_id)."""
+    при выдаче статуса), самое свежее имя из web_access_log (пишется при
+    каждом логине), затем discord_member_cache — часовой снимок display_name
+    ВСЕХ участников Discord-серверов гильдий бота (см. sync_discord_member_cache),
+    покрывающий и тех, кто ни разу не логинился в веб и не регистрировал
+    SWGOH-аккаунт (например ДР незарегистрированного игрока). Возвращает None,
+    если ни разу не встречался — вызывающий код в этом случае показывает сырой
+    ID как есть (например, для сид-меток вида "startup-seed", которые не
+    являются discord_id)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_bot_admins_table(cursor)
@@ -601,8 +605,44 @@ def get_username_for_discord_id(discord_id: str) -> str | None:
         (str(discord_id),)
     )
     row = cursor.fetchone()
+    if row and row[0]:
+        conn.close()
+        return row[0]
+    _ensure_discord_member_cache_table(cursor)
+    cursor.execute("SELECT display_name FROM discord_member_cache WHERE discord_id = ?", (str(discord_id),))
+    row = cursor.fetchone()
     conn.close()
     return row[0] if row and row[0] else None
+
+
+def _ensure_discord_member_cache_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS discord_member_cache (
+            discord_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def sync_discord_member_cache(members: list):
+    """Полная перезапись кэша display_name по всем участникам Discord-серверов
+    гильдий бота — members: [(discord_id, display_name), ...] сразу со всех
+    сконфигурированных гильдий. Единственный способ резолвить discord_id
+    в имя там, где нет live-подключения к Discord (веб-дашборд — отдельный
+    процесс без gateway), для участников, которые не логинились в веб и не
+    проходили /регистрация. См. get_username_for_discord_id (последний фолбэк)
+    и cogs/birthday.py::refresh_member_cache_loop (часовое обновление)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_discord_member_cache_table(cursor)
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.executemany(
+        "INSERT OR REPLACE INTO discord_member_cache (discord_id, display_name, updated_at) VALUES (?, ?, datetime('now'))",
+        members
+    )
+    conn.commit()
+    conn.close()
 
 # =====================================================================
 # РУЧНЫЕ ГРАНТЫ ДОСТУПА: для игроков ВНЕ участвующих гильдий (или без
