@@ -299,12 +299,17 @@ select { background: var(--page); }
     .dashboard-grid { grid-template-columns: 1fr; }
     .widget-secondary { grid-column: 1; grid-template-columns: 1fr; }
 }
-/* ---- Состав гильдии на моби (2026-08-26) — 4 колонки (Игрок/Ранг/Код/Discord) с
-   обычными десктопными паддингами не влезают в узкий экран и вызывали
-   горизонтальный скролл внутри виджета; на узких экранах превращаем строки
-   таблицы в блоки-карточки (label: value), thead прячем, подписи — из
-   data-label на каждом <td> (см. dashboard.html). ---- */
-@media (max-width: 34em) {
+/* ---- Состав гильдии — 4 колонки (Игрок/Ранг/Код/Discord) не влезают без
+   горизонтального скролла не только на телефоне, но и в самой widget-роster
+   колонке 3-колоночного десктопного грида (та ~460px шире 1440px-контейнера не
+   становится — 1/3 от 1440 минус gap'ы, см. правило .dashboard-grid выше), поэтому
+   триггер — контейнерный запрос от реальной ширины самого виджета (container query),
+   а не @media от ширины экрана: на широком мониторе с узким окном браузера так же
+   нужны карточки, как и на телефоне. Строки таблицы превращаются в блоки-карточки
+   (label: value), thead прячем, подписи — из data-label на каждом <td> (см.
+   dashboard.html). ---- */
+.widget-roster { container-type: inline-size; }
+@container (max-width: 32em) {
     #dashboard-roster-table thead { display: none; }
     #dashboard-roster-table, #dashboard-roster-table tbody, #dashboard-roster-table tr, #dashboard-roster-table td {
         display: block;
