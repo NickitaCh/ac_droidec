@@ -124,60 +124,62 @@
                     {% endif %}
                 </div>
 
-                <div class="widget wc-r1c2">
-                    <div class="widget-header">
-                        <h2>🚨 Топ нарушителей (90 дней)</h2>
-                        <a class="widget-link" href="/violations">Все нарушения →</a>
-                    </div>
-                    {% if not widgets.top_violators %}
-                        <p class="widget-empty">😇 Нарушений за последние 90 дней не найдено.</p>
-                    {% else %}
-                        <div class="bar-chart">
-                            {% for row in widgets.top_violators %}
-                                <div class="bar-chart-row">
-                                    <div class="bar-chart-name"><a href="/violations/{{ row.ally_code }}">{{ row.name }}</a></div>
-                                    <div class="bar-chart-track">
-                                        <div class="bar-chart-fill" data-tip="{{ row.name }}: {{ row.recent_total }}" style="width: {{ (row.recent_total / widgets.max_violator * 100) if widgets.max_violator else 0 }}%;"></div>
+                <div class="widget-stack wc-r1c2">
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🚨 Топ нарушителей (90 дней)</h2>
+                            <a class="widget-link" href="/violations">Все нарушения →</a>
+                        </div>
+                        {% if not widgets.top_violators %}
+                            <p class="widget-empty">😇 Нарушений за последние 90 дней не найдено.</p>
+                        {% else %}
+                            <div class="bar-chart">
+                                {% for row in widgets.top_violators %}
+                                    <div class="bar-chart-row">
+                                        <div class="bar-chart-name"><a href="/violations/{{ row.ally_code }}">{{ row.name }}</a></div>
+                                        <div class="bar-chart-track">
+                                            <div class="bar-chart-fill" data-tip="{{ row.name }}: {{ row.recent_total }}" style="width: {{ (row.recent_total / widgets.max_violator * 100) if widgets.max_violator else 0 }}%;"></div>
+                                        </div>
+                                        <div class="bar-chart-value">{{ row.recent_total }}</div>
                                     </div>
-                                    <div class="bar-chart-value">{{ row.recent_total }}</div>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                </div>
-
-                <div class="widget wc-r2c2">
-                    <div class="widget-header">
-                        <h2>🔮 Активные сезоны датакронов</h2>
-                        <a class="widget-link" href="/datacrons">Все сезоны →</a>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     </div>
-                    {% if not widgets.datacron_seasons %}
-                        <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
-                    {% else %}
-                        <div class="table-scroll">
-                            <table class="data">
-                                <thead>
-                                    <tr>
-                                        <th>Сезон</th>
-                                        <th class="num">Обычных</th>
-                                        <th class="num">Спец.</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for s in widgets.datacron_seasons %}
-                                        <tr>
-                                            <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
-                                            <td class="num">{{ s.base_count }}</td>
-                                            <td class="num">{{ s.focused_count }}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
+
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🔮 Активные сезоны датакронов</h2>
+                            <a class="widget-link" href="/datacrons">Все сезоны →</a>
                         </div>
-                    {% endif %}
+                        {% if not widgets.datacron_seasons %}
+                            <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
+                        {% else %}
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead>
+                                        <tr>
+                                            <th>Сезон</th>
+                                            <th class="num">Обычных</th>
+                                            <th class="num">Спец.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for s in widgets.datacron_seasons %}
+                                            <tr>
+                                                <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
+                                                <td class="num">{{ s.base_count }}</td>
+                                                <td class="num">{{ s.focused_count }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
 
-                <div class="widget wc-r3c1">
+                <div class="widget wc-r2c1">
                     <div class="widget-header">
                         <h2>⚔️ Очки территории — ТБ</h2>
                         <a class="widget-link" href="/tb">Подробный отчёт →</a>
@@ -204,7 +206,7 @@
                     {% endif %}
                 </div>
 
-                <div class="widget wc-r3c2">
+                <div class="widget wc-r2c2">
                     <div class="widget-header">
                         <h2>🛡️ Территориальные войны</h2>
                         <a class="widget-link" href="/tw">Вся история →</a>
