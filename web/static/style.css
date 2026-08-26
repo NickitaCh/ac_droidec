@@ -216,11 +216,13 @@ select { background: var(--page); }
 
 /* ---- Дашборд: сетка виджетов (редизайн 2026-08-25, перекомпоновка 2026-08-25:
    состав гильдии — высокая колонка слева на всю высоту без внутренней прокрутки,
-   остальные виджеты — 2-колоночная сетка справа, запрос пользователя) ---- */
+   остальные виджеты — 2-колоночная сетка справа; 2026-08-26: переведено на 3
+   равные колонки (роster/центр/право) — фикс-ширина 30em у ростера не давала
+   таблице (4 колонки) поместиться и вызывала горизонтальный скролл. ---- */
 .dashboard-grid {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    align-items: start;
     gap: 1em;
 }
 .widget {
@@ -230,19 +232,16 @@ select { background: var(--page); }
     padding: 0.9em 1.1em;
     min-width: 0; /* иначе широкие таблицы внутри узкой колонки распирают весь грид */
 }
-.widget-roster {
-    flex: 1 1 380px;
-    max-width: 30em;
-}
 .widget-secondary {
-    flex: 2 1 560px;
+    grid-column: span 2;
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     align-items: start;
     gap: 1em;
 }
 @media (max-width: 60em) {
-    .widget-secondary { grid-template-columns: 1fr; }
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .widget-secondary { grid-column: 1; grid-template-columns: 1fr; }
 }
 .widget-header {
     display: flex;
