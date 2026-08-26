@@ -74,94 +74,6 @@
             <div class="widget-secondary">
             <div class="widget">
                 <div class="widget-header">
-                    <h2>⚔️ Очки территории — ТБ</h2>
-                    <a class="widget-link" href="/tb">Подробный отчёт →</a>
-                </div>
-                {% if not widgets.tb_report or widgets.tb_report.event_totals|length < 2 %}
-                    <p class="widget-empty">Пока недостаточно сохранённых ТБ для графика.</p>
-                {% else %}
-                    <div class="trend-chart-wrap">
-                        <div class="trend-chart-plot">
-                            <svg class="trend-chart" viewBox="0 0 100 40" preserveAspectRatio="none">
-                                <polyline class="trend-area" points="{{ widgets.tb_report.trend_area_points }}"></polyline>
-                                <polyline points="{{ widgets.tb_report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
-                            </svg>
-                            {% for x, y, completed_at, value in widgets.tb_report.trend_coords %}
-                                <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
-                            {% endfor %}
-                        </div>
-                        <div class="trend-chart-labels">
-                            {% for completed_at, value in widgets.tb_report.event_totals %}
-                                <span>{{ completed_at[:10] }}</span>
-                            {% endfor %}
-                        </div>
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="widget">
-                <div class="widget-header">
-                    <h2>🛡️ Территориальные войны</h2>
-                    <a class="widget-link" href="/tw">Вся история →</a>
-                </div>
-                {% if not widgets.tw_rows %}
-                    <p class="widget-empty">История ВГ пока пуста.</p>
-                {% else %}
-                    <div class="table-scroll">
-                        <table class="data">
-                            <thead>
-                                <tr>
-                                    <th>Дата</th>
-                                    <th>Результат</th>
-                                    <th class="num">Счёт</th>
-                                    <th>Соперник</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for row in widgets.tw_rows %}
-                                    <tr>
-                                        <td>{{ row.date_label }}</td>
-                                        <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
-                                        <td class="num">{{ row.own_score }}:{{ row.opponent_score }}</td>
-                                        <td>
-                                            {% if row.opponent_url %}
-                                                <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
-                                            {% else %}
-                                                {{ row.opponent_name }}
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="widget">
-                <div class="widget-header">
-                    <h2>🚨 Топ нарушителей (90 дней)</h2>
-                    <a class="widget-link" href="/violations">Все нарушения →</a>
-                </div>
-                {% if not widgets.top_violators %}
-                    <p class="widget-empty">😇 Нарушений за последние 90 дней не найдено.</p>
-                {% else %}
-                    <div class="bar-chart">
-                        {% for row in widgets.top_violators %}
-                            <div class="bar-chart-row">
-                                <div class="bar-chart-name"><a href="/violations/{{ row.ally_code }}">{{ row.name }}</a></div>
-                                <div class="bar-chart-track">
-                                    <div class="bar-chart-fill" data-tip="{{ row.name }}: {{ row.recent_total }}" style="width: {{ (row.recent_total / widgets.max_violator * 100) if widgets.max_violator else 0 }}%;"></div>
-                                </div>
-                                <div class="bar-chart-value">{{ row.recent_total }}</div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="widget">
-                <div class="widget-header">
                     <h2>📈 Последняя активность</h2>
                     <a class="widget-link" href="/activity">Вся активность →</a>
                 </div>
@@ -188,58 +100,152 @@
                 {% endif %}
             </div>
 
-            <div class="widget">
-                <div class="widget-header">
-                    <h2>🔮 Активные сезоны датакронов</h2>
-                    <a class="widget-link" href="/datacrons">Все сезоны →</a>
-                </div>
-                {% if not widgets.datacron_seasons %}
-                    <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
-                {% else %}
-                    <div class="table-scroll">
-                        <table class="data">
-                            <thead>
-                                <tr>
-                                    <th>Сезон</th>
-                                    <th class="num">Обычных</th>
-                                    <th class="num">Спец.</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for s in widgets.datacron_seasons %}
-                                    <tr>
-                                        <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
-                                        <td class="num">{{ s.base_count }}</td>
-                                        <td class="num">{{ s.focused_count }}</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+            <div class="widget-cols">
+                <div class="widget-col">
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🎂 Ближайшие дни рождения</h2>
+                            <a class="widget-link" href="/birthdays">Весь список →</a>
+                        </div>
+                        {% if not widgets.birthdays %}
+                            <p class="widget-empty">Дней рождения пока не сохранено.</p>
+                        {% else %}
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <tbody>
+                                        {% for row in widgets.birthdays %}
+                                            <tr>
+                                                <td>{{ row.display_name }}</td>
+                                                <td class="num">{{ row.date_str }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
                     </div>
-                {% endif %}
-            </div>
 
-            <div class="widget">
-                <div class="widget-header">
-                    <h2>🎂 Ближайшие дни рождения</h2>
-                    <a class="widget-link" href="/birthdays">Весь список →</a>
-                </div>
-                {% if not widgets.birthdays %}
-                    <p class="widget-empty">Дней рождения пока не сохранено.</p>
-                {% else %}
-                    <div class="table-scroll">
-                        <table class="data">
-                            <tbody>
-                                {% for row in widgets.birthdays %}
-                                    <tr>
-                                        <td>{{ row.display_name }}</td>
-                                        <td class="num">{{ row.date_str }}</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>⚔️ Очки территории — ТБ</h2>
+                            <a class="widget-link" href="/tb">Подробный отчёт →</a>
+                        </div>
+                        {% if not widgets.tb_report or widgets.tb_report.event_totals|length < 2 %}
+                            <p class="widget-empty">Пока недостаточно сохранённых ТБ для графика.</p>
+                        {% else %}
+                            <div class="trend-chart-wrap">
+                                <div class="trend-chart-plot">
+                                    <svg class="trend-chart" viewBox="0 0 100 40" preserveAspectRatio="none">
+                                        <polyline class="trend-area" points="{{ widgets.tb_report.trend_area_points }}"></polyline>
+                                        <polyline points="{{ widgets.tb_report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
+                                    </svg>
+                                    {% for x, y, completed_at, value in widgets.tb_report.trend_coords %}
+                                        <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
+                                    {% endfor %}
+                                </div>
+                                <div class="trend-chart-labels">
+                                    {% for completed_at, value in widgets.tb_report.event_totals %}
+                                        <span>{{ completed_at[:10] }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% endif %}
                     </div>
-                {% endif %}
+                </div>
+
+                <div class="widget-col">
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🚨 Топ нарушителей (90 дней)</h2>
+                            <a class="widget-link" href="/violations">Все нарушения →</a>
+                        </div>
+                        {% if not widgets.top_violators %}
+                            <p class="widget-empty">😇 Нарушений за последние 90 дней не найдено.</p>
+                        {% else %}
+                            <div class="bar-chart">
+                                {% for row in widgets.top_violators %}
+                                    <div class="bar-chart-row">
+                                        <div class="bar-chart-name"><a href="/violations/{{ row.ally_code }}">{{ row.name }}</a></div>
+                                        <div class="bar-chart-track">
+                                            <div class="bar-chart-fill" data-tip="{{ row.name }}: {{ row.recent_total }}" style="width: {{ (row.recent_total / widgets.max_violator * 100) if widgets.max_violator else 0 }}%;"></div>
+                                        </div>
+                                        <div class="bar-chart-value">{{ row.recent_total }}</div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🔮 Активные сезоны датакронов</h2>
+                            <a class="widget-link" href="/datacrons">Все сезоны →</a>
+                        </div>
+                        {% if not widgets.datacron_seasons %}
+                            <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
+                        {% else %}
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead>
+                                        <tr>
+                                            <th>Сезон</th>
+                                            <th class="num">Обычных</th>
+                                            <th class="num">Спец.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for s in widgets.datacron_seasons %}
+                                            <tr>
+                                                <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
+                                                <td class="num">{{ s.base_count }}</td>
+                                                <td class="num">{{ s.focused_count }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="widget">
+                        <div class="widget-header">
+                            <h2>🛡️ Территориальные войны</h2>
+                            <a class="widget-link" href="/tw">Вся история →</a>
+                        </div>
+                        {% if not widgets.tw_rows %}
+                            <p class="widget-empty">История ВГ пока пуста.</p>
+                        {% else %}
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead>
+                                        <tr>
+                                            <th>Дата</th>
+                                            <th>Результат</th>
+                                            <th class="num">Счёт</th>
+                                            <th>Соперник</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in widgets.tw_rows %}
+                                            <tr>
+                                                <td>{{ row.date_label }}</td>
+                                                <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
+                                                <td class="num">{{ row.own_score }}:{{ row.opponent_score }}</td>
+                                                <td>
+                                                    {% if row.opponent_url %}
+                                                        <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
+                                                    {% else %}
+                                                        {{ row.opponent_name }}
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
             </div>
         </div>
