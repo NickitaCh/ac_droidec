@@ -7,6 +7,7 @@
 до 2026-08-25, разошлись бы при следующей правке порога)."""
 
 import json
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -98,6 +99,7 @@ class TbReport:
     # их использует /tb (tb_report.html). ----
     chart_bars: list = field(default_factory=list)  # [(completed_at, value, height_pct, compact_label, full_label, delta_label, delta_class, stars_or_None), ...]
     has_stars: bool = False  # есть ли хоть одно известное значение totalStars в этой истории
+    chart_gridlines: list = field(default_factory=list)  # [(bottom_pct, compact_label), ...] снизу вверх, см. _nice_ticks
 
 
 def _svg_coords(values: list, width: int = 100, height: int = 30, pad: int = 3) -> list:
@@ -133,6 +135,52 @@ def _compact_number(value: float) -> str:
             text = f"{scaled:.1f}".rstrip("0").rstrip(".")
             return f"{sign}{text}{suffix}"
     return f"{sign}{int(n)}"
+
+
+def _nice_ticks(min_val: float, max_val: float, target_count: int = 4) -> list[float]:
+    """Круглые деления оси Y (d3-style "nice ticks") для столбчатого графика ТБ на
+    дашборде — 2026-08-26: по прямой просьбе пользователя ось теперь начинается не с
+    нуля, а с ближайшего круглого числа НИЖЕ минимума истории (усечённая шкала), потому
+    что близкие по величине суммы очков давали визуально неотличимые столбцы на честной
+    нулевой базовой линии. Возвращает включительно [tick_min, ..., tick_max] с шагом,
+    округлённым до 1/2/5×10^n, tick_min <= min_val, tick_max >= max_val."""
+    if max_val <= min_val:
+        max_val = min_val + max(abs(min_val), 1) * 0.1
+    span = max_val - min_val
+    raw_step = span / target_count
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    residual = raw_step / magnitude
+    if residual > 5:
+        step = 10 * magnitude
+    elif residual > 2:
+        step = 5 * magnitude
+    elif residual > 1:
+        step = 2 * magnitude
+    else:
+        step = magnitude
+    tick_min = math.floor(min_val / step) * step
+    tick_max = math.ceil(max_val / step) * step
+    n_ticks = round((tick_max - tick_min) / step) + 1
+    return [tick_min + i * step for i in range(n_ticks)]
+
+
+def _format_axis_ticks(ticks: list[float]) -> list[str]:
+    """Подписи делений оси для усечённой шкалы — в отличие от _compact_number (всегда
+    1 знак после запятой, для подписи над столбцом) тут нужна ПЕРЕМЕННАЯ точность:
+    на близких значениях (обычное дело при усечённой оси, см. _nice_ticks) шаг между
+    соседними тиками может быть меньше 0.1 от единицы измерения — с фиксированным
+    1 знаком все деления превратились бы в одинаковую подпись ("5.0B" вместо 5.00/5.01/
+    5.02B). Подбирает минимум знаков, при котором все подписи различаются, до 4 знаков."""
+    ref = max((abs(t) for t in ticks), default=0) or 1
+    for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if ref >= threshold:
+            decimals = 0
+            labels = [f"{t / threshold:.{decimals}f}{suffix}" for t in ticks]
+            while len(set(labels)) < len(labels) and decimals < 4:
+                decimals += 1
+                labels = [f"{t / threshold:.{decimals}f}{suffix}" for t in ticks]
+            return labels
+    return [f"{int(round(t))}" for t in ticks]
 
 
 def get_tb_report(guild_id: int) -> TbReport | None:
@@ -200,16 +248,29 @@ def get_tb_report(guild_id: int) -> TbReport | None:
         (x, y, event_totals[i][0], event_totals[i][1]) for i, (x, y) in enumerate(trend_coords)
     ]
 
-    # ---- chart_bars: столбцы очков для дашборда (высота в % от максимума этой истории —
-    # столбчатый график всегда растёт от нулевой базовой линии, в отличие от trend_coords
-    # выше, который намеренно масштабирует от min до max для наглядности колебаний линии).
-    # compact_label — прямая подпись над столбцом (см. dataviz: "Bars -> value at the tip"),
-    # чтобы сумму очков было видно сразу, без наведения; точное число остаётся в data-tip.
-    # delta_label/delta_class — % к ПРЕДЫДУЩЕЙ ТБ (иначе округлённые до "5B" соседние
-    # столбцы визуально неотличимы, а пользователю как раз важно быстро видеть рост/спад).
-    # stars — из tb_events.stars, для инлайн-подписи со звёздочкой под баром. ----
+    # ---- chart_bars: столбцы очков для дашборда (высота в % от диапазона оси — усечённая
+    # шкала через _nice_ticks, см. её докстринг, вместо честной нулевой базовой линии;
+    # trend_coords выше отдельно масштабируется от min до max для наглядности колебаний
+    # линии — их логика не связана). compact_label — прямая подпись над столбцом (см.
+    # dataviz: "Bars -> value at the tip"), чтобы сумму очков было видно сразу, без
+    # наведения; точное число остаётся в data-tip. delta_label/delta_class — % к
+    # ПРЕДЫДУЩЕЙ ТБ (иначе округлённые до "5B" соседние столбцы визуально неотличимы,
+    # а пользователю как раз важно быстро видеть рост/спад). stars — из tb_events.stars,
+    # для инлайн-подписи со звёздочкой под баром. ----
     star_by_event = database.get_tb_event_stars(event_ids)
-    max_points = max((t for _, t in event_totals), default=0) or 1
+    values = [t for _, t in event_totals]
+    ticks = _nice_ticks(min(values), max(values))
+    axis_min, axis_max = ticks[0], ticks[-1]
+    axis_span = (axis_max - axis_min) or 1
+    tick_labels = _format_axis_ticks(ticks)
+    chart_gridlines = [
+        (round((tick - axis_min) / axis_span * 100, 2), label)
+        for tick, label in zip(ticks, tick_labels)
+    ]
+
+    def _to_pct(value):
+        return round(max(0.0, min(100.0, (value - axis_min) / axis_span * 100)), 1)
+
     chart_bars = []
     prev_total = None
     for eid, completed_at in events:
@@ -224,7 +285,7 @@ def get_tb_report(guild_id: int) -> TbReport | None:
                 delta_label = f"{arrow}{abs(delta_pct):.1f}%"
                 delta_class = "up" if delta_pct > 0 else "down"
         chart_bars.append((
-            completed_at, total, round(total / max_points * 100, 1), _compact_number(total),
+            completed_at, total, _to_pct(total), _compact_number(total),
             f"{total:,}".replace(",", " "), delta_label, delta_class, star_by_event.get(eid),
         ))
         prev_total = total
@@ -232,7 +293,7 @@ def get_tb_report(guild_id: int) -> TbReport | None:
     return TbReport(
         events=events, latest=latest, history=history, event_totals=event_totals,
         trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
-        chart_bars=chart_bars, has_stars=bool(star_by_event),
+        chart_bars=chart_bars, has_stars=bool(star_by_event), chart_gridlines=chart_gridlines,
     )
 
 

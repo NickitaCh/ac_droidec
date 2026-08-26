@@ -190,12 +190,18 @@
                         <div class="tb-combo-chart">
                             <div class="tb-chart-row">
                                 {% for completed_at, value, pct, compact_label, full_label, delta_label, delta_class, stars in widgets.tb_report.chart_bars %}
+                                    {% set is_first_col = loop.first %}
                                     <div class="tb-chart-col">
                                         <div class="tb-bar-value">{{ compact_label }}</div>
                                         {% if delta_label %}
                                             <div class="tb-bar-delta {{ delta_class }}">{{ delta_label }}</div>
                                         {% endif %}
                                         <div class="tb-bar-track">
+                                            {% for grid_pct, grid_label in widgets.tb_report.chart_gridlines %}
+                                                <div class="tb-gridline" style="bottom: {{ grid_pct }}%;">
+                                                    {% if is_first_col %}<span class="tb-gridline-label">{{ grid_label }}</span>{% endif %}
+                                                </div>
+                                            {% endfor %}
                                             <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ full_label }}"></div>
                                         </div>
                                         {% if widgets.tb_report.has_stars %}

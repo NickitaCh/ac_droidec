@@ -623,8 +623,17 @@ table.data .dc-level-col {
 .tb-bar-delta.up { color: var(--status-good); }
 .tb-bar-delta.down { color: var(--status-critical); }
 .tb-bar-delta.flat { color: var(--fg-muted); }
-.tb-bar-track { height: 120px; width: 100%; display: flex; align-items: flex-end; justify-content: center; margin-top: 0.35em; }
+.tb-bar-track { height: 120px; width: 100%; position: relative; display: flex; align-items: flex-end; justify-content: center; margin-top: 0.35em; }
+/* Усечённая шкала (деления из _nice_ticks, dashboard_data.py) — рисуется одинаково в
+   КАЖДОЙ .tb-bar-track колонки (а не одним элементом на весь ряд), потому что все
+   треки одной ширины/высоты и прижаты к низу общего ряда (align-items: flex-end на
+   .tb-chart-row), значит их линии совпадают по высоте и визуально читаются как единая
+   сетка. Подпись значения — только у первого столбца (is_first_col в шаблоне), чтобы
+   не повторять одно и то же число под каждым баром. */
+.tb-gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--border); pointer-events: none; }
+.tb-gridline-label { position: absolute; left: 2px; bottom: 0.15em; font-size: 0.6em; color: var(--fg-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tb-bar {
+    position: relative;
     width: 22px;
     min-height: 3px;
     background: var(--series-1);
