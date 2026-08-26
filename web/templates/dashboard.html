@@ -189,8 +189,19 @@
                     {% else %}
                         <div class="tb-combo-chart">
                             <div class="tb-chart-row">
+                                <div class="tb-chart-col tb-axis-col">
+                                    <div class="tb-bar-value">&nbsp;</div>
+                                    <div class="tb-bar-track">
+                                        {% for grid_pct, grid_label in widgets.tb_report.chart_gridlines %}
+                                            <div class="tb-gridline" style="bottom: {{ grid_pct }}%;">
+                                                <span class="tb-gridline-label">{{ grid_label }}</span>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% if widgets.tb_report.has_stars %}<div class="tb-star-label">&nbsp;</div>{% endif %}
+                                    <div class="tb-date-label">&nbsp;</div>
+                                </div>
                                 {% for completed_at, value, pct, compact_label, full_label, delta_label, delta_class, stars in widgets.tb_report.chart_bars %}
-                                    {% set is_first_col = loop.first %}
                                     <div class="tb-chart-col">
                                         <div class="tb-bar-value">{{ compact_label }}</div>
                                         {% if delta_label %}
@@ -198,9 +209,7 @@
                                         {% endif %}
                                         <div class="tb-bar-track">
                                             {% for grid_pct, grid_label in widgets.tb_report.chart_gridlines %}
-                                                <div class="tb-gridline" style="bottom: {{ grid_pct }}%;">
-                                                    {% if is_first_col %}<span class="tb-gridline-label">{{ grid_label }}</span>{% endif %}
-                                                </div>
+                                                <div class="tb-gridline" style="bottom: {{ grid_pct }}%;"></div>
                                             {% endfor %}
                                             <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ full_label }}"></div>
                                         </div>
