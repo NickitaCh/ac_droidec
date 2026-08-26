@@ -596,7 +596,9 @@ table.data .dc-level-col {
    событие (chart_bars в dashboard_data.py), не 3 параллельных ряда как раньше,
    чтобы они гарантированно не могли разъехаться по ширине. ---- */
 .tb-combo-chart { overflow-x: auto; }
-.tb-chart-row { display: flex; align-items: flex-end; gap: 0.5em; padding-bottom: 0.2em; }
+/* padding по бокам — иначе оverflow-x:auto выше обрезает всплывашку (data-tip) первого/
+   последнего столбца, она позиционируется от центра бара и вылезает за пределы ряда. */
+.tb-chart-row { display: flex; align-items: flex-end; gap: 0.5em; padding: 0 1.5em 0.2em; }
 .tb-chart-col { flex: 0 0 auto; width: 3.6em; display: flex; flex-direction: column; align-items: center; }
 .tb-bar-value { font-size: 0.82em; font-weight: 600; color: var(--fg-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tb-bar-delta { font-size: 0.72em; font-weight: 600; margin-top: 0.1em; white-space: nowrap; }

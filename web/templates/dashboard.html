@@ -196,7 +196,7 @@
                                             <div class="tb-bar-delta {{ delta_class }}">{{ delta_label }}</div>
                                         {% endif %}
                                         <div class="tb-bar-track">
-                                            <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ full_label }}"></div>
+                                            <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ full_label }}"></div>
                                         </div>
                                         {% if widgets.tb_report.has_stars %}
                                             <div class="tb-star-label">{% if stars is not none %}{{ stars }} ⭐{% else %}<span class="tb-star-missing">—</span>{% endif %}</div>
