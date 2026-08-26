@@ -90,13 +90,14 @@ class TbReport:
     trend_points: str = ""  # "x,y x,y ..." для <polyline>, viewBox "0 0 100 40"
     trend_area_points: str = ""  # то же + замыкание по низу, для залитой площади под линией
     trend_coords: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — для точек-маркеров
-    # ---- Расширенный блок ТБ на дашборде (widget: столбцы очков с подписью значения
-    # прямо над столбцом + текстовый ряд звёзд под ним, см. web/templates/dashboard.html).
-    # points_bars используется только тут, trend_points/trend_coords выше не трогаем —
+    # ---- Блок ТБ на дашборде (widget: плотные узкие столбцы очков, каждый со своей
+    # подписью значения + дельтой к предыдущей ТБ, и числом звёзд под баром — см.
+    # web/templates/dashboard.html). Один список на всю колонку (а не 2-3 параллельных,
+    # как было раньше) — так гарантированно нет рассинхрона по ширине между строками.
+    # chart_bars используется только тут, trend_points/trend_coords выше не трогаем —
     # их использует /tb (tb_report.html). ----
-    points_bars: list = field(default_factory=list)  # [(completed_at, value, height_pct, compact_label, full_label), ...]
+    chart_bars: list = field(default_factory=list)  # [(completed_at, value, height_pct, compact_label, full_label, delta_label, delta_class, stars_or_None), ...]
     has_stars: bool = False  # есть ли хоть одно известное значение totalStars в этой истории
-    star_labels: list = field(default_factory=list)  # [(completed_at, stars_or_None), ...], параллельно events
 
 
 def _svg_coords(values: list, width: int = 100, height: int = 30, pad: int = 3) -> list:
@@ -199,27 +200,39 @@ def get_tb_report(guild_id: int) -> TbReport | None:
         (x, y, event_totals[i][0], event_totals[i][1]) for i, (x, y) in enumerate(trend_coords)
     ]
 
-    # ---- points_bars: столбцы очков для дашборда (высота в % от максимума этой истории —
+    # ---- chart_bars: столбцы очков для дашборда (высота в % от максимума этой истории —
     # столбчатый график всегда растёт от нулевой базовой линии, в отличие от trend_coords
     # выше, который намеренно масштабирует от min до max для наглядности колебаний линии).
     # compact_label — прямая подпись над столбцом (см. dataviz: "Bars -> value at the tip"),
-    # чтобы сумму очков было видно сразу, без наведения; точное число остаётся в data-tip. ----
-    max_points = max((t for _, t in event_totals), default=0) or 1
-    points_bars = [
-        (completed_at, total, round(total / max_points * 100, 1), _compact_number(total),
-         f"{total:,}".replace(",", " "))
-        for completed_at, total in event_totals
-    ]
-
-    # ---- star_labels: звёзды текстом под датой того же события (без графика) —
-    # None там, где totalStars не сохранён (события до этой фичи). ----
+    # чтобы сумму очков было видно сразу, без наведения; точное число остаётся в data-tip.
+    # delta_label/delta_class — % к ПРЕДЫДУЩЕЙ ТБ (иначе округлённые до "5B" соседние
+    # столбцы визуально неотличимы, а пользователю как раз важно быстро видеть рост/спад).
+    # stars — из tb_events.stars, для инлайн-подписи со звёздочкой под баром. ----
     star_by_event = database.get_tb_event_stars(event_ids)
-    star_labels = [(completed_at, star_by_event.get(eid)) for eid, completed_at in events]
+    max_points = max((t for _, t in event_totals), default=0) or 1
+    chart_bars = []
+    prev_total = None
+    for eid, completed_at in events:
+        total = totals_by_event[eid]
+        delta_label, delta_class = None, None
+        if prev_total:
+            delta_pct = (total - prev_total) / prev_total * 100
+            if abs(delta_pct) < 0.05:
+                delta_label, delta_class = "±0%", "flat"
+            else:
+                arrow = "▲" if delta_pct > 0 else "▼"
+                delta_label = f"{arrow}{abs(delta_pct):.1f}%"
+                delta_class = "up" if delta_pct > 0 else "down"
+        chart_bars.append((
+            completed_at, total, round(total / max_points * 100, 1), _compact_number(total),
+            f"{total:,}".replace(",", " "), delta_label, delta_class, star_by_event.get(eid),
+        ))
+        prev_total = total
 
     return TbReport(
         events=events, latest=latest, history=history, event_totals=event_totals,
         trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
-        points_bars=points_bars, has_stars=bool(star_by_event), star_labels=star_labels,
+        chart_bars=chart_bars, has_stars=bool(star_by_event),
     )
 
 

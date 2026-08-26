@@ -188,28 +188,21 @@
                         <p class="widget-empty">Пока недостаточно сохранённых ТБ для графика.</p>
                     {% else %}
                         <div class="tb-combo-chart">
-                            <div class="tb-combo-label">Очки</div>
-                            <div class="tb-bars">
-                                {% for completed_at, value, pct, compact_label, full_label in widgets.tb_report.points_bars %}
-                                    <div class="tb-bar-col">
+                            <div class="tb-chart-row">
+                                {% for completed_at, value, pct, compact_label, full_label, delta_label, delta_class, stars in widgets.tb_report.chart_bars %}
+                                    <div class="tb-chart-col">
                                         <div class="tb-bar-value">{{ compact_label }}</div>
-                                        <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ full_label }}"></div>
+                                        {% if delta_label %}
+                                            <div class="tb-bar-delta {{ delta_class }}">{{ delta_label }}</div>
+                                        {% endif %}
+                                        <div class="tb-bar-track">
+                                            <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ full_label }}"></div>
+                                        </div>
+                                        {% if widgets.tb_report.has_stars %}
+                                            <div class="tb-star-label">{% if stars is not none %}{{ stars }} ⭐{% else %}<span class="tb-star-missing">—</span>{% endif %}</div>
+                                        {% endif %}
+                                        <div class="tb-date-label">{{ completed_at[:10] }}</div>
                                     </div>
-                                {% endfor %}
-                            </div>
-
-                            {% if widgets.tb_report.has_stars %}
-                                <div class="tb-combo-label">⭐ Звёзды</div>
-                                <div class="tb-star-row">
-                                    {% for completed_at, stars in widgets.tb_report.star_labels %}
-                                        <div class="tb-star-col">{% if stars is not none %}{{ stars }}{% else %}<span class="tb-star-missing">—</span>{% endif %}</div>
-                                    {% endfor %}
-                                </div>
-                            {% endif %}
-
-                            <div class="tb-combo-labels">
-                                {% for completed_at, value in widgets.tb_report.event_totals %}
-                                    <span>{{ completed_at[:10] }}</span>
                                 {% endfor %}
                             </div>
                         </div>

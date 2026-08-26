@@ -585,37 +585,35 @@ table.data .dc-level-col {
 }
 .trend-chart-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
 
-/* ---- Сдвоенный график ТБ на дашборде (виджет "Очки территории") — столбцы очков
-   + отдельный мини-график звёзд под ними, ОБЩАЯ горизонталь (даты снизу один раз на
-   оба), но раздельные Y-масштабы — намеренно два графика, а не один с двумя Y-осями
-   (dual-axis искажает сравнение метрик разного масштаба). Столбцы — flex-колонки,
-   поэтому x каждого центрируется на (i+0.5)/n от ширины; координаты точек звёзд в
-   dashboard_data.py::get_tb_report посчитаны по той же формуле, чтобы совпадать
-   по горизонтали со столбцом того же события. ---- */
-.tb-combo-label { font-size: 0.78em; color: var(--fg-muted); margin-bottom: 0.3em; }
-.tb-bars { display: flex; align-items: flex-end; height: 130px; gap: 0.75em; }
-.tb-bar-col {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-    height: 100%; min-width: 0; gap: 0.35em;
-}
-.tb-bar-value { font-size: 0.85em; font-weight: 600; color: var(--fg-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* ---- График ТБ на дашборде (виджет "Очки территории") — один ряд плотных узких
+   столбцов (mark spec: bar/column <= 24px, см. dataviz-скилл), каждый со своей
+   колонкой фиксированной (не резиновой flex:1) ширины — иначе на широком wc-wide
+   виджете 2-3 столбца растягивались на всю ширину блока с гигантскими пустыми
+   промежутками. Фиксированная ширина колонки даёт и обратный эффект: чем их больше
+   (TB_HISTORY_KEEP), тем шире весь ряд, а не теснее — .tb-combo-chart поэтому со
+   своим overflow-x на случай, если однажды не влезет по горизонтали. Значение,
+   дельта к предыдущей ТБ, сам бар, звёзды и дата — одна вертикальная колонка на
+   событие (chart_bars в dashboard_data.py), не 3 параллельных ряда как раньше,
+   чтобы они гарантированно не могли разъехаться по ширине. ---- */
+.tb-combo-chart { overflow-x: auto; }
+.tb-chart-row { display: flex; align-items: flex-end; gap: 0.5em; padding-bottom: 0.2em; }
+.tb-chart-col { flex: 0 0 auto; width: 3.6em; display: flex; flex-direction: column; align-items: center; }
+.tb-bar-value { font-size: 0.82em; font-weight: 600; color: var(--fg-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tb-bar-delta { font-size: 0.72em; font-weight: 600; margin-top: 0.1em; white-space: nowrap; }
+.tb-bar-delta.up { color: var(--status-good); }
+.tb-bar-delta.down { color: var(--status-critical); }
+.tb-bar-delta.flat { color: var(--fg-muted); }
+.tb-bar-track { height: 120px; width: 100%; display: flex; align-items: flex-end; justify-content: center; margin-top: 0.35em; }
 .tb-bar {
-    width: 60%;
-    max-width: 44px;
+    width: 22px;
     min-height: 3px;
     background: var(--series-1);
     border-radius: 4px 4px 0 0;
     cursor: pointer;
 }
-/* ---- Звёзды — прямым числом под столбцом того же события, без отдельного графика
-   (был мини-график с точками, но со столбцами очков "не смотрелся"). flex:1 на каждую
-   ячейку — та же техника, что у .tb-bar-col, гарантирует, что число окажется точно
-   под своим столбцом. ---- */
-.tb-star-row { display: flex; margin-top: 1em; }
-.tb-star-col { flex: 1; text-align: center; font-size: 1em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--series-2); }
-.tb-star-col .tb-star-missing { color: var(--fg-muted); font-weight: 400; }
-.tb-combo-labels { display: flex; margin-top: 0.5em; font-size: 0.78em; color: var(--fg-muted); }
-.tb-combo-labels span { flex: 1; text-align: center; }
+.tb-star-label { margin-top: 0.6em; font-size: 0.85em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--series-2); white-space: nowrap; }
+.tb-star-label .tb-star-missing { color: var(--fg-muted); font-weight: 400; }
+.tb-date-label { margin-top: 0.35em; font-size: 0.72em; color: var(--fg-muted); white-space: nowrap; }
 
 /* ---- Конструктор (/mod-builder): форма из разнородных секций (обычные поля +
    сетка сетов + повторяемые строки статов) — колонка пошире дефолтной (20em). ---- */

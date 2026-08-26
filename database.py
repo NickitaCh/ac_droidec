@@ -1314,7 +1314,7 @@ def set_bot_state(key: str, value: str, guild_id: int = 1):
 # =====================================================================
 # ИСТОРИЯ ТБ (последние N событий, для команд compare / player_compare)
 # =====================================================================
-TB_HISTORY_KEEP = 6
+TB_HISTORY_KEEP = 10  # было 6 — увеличено, чтобы график ТБ на дашборде вмещал больше истории
 
 def _ensure_tb_history_tables(cursor):
     cursor.execute("""
