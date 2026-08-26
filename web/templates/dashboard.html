@@ -45,8 +45,8 @@
                             <tbody>
                                 {% for row in widgets.roster_rows %}
                                     <tr data-search="{{ (row.ingame_name ~ ' ' ~ row.ally_code)|lower }}">
-                                        <td><a href="{{ row.swgoh_gg_url }}" target="_blank" rel="noopener">{{ row.ingame_name }}</a></td>
-                                        <td>
+                                        <td data-label="Игрок"><a href="{{ row.swgoh_gg_url }}" target="_blank" rel="noopener">{{ row.ingame_name }}</a></td>
+                                        <td data-label="Ранг">
                                             {% if row.rank_label == "ГМ" %}
                                                 <span class="badge badge-warn">{{ row.rank_label }}</span>
                                             {% elif row.rank_label == "Офицер" %}
@@ -55,8 +55,8 @@
                                                 <span class="badge badge-neutral">{{ row.rank_label }}</span>
                                             {% endif %}
                                         </td>
-                                        <td><code>{{ row.ally_code }}</code></td>
-                                        <td>
+                                        <td data-label="Код союзника"><code>{{ row.ally_code }}</code></td>
+                                        <td data-label="Discord">
                                             {% if row.registered %}
                                                 <span class="badge badge-ok">привязан</span>
                                             {% else %}

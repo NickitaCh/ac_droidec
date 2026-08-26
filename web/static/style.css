@@ -287,6 +287,35 @@ select { background: var(--page); }
     .dashboard-grid { grid-template-columns: 1fr; }
     .widget-secondary { grid-column: 1; grid-template-columns: 1fr; }
 }
+/* ---- Состав гильдии на моби (2026-08-26) — 4 колонки (Игрок/Ранг/Код/Discord) с
+   обычными десктопными паддингами не влезают в узкий экран и вызывали
+   горизонтальный скролл внутри виджета; на узких экранах превращаем строки
+   таблицы в блоки-карточки (label: value), thead прячем, подписи — из
+   data-label на каждом <td> (см. dashboard.html). ---- */
+@media (max-width: 34em) {
+    #dashboard-roster-table thead { display: none; }
+    #dashboard-roster-table, #dashboard-roster-table tbody, #dashboard-roster-table tr, #dashboard-roster-table td {
+        display: block;
+        width: 100%;
+    }
+    #dashboard-roster-table tr { padding: 0.5em 0; }
+    #dashboard-roster-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75em;
+        padding: 0.2em 0;
+        border: none;
+    }
+    #dashboard-roster-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: var(--fg-muted);
+        font-size: 0.8em;
+        text-transform: uppercase;
+        flex-shrink: 0;
+    }
+}
 .widget-header {
     display: flex;
     align-items: baseline;
