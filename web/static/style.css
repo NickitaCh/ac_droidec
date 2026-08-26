@@ -195,6 +195,18 @@ main {
 main.wide {
     max-width: none;
 }
+/* Вариант чела — только на десктопе (тот же порог, что у dashboard-grid ниже, где
+   раскладка реально становится многоколоночной). На моби/планшете остаётся обычный
+   full-bleed с отступами из main — там ограничение в 1440px и нулевой padding не нужны. */
+@media (min-width: 60em) {
+    main.wide {
+        max-width: 1440px;
+        width: 100%;
+        margin: 2em auto;
+        padding: 0 0 4em;
+        box-sizing: border-box;
+    }
+}
 @media (max-width: 30em) {
     main { margin: 1em auto; padding: 0 1em 3em; }
 }
