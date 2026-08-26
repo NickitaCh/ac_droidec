@@ -21,6 +21,7 @@
         {% if not rows %}
             <p class="empty-state">План ещё не задан — заполните форму ниже.</p>
         {% else %}
+            <div class="table-scroll">
             <table class="data">
                 <thead><tr><th>Фаза</th><th>Ветка</th><th>Планета</th></tr></thead>
                 <tbody>
@@ -33,6 +34,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% endif %}
     </div>
 

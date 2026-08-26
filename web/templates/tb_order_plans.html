@@ -24,6 +24,7 @@
             <p class="empty-state">Планов пока нет — соберите ордер через <code>/тб_ордер_из_картинки</code>
                 в Discord, либо зарегистрируйте уже готовую ветку формой ниже.</p>
         {% else %}
+            <div class="table-scroll">
             <table class="data">
                 <thead><tr><th>Название</th><th>★</th><th>Ветка</th><th></th></tr></thead>
                 <tbody>
@@ -55,6 +56,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% endif %}
     </div>
 

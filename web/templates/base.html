@@ -10,6 +10,8 @@
 <body>
     <header class="topbar">
         <a class="brand" href="/">AC Droidec</a>
+        <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
+        <label for="nav-toggle" class="nav-toggle-btn" aria-label="Меню">☰</label>
         <nav>
             {% if user %}
                 {% if user.tier == "officer" %}
