@@ -388,6 +388,24 @@ select { background: var(--page); }
 }
 .stat-tile .stat-label { color: var(--fg-muted); font-size: 0.85em; margin-top: 0.2em; }
 .stat-tile.status-danger .stat-value { color: var(--status-critical); }
+.stat-tile.status-ok .stat-value { color: var(--status-good); }
+
+/* ---- Компактная строка статов внутри виджета (напр. винрейт ВГ на дашборде) ---- */
+.mini-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25em;
+    margin: 0.1em 0 1em;
+}
+.mini-stat { display: flex; flex-direction: column; }
+.mini-stat .mini-stat-value {
+    font-size: 1.15em;
+    font-weight: 700;
+    font-variant-numeric: proportional-nums;
+}
+.mini-stat .mini-stat-label { color: var(--fg-muted); font-size: 0.78em; margin-top: 0.1em; }
+.mini-stat.status-ok .mini-stat-value { color: var(--status-good); }
+.mini-stat.status-danger .mini-stat-value { color: var(--status-critical); }
 
 /* ---- Значки/бейджи ---- */
 .badge {

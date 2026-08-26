@@ -80,6 +80,7 @@ async def home(request: Request):
             "registered_count": sum(1 for r in roster_rows if r.registered),
             "tb_report": tb_report,
             "tw_rows": dashboard_data.get_recent_tw_results(guild_id, limit=10),
+            "tw_stats": dashboard_data.get_tw_stats(guild_id),
             "top_violators": top_violators,
             "max_violator": top_violators[0].recent_total if top_violators else 0,
             "activity_rows": activity_rows,

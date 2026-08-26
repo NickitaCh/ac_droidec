@@ -110,6 +110,7 @@ async def tw_report(request: Request, user: dict = Depends(require_guild_access)
         "user": user,
         "rows": rows,
         "wins": wins,
+        "tw_stats": dashboard_data.get_tw_stats(user["guild_id"]),
     })
 
 

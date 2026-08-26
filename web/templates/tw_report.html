@@ -15,8 +15,24 @@
             </div>
             <div class="stat-tile">
                 <div class="stat-value">{{ wins }} / {{ rows|length }}</div>
-                <div class="stat-label">Побед</div>
+                <div class="stat-label">Побед (из показанных)</div>
             </div>
+            {% if tw_stats %}
+                {% for period in tw_stats.periods %}
+                    <div class="stat-tile">
+                        <div class="stat-value">{% if period.winrate is not none %}{{ period.winrate }}%{% else %}—{% endif %}</div>
+                        <div class="stat-label">Винрейт: {{ period.label }} ({{ period.wins }}/{{ period.total }})</div>
+                    </div>
+                {% endfor %}
+                <div class="stat-tile status-{{ tw_stats.streak_class }}">
+                    <div class="stat-value">{{ tw_stats.streak_label }}</div>
+                    <div class="stat-label">Текущая серия</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-value">{% if tw_stats.avg_margin is not none %}{{ "{:+,}".format(tw_stats.avg_margin).replace(",", " ") }}{% else %}—{% endif %}</div>
+                    <div class="stat-label">Средняя разница в очках</div>
+                </div>
+            {% endif %}
         </div>
 
         <div class="panel">

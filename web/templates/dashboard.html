@@ -214,6 +214,20 @@
                         <h2>🛡️ Территориальные войны</h2>
                         <a class="widget-link" href="/tw">Вся история →</a>
                     </div>
+                    {% if widgets.tw_stats %}
+                        <div class="mini-stats">
+                            {% for period in widgets.tw_stats.periods %}
+                                <div class="mini-stat">
+                                    <span class="mini-stat-value">{% if period.winrate is not none %}{{ period.winrate }}%{% else %}—{% endif %}</span>
+                                    <span class="mini-stat-label">Винрейт: {{ period.label }}</span>
+                                </div>
+                            {% endfor %}
+                            <div class="mini-stat status-{{ widgets.tw_stats.streak_class }}">
+                                <span class="mini-stat-value">{{ widgets.tw_stats.streak_label }}</span>
+                                <span class="mini-stat-label">Текущая серия</span>
+                            </div>
+                        </div>
+                    {% endif %}
                     {% if not widgets.tw_rows %}
                         <p class="widget-empty">История ВГ пока пуста.</p>
                     {% else %}

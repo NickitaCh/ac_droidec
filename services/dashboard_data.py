@@ -782,3 +782,80 @@ def get_recent_tw_results(guild_id: int, limit: int = 10) -> list[TwEventRow]:
             opponent_url=f"https://swgoh.gg/g/{opponent_guild_id}/" if opponent_guild_id else "",
         ))
     return result
+
+
+def _ru_plural(n: int, one: str, few: str, many: str) -> str:
+    n_abs = abs(n) % 100
+    if 11 <= n_abs <= 14:
+        return many
+    n1 = n_abs % 10
+    if n1 == 1:
+        return one
+    if 2 <= n1 <= 4:
+        return few
+    return many
+
+
+@dataclass
+class TwPeriodStat:
+    label: str
+    winrate: int | None
+    wins: int
+    total: int
+
+
+@dataclass
+class TwStats:
+    periods: list[TwPeriodStat]
+    streak_label: str
+    streak_class: str
+    avg_margin: int | None
+
+
+def get_tw_stats(guild_id: int) -> TwStats | None:
+    """Общая статистика по ВГ (винрейт за 3/6 месяцев и за всё время, текущая серия,
+    средняя разница в очках) — на основе всей истории, накопленной ботом в tw_events.
+    "Всё время" — не настоящий алл-тайм, а глубина с момента, когда бот начал писать эту
+    таблицу (2026-08-25), т.к. Comlink отдаёт только последние ~8 завершённых ВГ и дальше
+    история копится только тиками бота, см. память project_territory_war_report_gap.
+    Ничьи не учитываются в винрейте (решающих партий в ВГ практически не бывает), но не
+    ломают подсчёт серии — встретив ничью, серия просто обрывается."""
+    rows = database.get_recent_tw_events(guild_id, limit=None)
+    if not rows:
+        return None
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    periods = []
+    for label, days in (("3 месяца", 90), ("6 месяцев", 180), ("Всё время", None)):
+        cutoff = now_ts - days * 86400 if days else None
+        decisive = [r for r in rows if r[9] in ("win", "loss") and (cutoff is None or r[7] >= cutoff)]
+        wins = sum(1 for r in decisive if r[9] == "win")
+        winrate = round(wins / len(decisive) * 100) if decisive else None
+        periods.append(TwPeriodStat(label=label, winrate=winrate, wins=wins, total=len(decisive)))
+
+    streak_result = None
+    streak_count = 0
+    for r in rows:
+        res = r[9]
+        if res not in ("win", "loss"):
+            break
+        if streak_result is None:
+            streak_result = res
+        elif res != streak_result:
+            break
+        streak_count += 1
+
+    if streak_result == "win":
+        streak_label = f"{streak_count} {_ru_plural(streak_count, 'победа', 'победы', 'побед')} подряд"
+        streak_class = "ok"
+    elif streak_result == "loss":
+        streak_label = f"{streak_count} {_ru_plural(streak_count, 'поражение', 'поражения', 'поражений')} подряд"
+        streak_class = "danger"
+    else:
+        streak_label = "—"
+        streak_class = "neutral"
+
+    margins = [r[1] - r[2] for r in rows if r[9] in ("win", "loss")]
+    avg_margin = round(sum(margins) / len(margins)) if margins else None
+
+    return TwStats(periods=periods, streak_label=streak_label, streak_class=streak_class, avg_margin=avg_margin)

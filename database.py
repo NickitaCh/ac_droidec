@@ -1556,17 +1556,24 @@ def upsert_tw_event(guild_id: int, territory_war_id: str, own_score: int, oppone
     conn.close()
 
 
-def get_recent_tw_events(guild_id: int, limit: int = 10):
+def get_recent_tw_events(guild_id: int, limit: int | None = 10):
     """[(territory_war_id, own_score, opponent_score, own_power, opponent_name,
-    opponent_guild_id, opponent_gp, start_time, end_time, result), ...] от новых к старым."""
+    opponent_guild_id, opponent_gp, start_time, end_time, result), ...] от новых к старым.
+    limit=None — вся накопленная история без обрезки (нужно для статистики винрейта
+    по периодам, см. dashboard_data.get_tw_stats)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tw_events_table(cursor)
-    cursor.execute("""
+    query = """
         SELECT territory_war_id, own_score, opponent_score, own_power, opponent_name,
                opponent_guild_id, opponent_gp, start_time, end_time, result
-        FROM tw_events WHERE guild_id = ? ORDER BY start_time DESC LIMIT ?
-    """, (guild_id, limit))
+        FROM tw_events WHERE guild_id = ? ORDER BY start_time DESC
+    """
+    params = [guild_id]
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
     return rows
