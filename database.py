@@ -1346,6 +1346,13 @@ def _ensure_tb_history_tables(cursor):
         """)
         cursor.execute("DROP TABLE tb_events_old")
         cursor.connection.commit()  # см. объяснение в _ensure_user_registration_table
+    try:
+        # totalStars — реальное поле recentTerritoryBattleResult[0] от Comlink (guild.get(...)),
+        # ранее не сохранялось нигде (код читал только finalStat); для событий, записанных
+        # до этой колонки, останется NULL — старую ТБ Comlink не переспросишь задним числом.
+        cursor.execute("ALTER TABLE tb_events ADD COLUMN stars INTEGER")
+    except sqlite3.OperationalError:
+        pass
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_player_summary (
             event_id INTEGER NOT NULL,
@@ -1372,19 +1379,27 @@ def _ensure_tb_history_tables(cursor):
         )
     """)
 
-def record_tb_event(fingerprint: str, guild_id: int = 1) -> int:
-    """Идемпотентно регистрирует ТБ гильдии по отпечатку (fingerprint), возвращает event_id."""
+def record_tb_event(fingerprint: str, guild_id: int = 1, stars: int | None = None) -> int:
+    """Идемпотентно регистрирует ТБ гильдии по отпечатку (fingerprint), возвращает event_id.
+    stars — totalStars из recentTerritoryBattleResult (см. cogs/guild_events.py::_store_tb_history);
+    если событие уже было записано без stars (monitor_loop дошёл раньше, чем появилась эта колонка,
+    либо предыдущий тик не смог его распарсить) — дозаписываем, только если ещё NULL."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_history_tables(cursor)
     cursor.execute("SELECT id FROM tb_events WHERE guild_id = ? AND fingerprint = ?", (guild_id, fingerprint))
     row = cursor.fetchone()
     if row:
+        if stars is not None:
+            cursor.execute(
+                "UPDATE tb_events SET stars = ? WHERE id = ? AND stars IS NULL", (stars, row[0])
+            )
+            conn.commit()
         conn.close()
         return row[0]
     cursor.execute(
-        "INSERT INTO tb_events (guild_id, fingerprint, completed_at) VALUES (?, ?, datetime('now'))",
-        (guild_id, fingerprint)
+        "INSERT INTO tb_events (guild_id, fingerprint, completed_at, stars) VALUES (?, ?, datetime('now'), ?)",
+        (guild_id, fingerprint, stars)
     )
     event_id = cursor.lastrowid
     conn.commit()
@@ -1446,6 +1461,21 @@ def get_recent_tb_events(limit: int = TB_HISTORY_KEEP, guild_id: int = 1):
     rows = cursor.fetchall()
     conn.close()
     return list(reversed(rows))
+
+def get_tb_event_stars(event_ids: list) -> dict:
+    """{event_id: stars}, только для событий, где totalStars реально сохранён (см.
+    record_tb_event) — старые события до этой колонки в словаре не появятся,
+    вызывающий код должен использовать .get(event_id) и обрабатывать отсутствие."""
+    if not event_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    placeholders = ",".join("?" * len(event_ids))
+    cursor.execute(f"SELECT id, stars FROM tb_events WHERE id IN ({placeholders}) AND stars IS NOT NULL", event_ids)
+    rows = cursor.fetchall()
+    conn.close()
+    return {eid: stars for eid, stars in rows}
 
 def get_tb_player_summary_for_events(event_ids):
     if not event_ids:

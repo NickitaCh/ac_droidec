@@ -624,7 +624,16 @@ class GuildEvents(commands.Cog):
     def _store_tb_history(self, fingerprint, result, members, player_names, stats, guild_id=1):
         """Сохраняет итоги завершённой ТБ (сводку по гильдии + полную расшифровку
         по каждому игроку) в БД, храним только последние TB_HISTORY_KEEP событий на гильдию."""
-        event_id = database.record_tb_event(fingerprint, guild_id=guild_id)
+        # totalStars — отдельное поле верхнего уровня в result[0] (рядом с instanceId/
+        # definitionId/startTime/endTime), НЕ внутри finalStat — раньше не читалось вообще.
+        stars = None
+        if result:
+            try:
+                raw_stars = result[0].get("totalStars")
+                stars = int(raw_stars) if raw_stars is not None else None
+            except (TypeError, ValueError):
+                stars = None
+        event_id = database.record_tb_event(fingerprint, guild_id=guild_id, stars=stars)
         database.snapshot_tb_planet_names(event_id, guild_id=guild_id)
 
         summary_rows = [

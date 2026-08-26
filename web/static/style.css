@@ -590,6 +590,38 @@ table.data .dc-level-col {
 }
 .trend-chart-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
 
+/* ---- Сдвоенный график ТБ на дашборде (виджет "Очки территории") — столбцы очков
+   + отдельный мини-график звёзд под ними, ОБЩАЯ горизонталь (даты снизу один раз на
+   оба), но раздельные Y-масштабы — намеренно два графика, а не один с двумя Y-осями
+   (dual-axis искажает сравнение метрик разного масштаба). Столбцы — flex-колонки,
+   поэтому x каждого центрируется на (i+0.5)/n от ширины; координаты точек звёзд в
+   dashboard_data.py::get_tb_report посчитаны по той же формуле, чтобы совпадать
+   по горизонтали со столбцом того же события. ---- */
+.tb-combo-label { font-size: 0.78em; color: var(--fg-muted); margin-bottom: 0.3em; }
+.tb-bars { display: flex; align-items: flex-end; height: 84px; gap: 0.5em; }
+.tb-bar-col { flex: 1; display: flex; align-items: flex-end; justify-content: center; height: 100%; min-width: 0; }
+.tb-bar {
+    width: 60%;
+    max-width: 28px;
+    min-height: 3px;
+    background: var(--series-1);
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+}
+.tb-star-chart-plot { position: relative; width: 100%; height: 32px; margin-top: 0.9em; }
+.tb-star-chart { width: 100%; height: 100%; display: block; position: absolute; inset: 0; }
+.tb-star-chart polyline { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.tb-star-dot {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: var(--series-2);
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+}
+.tb-combo-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
+
 /* ---- Конструктор (/mod-builder): форма из разнородных секций (обычные поля +
    сетка сетов + повторяемые строки статов) — колонка пошире дефолтной (20em). ---- */
 .builder-form { max-width: 42em; gap: 1.25em; }

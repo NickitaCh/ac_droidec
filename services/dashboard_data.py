@@ -90,6 +90,15 @@ class TbReport:
     trend_points: str = ""  # "x,y x,y ..." для <polyline>, viewBox "0 0 100 40"
     trend_area_points: str = ""  # то же + замыкание по низу, для залитой площади под линией
     trend_coords: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — для точек-маркеров
+    # ---- Сдвоенный график ТБ на дашборде (widget: очки-столбцы + звёзды-точки под ними,
+    # см. web/templates/dashboard.html) — намеренно ДВА графика с общей горизонталью
+    # вместо одного с двумя Y-осями (dual-axis — известный антипаттерн, искажает
+    # восприятие двух метрик разного масштаба). points_bars используется только тут,
+    # trend_points/trend_coords выше не трогаем — их использует /tb (tb_report.html). ----
+    points_bars: list = field(default_factory=list)  # [(completed_at, value, height_pct), ...]
+    has_stars: bool = False  # есть ли хоть одно известное значение totalStars в этой истории
+    star_coords: list = field(default_factory=list)  # [(x, y, completed_at, value), ...], viewBox "0 0 100 32"
+    star_segments: list = field(default_factory=list)  # ["x1,y1 x2,y2", ...] — только между СОСЕДНИМИ известными точками
 
 
 def _svg_coords(values: list, width: int = 100, height: int = 30, pad: int = 3) -> list:
@@ -178,9 +187,43 @@ def get_tb_report(guild_id: int) -> TbReport | None:
         (x, y, event_totals[i][0], event_totals[i][1]) for i, (x, y) in enumerate(trend_coords)
     ]
 
+    # ---- points_bars: столбцы очков для дашборда (высота в % от максимума этой истории —
+    # столбчатый график всегда растёт от нулевой базовой линии, в отличие от trend_coords
+    # выше, который намеренно масштабирует от min до max для наглядности колебаний линии). ----
+    max_points = max((t for _, t in event_totals), default=0) or 1
+    points_bars = [
+        (completed_at, total, round(total / max_points * 100, 1))
+        for completed_at, total in event_totals
+    ]
+
+    # ---- star_coords/star_segments: мини-график звёзд под столбцами очков, x выровнен
+    # по центру того же слота, что и flex-колонка соответствующего столбца в HTML (см.
+    # dashboard.html/style.css .tb-bars) — (i + 0.5) / n, а НЕ i / (n - 1) как у _svg_coords
+    # выше, иначе точки звёзд разъехались бы со столбцами очков по горизонтали. ----
+    star_by_event = database.get_tb_event_stars(event_ids)
+    star_h, star_pad = 32, 4
+    n = len(events)
+    max_stars = max(star_by_event.values(), default=0) or 1
+    star_points_indexed = []
+    for i, (eid, completed_at) in enumerate(events):
+        if eid not in star_by_event:
+            continue
+        value = star_by_event[eid]
+        x = round((i + 0.5) / n * 100, 1) if n else 50.0
+        y = round(star_h - star_pad - (value / max_stars) * (star_h - 2 * star_pad), 1)
+        star_points_indexed.append((i, x, y, completed_at, value))
+    star_coords = [(x, y, completed_at, value) for _, x, y, completed_at, value in star_points_indexed]
+    star_segments = [
+        f"{x1},{y1} {x2},{y2}"
+        for (i1, x1, y1, *_r1), (i2, x2, y2, *_r2) in zip(star_points_indexed, star_points_indexed[1:])
+        if i2 - i1 == 1  # только соседние по времени события — не тянуть линию через пропуск
+    ]
+
     return TbReport(
         events=events, latest=latest, history=history, event_totals=event_totals,
         trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
+        points_bars=points_bars, has_stars=bool(star_coords),
+        star_coords=star_coords, star_segments=star_segments,
     )
 
 

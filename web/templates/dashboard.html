@@ -187,17 +187,33 @@
                     {% if not widgets.tb_report or widgets.tb_report.event_totals|length < 2 %}
                         <p class="widget-empty">Пока недостаточно сохранённых ТБ для графика.</p>
                     {% else %}
-                        <div class="trend-chart-wrap">
-                            <div class="trend-chart-plot">
-                                <svg class="trend-chart" viewBox="0 0 100 40" preserveAspectRatio="none">
-                                    <polyline class="trend-area" points="{{ widgets.tb_report.trend_area_points }}"></polyline>
-                                    <polyline points="{{ widgets.tb_report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
-                                </svg>
-                                {% for x, y, completed_at, value in widgets.tb_report.trend_coords %}
-                                    <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
+                        <div class="tb-combo-chart">
+                            <div class="tb-combo-label">Очки</div>
+                            <div class="tb-bars">
+                                {% for completed_at, value, pct in widgets.tb_report.points_bars %}
+                                    <div class="tb-bar-col">
+                                        <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ value }}"></div>
+                                    </div>
                                 {% endfor %}
                             </div>
-                            <div class="trend-chart-labels">
+
+                            {% if widgets.tb_report.has_stars %}
+                                <div class="tb-combo-label">⭐ Звёзды</div>
+                                <div class="tb-star-chart-plot">
+                                    <svg class="tb-star-chart" viewBox="0 0 100 32" preserveAspectRatio="none">
+                                        {% for seg in widgets.tb_report.star_segments %}
+                                            <polyline points="{{ seg }}" vector-effect="non-scaling-stroke"></polyline>
+                                        {% endfor %}
+                                    </svg>
+                                    {% for x, y, completed_at, value in widgets.tb_report.star_coords %}
+                                        <div class="tb-star-dot" data-tip="{{ completed_at[:10] }}: {{ value }} ⭐" style="left: {{ x }}%; top: {{ y / 32 * 100 }}%;"></div>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <p class="widget-empty" style="padding: 0.3em 0;">Звёзды появятся начиная со следующей завершённой ТБ.</p>
+                            {% endif %}
+
+                            <div class="tb-combo-labels">
                                 {% for completed_at, value in widgets.tb_report.event_totals %}
                                     <span>{{ completed_at[:10] }}</span>
                                 {% endfor %}
