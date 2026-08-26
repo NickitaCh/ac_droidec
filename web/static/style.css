@@ -152,7 +152,7 @@ main {
     padding: 0 1.5em 4em;
 }
 main.wide {
-    max-width: 78em;
+    max-width: 90em; /* 1440px */
 }
 
 .button, button {
