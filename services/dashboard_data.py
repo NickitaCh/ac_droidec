@@ -576,6 +576,12 @@ def get_guild_activity_count(guild_id: int, ally_code: str | None = None, action
                                                       date_from=date_from, date_to=date_to)
 
 
+def get_guild_activity_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                              date_from: str | None = None, date_to: str | None = None) -> list[str]:
+    return database.get_guild_activity_distinct_dates(guild_id, ally_code=ally_code, action_type=action_type,
+                                                        date_from=date_from, date_to=date_to)
+
+
 def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
                                   date_from: str | None = None, date_to: str | None = None) -> list:
     """[(action_label, count), ...] отсортировано по убыванию — намеренно игнорирует фильтр
@@ -608,6 +614,14 @@ def _friendly_date_label(event_date: str, today) -> str:
     if d == today - timedelta(days=1):
         return "Вчера"
     return d.strftime("%d.%m.%Y")
+
+
+def friendly_activity_date_label(event_date: str | None) -> str | None:
+    """Публичная обёртка над _friendly_date_label с текущей датой (МСК) — для подписи
+    текущей страницы в постраничной навигации /activity (1 страница = 1 день)."""
+    if not event_date:
+        return None
+    return _friendly_date_label(event_date, datetime.now(MSK).date())
 
 
 def group_activity(rows: list[ActivityEventRow]) -> list[dict]:

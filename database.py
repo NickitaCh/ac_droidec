@@ -2900,6 +2900,24 @@ def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None,
     return count
 
 
+def get_guild_activity_distinct_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
+                                       date_from: str | None = None, date_to: str | None = None) -> list[str]:
+    """Отсортированные по убыванию (свежие первыми) даты, в которые по текущему фильтру
+    есть хоть одно событие — основа постраничной навигации на /activity "1 страница = 1 день"
+    (см. web/routes/guild_dashboard.py::activity)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    cursor.execute(f"""
+        SELECT DISTINCT event_date FROM guild_activity_events WHERE {where_sql}
+        ORDER BY event_date DESC
+    """, params)
+    dates = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return dates
+
+
 def get_guild_activity_type_counts(guild_id: int, ally_code: str | None = None,
                                     date_from: str | None = None, date_to: str | None = None):
     """[(action_type, count), ...] по игроку/периоду, БЕЗ фильтра по типу события —

@@ -129,7 +129,7 @@
                     {% if prev_page_url %}
                         <a class="button" href="{{ prev_page_url }}">← Новее</a>
                     {% endif %}
-                    <span class="muted">стр. {{ page }} из {{ total_pages }}</span>
+                    <span class="muted">{% if page_date_label %}{{ page_date_label }} · {% endif %}стр. {{ page }} из {{ total_pages }}</span>
                     {% if next_page_url %}
                         <a class="button" href="{{ next_page_url }}">Старее →</a>
                     {% endif %}

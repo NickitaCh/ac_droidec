@@ -242,7 +242,11 @@ async def tb_order_plans_save_manual(
     return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
 
 
-ACTIVITY_PAGE_SIZE = 50
+# Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так
+# страница 1 всегда за сегодня, страница 2 — за вчера и т.д., как просил пользователь.
+# ACTIVITY_DAY_ROW_LIMIT — просто защитный потолок на случай аномально активного дня
+# (массовый первый синк и т.п.), а не обычный постраничный лимит.
+ACTIVITY_DAY_ROW_LIMIT = 2000
 ACTIVITY_PERIOD_DAYS = {"7": 7, "30": 30, "90": 90}  # пресеты вместо ручного выбора дат — см. обсуждение в гайд-канале 2026-08-25
 
 
@@ -263,20 +267,30 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         period = ""
     date_from = _period_to_date_from(period)
 
+    # "Событий по фильтру/всего" на плашке наверху — суммарно по всему фильтру, не по одному
+    # дню, иначе цифра скакала бы при перелистывании страниц.
     total_count = dashboard_data.get_guild_activity_count(
         guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
     )
-    total_pages = max(1, -(-total_count // ACTIVITY_PAGE_SIZE))  # ceil-деление без импорта math
+
+    # Список дат, за которые вообще есть события по фильтру (без учёта страницы) — сама
+    # пагинация теперь идёт по этому списку, а не по offset/limit строк: страница N
+    # показывает все события за N-й по свежести день, а не N-ю полусотню строк.
+    activity_dates = dashboard_data.get_guild_activity_dates(
+        guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
+    )
+    total_pages = max(1, len(activity_dates))
     try:
         page = int(request.query_params.get("page", "1"))
     except ValueError:
         page = 1
     page = min(max(page, 1), total_pages)
+    selected_date = activity_dates[page - 1] if activity_dates else None
 
     rows = dashboard_data.get_guild_activity(
         guild_id, ally_code=player_filter, action_type=action_type_filter,
-        limit=ACTIVITY_PAGE_SIZE, offset=(page - 1) * ACTIVITY_PAGE_SIZE, date_from=date_from,
-    )
+        limit=ACTIVITY_DAY_ROW_LIMIT, date_from=selected_date, date_to=selected_date,
+    ) if selected_date else []
     players = dashboard_data.get_guild_activity_players(guild_id)
     grouped = dashboard_data.group_activity(rows)
     sync_status = dashboard_data.get_activity_sync_status(guild_id)
@@ -305,6 +319,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "total_count": total_count,
         "page": page,
         "total_pages": total_pages,
+        "page_date_label": dashboard_data.friendly_activity_date_label(selected_date),
         "prev_page_url": f"/activity?{urlencode({**base_params, 'page': page - 1})}" if page > 1 else None,
         "next_page_url": f"/activity?{urlencode({**base_params, 'page': page + 1})}" if page < total_pages else None,
         "reset_url": "/activity",
