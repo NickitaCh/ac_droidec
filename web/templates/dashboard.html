@@ -179,7 +179,7 @@
                     </div>
                 </div>
 
-                <div class="widget wc-r2c1">
+                <div class="widget wc-wide">
                     <div class="widget-header">
                         <h2>⚔️ Очки территории — ТБ</h2>
                         <a class="widget-link" href="/tb">Подробный отчёт →</a>
@@ -190,27 +190,21 @@
                         <div class="tb-combo-chart">
                             <div class="tb-combo-label">Очки</div>
                             <div class="tb-bars">
-                                {% for completed_at, value, pct in widgets.tb_report.points_bars %}
+                                {% for completed_at, value, pct, compact_label, full_label in widgets.tb_report.points_bars %}
                                     <div class="tb-bar-col">
-                                        <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ value }}"></div>
+                                        <div class="tb-bar-value">{{ compact_label }}</div>
+                                        <div class="tb-bar" style="height: {{ pct }}%;" data-tip="{{ completed_at[:10] }}: {{ full_label }}"></div>
                                     </div>
                                 {% endfor %}
                             </div>
 
                             {% if widgets.tb_report.has_stars %}
                                 <div class="tb-combo-label">⭐ Звёзды</div>
-                                <div class="tb-star-chart-plot">
-                                    <svg class="tb-star-chart" viewBox="0 0 100 32" preserveAspectRatio="none">
-                                        {% for seg in widgets.tb_report.star_segments %}
-                                            <polyline points="{{ seg }}" vector-effect="non-scaling-stroke"></polyline>
-                                        {% endfor %}
-                                    </svg>
-                                    {% for x, y, completed_at, value in widgets.tb_report.star_coords %}
-                                        <div class="tb-star-dot" data-tip="{{ completed_at[:10] }}: {{ value }} ⭐" style="left: {{ x }}%; top: {{ y / 32 * 100 }}%;"></div>
+                                <div class="tb-star-row">
+                                    {% for completed_at, stars in widgets.tb_report.star_labels %}
+                                        <div class="tb-star-col">{% if stars is not none %}{{ stars }}{% else %}<span class="tb-star-missing">—</span>{% endif %}</div>
                                     {% endfor %}
                                 </div>
-                            {% else %}
-                                <p class="widget-empty" style="padding: 0.3em 0;">Звёзды появятся начиная со следующей завершённой ТБ.</p>
                             {% endif %}
 
                             <div class="tb-combo-labels">
@@ -222,7 +216,7 @@
                     {% endif %}
                 </div>
 
-                <div class="widget wc-r2c2">
+                <div class="widget wc-wide">
                     <div class="widget-header">
                         <h2>🛡️ Территориальные войны</h2>
                         <a class="widget-link" href="/tw">Вся история →</a>

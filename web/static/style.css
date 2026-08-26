@@ -298,34 +298,29 @@ select { background: var(--page); }
     gap: 1em;
 }
 /* ---- Ряд из двух колонок под "Последней активностью" — центр:право = 0.8:1
-   (см. .dashboard-grid выше за той же логикой: правая колонка тут держит более
-   тяжёлые таблицы — ВГ/датакроны — и получает чуть больше места). 2 grid-строки:
-   в первой — ДР (центр) и стек Нарушители+Датакроны (право, .widget-stack —
-   склеены как один grid-элемент, а не 2 отдельные строки, иначе между ними
-   появлялся паразитный зазор в высоту разницы контента с ДР); во второй —
-   ТБ и ВГ, каждый отдельным grid-элементом на явных .wc-rXcY — только их старт
-   должен совпадать по горизонтали, вне зависимости от высоты контента выше
-   (см. запрос пользователя). ---- */
+   (см. .dashboard-grid выше за той же логикой). Первая grid-строка: ДР (центр) и стек
+   Нарушители+Датакроны (право, .widget-stack — склеены как один grid-элемент, иначе
+   между ними появлялся паразитный зазор в высоту разницы контента с ДР). ТБ и ВГ —
+   не в этих двух колонках, а каждый на всю ширину блока (.wc-wide, grid-column: 1/-1)
+   отдельными строками друг под другом — расширены по запросу пользователя вместо
+   тесных полуколонок. ---- */
 .widget-cols {
     display: grid;
     grid-template-columns: 0.8fr 1fr;
-    grid-template-rows: auto auto;
     align-items: start;
     gap: 1em;
 }
 .widget-stack { display: flex; flex-direction: column; gap: 1em; min-width: 0; }
 .wc-r1c1 { grid-column: 1; grid-row: 1; }
 .wc-r1c2 { grid-column: 2; grid-row: 1; }
-.wc-r2c1 { grid-column: 1; grid-row: 2; }
-.wc-r2c2 { grid-column: 2; grid-row: 2; }
+.wc-wide { grid-column: 1 / -1; }
 @media (max-width: 60em) {
     .dashboard-grid { grid-template-columns: 1fr; }
     .widget-secondary { grid-column: 1; }
     .widget-cols { grid-template-columns: 1fr; }
-    /* На мобильном грид — 1 колонка, явные grid-row по столбцам больше не
-       нужны (и накладывались бы друг на друга) — сбрасываем на естественный
-       порядок появления в DOM. */
-    .widget-cols > .widget, .widget-cols > .widget-stack { grid-column: 1; grid-row: auto; }
+    /* На мобильном грид — 1 колонка, явные grid-column по столбцам больше не
+       нужны — сбрасываем на естественный порядок появления в DOM. */
+    .widget-cols > .widget, .widget-cols > .widget-stack { grid-column: 1; }
 }
 /* ---- Состав гильдии — 4 колонки (Игрок/Ранг/Код/Discord) не влезают без
    горизонтального скролла ни на телефоне, ни на десктопе при узком окне браузера
@@ -598,29 +593,29 @@ table.data .dc-level-col {
    dashboard_data.py::get_tb_report посчитаны по той же формуле, чтобы совпадать
    по горизонтали со столбцом того же события. ---- */
 .tb-combo-label { font-size: 0.78em; color: var(--fg-muted); margin-bottom: 0.3em; }
-.tb-bars { display: flex; align-items: flex-end; height: 84px; gap: 0.5em; }
-.tb-bar-col { flex: 1; display: flex; align-items: flex-end; justify-content: center; height: 100%; min-width: 0; }
+.tb-bars { display: flex; align-items: flex-end; height: 130px; gap: 0.75em; }
+.tb-bar-col {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    height: 100%; min-width: 0; gap: 0.35em;
+}
+.tb-bar-value { font-size: 0.85em; font-weight: 600; color: var(--fg-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tb-bar {
     width: 60%;
-    max-width: 28px;
+    max-width: 44px;
     min-height: 3px;
     background: var(--series-1);
     border-radius: 4px 4px 0 0;
     cursor: pointer;
 }
-.tb-star-chart-plot { position: relative; width: 100%; height: 32px; margin-top: 0.9em; }
-.tb-star-chart { width: 100%; height: 100%; display: block; position: absolute; inset: 0; }
-.tb-star-chart polyline { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.tb-star-dot {
-    position: absolute;
-    width: 10px; height: 10px;
-    background: var(--series-2);
-    border: 2px solid var(--surface);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    cursor: pointer;
-}
-.tb-combo-labels { display: flex; justify-content: space-between; margin-top: 0.4em; font-size: 0.78em; color: var(--fg-muted); }
+/* ---- Звёзды — прямым числом под столбцом того же события, без отдельного графика
+   (был мини-график с точками, но со столбцами очков "не смотрелся"). flex:1 на каждую
+   ячейку — та же техника, что у .tb-bar-col, гарантирует, что число окажется точно
+   под своим столбцом. ---- */
+.tb-star-row { display: flex; margin-top: 1em; }
+.tb-star-col { flex: 1; text-align: center; font-size: 1em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--series-2); }
+.tb-star-col .tb-star-missing { color: var(--fg-muted); font-weight: 400; }
+.tb-combo-labels { display: flex; margin-top: 0.5em; font-size: 0.78em; color: var(--fg-muted); }
+.tb-combo-labels span { flex: 1; text-align: center; }
 
 /* ---- Конструктор (/mod-builder): форма из разнородных секций (обычные поля +
    сетка сетов + повторяемые строки статов) — колонка пошире дефолтной (20em). ---- */
