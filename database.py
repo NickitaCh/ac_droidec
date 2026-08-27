@@ -862,6 +862,29 @@ def search_game_units(query: str, limit: int = 25):
     return matches
 
 
+def resolve_unit_display_names(names: list[str]) -> dict[str, str | None]:
+    """Точный (не подстрочный, в отличие от search_game_units выше) поиск base_id по
+    отображаемому имени — и по cached_name (RU), и по cached_name_en. Нужен для резолва
+    справочника tb_platoon_data.py (имена сняты с EchoBase, на английском) в base_id.
+    Для нерезолвленных имён отдаёт None — вызывающая сторона логирует и пропускает,
+    не падает (ожидаемо немного непопаданий: '0-0-0', варианты с апострофами и т.п.)."""
+    if not names:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT base_id, cached_name, cached_name_en FROM game_units")
+    rows = cursor.fetchall()
+    conn.close()
+
+    by_name = {}
+    for base_id, name, name_en in rows:
+        by_name.setdefault(name.lower(), base_id)
+        if name_en:
+            by_name.setdefault(name_en.lower(), base_id)
+
+    return {name: by_name.get(name.lower()) for name in names}
+
+
 def get_game_unit_name(base_id: str) -> str | None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -2722,6 +2745,23 @@ def get_player_units_last_sync(ally_codes: list) -> str | None:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row and row[0] else None
+
+
+def get_player_unit_owners(base_id: str) -> list[dict]:
+    """Обратный запрос к get_player_units — все ally_code, у кого есть этот base_id, с сырым
+    unit_json (для извлечения реликвии через stat_engine.get_current_relic_level на
+    вызывающей стороне — держим stat_engine вне database.py, см. web/routes/stat_builder.py
+    за прецедентом такого разделения). Заготовка под фичу-конструктор взводов ТБ
+    (web/routes/guild_dashboard.py::tb_platoons, см. память
+    project_tb_platoon_unit_lists_rote_2026-08-27) — "кто в гильдии может принести юнита X"
+    для проверки заполняемости взводов; пока не вызывается ниоткуда, следующий шаг фичи."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    cursor.execute("SELECT ally_code, unit_json FROM player_unit_cache WHERE base_id = ?", (base_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"ally_code": ally_code, "unit": json.loads(unit_json)} for ally_code, unit_json in rows]
 
 
 def set_omicron_capable_base_ids(base_ids) -> None:

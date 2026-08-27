@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Взводы ТБ — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/tb">← Назад к ТБ</a></p>
+    <h1>Конструктор взводов ТБ</h1>
+    <p class="muted">
+        Планеты — из текущего активного плана ордера (см. «Планы ордера»). Списки юнитов —
+        топ-кандидаты из живого плана HotUtils гильдии на момент снятия (2026-08-27), не
+        жёсткое игровое требование — можно ставить и других юнитов. Пока это только
+        просмотр — без назначения игроков на слоты.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not error and not sections %}
+        <p class="empty-state">В активном плане не нашлось ни одной планеты.</p>
+    {% endif %}
+
+    {% for section in sections %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>{{ section.name }}</span>
+                <span class="muted">этап{{ "ы" if section.rounds|length > 1 else "" }} {{ section.rounds|join(", ") }}</span>
+            </div>
+            {% if section.unresolved %}
+                <p class="error">
+                    Название планеты не распознано — нет данных по взводам. Добавьте
+                    «{{ section.name }}» в _PLANET_NAME_TO_RU в web/routes/guild_dashboard.py.
+                </p>
+            {% else %}
+                {% for op in section.operations %}
+                    <h3>Операция {{ op.number }}</h3>
+                    {% if op.units %}
+                        <ul>
+                            {% for unit in op.units %}
+                                <li>{{ unit }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="empty-state">Нет данных по этой операции.</p>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+    {% endfor %}
+{% endblock %}

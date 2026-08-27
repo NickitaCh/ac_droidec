@@ -1,15 +1,18 @@
 import asyncio
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+import tb_platoon_data
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data
 from web.deps import require_guild_access
@@ -241,6 +244,144 @@ async def tb_order_plans_save_manual(
         )
     database.save_tb_plan(user["guild_id"], name, thread_id, stars, created_by=f"web:{user['discord_id']}")
     return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+
+
+# =====================================================================
+# КОНСТРУКТОР ВЗВОДОВ ТБ: для планет, которые реально задействованы в текущем активном
+# плане ордера (guilds.tb_active_plan_id → tb_saved_plans.thread_id), показывает 6
+# операций и подсказки юнитов на каждую (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS,
+# см. память project_tb_platoon_unit_lists_rote_2026-08-27). Пока ЧИСТО НА ЧТЕНИЕ —
+# по прямому запросу пользователя 2026-08-27: сначала просто список юнитов, механику
+# назначения игрок/юнит откладываем на следующий заход (не путать с уже существующими
+# database.*_tb_platoon_assignment* — они написаны заранее под старую, пофазовую
+# модель и потребуют переделки под планеты, прежде чем их подключать сюда).
+#
+# Активный план хранит только discord thread_id (см. cogs/tb_order_image.py) — самого
+# разбора "какая планета на каком этапе" нигде в БД не остаётся, только опубликованные
+# ботом сообщения-блоки в этом треде ("## Восход Империи — N этап" + по кружку-эмодзи
+# на планету). Поэтому здесь эти сообщения перечитываются напрямую через Discord REST
+# (bot-token техника, уже проверенная в этом проекте — см. память
+# project_tw_counter_order_builder.md), а не через живой бот (веб-процесс его не поднимает).
+# =====================================================================
+
+# Дублирует cogs/guild_events.py::TB_PLAN_HEADER_RE/TB_PLAN_CIRCLE_CHARS — тот же принцип
+# развязки веб-процесса от cogs/*, что и у TB_THREAD_LINK_RE выше в этом файле.
+_TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+)\s*этап", re.IGNORECASE)
+_TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪"
+
+# Русские названия планет, которые публикует cogs/tb_order_image.py::_translate_planet —
+# обратный словарь к его PLANET_RU, ключи которого — названия из tb_platoon_data.py.
+# Death Star/Hoth — стандартные локализации, НЕ подтверждены живым постом бота (эта
+# гильдия пока не доходила до 6 этапа в реальном прогрессе) — если появятся в реальном
+# ордере под другим названием, поправить здесь.
+_PLANET_NAME_TO_RU = {
+    "Mustafar": "мустафар", "Corellia": "кореллия", "Coruscant": "корусант",
+    "Geonosis": "джеонозис", "Felucia": "фелуция", "Bracca": "бракка",
+    "Dathomir": "датомир", "Tatooine": "татуин", "Kashyyyk": "кашик",
+    "Haven-class Medical Station": "медстанция", "Kessel": "кессель", "Lothal": "лотал",
+    "Malachor": "малахор", "Vandor": "вандор", "Ring of Kafrene": "кольцо кафрены",
+    "Death Star": "звезда смерти", "Hoth": "хот", "Scarif": "скариф",
+    "Zeffo": "зеффо", "Mandalore": "мандалор",
+}
+_RU_TO_PLANET_NAME = {ru: en for en, ru in _PLANET_NAME_TO_RU.items()}
+
+
+async def _fetch_active_plan_planets(guild_id: int) -> tuple[list[dict], str | None]:
+    """Возвращает (список {"planet": англ.название|None, "raw": как было в сообщении,
+    "round": N}, текст_ошибки|None). Планета=None — распознали блок этапа, но название
+    не нашлось в _RU_TO_PLANET_NAME (новая планета/опечатка — raw всё равно показываем)."""
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    plan_id = guild_cfg.get("tb_active_plan_id")
+    if not plan_id:
+        return [], "Нет активного плана ордера — выберите его на странице «Планы ордера»."
+    plan = database.get_tb_saved_plan(int(plan_id))
+    if not plan or plan["guild_id"] != guild_id:
+        return [], "Активный план не найден — выберите его заново на странице «Планы ордера»."
+
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return [], "DISCORD_TOKEN не настроен на веб-процессе — не могу прочитать тред плана."
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
+                headers={"Authorization": f"Bot {token}"},
+                params={"limit": 100},
+            )
+            resp.raise_for_status()
+            messages = resp.json()
+    except httpx.HTTPError as e:
+        return [], f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
+
+    # Discord отдаёт сообщения от новых к старым — для дублей (повторная публикация
+    # с "принудительно: True") берём первое встреченное (самое новое) на каждый этап.
+    by_round: dict[int, str] = {}
+    for msg in messages:
+        content = msg.get("content") or ""
+        header = _TB_PLAN_HEADER_RE.search(content)
+        if not header:
+            continue
+        round_num = int(header.group(1))
+        by_round.setdefault(round_num, content)
+
+    if not by_round:
+        return [], f"В треде плана «{plan['name']}» не нашлось ни одного блока этапа."
+
+    entries = []
+    for round_num in sorted(by_round):
+        for line in by_round[round_num].splitlines():
+            stripped = line.strip()
+            if stripped.startswith(">"):
+                # Блоки бота (cogs/tb_order_image.py::_build_order_blocks) — цитата Discord
+                # ("> {emoji} **Планета**"); офицерские анонсы (guild_events.py) — без неё.
+                # Поддерживаем оба.
+                stripped = stripped[1:].strip()
+            if not stripped or stripped[0] not in _TB_PLAN_CIRCLE_CHARS:
+                continue
+            name_ru = stripped[1:].strip(" *#").lower()
+            entries.append({
+                "planet": _RU_TO_PLANET_NAME.get(name_ru),
+                "raw": stripped[1:].strip(" *#"),
+                "round": round_num,
+            })
+    return entries, None
+
+
+@router.get("/tb/platoons", response_class=HTMLResponse)
+async def tb_platoons(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    entries, error = await _fetch_active_plan_planets(guild_id)
+
+    # Одна планета может стоять на нескольких этапах подряд (не выбрали все звёзды) —
+    # схлопываем в порядке первого появления, показывая все номера этапов рядом.
+    planets = []
+    seen = {}
+    for e in entries:
+        key = e["planet"] or f"raw:{e['raw']}"
+        if key not in seen:
+            seen[key] = {"name": e["planet"], "raw": e["raw"], "rounds": []}
+            planets.append(seen[key])
+        seen[key]["rounds"].append(e["round"])
+
+    sections = []
+    for p in planets:
+        operations = []
+        for operation in range(1, 7):
+            units = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((p["name"], operation)) if p["name"] else None
+            operations.append({"number": operation, "units": units})
+        sections.append({
+            "name": p["name"] or p["raw"],
+            "unresolved": p["name"] is None,
+            "rounds": p["rounds"],
+            "operations": operations,
+        })
+
+    return templates.TemplateResponse(request, "tb_platoons.html", {
+        "user": user,
+        "sections": sections,
+        "error": error,
+    })
 
 
 # Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так
