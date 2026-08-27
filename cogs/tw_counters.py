@@ -37,16 +37,23 @@ HEADER_LINE_RE = re.compile(r'^#{1,4}\s*(.+)$', re.MULTILINE)
 # \b перед "Состав" обязателен — без него ловятся ложные срабатывания на словах
 # вроде "оставить"/"заставить", которые содержат подстроку "остав".
 COMPOSITION_RE = re.compile(r'^\*{0,2}\b[Cс]остав\w*:?\*{0,2}\s*(.+)$', re.IGNORECASE | re.MULTILINE)
+# "Подкреп(ление)"/"Основа" — композиция-смежные подписи, отдельные от
+# "Состав:", встречаются у части авторов гайдов. Своего поля в БД под них нет
+# (не стоит того ради пары авторов) — их содержимое просто дописывается к
+# composition с меткой, лишь бы не терялось молча при структурном разборе.
+REINFORCEMENT_RE = re.compile(r'^\*{0,2}\bПодкреп\w*:?\*{0,2}\s*(.+)$', re.IGNORECASE | re.MULTILINE)
+BASE_SQUAD_RE = re.compile(r'^\*{0,2}\bОснова\w*:?\*{0,2}\s*(.+)$', re.IGNORECASE | re.MULTILINE)
 # Датакрон/Ход боя — многострочные поля, читаем не-жадно от заголовка (в начале
 # СВОЕЙ строки — иначе "дк"/"состав" как случайное слово в тексте до заголовка
 # ложно матчится) до следующего известного маркера или конца сообщения.
+# "Расхадовка" — опечатка/синоним "Ход боя" у части авторов, распознаём наравне.
 DATACRON_RE = re.compile(
     r'^\*{0,2}\b(?:Датакрон\w*|ДК)\b\s*:?\*{0,2}[ \t]*\n?(.*?)'
-    r'(?=^\s*\*{0,2}\b(?:Ход\s+боя|Команда|Видео)\b|\Z)',
+    r'(?=^\s*\*{0,2}\b(?:Ход\s+боя|Расхадовка|Команда|Видео|Подкреп\w*|Основа\w*)\b|\Z)',
     re.IGNORECASE | re.MULTILINE | re.DOTALL
 )
 BATTLE_PLAN_RE = re.compile(
-    r'^\*{0,2}\bХод\s+боя\b\s*:?\*{0,2}[ \t]*\n?(.*?)'
+    r'^\*{0,2}\b(?:Ход\s+боя|Расхадовка)\b\s*:?\*{0,2}[ \t]*\n?(.*?)'
     r'(?=^\s*\*{0,2}\bКоманда\b|^\s*\*{0,2}\bВидео\b|\Z)',
     re.IGNORECASE | re.MULTILINE | re.DOTALL
 )
@@ -96,6 +103,17 @@ def _parse_counter_message(content: str, thread_name: str) -> dict:
 
     comp_match = COMPOSITION_RE.search(text)
     composition = _clean(comp_match.group(1)) if comp_match else None
+    base_match = BASE_SQUAD_RE.search(text)
+    base_squad = _clean(base_match.group(1)) if base_match else None
+    reinf_match = REINFORCEMENT_RE.search(text)
+    reinforcement = _clean(reinf_match.group(1)) if reinf_match else None
+    if base_squad or reinforcement:
+        extra = []
+        if base_squad:
+            extra.append(f"Основа: {base_squad}")
+        if reinforcement:
+            extra.append(f"Подкрепление: {reinforcement}")
+        composition = " / ".join([composition] + extra) if composition else " / ".join(extra)
 
     dk_match = DATACRON_RE.search(text)
     datacron_note = _clean(dk_match.group(1)) if dk_match else None
@@ -246,6 +264,38 @@ class TWCounters(commands.Cog):
 
     # ------------------ Синхронизация форум-канала гайдов ------------------
     async def _sync_guild(self, guild_cfg: dict) -> dict:
+        """Обёртка над _sync_guild_once с защитой от молчаливого частичного
+        синка (наблюдалось в проде: Discord API/gateway обрывает итерацию
+        тредов/сообщений без исключения, обычно когда event loop был занят
+        другой блокирующей работой в этот момент — результат тихо занижен,
+        хотя команда бодро репортует "✅ завершено"). Если тредов заметно
+        меньше, чем в последнем НЕ подозрительном прогоне — повторяем синк
+        один раз и берём лучший результат; если и повтор подозрительный,
+        сообщаем об этом наружу через stats["suspect_partial"], не обновляя
+        сохранённый baseline (чтобы одна плохая попытка не занизила порог
+        для следующих проверок)."""
+        gid = guild_cfg["id"]
+        baseline_key = "tw_sync_last_threads"
+        baseline_raw = database.get_bot_state(baseline_key, guild_id=gid)
+        baseline = int(baseline_raw) if baseline_raw else None
+
+        stats = await self._sync_guild_once(guild_cfg)
+        if "threads" not in stats:
+            return stats  # skipped / error — нечего сравнивать
+
+        suspect = baseline is not None and stats["threads"] < baseline * 0.5
+        if suspect:
+            retry_stats = await self._sync_guild_once(guild_cfg)
+            if retry_stats["threads"] > stats["threads"]:
+                stats = retry_stats
+            suspect = stats["threads"] < baseline * 0.5
+        stats["suspect_partial"] = suspect
+
+        if not suspect:
+            database.set_bot_state(baseline_key, str(stats["threads"]), guild_id=gid)
+        return stats
+
+    async def _sync_guild_once(self, guild_cfg: dict) -> dict:
         forum_channel_id = guild_cfg.get("tw_guide_forum_channel_id")
         if not forum_channel_id:
             return {"skipped": True}
@@ -312,7 +362,8 @@ class TWCounters(commands.Cog):
                 continue
             try:
                 stats = await self._sync_guild(guild_cfg)
-                print(f"✅ [TWCounters] [{guild_cfg['name']}] синк гайдов ВГ: {stats}")
+                marker = "⚠️ ПОДОЗРИТЕЛЬНО МАЛО" if stats.get("suspect_partial") else "✅"
+                print(f"{marker} [TWCounters] [{guild_cfg['name']}] синк гайдов ВГ: {stats}")
             except Exception as e:
                 print(f"❌ [TWCounters] [{guild_cfg['name']}] ошибка синка гайдов ВГ: {e}")
 
@@ -341,12 +392,19 @@ class TWCounters(commands.Cog):
         except Exception as e:
             await inter.edit_original_response(f"Ошибка синхронизации: {e}")
             return
+        warning = (
+            "\n\n⚠️ Похоже, синк обработал не все треды (сеть/рейт-лимит Discord) — "
+            "результат заметно ниже прошлого успешного прогона даже после автоповтора. "
+            "Запустите команду ещё раз."
+            if stats.get("suspect_partial") else ""
+        )
         await inter.edit_original_response(
             f"✅ Синхронизация завершена.\n"
             f"Тредов: {stats['threads']}\n"
             f"Сообщений: {stats['messages']}\n"
             f"Распознано структурно: {stats['parsed_ok']}\n"
             f"Не распознано (сохранено как есть): {stats['parsed_fail']}"
+            f"{warning}"
         )
 
     # ------------------ Слэш-команда ------------------
