@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+import stat_engine
 import tb_platoon_data
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data
@@ -247,19 +248,20 @@ async def tb_order_plans_save_manual(
 
 
 # =====================================================================
-# КОНСТРУКТОР ВЗВОДОВ ТБ: для планет, которые реально задействованы в текущем активном
-# плане ордера (guilds.tb_active_plan_id → tb_saved_plans.thread_id), показывает 6
-# операций и подсказки юнитов на каждую (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS,
-# см. память project_tb_platoon_unit_lists_rote_2026-08-27). Пока ЧИСТО НА ЧТЕНИЕ —
-# по прямому запросу пользователя 2026-08-27: сначала просто список юнитов, механику
-# назначения игрок/юнит откладываем на следующий заход (не путать с уже существующими
-# database.*_tb_platoon_assignment* — они написаны заранее под старую, пофазовую
-# модель и потребуют переделки под планеты, прежде чем их подключать сюда).
+# КОНСТРУКТОР ВЗВОДОВ ТБ: для планет, которые реально задействованы в выбранном
+# сохранённом плане ордера (по умолчанию — активный, guilds.tb_active_plan_id, но
+# можно переключиться на любой другой через ?plan_id=), показывает 6 операций,
+# подсказки юнитов на каждую (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS, см. память
+# project_tb_platoon_unit_lists_rote_2026-08-27), минимальную реликвию по этапу
+# (tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND) и назначение конкретного игрока гильдии
+# на конкретный донат-слот (database.*_tb_platoon_assignment*, аналог "Assign
+# Players" в HotUtils) — кандидаты на слот считаются из живого кэша ростера гильдии
+# (database.get_player_unit_owners_bulk + stat_engine.get_current_relic_level).
 #
-# Активный план хранит только discord thread_id (см. cogs/tb_order_image.py) — самого
-# разбора "какая планета на каком этапе" нигде в БД не остаётся, только опубликованные
-# ботом сообщения-блоки в этом треде ("## Восход Империи — N этап" + по кружку-эмодзи
-# на планету). Поэтому здесь эти сообщения перечитываются напрямую через Discord REST
+# План хранит только discord thread_id (см. cogs/tb_order_image.py) — самого разбора
+# "какая планета на каком этапе" нигде в БД не остаётся, только опубликованные ботом
+# сообщения-блоки в этом треде ("## Восход Империи — N этап" + по кружку-эмодзи на
+# планету). Поэтому здесь эти сообщения перечитываются напрямую через Discord REST
 # (bot-token техника, уже проверенная в этом проекте — см. память
 # project_tw_counter_order_builder.md), а не через живой бот (веб-процесс его не поднимает).
 # =====================================================================
@@ -286,18 +288,34 @@ _PLANET_NAME_TO_RU = {
 _RU_TO_PLANET_NAME = {ru: en for en, ru in _PLANET_NAME_TO_RU.items()}
 
 
-async def _fetch_active_plan_planets(guild_id: int) -> tuple[list[dict], str | None]:
+def _resolve_viewed_plan(guild_id: int, plan_id_param: str | None) -> tuple[dict | None, str | None]:
+    """Какой сохранённый план показывать в конструкторе взводов: явный ?plan_id= (любой
+    план гильдии, не обязательно активный — переключение в конструкторе только просмотровое,
+    не трогает guilds.tb_active_plan_id), либо, если параметра нет, активный план как раньше."""
+    if plan_id_param:
+        try:
+            plan_id = int(plan_id_param)
+        except ValueError:
+            return None, "Некорректный ID плана."
+        plan = database.get_tb_saved_plan(plan_id)
+        if not plan or plan["guild_id"] != guild_id:
+            return None, "План не найден."
+        return plan, None
+
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    active_id = guild_cfg.get("tb_active_plan_id")
+    if not active_id:
+        return None, "Нет активного плана ордера — выберите его на странице «Планы ордера»."
+    plan = database.get_tb_saved_plan(int(active_id))
+    if not plan or plan["guild_id"] != guild_id:
+        return None, "Активный план не найден — выберите его заново на странице «Планы ордера»."
+    return plan, None
+
+
+async def _fetch_plan_planets(plan: dict) -> tuple[list[dict], str | None]:
     """Возвращает (список {"planet": англ.название|None, "raw": как было в сообщении,
     "round": N}, текст_ошибки|None). Планета=None — распознали блок этапа, но название
     не нашлось в _RU_TO_PLANET_NAME (новая планета/опечатка — raw всё равно показываем)."""
-    guild_cfg = database.get_guild_config(guild_id) or {}
-    plan_id = guild_cfg.get("tb_active_plan_id")
-    if not plan_id:
-        return [], "Нет активного плана ордера — выберите его на странице «Планы ордера»."
-    plan = database.get_tb_saved_plan(int(plan_id))
-    if not plan or plan["guild_id"] != guild_id:
-        return [], "Активный план не найден — выберите его заново на странице «Планы ордера»."
-
     token = os.environ.get("DISCORD_TOKEN")
     if not token:
         return [], "DISCORD_TOKEN не настроен на веб-процессе — не могу прочитать тред плана."
@@ -374,7 +392,11 @@ async def _fetch_active_plan_planets(guild_id: int) -> tuple[list[dict], str | N
 @router.get("/tb/platoons", response_class=HTMLResponse)
 async def tb_platoons(request: Request, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]
-    entries, error = await _fetch_active_plan_planets(guild_id)
+    plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
+
+    entries: list[dict] = []
+    if plan is not None:
+        entries, error = await _fetch_plan_planets(plan)
 
     # Группируем по ЭТАПУ (round), не по планете — по прямому запросу пользователя
     # 2026-08-28 (страница раньше листала одну планету за раз через выпадашку, из-за
@@ -394,26 +416,121 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         seen_in_round.add(key)
         by_round.setdefault(e["round"], []).append(e)
 
+    # Все уникальные названия юнитов на странице разом -> base_id -> живые владельцы в
+    # гильдии (один батч-запрос вместо N на каждый слот, см. коммент над
+    # get_player_unit_owners_bulk в database.py).
+    all_unit_names = {
+        name
+        for planets in by_round.values()
+        for e in planets
+        if e["planet"]
+        for operation in range(1, 7)
+        for name in (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) or [])
+    }
+    name_to_base_id = database.resolve_unit_display_names(list(all_unit_names)) if all_unit_names else {}
+    mappings = database.get_all_user_mappings(guild_id)
+    ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
+    player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
+    base_ids = sorted({bid for bid in name_to_base_id.values() if bid})
+    owners_raw = database.get_player_unit_owners_bulk(ally_codes, base_ids) if base_ids else []
+    owners_by_base_id: dict[str, list[dict]] = {}
+    for row in owners_raw:
+        owners_by_base_id.setdefault(row["base_id"], []).append({
+            "ally_code": row["ally_code"],
+            "name": player_name_by_ally.get(row["ally_code"], row["ally_code"]),
+            "relic": stat_engine.get_current_relic_level(row["unit"]),
+        })
+    for owners in owners_by_base_id.values():
+        owners.sort(key=lambda o: -o["relic"])
+
+    assignments = database.get_tb_platoon_assignments(guild_id, plan["id"]) if plan else {}
+
     rounds = []
     for round_num in sorted(by_round):
+        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
         planet_blocks = []
-        for e in by_round[round_num]:
+        for planet_idx, e in enumerate(by_round[round_num]):
             operations = []
             for operation in range(1, 7):
-                units = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
-                operations.append({"number": operation, "units": units})
+                unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
+                slots = []
+                for slot_index, unit_name in enumerate(unit_names or []):
+                    base_id = name_to_base_id.get(unit_name)
+                    owners = owners_by_base_id.get(base_id, []) if base_id else []
+                    assignment = assignments.get((round_num, e["planet"], operation, slot_index))
+                    slots.append({
+                        "index": slot_index,
+                        "unit": unit_name,
+                        "owners": [
+                            {**o, "meets_min": min_relic is not None and o["relic"] >= min_relic}
+                            for o in owners
+                        ],
+                        "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
+                        "assigned_ally_code": assignment["ally_code"] if assignment else None,
+                        "anchor": f"slot-{round_num}-{planet_idx}-{operation}-{slot_index}",
+                    })
+                operations.append({"number": operation, "slots": slots})
             planet_blocks.append({
                 "name": e["planet"] or e["raw"],
                 "unresolved": e["planet"] is None,
                 "operations": operations,
             })
-        rounds.append({"number": round_num, "planets": planet_blocks})
+        rounds.append({"number": round_num, "planets": planet_blocks, "min_relic": min_relic})
+
+    saved_plans = database.get_tb_saved_plans(guild_id)
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    active_plan_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
 
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
         "rounds": rounds,
         "error": error,
+        "plan": plan,
+        "saved_plans": saved_plans,
+        "active_plan_id": active_plan_id,
     })
+
+
+@router.post("/tb/platoons/assign", response_class=HTMLResponse)
+async def tb_platoons_assign(
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    planet: str = Form(...),
+    operation: int = Form(...),
+    slot_index: int = Form(...),
+    ally_code: str = Form(...),
+    anchor: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
+    database.set_tb_platoon_assignment(
+        guild_id, plan_id, round_num, planet, operation, slot_index, ally_code.strip(),
+        assigned_by=f"web:{user['discord_id']}",
+    )
+    suffix = f"#{anchor}" if anchor else ""
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}{suffix}", status_code=303)
+
+
+@router.post("/tb/platoons/unassign", response_class=HTMLResponse)
+async def tb_platoons_unassign(
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    planet: str = Form(...),
+    operation: int = Form(...),
+    slot_index: int = Form(...),
+    anchor: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
+    database.clear_tb_platoon_assignment(guild_id, plan_id, round_num, planet, operation, slot_index)
+    suffix = f"#{anchor}" if anchor else ""
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}{suffix}", status_code=303)
 
 
 # Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так

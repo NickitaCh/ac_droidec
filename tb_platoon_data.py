@@ -167,3 +167,18 @@ ROTE_PLATOON_SUGGESTIONS: dict[tuple[str, int], list[str]] = {
     ("Scarif", 4): ["Bastila Shan", "Ben Solo", "Commander Ahsoka Tano", "Dash Rendar", "Hermit Yoda", "Jedi Master Kenobi", "Jedi Master Luke Skywalker", "Ki-Adi-Mundi", "Ki-Adi-Mundi", "L3-37", "Mara Jade, The Emperor's Hand", "Razor Crest", "Rey", "Rey (Scavenger)", "Xanadu Blood"],
     ("Scarif", 5): ["Bastila Shan", "Ben Solo", "Ben Solo", "Han Solo", "Han Solo", "Ima-Gun Di", "Jedi Master Luke Skywalker", "Jedi Master Luke Skywalker", "Logray", "Razor Crest", "Resistance X-wing", "Rey", "Skiff Guard (Lando Calrissian)", "Tech", "Zaalbar"],
     ("Scarif", 6): ["Bastila Shan", "BB-8", "Ben Solo", "Ben Solo", "Dash Rendar", "Han Solo", "Han's Millennium Falcon", "Hermit Yoda", "Jedi Knight Revan", "Jedi Master Kenobi", "Jedi Master Luke Skywalker", "Razor Crest", "Rebel Officer Leia Organa", "Rey", "Skiff Guard (Lando Calrissian)"],}
+
+# Минимальная реликвия для донат-слота взвода, по этапу (1-6) — реальное игровое
+# требование (не подсказка, в отличие от ROTE_PLATOON_SUGGESTIONS выше), снято живьём
+# 2026-08-28 через comlink.get_game_data(request_segment=2)::territoryBattleDefinition
+# (id="t05D", он же "Восход Империи"): каждая reconZoneDefinition несёт unitRarity=7
+# (константа, генерик 7★) и unitRelicTier, который растёт по этапу и ОДИНАКОВ во всех
+# трёх ветках (conflict01/02/03, включая bonus-зоны Зеффо/Мандалора) внутри одного
+# этапа — проверено по всем 20 recon-зонам, ключ по одному только round достаточен, ветка
+# не нужна. Raw-значения из Comlink (7/8/8/9/10/11/11 по фазам 1-6, bonus совпадает со
+# своей фазой) переведены в отображаемый в игре/HotUtils релик через оффсет "-2",
+# подтверждённый кросс-чеком с HotUtils в память project_tb_platoon_gamedata_research_2026-08-25
+# ("Relic 5" в HotUtils == raw relic 7 в Comlink). Как и ROTE_PLATOON_SUGGESTIONS — это
+# t05D-специфичный справочник, актуален для текущего TB-типа гильдии ("Восход Империи");
+# если гильдия перейдёт на другой TB, эти цифры нужно переснять под его id.
+ROTE_MIN_RELIC_BY_ROUND: dict[int, int] = {1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 9}

@@ -1822,6 +1822,84 @@ def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
     return True
 
 
+# =====================================================================
+# НАЗНАЧЕНИЯ ИГРОКОВ НА СЛОТЫ ВЗВОДОВ ТБ: закрепление конкретного игрока
+# гильдии за конкретным донат-слотом конкретной планеты/операции конкретного
+# сохранённого плана (web/routes/guild_dashboard.py::tb_platoons) — аналог
+# "Assign Players" в HotUtils. Привязано к plan_id (не только к planet/round),
+# т.к. один и тот же план — это конкретный прогон ТБ с конкретным, статичным
+# сопоставлением этап->планета (тред плана уже опубликован и не меняется);
+# переключение вида на другой сохранённый план должно показывать его
+# СОБСТВЕННЫЕ назначения, а не унаследованные от активного.
+# =====================================================================
+def _ensure_tb_platoon_assignments_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_platoon_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            round_num INTEGER NOT NULL,
+            planet TEXT NOT NULL,
+            operation INTEGER NOT NULL,
+            slot_index INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            assigned_by TEXT,
+            assigned_at TEXT NOT NULL,
+            UNIQUE(guild_id, plan_id, round_num, planet, operation, slot_index)
+        )
+    """)
+
+
+def set_tb_platoon_assignment(
+    guild_id: int, plan_id: int, round_num: int, planet: str, operation: int, slot_index: int,
+    ally_code: str, assigned_by: str = None,
+) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("""
+        INSERT INTO tb_platoon_assignments
+            (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by, assigned_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id, plan_id, round_num, planet, operation, slot_index)
+        DO UPDATE SET ally_code = excluded.ally_code, assigned_by = excluded.assigned_by, assigned_at = excluded.assigned_at
+    """, (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by))
+    conn.commit()
+    conn.close()
+
+
+def clear_tb_platoon_assignment(
+    guild_id: int, plan_id: int, round_num: int, planet: str, operation: int, slot_index: int,
+) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("""
+        DELETE FROM tb_platoon_assignments
+        WHERE guild_id = ? AND plan_id = ? AND round_num = ? AND planet = ? AND operation = ? AND slot_index = ?
+    """, (guild_id, plan_id, round_num, planet, operation, slot_index))
+    conn.commit()
+    conn.close()
+
+
+def get_tb_platoon_assignments(guild_id: int, plan_id: int) -> dict:
+    """(round_num, planet, operation, slot_index) -> {"ally_code", "assigned_by"} — все
+    назначения конкретного плана разом, чтобы не дёргать БД по одному слоту на странице."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("""
+        SELECT round_num, planet, operation, slot_index, ally_code, assigned_by
+        FROM tb_platoon_assignments WHERE guild_id = ? AND plan_id = ?
+    """, (guild_id, plan_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        (round_num, planet, operation, slot_index): {"ally_code": ally_code, "assigned_by": assigned_by}
+        for round_num, planet, operation, slot_index, ally_code, assigned_by in rows
+    }
+
+
 def get_user_mapping_by_name(name: str, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -2780,10 +2858,8 @@ def get_player_unit_owners(base_id: str) -> list[dict]:
     """Обратный запрос к get_player_units — все ally_code, у кого есть этот base_id, с сырым
     unit_json (для извлечения реликвии через stat_engine.get_current_relic_level на
     вызывающей стороне — держим stat_engine вне database.py, см. web/routes/stat_builder.py
-    за прецедентом такого разделения). Заготовка под фичу-конструктор взводов ТБ
-    (web/routes/guild_dashboard.py::tb_platoons, см. память
-    project_tb_platoon_unit_lists_rote_2026-08-27) — "кто в гильдии может принести юнита X"
-    для проверки заполняемости взводов; пока не вызывается ниоткуда, следующий шаг фичи."""
+    за прецедентом такого разделения). Один base_id за раз — для страницы целиком (много
+    разных юнитов сразу) см. get_player_unit_owners_bulk ниже."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_player_unit_cache_table(cursor)
@@ -2791,6 +2867,30 @@ def get_player_unit_owners(base_id: str) -> list[dict]:
     rows = cursor.fetchall()
     conn.close()
     return [{"ally_code": ally_code, "unit": json.loads(unit_json)} for ally_code, unit_json in rows]
+
+
+def get_player_unit_owners_bulk(ally_codes: list, base_ids: list) -> list[dict]:
+    """Как get_player_unit_owners, но одним запросом сразу на несколько base_id и
+    ограниченным набором ally_code (ростер гильдии) — используется конструктором взводов
+    ТБ (web/routes/guild_dashboard.py::tb_platoons), где на одной странице может быть до
+    ~350 юнит-слотов с массой повторов, и по одному запросу на base_id было бы N+1."""
+    if not ally_codes or not base_ids:
+        return []
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    ally_placeholders = ",".join("?" for _ in ally_codes)
+    base_placeholders = ",".join("?" for _ in base_ids)
+    cursor.execute(f"""
+        SELECT ally_code, base_id, unit_json FROM player_unit_cache
+        WHERE ally_code IN ({ally_placeholders}) AND base_id IN ({base_placeholders})
+    """, [*ally_codes, *base_ids])
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"ally_code": ally_code, "base_id": base_id, "unit": json.loads(unit_json)}
+        for ally_code, base_id, unit_json in rows
+    ]
 
 
 def set_omicron_capable_base_ids(base_ids) -> None:

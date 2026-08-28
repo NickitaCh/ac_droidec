@@ -2,14 +2,40 @@
 {% block title %}Взводы ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/tb">← Назад к ТБ</a></p>
+    <p><a href="/tb">← Назад к ТБ</a> · <a href="/tb/order-plans">Планы ордера</a></p>
     <h1>Конструктор взводов ТБ</h1>
     <p class="muted">
-        Планеты — из текущего активного плана ордера (см. «Планы ордера»). Списки юнитов —
-        топ-кандидаты из живого плана HotUtils гильдии на момент снятия (2026-08-27), не
-        жёсткое игровое требование — можно ставить и других юнитов. Пока это только
-        просмотр — без назначения игроков на слоты.
+        Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
+        снятия (2026-08-27), не жёсткое игровое требование — можно ставить и других юнитов.
+        Мин. реликвия на этапе — реальное игровое требование к донат-слоту. Раскройте слот,
+        чтобы увидеть, у кого в гильдии есть этот юнит, и закрепить игрока за слотом.
     </p>
+
+    {% if saved_plans %}
+        <form method="get" class="platoon-plan-switch">
+            <label for="plan-select">План</label>
+            <select id="plan-select" name="plan_id" onchange="this.form.submit()">
+                {% if not plan %}<option value="" selected disabled>— выберите план —</option>{% endif %}
+                {% for p in saved_plans %}
+                    <option value="{{ p.id }}" {% if plan and plan.id == p.id %}selected{% endif %}>
+                        {{ p.name }}{% if p.id == active_plan_id %} (активен){% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            <noscript><button type="submit">Показать</button></noscript>
+        </form>
+    {% endif %}
+
+    {% if plan %}
+        <p>
+            Смотрите план: <strong>{{ plan.name }}</strong>
+            {% if plan.id == active_plan_id %}
+                <span class="badge badge-ok">активен</span>
+            {% else %}
+                <span class="badge badge-neutral">неактивен</span>
+            {% endif %}
+        </p>
+    {% endif %}
 
     {% if error %}
         <p class="error">{{ error }}</p>
@@ -35,7 +61,10 @@
             <div class="panel platoon-planet-panel" id="stage-{{ loop.index0 }}" data-planet-panel {% if not loop.first %}hidden{% endif %}>
                 <div class="panel-title">
                     <span>Этап {{ r.number }}</span>
-                    <span class="panel-hint">планет: {{ r.planets|length }}</span>
+                    <span class="panel-hint">
+                        планет: {{ r.planets|length }}
+                        {% if r.min_relic %} · <span class="badge badge-relic">Мин. релик {{ r.min_relic }}</span>{% endif %}
+                    </span>
                 </div>
                 {% for p in r.planets %}
                     <div class="platoon-planet-block">
@@ -51,10 +80,54 @@
                                     {% for op in p.operations %}
                                         <div class="platoon-op-card">
                                             <h4>Операция {{ op.number }}</h4>
-                                            {% if op.units %}
-                                                <ul>
-                                                    {% for unit in op.units %}
-                                                        <li>{{ unit }}</li>
+                                            {% if op.slots %}
+                                                <ul class="platoon-slot-list">
+                                                    {% for slot in op.slots %}
+                                                        <li id="{{ slot.anchor }}" class="platoon-slot">
+                                                            <details>
+                                                                <summary>
+                                                                    {{ slot.unit }}
+                                                                    {% if slot.assigned_name %}
+                                                                        <span class="badge badge-ok">{{ slot.assigned_name }}</span>
+                                                                    {% endif %}
+                                                                </summary>
+                                                                <div class="platoon-slot-candidates">
+                                                                    {% if slot.assigned_ally_code %}
+                                                                        <form method="post" action="/tb/platoons/unassign">
+                                                                            <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                                                                            <input type="hidden" name="round_num" value="{{ r.number }}">
+                                                                            <input type="hidden" name="planet" value="{{ p.name }}">
+                                                                            <input type="hidden" name="operation" value="{{ op.number }}">
+                                                                            <input type="hidden" name="slot_index" value="{{ slot.index }}">
+                                                                            <input type="hidden" name="anchor" value="{{ slot.anchor }}">
+                                                                            <button type="submit" class="button-danger">Снять {{ slot.assigned_name }}</button>
+                                                                        </form>
+                                                                    {% endif %}
+                                                                    {% if slot.owners %}
+                                                                        <ul class="platoon-candidate-list">
+                                                                            {% for owner in slot.owners %}
+                                                                                <li>
+                                                                                    <form method="post" action="/tb/platoons/assign">
+                                                                                        <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                                                                                        <input type="hidden" name="round_num" value="{{ r.number }}">
+                                                                                        <input type="hidden" name="planet" value="{{ p.name }}">
+                                                                                        <input type="hidden" name="operation" value="{{ op.number }}">
+                                                                                        <input type="hidden" name="slot_index" value="{{ slot.index }}">
+                                                                                        <input type="hidden" name="ally_code" value="{{ owner.ally_code }}">
+                                                                                        <input type="hidden" name="anchor" value="{{ slot.anchor }}">
+                                                                                        <button type="submit" {% if owner.ally_code == slot.assigned_ally_code %}disabled{% endif %}>
+                                                                                            {{ "✅" if owner.meets_min else "⚠️" }} {{ owner.name }} — релик {{ owner.relic }}
+                                                                                        </button>
+                                                                                    </form>
+                                                                                </li>
+                                                                            {% endfor %}
+                                                                        </ul>
+                                                                    {% else %}
+                                                                        <p class="empty-state">В гильдии не нашлось владельцев этого юнита (или не удалось определить base_id).</p>
+                                                                    {% endif %}
+                                                                </div>
+                                                            </details>
+                                                        </li>
                                                     {% endfor %}
                                                 </ul>
                                             {% else %}

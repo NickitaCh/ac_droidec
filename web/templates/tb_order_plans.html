@@ -40,6 +40,7 @@
                                 {% endif %}
                             </td>
                             <td class="row-actions">
+                                <a href="/tb/platoons?plan_id={{ row.id }}">Взводы →</a>
                                 {% if not row.active %}
                                     <form method="post" action="/tb/order-plans/select">
                                         <input type="hidden" name="plan_id" value="{{ row.id }}">

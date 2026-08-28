@@ -570,6 +570,35 @@ table.data .dc-level-col {
 .platoon-op-card ul { margin: 0; padding-left: 1.2em; }
 .platoon-op-card li { margin-bottom: 0.3em; }
 
+/* ---- Слоты взвода — конструктор назначения игроков (2026-08-28), см. память
+   project_tb_platoon_unit_lists_rote_2026-08-27 ---- */
+.platoon-plan-switch { display: inline-flex; align-items: center; gap: 0.6em; margin: 0 0 1em; flex-wrap: wrap; }
+.platoon-plan-switch select { padding: 0.4em 0.6em; font-size: 0.9em; border-radius: 6px; min-width: 16em; }
+.platoon-slot-list { list-style: none; padding-left: 0; }
+.platoon-slot summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    flex-wrap: wrap;
+}
+.platoon-slot summary::-webkit-details-marker { display: none; }
+.platoon-slot-candidates { margin-top: 0.5em; padding-left: 0.8em; border-left: 2px solid var(--border); }
+.platoon-slot-candidates form { display: inline; }
+.platoon-candidate-list { list-style: none; padding-left: 0; }
+.platoon-candidate-list li { margin-bottom: 0.25em; }
+.platoon-candidate-list button {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3em 0.6em;
+    font-size: 0.85em;
+    cursor: pointer;
+    text-align: left;
+}
+.platoon-candidate-list button:hover { background: var(--surface-2); }
+.platoon-candidate-list button:disabled { opacity: 0.6; cursor: default; }
+
 /* ---- Мини-тултип на наведение (для баров/точек графиков) ---- */
 [data-tip] { position: relative; }
 [data-tip]:hover::after, [data-tip]:focus-visible::after {
