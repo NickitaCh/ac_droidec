@@ -277,9 +277,9 @@ _TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪"
 _PLANET_NAME_TO_RU = {
     "Mustafar": "мустафар", "Corellia": "кореллия", "Coruscant": "корусант",
     "Geonosis": "джеонозис", "Felucia": "фелуция", "Bracca": "бракка",
-    "Dathomir": "датомир", "Tatooine": "татуин", "Kashyyyk": "кашик",
+    "Dathomir": "датомир", "Tatooine": "татуин", "Kashyyyk": "кашиик",
     "Haven-class Medical Station": "медстанция", "Kessel": "кессель", "Lothal": "лотал",
-    "Malachor": "малахор", "Vandor": "вандор", "Ring of Kafrene": "кольцо кафрены",
+    "Malachor": "малакор", "Vandor": "вандор", "Ring of Kafrene": "кольцо кафрены",
     "Death Star": "звезда смерти", "Hoth": "хот", "Scarif": "скариф",
     "Zeffo": "зеффо", "Mandalore": "мандалор",
 }
@@ -330,7 +330,8 @@ async def _fetch_active_plan_planets(guild_id: int) -> tuple[list[dict], str | N
 
     entries = []
     for round_num in sorted(by_round):
-        for line in by_round[round_num].splitlines():
+        lines = by_round[round_num].splitlines()
+        for i, line in enumerate(lines):
             stripped = line.strip()
             if stripped.startswith(">"):
                 # Блоки бота (cogs/tb_order_image.py::_build_order_blocks) — цитата Discord
@@ -340,8 +341,30 @@ async def _fetch_active_plan_planets(guild_id: int) -> tuple[list[dict], str | N
             if not stripped or stripped[0] not in _TB_PLAN_CIRCLE_CHARS:
                 continue
             name_ru = stripped[1:].strip(" *#").lower()
+            planet = _RU_TO_PLANET_NAME.get(name_ru)
+            if planet is None:
+                # Неизвестное название — либо реально новая/ещё не занесённая в словарь
+                # планета, либо просто офицерская заметка, начинающаяся тем же цветным
+                # кружком, что и планеты (живой пример, этап 3 плана "43 базовых
+                # минимума": "⚪ **Текстовый гайд на мандалорское ОЗ:**" — офицер приложил
+                # объёмный гайд по модингу тем же маркером). Отличаем по следующей
+                # непустой строке: у настоящей планеты сразу за названием всегда идёт
+                # "**Цель:** N звёзд" (см. cogs/tb_order_image.py и все реальные анонсы) —
+                # у произвольной заметки там что угодно другое. Известные (сопоставленные
+                # по словарю) названия эта проверка не трогает — только помогает не
+                # засорять список неопознанными "планетами".
+                next_line = ""
+                for j in range(i + 1, len(lines)):
+                    candidate = lines[j].strip()
+                    if candidate.startswith(">"):
+                        candidate = candidate[1:].strip()
+                    if candidate:
+                        next_line = candidate
+                        break
+                if not next_line.lower().startswith("**цель:**"):
+                    continue
             entries.append({
-                "planet": _RU_TO_PLANET_NAME.get(name_ru),
+                "planet": planet,
                 "raw": stripped[1:].strip(" *#"),
                 "round": round_num,
             })
