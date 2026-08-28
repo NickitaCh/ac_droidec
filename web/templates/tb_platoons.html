@@ -15,51 +15,58 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
-    {% if not error and not sections %}
+    {% if not error and not rounds %}
         <p class="empty-state">В активном плане не нашлось ни одной планеты.</p>
     {% endif %}
 
-    {% if sections %}
+    {% if rounds %}
         <div class="platoon-planet-picker">
-            <label for="platoon-planet-select">Планета</label>
-            <select id="platoon-planet-select" data-planet-picker>
-                {% for section in sections %}
-                    <option value="planet-{{ loop.index0 }}">
-                        {{ "⚠ " if section.unresolved else "" }}{{ section.name }} — этап{{ "ы" if section.rounds|length > 1 else "" }} {{ section.rounds|join(", ") }}
+            <label for="platoon-stage-select">Этап</label>
+            <select id="platoon-stage-select" data-planet-picker>
+                {% for r in rounds %}
+                    <option value="stage-{{ loop.index0 }}">
+                        Этап {{ r.number }} — {% for p in r.planets %}{{ "⚠ " if p.unresolved else "" }}{{ p.name }}{{ ", " if not loop.last else "" }}{% endfor %}
                     </option>
                 {% endfor %}
             </select>
         </div>
 
-        {% for section in sections %}
-            <div class="panel platoon-planet-panel" id="planet-{{ loop.index0 }}" data-planet-panel {% if not loop.first %}hidden{% endif %}>
+        {% for r in rounds %}
+            <div class="panel platoon-planet-panel" id="stage-{{ loop.index0 }}" data-planet-panel {% if not loop.first %}hidden{% endif %}>
                 <div class="panel-title">
-                    <span>{{ section.name }}</span>
-                    <span class="panel-hint">этап{{ "ы" if section.rounds|length > 1 else "" }} {{ section.rounds|join(", ") }}</span>
+                    <span>Этап {{ r.number }}</span>
+                    <span class="panel-hint">планет: {{ r.planets|length }}</span>
                 </div>
-                {% if section.unresolved %}
-                    <p class="error">
-                        Название планеты не распознано — нет данных по взводам. Добавьте
-                        «{{ section.name }}» в _PLANET_NAME_TO_RU в web/routes/guild_dashboard.py.
-                    </p>
-                {% else %}
-                    <div class="platoon-ops-grid">
-                        {% for op in section.operations %}
-                            <div class="platoon-op-card">
-                                <h3>Операция {{ op.number }}</h3>
-                                {% if op.units %}
-                                    <ul>
-                                        {% for unit in op.units %}
-                                            <li>{{ unit }}</li>
-                                        {% endfor %}
-                                    </ul>
-                                {% else %}
-                                    <p class="empty-state">Нет данных по этой операции.</p>
-                                {% endif %}
+                {% for p in r.planets %}
+                    <div class="platoon-planet-block">
+                        <h3 class="platoon-planet-name">{{ p.name }}</h3>
+                        {% if p.unresolved %}
+                            <p class="error">
+                                Название планеты не распознано — нет данных по взводам. Добавьте
+                                «{{ p.name }}» в _PLANET_NAME_TO_RU в web/routes/guild_dashboard.py.
+                            </p>
+                        {% else %}
+                            <div class="platoon-ops-scroll">
+                                <div class="platoon-ops-grid">
+                                    {% for op in p.operations %}
+                                        <div class="platoon-op-card">
+                                            <h4>Операция {{ op.number }}</h4>
+                                            {% if op.units %}
+                                                <ul>
+                                                    {% for unit in op.units %}
+                                                        <li>{{ unit }}</li>
+                                                    {% endfor %}
+                                                </ul>
+                                            {% else %}
+                                                <p class="empty-state">Нет данных по этой операции.</p>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
                             </div>
-                        {% endfor %}
+                        {% endif %}
                     </div>
-                {% endif %}
+                {% endfor %}
             </div>
         {% endfor %}
     {% endif %}

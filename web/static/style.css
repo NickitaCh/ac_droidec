@@ -529,9 +529,14 @@ table.data .dc-level-col {
     background: var(--surface);
 }
 
-/* ---- /tb/platoons: выбор планеты выпадашкой (по образцу HotUtils — там тоже
-   одна открытая планета за раз, а не длинная стена из всех сразу), сама планета —
-   .panel с сеткой карточек-операций внутри. Переключение — JS ниже (dashboard.js). ---- */
+/* ---- /tb/platoons: выбор ЭТАПА выпадашкой (по образцу HotUtils), одна открытая
+   .panel на этап за раз (переключение — JS в dashboard.js) — внутри неё все планеты
+   этого этапа разом (2-4: тёмная/смешанная/светлая ветка + иногда бонус-зона), не
+   листаем планета-за-планетой, см. память project_tb_platoon_unit_lists_rote_2026-08-27
+   про редизайн 2026-08-28. Каждая планета — .platoon-planet-block с 6 карточками
+   операций строго В ОДНУ СТРОКУ (repeat(6, ...), не auto-fill — тот заворачивал 6-ю
+   карточку на новую строку уже на 1440px) — на действительно узком окне строка
+   скроллится горизонтально (.platoon-ops-scroll) вместо переноса. ---- */
 .platoon-planet-picker {
     display: flex;
     align-items: center;
@@ -545,9 +550,13 @@ table.data .dc-level-col {
     font-size: 1.05em;
     padding: 0.6em 0.9em;
 }
+.platoon-planet-block { margin-bottom: 1.75em; }
+.platoon-planet-block:last-child { margin-bottom: 0; }
+.platoon-planet-name { margin: 0 0 0.7em; font-size: 1.15em; }
+.platoon-ops-scroll { overflow-x: auto; padding-bottom: 0.25em; }
 .platoon-ops-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15em, 1fr));
+    grid-template-columns: repeat(6, minmax(10em, 1fr));
     gap: 1em;
 }
 .platoon-op-card {
@@ -555,8 +564,9 @@ table.data .dc-level-col {
     border-radius: 10px;
     background: var(--page);
     padding: 1em 1.1em;
+    min-width: 0;
 }
-.platoon-op-card h3 { margin: 0 0 0.6em; font-size: 1em; }
+.platoon-op-card h4 { margin: 0 0 0.6em; font-size: 0.95em; color: var(--fg-secondary); }
 .platoon-op-card ul { margin: 0; padding-left: 1.2em; }
 .platoon-op-card li { margin-bottom: 0.3em; }
 

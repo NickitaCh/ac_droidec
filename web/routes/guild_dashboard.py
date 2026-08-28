@@ -353,33 +353,42 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     guild_id = user["guild_id"]
     entries, error = await _fetch_active_plan_planets(guild_id)
 
-    # Одна планета может стоять на нескольких этапах подряд (не выбрали все звёзды) —
-    # схлопываем в порядке первого появления, показывая все номера этапов рядом.
-    planets = []
-    seen = {}
+    # Группируем по ЭТАПУ (round), не по планете — по прямому запросу пользователя
+    # 2026-08-28 (страница раньше листала одну планету за раз через выпадашку, из-за
+    # чего было не видно все планеты конкретного этапа сразу). Один этап реально
+    # содержит 2-4 планеты одновременно (тёмная/смешанная/светлая ветка + иногда ещё и
+    # бонус-зона Зеффо/Мандалор — см. TB_PLANET_CONFLICT в cogs/guild_events.py), и
+    # именно это нужно видеть разом, а не листать планета-за-планетой. Планета,
+    # стоящая на нескольких этапах подряд (гильдия не выбрала все звёзды за этап),
+    # теперь просто попадает в блок каждого из этих этапов отдельно — дублирование
+    # разумно: на разных этапах это всё ещё "то же самое, что нужно фармить сейчас".
+    by_round: dict[int, list[dict]] = {}
+    seen_in_round = set()
     for e in entries:
-        key = e["planet"] or f"raw:{e['raw']}"
-        if key not in seen:
-            seen[key] = {"name": e["planet"], "raw": e["raw"], "rounds": []}
-            planets.append(seen[key])
-        seen[key]["rounds"].append(e["round"])
+        key = (e["round"], e["planet"] or f"raw:{e['raw']}")
+        if key in seen_in_round:
+            continue
+        seen_in_round.add(key)
+        by_round.setdefault(e["round"], []).append(e)
 
-    sections = []
-    for p in planets:
-        operations = []
-        for operation in range(1, 7):
-            units = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((p["name"], operation)) if p["name"] else None
-            operations.append({"number": operation, "units": units})
-        sections.append({
-            "name": p["name"] or p["raw"],
-            "unresolved": p["name"] is None,
-            "rounds": p["rounds"],
-            "operations": operations,
-        })
+    rounds = []
+    for round_num in sorted(by_round):
+        planet_blocks = []
+        for e in by_round[round_num]:
+            operations = []
+            for operation in range(1, 7):
+                units = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
+                operations.append({"number": operation, "units": units})
+            planet_blocks.append({
+                "name": e["planet"] or e["raw"],
+                "unresolved": e["planet"] is None,
+                "operations": operations,
+            })
+        rounds.append({"number": round_num, "planets": planet_blocks})
 
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
-        "sections": sections,
+        "rounds": rounds,
         "error": error,
     })
 
