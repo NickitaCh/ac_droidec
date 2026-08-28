@@ -2,6 +2,24 @@
 
 from fastapi import Request, HTTPException
 
+import guild_resolver
+
+
+def _refresh_access(user: dict) -> dict:
+    """Перерезолвливает tier/guild_id/is_super_admin живьём на каждый запрос,
+    а не доверяет значению, записанному в сессию при логине.
+
+    Раньше это было главной дырой в инциденте "кикнутый офицер ещё какое-то
+    время мог пользоваться веб-панелью": tier клался в request.session один
+    раз при OAuth-логине (web/auth.py) и потом просто читался как есть —
+    SessionMiddleware (web/app.py) создан без max_age, то есть у Starlette
+    это дефолтные 14 дней сессии, всё это время доступ не перепроверялся
+    вообще. Теперь единственное окно устаревания — это интервал синка
+    ростера (ViolationsCog.update_roster_cache, см. cogs/violations.py),
+    а не срок жизни сессии."""
+    fresh = guild_resolver.resolve_access(user["discord_id"])
+    return {**user, "guild_id": fresh["guild_id"], "tier": fresh["tier"], "is_super_admin": fresh["is_super_admin"]}
+
 
 def _apply_guild_switch(request: Request, user: dict) -> dict:
     """Даёт супер-админам временно "переключиться" на дашборд другой гильдии
@@ -31,7 +49,7 @@ def get_current_user(request: Request) -> dict:
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
-    return _apply_guild_switch(request, user)
+    return _apply_guild_switch(request, _refresh_access(user))
 
 
 def require_officer_access(request: Request) -> dict:

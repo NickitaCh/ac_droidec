@@ -1095,7 +1095,7 @@ def sync_guild_roster(guild_id: int, roster_rows):
     guild_resolver.resolve_access для прав по игровому рангу. comlink_player_id — сырой Comlink
     playerId, хранится отдельно от ally_code, чтобы при следующем синке можно было опознать
     того же игрока и подставить его последние известные имя/код союзника, если Comlink в этот
-    раз не отдал allyCode/playerName (см. get_roster_by_player_id). Используется часовым
+    раз не отдал allyCode/playerName (см. get_roster_by_player_id). Используется 15-минутным
     рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()

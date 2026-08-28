@@ -103,7 +103,14 @@ class ViolationsCog(commands.Cog):
     # в своём try/except (сбой Comlink для одной гильдии не должен срывать
     # обновление остальных). guild_roster_cache (легаси, без guild_id) держим
     # зеркалом гильдии id=1 — на неё пока завязаны не переведённые cogs.
-    @tasks.loop(hours=1)
+    #
+    # Интервал (штатный, без сетевых сбоев) был раньше 1 час — сокращён до 15
+    # минут после инцидента, когда кикнутый из гильдии офицер до часа
+    # оставался с офицерским доступом (member_level в user_mapping, на
+    # который опирается guild_resolver.resolve_access, не успевал
+    # обновиться). См. также web/deps.py::_refresh_access — вторая половина
+    # того же фикса, убирающая доверие к закэшированному в веб-сессии tier.
+    @tasks.loop(minutes=15)
     async def update_roster_cache(self):
         guild_configs = database.get_all_guild_configs()
         if not guild_configs:
@@ -219,9 +226,9 @@ class ViolationsCog(commands.Cog):
                 name="Следит за игроками AC [кеш]"
             ))
         else:
-            if self.update_roster_cache.hours != 1:
-                print("⚙️ Сеть восстановлена для всех гильдий. Устанавливаем штатный интервал обновления: 1 час")
-                self.update_roster_cache.change_interval(hours=1, minutes=0)
+            if self.update_roster_cache.minutes != 15:
+                print("⚙️ Сеть восстановлена для всех гильдий. Устанавливаем штатный интервал обновления: 15 минут")
+                self.update_roster_cache.change_interval(hours=0, minutes=15)
             if any_success:
                 await self.bot.change_presence(activity=disnake.Activity(
                     type=disnake.ActivityType.watching,
