@@ -624,7 +624,7 @@ class StatRequirementsCog(commands.Cog):
     # ------------------ /статы_требования ------------------
     # Проверка прав больше не висит на группе целиком: "список"/"плейты" открыты
     # уровню member (main.py::MEMBER_ACCESSIBLE_COMMANDS), а остальные сабкоманды
-    # (создать/добавить/редактировать/переименовать/удалить_плейт) и так требуют
+    # (создать/добавить/редактировать/переименовать/удалить) и так требуют
     # officer через глобальный гейт main.py::_check_access по умолчанию.
     @commands.slash_command(name="статы_требования", description="Управление требованиями к статам персонажей по плейтам")
     async def stat_req(self, inter: disnake.ApplicationCommandInteraction):
@@ -796,15 +796,36 @@ class StatRequirementsCog(commands.Cog):
             return
         await inter.response.send_message(f"✅ Плейт «{плейт}» переименован в «{новое_имя}».", ephemeral=True)
 
-    @stat_req.sub_command(name="удалить_плейт", description="Удалить плейт целиком со всеми его требованиями")
+    @stat_req.sub_command(name="удалить", description="Удалить плейт целиком, либо одного персонажа из плейта (если указан)")
     async def stat_req_delete_plate(
         self,
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт для удаления", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — удаляется весь плейт)", autocomplete=autocomplete_stat_character),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
+            return
+
+        if персонаж:
+            base_id = _parse_bracket_id(персонаж)
+            char_name = _unit_display_name(base_id)
+            count = database.count_stat_requirements_by_character(плейт, base_id, guild_id=guild_id)
+            if count == 0:
+                await inter.response.send_message(f"❌ У персонажа «{char_name}» нет требований в плейте «{плейт}».", ephemeral=True)
+                return
+
+            if not подтвердить:
+                await inter.response.send_message(
+                    f"⚠️ Будет удалён персонаж «{char_name}» из плейта «{плейт}» вместе с его требованиями: {count}. "
+                    f"Повторите команду с подтвердить=True, чтобы подтвердить удаление.",
+                    ephemeral=True,
+                )
+                return
+
+            deleted = database.delete_stat_requirements_by_character(плейт, base_id, guild_id=guild_id)
+            await inter.response.send_message(f"🗑️ Персонаж «{char_name}» удалён из плейта «{плейт}» вместе с требованиями: {deleted}.", ephemeral=True)
             return
 
         count = database.count_stat_requirements_by_plate(плейт, guild_id=guild_id)

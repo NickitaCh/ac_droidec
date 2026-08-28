@@ -2326,6 +2326,35 @@ def count_stat_requirements_by_plate(plate_name: str, guild_id: int = 1) -> int:
     return count
 
 
+def count_stat_requirements_by_character(plate_name: str, character_key: str, guild_id: int = 1) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute(
+        "SELECT COUNT(*) FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
+        (guild_id, plate_name, character_key),
+    )
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def delete_stat_requirements_by_character(plate_name: str, character_key: str, guild_id: int = 1) -> int:
+    """Удаляет все требования одного персонажа в плейте (сам плейт остаётся, даже если
+    после этого в нём не остаётся ни одного персонажа), возвращает количество удалённых."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute(
+        "DELETE FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
+        (guild_id, plate_name, character_key),
+    )
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     """Удаляет плейт и все его требования (в пределах гильдии), возвращает количество удалённых требований."""
     conn = sqlite3.connect(DB_NAME)
