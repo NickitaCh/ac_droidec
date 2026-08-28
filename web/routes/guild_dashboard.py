@@ -389,6 +389,13 @@ async def _fetch_plan_planets(plan: dict) -> tuple[list[dict], str | None]:
     return entries, None
 
 
+# Потолок на число кандидатов, показываемых под одним слотом — без него страница
+# распухала до десятков тысяч <form> разом (частый юнит донатят треть гильдии), из-за
+# чего переключение этапа/раскрытие слота ощутимо тормозило (жалоба пользователя
+# 2026-08-28). Топ-N по релику — снизу всё равно никто не выбирает донора №25.
+PLATOON_CANDIDATES_LIMIT = 20
+
+
 @router.get("/tb/platoons", response_class=HTMLResponse)
 async def tb_platoons(request: Request, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]
@@ -416,18 +423,41 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         seen_in_round.add(key)
         by_round.setdefault(e["round"], []).append(e)
 
-    # Все уникальные названия юнитов на странице разом -> base_id -> живые владельцы в
+    # Выбор этапа теперь СЕРВЕРНЫЙ (?round=), не клиентский тумблер видимости — на всех
+    # 6 этапах разом кандидаты на слоты давали десятки тысяч элементов в DOM разом
+    # (жалоба "очень долго меняется этап" 2026-08-28); считаем и рендерим только один
+    # выбранный этап за раз, остальные — просто пункты в выпадашке ниже.
+    round_numbers = sorted(by_round)
+    try:
+        selected_round_num = int(request.query_params.get("round", ""))
+    except ValueError:
+        selected_round_num = None
+    if selected_round_num not in round_numbers:
+        selected_round_num = round_numbers[0] if round_numbers else None
+
+    round_options = []
+    for n in round_numbers:
+        names = [
+            ("⚠ " if e["planet"] is None else "") + (e["planet"] or e["raw"])
+            for e in by_round[n]
+        ]
+        round_options.append({"number": n, "label": f"Этап {n} — " + ", ".join(names)})
+
+    selected_entries = by_round.get(selected_round_num, []) if selected_round_num is not None else []
+    min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(selected_round_num) if selected_round_num else None
+    min_relic_label = f"R{min_relic}+" if min_relic is not None else None
+
+    # Уникальные названия юнитов ТОЛЬКО выбранного этапа -> base_id -> живые владельцы в
     # гильдии (один батч-запрос вместо N на каждый слот, см. коммент над
     # get_player_unit_owners_bulk в database.py).
-    all_unit_names = {
+    unit_names_this_round = {
         name
-        for planets in by_round.values()
-        for e in planets
+        for e in selected_entries
         if e["planet"]
         for operation in range(1, 7)
         for name in (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) or [])
     }
-    name_to_base_id = database.resolve_unit_display_names(list(all_unit_names)) if all_unit_names else {}
+    name_to_base_id = database.resolve_unit_display_names(list(unit_names_this_round)) if unit_names_this_round else {}
     mappings = database.get_all_user_mappings(guild_id)
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
     player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
@@ -442,40 +472,59 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         })
     for owners in owners_by_base_id.values():
         owners.sort(key=lambda o: -o["relic"])
+        del owners[PLATOON_CANDIDATES_LIMIT:]
 
     assignments = database.get_tb_platoon_assignments(guild_id, plan["id"]) if plan else {}
 
-    rounds = []
-    for round_num in sorted(by_round):
-        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
-        planet_blocks = []
-        for planet_idx, e in enumerate(by_round[round_num]):
-            operations = []
-            for operation in range(1, 7):
-                unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
-                slots = []
-                for slot_index, unit_name in enumerate(unit_names or []):
-                    base_id = name_to_base_id.get(unit_name)
-                    owners = owners_by_base_id.get(base_id, []) if base_id else []
-                    assignment = assignments.get((round_num, e["planet"], operation, slot_index))
-                    slots.append({
-                        "index": slot_index,
-                        "unit": unit_name,
-                        "owners": [
-                            {**o, "meets_min": min_relic is not None and o["relic"] >= min_relic}
-                            for o in owners
-                        ],
-                        "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
-                        "assigned_ally_code": assignment["ally_code"] if assignment else None,
-                        "anchor": f"slot-{round_num}-{planet_idx}-{operation}-{slot_index}",
+    # В рамках ОДНОГО этапа игрок не может задонатить одного и того же юнита дважды —
+    # прямой запрос пользователя 2026-08-28 ("если 0-0-0 стоит на Мустафаре на 1 этапе
+    # на 3 операции, второй раз его на 1 этапе поставить нельзя"). Считаем по всем
+    # назначениям выбранного этапа разом: (ally_code, base_id) -> где уже стоит.
+    used_pairs_this_round: dict[tuple[str, str], tuple[str, int, int]] = {}
+    for (a_round, a_planet, a_operation, a_slot_index), assignment in assignments.items():
+        if a_round != selected_round_num:
+            continue
+        unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((a_planet, a_operation)) or []
+        if a_slot_index >= len(unit_list):
+            continue
+        a_base_id = name_to_base_id.get(unit_list[a_slot_index])
+        if not a_base_id:
+            continue
+        used_pairs_this_round[(assignment["ally_code"], a_base_id)] = (a_planet, a_operation, a_slot_index)
+
+    planet_blocks = []
+    for planet_idx, e in enumerate(selected_entries):
+        operations = []
+        for operation in range(1, 7):
+            unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
+            slots = []
+            for slot_index, unit_name in enumerate(unit_names or []):
+                base_id = name_to_base_id.get(unit_name)
+                owners = owners_by_base_id.get(base_id, []) if base_id else []
+                assignment = assignments.get((selected_round_num, e["planet"], operation, slot_index))
+                here = (e["planet"], operation, slot_index)
+                slot_owners = []
+                for o in owners:
+                    used_at = used_pairs_this_round.get((o["ally_code"], base_id))
+                    slot_owners.append({
+                        **o,
+                        "meets_min": min_relic is not None and o["relic"] >= min_relic,
+                        "used_elsewhere": used_at is not None and used_at != here,
                     })
-                operations.append({"number": operation, "slots": slots})
-            planet_blocks.append({
-                "name": e["planet"] or e["raw"],
-                "unresolved": e["planet"] is None,
-                "operations": operations,
-            })
-        rounds.append({"number": round_num, "planets": planet_blocks, "min_relic": min_relic})
+                slots.append({
+                    "index": slot_index,
+                    "unit": unit_name,
+                    "owners": slot_owners,
+                    "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
+                    "assigned_ally_code": assignment["ally_code"] if assignment else None,
+                    "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
+                })
+            operations.append({"number": operation, "slots": slots})
+        planet_blocks.append({
+            "name": e["planet"] or e["raw"],
+            "unresolved": e["planet"] is None,
+            "operations": operations,
+        })
 
     saved_plans = database.get_tb_saved_plans(guild_id)
     guild_cfg = database.get_guild_config(guild_id) or {}
@@ -483,7 +532,10 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
 
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
-        "rounds": rounds,
+        "round_options": round_options,
+        "selected_round_num": selected_round_num,
+        "planets": planet_blocks,
+        "min_relic_label": min_relic_label,
         "error": error,
         "plan": plan,
         "saved_plans": saved_plans,
@@ -511,7 +563,7 @@ async def tb_platoons_assign(
         assigned_by=f"web:{user['discord_id']}",
     )
     suffix = f"#{anchor}" if anchor else ""
-    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}{suffix}", status_code=303)
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}{suffix}", status_code=303)
 
 
 @router.post("/tb/platoons/unassign", response_class=HTMLResponse)
@@ -530,7 +582,7 @@ async def tb_platoons_unassign(
         return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
     database.clear_tb_platoon_assignment(guild_id, plan_id, round_num, planet, operation, slot_index)
     suffix = f"#{anchor}" if anchor else ""
-    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}{suffix}", status_code=303)
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}{suffix}", status_code=303)
 
 
 # Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так

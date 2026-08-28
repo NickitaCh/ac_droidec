@@ -529,27 +529,17 @@ table.data .dc-level-col {
     background: var(--surface);
 }
 
-/* ---- /tb/platoons: выбор ЭТАПА выпадашкой (по образцу HotUtils), одна открытая
-   .panel на этап за раз (переключение — JS в dashboard.js) — внутри неё все планеты
-   этого этапа разом (2-4: тёмная/смешанная/светлая ветка + иногда бонус-зона), не
-   листаем планета-за-планетой, см. память project_tb_platoon_unit_lists_rote_2026-08-27
-   про редизайн 2026-08-28. Каждая планета — .platoon-planet-block с 6 карточками
-   операций строго В ОДНУ СТРОКУ (repeat(6, ...), не auto-fill — тот заворачивал 6-ю
-   карточку на новую строку уже на 1440px) — на действительно узком окне строка
+/* ---- /tb/platoons: выбор ЭТАПА выпадашкой (по образцу HotUtils) — СЕРВЕРНЫЙ (?round=),
+   не JS-тумблер видимости (был до 2026-08-28: все этапы разом рендерились в DOM и просто
+   прятались через hidden — с кандидатами на слоты это давало десятки тысяч элементов
+   разом и ощутимо тормозило переключение, жалоба пользователя). Рендерится только ВЫБРАННЫЙ
+   этап, внутри — все его планеты разом (2-4: тёмная/смешанная/светлая ветка + иногда
+   бонус-зона), не листаем планета-за-планетой, см. память
+   project_tb_platoon_unit_lists_rote_2026-08-27. Каждая планета — .platoon-planet-block с
+   6 карточками операций строго В ОДНУ СТРОКУ (repeat(6, ...), не auto-fill — тот заворачивал
+   6-ю карточку на новую строку уже на 1440px) — на действительно узком окне строка
    скроллится горизонтально (.platoon-ops-scroll) вместо переноса. ---- */
-.platoon-planet-picker {
-    display: flex;
-    align-items: center;
-    gap: 0.75em;
-    margin-bottom: 1.5em;
-    flex-wrap: wrap;
-}
-.platoon-planet-picker label { font-weight: 600; }
-.platoon-planet-picker select {
-    min-width: 22em;
-    font-size: 1.05em;
-    padding: 0.6em 0.9em;
-}
+.platoon-switchers { display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; margin-bottom: 1em; }
 .platoon-planet-block { margin-bottom: 1.75em; }
 .platoon-planet-block:last-child { margin-bottom: 0; }
 .platoon-planet-name { margin: 0 0 0.7em; font-size: 1.15em; }
@@ -575,14 +565,31 @@ table.data .dc-level-col {
 .platoon-plan-switch { display: inline-flex; align-items: center; gap: 0.6em; margin: 0 0 1em; flex-wrap: wrap; }
 .platoon-plan-switch select { padding: 0.4em 0.6em; font-size: 0.9em; border-radius: 6px; min-width: 16em; }
 .platoon-slot-list { list-style: none; padding-left: 0; }
+.platoon-slot { margin-bottom: 0.3em; }
+/* Раньше слот выглядел как обычная строка текста — непонятно было, что на него можно
+   нажать (жалоба пользователя 2026-08-28). Теперь это явный "чип": рамка, фон, стрелка,
+   меняющая направление по [open], hover-подсветка — читается как кликабельный элемент. */
 .platoon-slot summary {
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 0.4em;
     flex-wrap: wrap;
+    padding: 0.3em 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
 }
+.platoon-slot summary:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .platoon-slot summary::-webkit-details-marker { display: none; }
+.platoon-slot summary::before {
+    content: "▸";
+    color: var(--fg-muted);
+    font-size: 0.8em;
+    flex-shrink: 0;
+}
+.platoon-slot details[open] > summary::before { content: "▾"; }
+.platoon-slot-unit { text-decoration: underline dotted; text-underline-offset: 3px; }
 .platoon-slot-candidates { margin-top: 0.5em; padding-left: 0.8em; border-left: 2px solid var(--border); }
 .platoon-slot-candidates form { display: inline; }
 .platoon-candidate-list { list-style: none; padding-left: 0; }

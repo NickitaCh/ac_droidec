@@ -254,19 +254,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Выбор этапа на /tb/platoons (было — выбор планеты, редизайн 2026-08-28 сгруппировал
-    // по этапу вместо планеты) — выпадашка [data-planet-picker] показывает ровно одну
-    // панель [data-planet-panel] с id, совпадающим со значением опции, остальные прячет
-    // через native hidden (панели изначально скрыты через hidden в разметке, кроме
-    // первой — см. tb_platoons.html). Атрибуты/имена в разметке не переименовывались —
-    // логика идентична, поменялось только что именно группируется.
-    document.querySelectorAll("[data-planet-picker]").forEach((select) => {
-        const panels = document.querySelectorAll("[data-planet-panel]");
-        select.addEventListener("change", () => {
-            panels.forEach((panel) => { panel.hidden = panel.id !== select.value; });
-        });
-    });
-
     // Поповеры переименования/редактирования (details.row-actions) и выпадающие
     // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.
