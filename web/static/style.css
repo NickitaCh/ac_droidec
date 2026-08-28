@@ -546,7 +546,7 @@ table.data .dc-level-col {
 .platoon-ops-scroll { overflow-x: auto; padding-bottom: 0.25em; }
 .platoon-ops-grid {
     display: grid;
-    grid-template-columns: repeat(6, minmax(10em, 1fr));
+    grid-template-columns: repeat(6, minmax(12.5em, 1fr));
     gap: 1em;
 }
 .platoon-op-card {
@@ -568,17 +568,27 @@ table.data .dc-level-col {
 .platoon-slot { margin-bottom: 0.3em; }
 /* Раньше слот выглядел как обычная строка текста — непонятно было, что на него можно
    нажать (жалоба пользователя 2026-08-28). Теперь это явный "чип": рамка, фон, стрелка,
-   меняющая направление по [open], hover-подсветка — читается как кликабельный элемент. */
+   меняющая направление по [open], hover-подсветка — читается как кликабельный элемент.
+   Раньше был ещё и flex-row (стрелка + имя в одну строку) — при переносе длинных имён
+   ("Geonosian Spy's Starfighter") на 2-3 строки текст оставался прижат к стрелке слева,
+   а короткие ("BT-1") лепились рядом с ней же — вперемешку выглядело неровно (жалоба
+   пользователя 2026-08-28 "какие-то переносятся, какие-то нет"). Теперь колонка
+   (flex-direction: column) — стрелка отдельной строкой сверху, имя и бейдж центрированы
+   под ней и центрируются построчно сами при переносе (text-align на .platoon-slot-unit) —
+   не зависит от длины имени. Плюс уже колонки .platoon-ops-grid (12.5em) и чуть меньший
+   шрифт — реже переносится вообще. */
 .platoon-slot summary {
     cursor: pointer;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.4em;
-    flex-wrap: wrap;
-    padding: 0.3em 0.5em;
+    gap: 0.2em;
+    padding: 0.4em 0.5em;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
+    font-size: 0.9em;
+    text-align: center;
 }
 .platoon-slot summary:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .platoon-slot summary::-webkit-details-marker { display: none; }
@@ -586,7 +596,6 @@ table.data .dc-level-col {
     content: "▸";
     color: var(--fg-muted);
     font-size: 0.8em;
-    flex-shrink: 0;
 }
 .platoon-slot details[open] > summary::before { content: "▾"; }
 .platoon-slot-unit { text-decoration: underline dotted; text-underline-offset: 3px; }
