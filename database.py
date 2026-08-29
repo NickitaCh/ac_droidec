@@ -1831,8 +1831,31 @@ def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
 # сопоставлением этап->планета (тред плана уже опубликован и не меняется);
 # переключение вида на другой сохранённый план должно показывать его
 # СОБСТВЕННЫЕ назначения, а не унаследованные от активного.
+#
+# Слот НЕ привязан к номеру этапа (round_num) — по прямому запросу пользователя
+# 2026-08-29: если планета не зачищена целиком и висит 2+ этапа подряд (тот же физический
+# донат-слот в игре, TB_PLANET_CONFLICT/tb_platoon_data.py об этом уже предупреждали), это
+# ОДИН и тот же слот на всех этих этапах, а не разные. До этой правки round_num входил в
+# UNIQUE-ключ — донат, вписанный при просмотре этапа 3, был не виден на этапе 4 для той же
+# планеты (слот выглядел пустым), а фильтр "не более N юнитов на планету от игрока" в
+# принципе не мог посчитать верно (переносящаяся планета считалась как две разных). round_num
+# в схеме остаётся, но теперь это чисто информационное поле "на каком этапе донат впервые
+# вписан" — на identity слота не влияет (не входит в UNIQUE, не обновляется при повторном
+# ON CONFLICT). См. get_tb_platoon_assignments/set_/clear_ — все три больше не принимают/не
+# возвращают round_num как часть ключа слота.
 # =====================================================================
 def _ensure_tb_platoon_assignments_table(cursor):
+    # Миграция со старой схемы (UNIQUE включал round_num) — переносим существующие
+    # назначения: группируем по (guild_id, plan_id, planet, operation, slot_index), если
+    # один и тот же слот успели заполнить под двумя разными round_num (до этой правки такое
+    # могло случиться на планете, растянутой на 2+ этапа) — берём запись с максимальным
+    # assigned_at как самую свежую, round_num — минимальный среди дублей ("впервые вписан").
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tb_platoon_assignments'")
+    row = cursor.fetchone()
+    needs_migration = row is not None and "UNIQUE(guild_id, plan_id, round_num, planet, operation, slot_index)" in (row[0] or "")
+    if needs_migration:
+        cursor.execute("ALTER TABLE tb_platoon_assignments RENAME TO tb_platoon_assignments_old_round_scoped")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tb_platoon_assignments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1845,15 +1868,33 @@ def _ensure_tb_platoon_assignments_table(cursor):
             ally_code TEXT NOT NULL,
             assigned_by TEXT,
             assigned_at TEXT NOT NULL,
-            UNIQUE(guild_id, plan_id, round_num, planet, operation, slot_index)
+            UNIQUE(guild_id, plan_id, planet, operation, slot_index)
         )
     """)
+
+    if needs_migration:
+        cursor.execute("""
+            INSERT INTO tb_platoon_assignments
+                (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by, assigned_at)
+            SELECT o.guild_id, o.plan_id, MIN(o.round_num), o.planet, o.operation, o.slot_index, o.ally_code, o.assigned_by, o.assigned_at
+            FROM tb_platoon_assignments_old_round_scoped o
+            WHERE o.assigned_at = (
+                SELECT MAX(o2.assigned_at) FROM tb_platoon_assignments_old_round_scoped o2
+                WHERE o2.guild_id = o.guild_id AND o2.plan_id = o.plan_id AND o2.planet = o.planet
+                  AND o2.operation = o.operation AND o2.slot_index = o.slot_index
+            )
+            GROUP BY o.guild_id, o.plan_id, o.planet, o.operation, o.slot_index
+        """)
+        cursor.execute("DROP TABLE tb_platoon_assignments_old_round_scoped")
 
 
 def set_tb_platoon_assignment(
     guild_id: int, plan_id: int, round_num: int, planet: str, operation: int, slot_index: int,
     ally_code: str, assigned_by: str = None,
 ) -> None:
+    """round_num — этап, на котором донат ВПЕРВЫЕ вписан; чисто информационное поле (см.
+    комментарий над _ensure_tb_platoon_assignments_table) — при повторном назначении на тот
+    же слот (переназначение другого игрока) round_num НЕ перезаписывается."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_platoon_assignments_table(cursor)
@@ -1861,7 +1902,7 @@ def set_tb_platoon_assignment(
         INSERT INTO tb_platoon_assignments
             (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by, assigned_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(guild_id, plan_id, round_num, planet, operation, slot_index)
+        ON CONFLICT(guild_id, plan_id, planet, operation, slot_index)
         DO UPDATE SET ally_code = excluded.ally_code, assigned_by = excluded.assigned_by, assigned_at = excluded.assigned_at
     """, (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by))
     conn.commit()
@@ -1869,35 +1910,129 @@ def set_tb_platoon_assignment(
 
 
 def clear_tb_platoon_assignment(
-    guild_id: int, plan_id: int, round_num: int, planet: str, operation: int, slot_index: int,
+    guild_id: int, plan_id: int, planet: str, operation: int, slot_index: int,
 ) -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_platoon_assignments_table(cursor)
     cursor.execute("""
         DELETE FROM tb_platoon_assignments
-        WHERE guild_id = ? AND plan_id = ? AND round_num = ? AND planet = ? AND operation = ? AND slot_index = ?
-    """, (guild_id, plan_id, round_num, planet, operation, slot_index))
+        WHERE guild_id = ? AND plan_id = ? AND planet = ? AND operation = ? AND slot_index = ?
+    """, (guild_id, plan_id, planet, operation, slot_index))
     conn.commit()
     conn.close()
 
 
 def get_tb_platoon_assignments(guild_id: int, plan_id: int) -> dict:
-    """(round_num, planet, operation, slot_index) -> {"ally_code", "assigned_by"} — все
-    назначения конкретного плана разом, чтобы не дёргать БД по одному слоту на странице."""
+    """(planet, operation, slot_index) -> {"ally_code", "assigned_by", "round_num"} — все
+    назначения плана разом (round_num — только для отображения "впервые вписан на этапе N",
+    не часть идентичности слота, см. комментарий над _ensure_tb_platoon_assignments_table)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_platoon_assignments_table(cursor)
     cursor.execute("""
-        SELECT round_num, planet, operation, slot_index, ally_code, assigned_by
+        SELECT planet, operation, slot_index, ally_code, assigned_by, round_num
         FROM tb_platoon_assignments WHERE guild_id = ? AND plan_id = ?
     """, (guild_id, plan_id))
     rows = cursor.fetchall()
     conn.close()
     return {
-        (round_num, planet, operation, slot_index): {"ally_code": ally_code, "assigned_by": assigned_by}
-        for round_num, planet, operation, slot_index, ally_code, assigned_by in rows
+        (planet, operation, slot_index): {"ally_code": ally_code, "assigned_by": assigned_by, "round_num": round_num}
+        for planet, operation, slot_index, ally_code, assigned_by, round_num in rows
     }
+
+
+# =====================================================================
+# "ДЕРЖИМ" ФЛАГ: офицер намеренно не добивает звёзды на планете в конкретном
+# КАЛЕНДАРНОМ этапе просмотра плана (см. web/routes/guild_dashboard.py::tb_platoons,
+# tb_platoon_autofill.py) — автозаполнение не должно закрывать 100% ни одной операции
+# такой планеты. В отличие от tb_platoon_assignments (см. комментарий выше — там
+# round_num вынесен из идентичности слота ради переноса планеты через этапы), здесь
+# round_num ОСТАЁТСЯ частью ключа: "держим" — решение конкретно для одного этапа
+# просмотра, та же планета вполне может быть "держим" на этапе 3 и "добиваем" на этапе 4.
+# =====================================================================
+def _ensure_tb_platoon_hold_flags_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_platoon_hold_flags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            round_num INTEGER NOT NULL,
+            planet TEXT NOT NULL,
+            held INTEGER NOT NULL,
+            set_by TEXT,
+            set_at TEXT NOT NULL,
+            UNIQUE(guild_id, plan_id, round_num, planet)
+        )
+    """)
+
+
+def set_tb_platoon_hold(guild_id: int, plan_id: int, round_num: int, planet: str, held: bool, set_by: str = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_hold_flags_table(cursor)
+    cursor.execute("""
+        INSERT INTO tb_platoon_hold_flags (guild_id, plan_id, round_num, planet, held, set_by, set_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id, plan_id, round_num, planet)
+        DO UPDATE SET held = excluded.held, set_by = excluded.set_by, set_at = excluded.set_at
+    """, (guild_id, plan_id, round_num, planet, int(held), set_by))
+    conn.commit()
+    conn.close()
+
+
+def get_tb_platoon_holds(guild_id: int, plan_id: int) -> dict:
+    """(round_num, planet) -> True, только для held=1 (планет, не отмеченных "держим",
+    в словаре просто нет — вызывающая сторона использует .get(..., False) по месту)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_hold_flags_table(cursor)
+    cursor.execute("""
+        SELECT round_num, planet, held FROM tb_platoon_hold_flags WHERE guild_id = ? AND plan_id = ?
+    """, (guild_id, plan_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return {(round_num, planet): True for round_num, planet, held in rows if held}
+
+
+# =====================================================================
+# ФИЛЬТРЫ АВТОЗАПОЛНЕНИЯ ВЗВОДОВ: сырой текст правил на языке из tb_platoon_filters.py,
+# один ряд на гильдию (не построчные CRUD-записи — веб-страница /tb/platoons/filters
+# сохраняет/перечитывает textarea целиком, разбор строк — в tb_platoon_filters.py::parse_rules,
+# не здесь). См. план "Автозаполнение взводов ТБ + фильтры" от 2026-08-29.
+# =====================================================================
+def _ensure_tb_platoon_filter_rules_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tb_platoon_filter_rules (
+            guild_id INTEGER PRIMARY KEY,
+            rules_text TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def get_tb_platoon_filter_rules(guild_id: int) -> str:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_filter_rules_table(cursor)
+    cursor.execute("SELECT rules_text FROM tb_platoon_filter_rules WHERE guild_id = ?", (guild_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+
+def set_tb_platoon_filter_rules(guild_id: int, rules_text: str, updated_by: str = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_filter_rules_table(cursor)
+    cursor.execute("""
+        INSERT INTO tb_platoon_filter_rules (guild_id, rules_text, updated_by, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id) DO UPDATE SET rules_text = excluded.rules_text, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+    """, (guild_id, rules_text, updated_by))
+    conn.commit()
+    conn.close()
 
 
 def get_user_mapping_by_name(name: str, guild_id: int = 1):

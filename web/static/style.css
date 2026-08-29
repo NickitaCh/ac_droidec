@@ -540,6 +540,11 @@ table.data .dc-level-col {
    6-ю карточку на новую строку уже на 1440px) — на действительно узком окне строка
    скроллится горизонтально (.platoon-ops-scroll) вместо переноса. ---- */
 .platoon-switchers { display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; margin-bottom: 1em; }
+.platoon-export-actions { display: flex; gap: 0.8em; flex-wrap: wrap; margin-bottom: 0.3em; }
+.platoon-export-hint { font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }
+.platoon-filters-syntax code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
+.platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
+.platoon-hold-toggle { font-size: 0.85em; }
 .platoon-planet-block { margin-bottom: 1.75em; }
 .platoon-planet-block:last-child { margin-bottom: 0; }
 .platoon-planet-name { margin: 0 0 0.7em; font-size: 1.15em; }

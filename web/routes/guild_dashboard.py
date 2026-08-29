@@ -1,19 +1,24 @@
 import asyncio
-import os
+import io
+import json
 import re
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
-import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 import database
 import stat_engine
+import tb_plan_reader
+import tb_platoon_autofill
 import tb_platoon_data
+import tb_platoon_engine
+import tb_platoon_filters
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data
 from web.deps import require_guild_access
@@ -260,32 +265,55 @@ async def tb_order_plans_save_manual(
 #
 # План хранит только discord thread_id (см. cogs/tb_order_image.py) — самого разбора
 # "какая планета на каком этапе" нигде в БД не остаётся, только опубликованные ботом
-# сообщения-блоки в этом треде ("## Восход Империи — N этап" + по кружку-эмодзи на
-# планету). Поэтому здесь эти сообщения перечитываются напрямую через Discord REST
-# (bot-token техника, уже проверенная в этом проекте — см. память
-# project_tw_counter_order_builder.md), а не через живой бот (веб-процесс его не поднимает).
+# сообщения-блоки в этом треде. Разбор (чтение через Discord REST + регексы + перевод
+# RU->EN названий планет) вынесен в tb_plan_reader.py 2026-08-29 — тот же разбор
+# понадобился tb_platoon_autofill.py, который дёргается и с веб-роута, и из
+# cogs/tb_order_image.py (см. план "Автозаполнение взводов ТБ + фильтры"), дублировать
+# его в третий раз не стали.
 # =====================================================================
 
-# Дублирует cogs/guild_events.py::TB_PLAN_HEADER_RE/TB_PLAN_CIRCLE_CHARS — тот же принцип
-# развязки веб-процесса от cogs/*, что и у TB_THREAD_LINK_RE выше в этом файле.
-_TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+)\s*этап", re.IGNORECASE)
-_TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪"
+_PLANET_NAME_TO_RU = tb_plan_reader.PLANET_NAME_TO_RU
+_RU_TO_PLANET_NAME = tb_plan_reader.RU_TO_PLANET_NAME
 
-# Русские названия планет, которые публикует cogs/tb_order_image.py::_translate_planet —
-# обратный словарь к его PLANET_RU, ключи которого — названия из tb_platoon_data.py.
-# Death Star/Hoth — стандартные локализации, НЕ подтверждены живым постом бота (эта
-# гильдия пока не доходила до 6 этапа в реальном прогрессе) — если появятся в реальном
-# ордере под другим названием, поправить здесь.
-_PLANET_NAME_TO_RU = {
-    "Mustafar": "мустафар", "Corellia": "кореллия", "Coruscant": "корусант",
-    "Geonosis": "джеонозис", "Felucia": "фелуция", "Bracca": "бракка",
-    "Dathomir": "датомир", "Tatooine": "татуин", "Kashyyyk": "кашиик",
-    "Haven-class Medical Station": "медстанция", "Kessel": "кессель", "Lothal": "лотал",
-    "Malachor": "малакор", "Vandor": "вандор", "Ring of Kafrene": "кольцо кафрены",
-    "Death Star": "звезда смерти", "Hoth": "хот", "Scarif": "скариф",
-    "Zeffo": "зеффо", "Mandalore": "мандалор",
+# Ветка (conflict-код в comlink zoneId, "power_zone_tb3_mixed_phaseNN_conflictNN_...") для
+# каждой планеты — дублирует cogs/guild_events.py::TB_PLANET_CONFLICT (тот же принцип
+# развязки веб-процесса от cogs/*, что и у _TB_PLAN_HEADER_RE выше), но ключами здесь взяты
+# английские названия из tb_platoon_data.py (а не русские из офицерских анонсов) — сразу
+# нужный вид для сборки zoneId в EchoBase/HotUtils-экспорте взводов (см. tb_platoons_export
+# ниже). Код фиксирован per-планета (не меняется от этапа к этапу) — подтверждено сверкой
+# сгенерированного zoneId с реальным экспортом HotUtils: 15 обычных планет — по файлу с
+# этапа 1 (Mustafar=conflict01, набор юнитов совпал с ROTE_PLATOON_SUGGESTIONS[("Mustafar",1)]
+# как мультимножество); Zeffo/Mandalore — по файлу-примеру с бонус-зонами (этап "4/M4/Z4",
+# 2026-08-28): их unitBaseId по каждому platoonDefinitionId сверены с ROTE_PLATOON_SUGGESTIONS
+# для обеих бонус-планет (Zeffo: conflict01_bonus, 47/72 юнитов совпало против 5/72 у
+# Mandalore на той же зоне; Mandalore: conflict03_bonus, 48/71 против 4/71 у Zeffo).
+# Death Star/Hoth/Scarif (появляются только на этапе 6, до которого гильдия ещё не доходила,
+# поэтому их вообще нет в TB_PLANET_CONFLICT) — сняты 2026-08-28 напрямую со страницы
+# https://echobase.app/platoonAssigner/tb/RiseOfTheEmpire/phase/6 для гильдии AbsoluteChaos
+# (guildId=718294) через DOM (table[cgid] на каждую зону несёт готовый zoneId), составы
+# донат-слотов дополнительно сверены с ROTE_PLATOON_SUGGESTIONS — совпадение сильное для всех
+# трёх. ВАЖНО: цифра conflict-кода здесь НЕ соответствует "интуитивной" тёмная/смешанная/
+# светлая теме планеты в порядке 01/02/03 — Scarif (светлая по геймплею) оказался на
+# conflict01, Death Star (тёмная) — на conflict02, Hoth (смешанная) — на conflict03; не
+# пытаться выводить conflict-код новых планет из темы юнитов, только снимать живьём.
+_PLANET_CONFLICT_CODE = {
+    "Mustafar": "01", "Geonosis": "01", "Dathomir": "01", "Haven-class Medical Station": "01", "Malachor": "01",
+    "Scarif": "01",
+    "Corellia": "02", "Felucia": "02", "Tatooine": "02", "Kessel": "02", "Vandor": "02",
+    "Death Star": "02",
+    "Coruscant": "03", "Bracca": "03", "Kashyyyk": "03", "Lothal": "03", "Ring of Kafrene": "03",
+    "Hoth": "03",
+    "Zeffo": "01", "Mandalore": "03",
 }
-_RU_TO_PLANET_NAME = {ru: en for en, ru in _PLANET_NAME_TO_RU.items()}
+_BONUS_PLANETS = {"Zeffo", "Mandalore"}
+
+# Неподтверждённая деталь, НЕ проблема на практике (см. пояснение пользователя 2026-08-28:
+# планету можно зачищать и расставлять на ней взводы практически на любом этапе): в файле-
+# примере "4/M4/Z4" бонус-зона Зеффо стояла на phase03, хотя весь файл был снят на этапе 4 (три
+# обычные зоны и Мандалор — на phase04). Наша сборка всё равно берёт цифру фазы как round_num
+# (номер анонсированного этапа) — точно верно для первого появления планеты на этапе (проверено
+# на этапе 1); расхождение выше не мешает реальному использованию, оставлено как техническая
+# заметка на случай, если импорт в HotUtils когда-нибудь всё же на этом споткнётся.
 
 
 def _resolve_viewed_plan(guild_id: int, plan_id_param: str | None) -> tuple[dict | None, str | None]:
@@ -312,81 +340,9 @@ def _resolve_viewed_plan(guild_id: int, plan_id_param: str | None) -> tuple[dict
     return plan, None
 
 
-async def _fetch_plan_planets(plan: dict) -> tuple[list[dict], str | None]:
-    """Возвращает (список {"planet": англ.название|None, "raw": как было в сообщении,
-    "round": N}, текст_ошибки|None). Планета=None — распознали блок этапа, но название
-    не нашлось в _RU_TO_PLANET_NAME (новая планета/опечатка — raw всё равно показываем)."""
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        return [], "DISCORD_TOKEN не настроен на веб-процессе — не могу прочитать тред плана."
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
-                headers={"Authorization": f"Bot {token}"},
-                params={"limit": 100},
-            )
-            resp.raise_for_status()
-            messages = resp.json()
-    except httpx.HTTPError as e:
-        return [], f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
-
-    # Discord отдаёт сообщения от новых к старым — для дублей (повторная публикация
-    # с "принудительно: True") берём первое встреченное (самое новое) на каждый этап.
-    by_round: dict[int, str] = {}
-    for msg in messages:
-        content = msg.get("content") or ""
-        header = _TB_PLAN_HEADER_RE.search(content)
-        if not header:
-            continue
-        round_num = int(header.group(1))
-        by_round.setdefault(round_num, content)
-
-    if not by_round:
-        return [], f"В треде плана «{plan['name']}» не нашлось ни одного блока этапа."
-
-    entries = []
-    for round_num in sorted(by_round):
-        lines = by_round[round_num].splitlines()
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(">"):
-                # Блоки бота (cogs/tb_order_image.py::_build_order_blocks) — цитата Discord
-                # ("> {emoji} **Планета**"); офицерские анонсы (guild_events.py) — без неё.
-                # Поддерживаем оба.
-                stripped = stripped[1:].strip()
-            if not stripped or stripped[0] not in _TB_PLAN_CIRCLE_CHARS:
-                continue
-            name_ru = stripped[1:].strip(" *#").lower()
-            planet = _RU_TO_PLANET_NAME.get(name_ru)
-            if planet is None:
-                # Неизвестное название — либо реально новая/ещё не занесённая в словарь
-                # планета, либо просто офицерская заметка, начинающаяся тем же цветным
-                # кружком, что и планеты (живой пример, этап 3 плана "43 базовых
-                # минимума": "⚪ **Текстовый гайд на мандалорское ОЗ:**" — офицер приложил
-                # объёмный гайд по модингу тем же маркером). Отличаем по следующей
-                # непустой строке: у настоящей планеты сразу за названием всегда идёт
-                # "**Цель:** N звёзд" (см. cogs/tb_order_image.py и все реальные анонсы) —
-                # у произвольной заметки там что угодно другое. Известные (сопоставленные
-                # по словарю) названия эта проверка не трогает — только помогает не
-                # засорять список неопознанными "планетами".
-                next_line = ""
-                for j in range(i + 1, len(lines)):
-                    candidate = lines[j].strip()
-                    if candidate.startswith(">"):
-                        candidate = candidate[1:].strip()
-                    if candidate:
-                        next_line = candidate
-                        break
-                if not next_line.lower().startswith("**цель:**"):
-                    continue
-            entries.append({
-                "planet": planet,
-                "raw": stripped[1:].strip(" *#"),
-                "round": round_num,
-            })
-    return entries, None
+# Тонкая обёртка вокруг tb_plan_reader.fetch_plan_planets — сохраняет прежнее локальное
+# имя _fetch_plan_planets(plan), чтобы не трогать все вызовы ниже по файлу.
+_fetch_plan_planets = tb_plan_reader.fetch_plan_planets
 
 
 # Потолок на число кандидатов, показываемых под одним слотом — без него страница
@@ -476,21 +432,31 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
 
     assignments = database.get_tb_platoon_assignments(guild_id, plan["id"]) if plan else {}
 
+    # Фильтры автозаполнения (tb_platoon_filters.py) применяются и здесь, к ручной
+    # расстановке — единая точка правды, см. tb_platoon_engine.py. Ошибки разбора текста
+    # молча игнорируются на этой странице (страница /tb/platoons/filters не даёт сохранить
+    # текст с ошибками — значит то, что лежит в БД, уже валидно; пустой текст парсится в
+    # пустой ParsedRules без ошибок).
+    filter_rules, _filter_errors = tb_platoon_filters.parse_rules(
+        database.get_tb_platoon_filter_rules(guild_id), guild_id,
+    )
+
     # В рамках ОДНОГО этапа игрок не может задонатить одного и того же юнита дважды —
     # прямой запрос пользователя 2026-08-28 ("если 0-0-0 стоит на Мустафаре на 1 этапе
     # на 3 операции, второй раз его на 1 этапе поставить нельзя"). Считаем по всем
-    # назначениям выбранного этапа разом: (ally_code, base_id) -> где уже стоит.
-    used_pairs_this_round: dict[tuple[str, str], tuple[str, int, int]] = {}
-    for (a_round, a_planet, a_operation, a_slot_index), assignment in assignments.items():
-        if a_round != selected_round_num:
-            continue
-        unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((a_planet, a_operation)) or []
-        if a_slot_index >= len(unit_list):
-            continue
-        a_base_id = name_to_base_id.get(unit_list[a_slot_index])
-        if not a_base_id:
-            continue
-        used_pairs_this_round[(assignment["ally_code"], a_base_id)] = (a_planet, a_operation, a_slot_index)
+    # назначениям ПЛАНЕТ, показанных на выбранном этапе, разом: (ally_code, base_id) ->
+    # где уже стоит. Планета, растянутая на 2+ этапа (не зачищена целиком), теперь всегда
+    # входит в selected_entries того этапа, на котором её сейчас смотрят — её назначения
+    # (уже не привязанные к round_num, см. database.py::_ensure_tb_platoon_assignments_table)
+    # подхватываются здесь так же, как назначения любой другой планеты этого этапа.
+    planets_this_round = {e["planet"] for e in selected_entries if e["planet"]}
+    used_pairs_this_round = tb_platoon_engine.compute_used_pairs(assignments, planets_this_round, name_to_base_id)
+
+    # Лимит "не больше 10 юнитов на планету от игрока" — по этапу ПРОСМОТРА (round_num
+    # первого назначения слота, не по планете целиком), см. tb_platoon_engine.py.
+    round_counts = tb_platoon_engine.compute_round_counts(assignments, selected_round_num) if selected_round_num else {}
+
+    hold_flags = database.get_tb_platoon_holds(guild_id, plan["id"]) if plan else {}
 
     planet_blocks = []
     for planet_idx, e in enumerate(selected_entries):
@@ -501,20 +467,21 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             for slot_index, unit_name in enumerate(unit_names or []):
                 base_id = name_to_base_id.get(unit_name)
                 owners = owners_by_base_id.get(base_id, []) if base_id else []
-                assignment = assignments.get((selected_round_num, e["planet"], operation, slot_index))
+                assignment = assignments.get((e["planet"], operation, slot_index))
                 here = (e["planet"], operation, slot_index)
-                slot_owners = []
-                for o in owners:
-                    used_at = used_pairs_this_round.get((o["ally_code"], base_id))
-                    slot_owners.append({
-                        **o,
-                        "meets_min": min_relic is not None and o["relic"] >= min_relic,
-                        "used_elsewhere": used_at is not None and used_at != here,
-                    })
+                slot_owners = tb_platoon_engine.slot_candidates(
+                    owners=owners, base_id=base_id, here=here, used_pairs=used_pairs_this_round,
+                    min_relic=min_relic, round_num=selected_round_num, planet=e["planet"],
+                    filter_rules=filter_rules, round_counts=round_counts,
+                )
+                if base_id and filter_rules.is_unit_excluded(base_id):
+                    for o in slot_owners:
+                        o["excluded_by_filter"] = True
                 slots.append({
                     "index": slot_index,
                     "unit": unit_name,
                     "owners": slot_owners,
+                    "unit_excluded": bool(base_id and filter_rules.is_unit_excluded(base_id)),
                     "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
                     "assigned_ally_code": assignment["ally_code"] if assignment else None,
                     "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
@@ -524,6 +491,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             "name": e["planet"] or e["raw"],
             "unresolved": e["planet"] is None,
             "operations": operations,
+            "held": bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
         })
 
     saved_plans = database.get_tb_saved_plans(guild_id)
@@ -540,6 +508,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         "plan": plan,
         "saved_plans": saved_plans,
         "active_plan_id": active_plan_id,
+        "autofill_summary": request.query_params.get("autofill_summary"),
     })
 
 
@@ -580,9 +549,246 @@ async def tb_platoons_unassign(
     plan = database.get_tb_saved_plan(plan_id)
     if not plan or plan["guild_id"] != guild_id:
         return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
-    database.clear_tb_platoon_assignment(guild_id, plan_id, round_num, planet, operation, slot_index)
+    database.clear_tb_platoon_assignment(guild_id, plan_id, planet, operation, slot_index)
     suffix = f"#{anchor}" if anchor else ""
     return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}{suffix}", status_code=303)
+
+
+_AUTOFILL_REASON_LABELS = {
+    "no_owner": "нет владельцев в гильдии",
+    "no_eligible_owner": "нет подходящих доноров",
+    "unit_excluded": "юнит исключён фильтром",
+    "unit_not_resolved": "юнит не распознан",
+}
+
+
+@router.post("/tb/platoons/autofill", response_class=HTMLResponse)
+async def tb_platoons_autofill_route(
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    user: dict = Depends(require_guild_access),
+):
+    """Заполняет все ещё пустые слоты ВСЕГО плана (все распознанные этапы сразу, не
+    только открытый) — tb_platoon_autofill.py. round_num здесь — только чтобы вернуть
+    пользователя на тот же этап после редиректа, на сам алгоритм не влияет."""
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
+
+    try:
+        result = await tb_platoon_autofill.autofill_plan(guild_id, plan_id)
+    except (ValueError, RuntimeError) as e:
+        return RedirectResponse(
+            f"/tb/platoons?plan_id={plan_id}&round={round_num}&{urlencode({'error': str(e)})}", status_code=303,
+        )
+
+    reasons: dict[str, int] = {}
+    for o in result.unfilled:
+        if o.reason == "held_back":
+            continue
+        reasons[o.reason] = reasons.get(o.reason, 0) + 1
+
+    summary = f"Автозаполнение: {result.filled_slots}/{result.total_slots} слотов занято"
+    if result.held_back:
+        summary += f", {result.held_back} намеренно не добито («держим»)"
+    if reasons:
+        parts = [f"{_AUTOFILL_REASON_LABELS.get(reason, reason)}: {count}" for reason, count in reasons.items()]
+        summary += " — не хватает (" + ", ".join(parts) + ")"
+
+    suffix = urlencode({"autofill_summary": summary})
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}&{suffix}", status_code=303)
+
+
+@router.post("/tb/platoons/hold", response_class=HTMLResponse)
+async def tb_platoons_hold_route(
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    planet: str = Form(...),
+    held: str = Form(...),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
+    database.set_tb_platoon_hold(guild_id, plan_id, round_num, planet, held == "1", set_by=f"web:{user['discord_id']}")
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}", status_code=303)
+
+
+@router.get("/tb/platoons/filters", response_class=HTMLResponse)
+async def tb_platoons_filters_page(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    rules_text = database.get_tb_platoon_filter_rules(guild_id)
+    parsed, errors = tb_platoon_filters.parse_rules(rules_text, guild_id)
+    return templates.TemplateResponse(request, "tb_platoon_filters.html", {
+        "user": user,
+        "rules_text": rules_text,
+        "described": tb_platoon_filters.describe_rules(parsed) if not errors else [],
+        "errors": errors,
+        "saved": False,
+    })
+
+
+@router.post("/tb/platoons/filters", response_class=HTMLResponse)
+async def tb_platoons_filters_save(
+    request: Request,
+    rules_text: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    parsed, errors = tb_platoon_filters.parse_rules(rules_text, guild_id)
+    if not errors:
+        database.set_tb_platoon_filter_rules(guild_id, rules_text, updated_by=f"web:{user['discord_id']}")
+    return templates.TemplateResponse(request, "tb_platoon_filters.html", {
+        "user": user,
+        "rules_text": rules_text,
+        "described": tb_platoon_filters.describe_rules(parsed) if not errors else [],
+        "errors": errors,
+        "saved": not errors,
+    })
+
+
+# =====================================================================
+# Экспорт расставленных взводов в формат HotUtils/EchoBase Platoon Assigner — по прямому
+# запросу пользователя 2026-08-28, снявшего два живых примера импорта с рабочего стола:
+# echobase-assignments-ROTE-P1_1_1-<ts>.json (этап 1, только 3 обычные зоны) и
+# echobase-assignments-ROTE-P4_M4_Z4-<ts>.json (этап 4, + бонус-зоны Зеффо/Мандалора) —
+# и попросившего собирать такой же файл из назначений /tb/platoons, чтобы завозить их
+# обратно в HotUtils. Схема файла: {"phase": "N/N/N", "timestamp": ISO8601,
+# "platoonAssignments": [{"allyCode", "unitBaseId", "zoneId", "platoonDefinitionId"}, ...]}.
+# zoneId = "tb3_mixed_phase{round:02d}_conflict{code}[_bonus]_recon01", code — из
+# _PLANET_CONFLICT_CODE, "_bonus" — только для Zeffo/Mandalore (см. _BONUS_PLANETS и
+# комментарий у _PLANET_CONFLICT_CODE про то, как это подтверждено). platoonDefinitionId =
+# "tb3-platoon-{operation}" — подтверждено тем же сравнением (6 операций конструктора = 6
+# tb3-platoon-N в обоих примерах). Поле "phase" в самом файле по-прежнему НЕ проверено на
+# реальном импорте: во втором примере оно "4/M4/Z4" — не просто "N/N/N", вероятно
+# человекочитаемый ярлык самого сохранённого шаблона HotUtils, а не вычисляемое из данных
+# значение; жёстко утверждать нельзя. У цифры фазы В zoneId — своя отдельная оговорка про
+# перенос планеты с этапа на этап, см. комментарий у _PLANET_CONFLICT_CODE выше.
+def _build_round_platoon_assignments(
+    round_num: int, round_entries: list[dict], assignments: dict,
+) -> tuple[list[dict], list[str]]:
+    """round_entries — записи _fetch_plan_planets для одного этапа. Возвращает
+    (platoonAssignments-список, имена пропущенных планет) — планета пропускается, только
+    если её название вообще не распознано (raw-заметка officer-анонса, не нашлось в
+    _PLANET_NAME_TO_RU)."""
+    unit_names = {
+        name
+        for e in round_entries
+        if e["planet"]
+        for operation in range(1, 7)
+        for name in (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) or [])
+    }
+    name_to_base_id = database.resolve_unit_display_names(list(unit_names)) if unit_names else {}
+
+    result = []
+    skipped = []
+    for e in round_entries:
+        planet = e["planet"]
+        conflict_code = _PLANET_CONFLICT_CODE.get(planet) if planet else None
+        if not conflict_code:
+            skipped.append(planet or e["raw"])
+            continue
+        bonus_suffix = "_bonus" if planet in _BONUS_PLANETS else ""
+        zone_id = f"tb3_mixed_phase{round_num:02d}_conflict{conflict_code}{bonus_suffix}_recon01"
+        for operation in range(1, 7):
+            unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
+            for slot_index, unit_name in enumerate(unit_list):
+                assignment = assignments.get((planet, operation, slot_index))
+                if not assignment:
+                    continue
+                base_id = name_to_base_id.get(unit_name)
+                if not base_id:
+                    continue
+                result.append({
+                    "allyCode": assignment["ally_code"],
+                    "unitBaseId": base_id,
+                    "zoneId": zone_id,
+                    "platoonDefinitionId": f"tb3-platoon-{operation}",
+                })
+    return result, skipped
+
+
+def _echobase_export_bytes(round_num: int, platoon_assignments: list[dict]) -> tuple[bytes, str]:
+    """Сериализует один этап в JSON того же вида, что и живой пример HotUtils/EchoBase
+    (минифицированный, без пробелов — как в самом примере) + имя файла с тем же паттерном
+    (echobase-assignments-ROTE-P{r}_{r}_{r}-{timestamp с ':' -> '_'}.json)."""
+    now = datetime.utcnow()
+    timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    payload = {
+        "phase": f"{round_num}/{round_num}/{round_num}",
+        "timestamp": timestamp,
+        "platoonAssignments": platoon_assignments,
+    }
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    filename = f"echobase-assignments-ROTE-P{round_num}_{round_num}_{round_num}-{timestamp.replace(':', '_')}.json"
+    return body, filename
+
+
+def _attachment_headers(filename: str) -> dict:
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "download"
+    return {"Content-Disposition": f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"}
+
+
+@router.get("/tb/platoons/export")
+async def tb_platoons_export(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
+    if plan is None:
+        raise HTTPException(404, error or "План не найден.")
+    try:
+        round_num = int(request.query_params.get("round", ""))
+    except ValueError:
+        raise HTTPException(400, "Некорректный номер этапа.")
+
+    entries, fetch_error = await _fetch_plan_planets(plan)
+    if fetch_error:
+        raise HTTPException(400, fetch_error)
+    round_entries = [e for e in entries if e["round"] == round_num]
+    if not round_entries:
+        raise HTTPException(404, f"На этапе {round_num} нет планет.")
+
+    assignments = database.get_tb_platoon_assignments(guild_id, plan["id"])
+    platoon_assignments, _skipped = _build_round_platoon_assignments(round_num, round_entries, assignments)
+    body, filename = _echobase_export_bytes(round_num, platoon_assignments)
+    return Response(content=body, media_type="application/json", headers=_attachment_headers(filename))
+
+
+@router.get("/tb/platoons/export/all")
+async def tb_platoons_export_all(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
+    if plan is None:
+        raise HTTPException(404, error or "План не найден.")
+
+    entries, fetch_error = await _fetch_plan_planets(plan)
+    if fetch_error:
+        raise HTTPException(400, fetch_error)
+
+    by_round: dict[int, list[dict]] = {}
+    seen = set()
+    for e in entries:
+        key = (e["round"], e["planet"] or f"raw:{e['raw']}")
+        if key in seen:
+            continue
+        seen.add(key)
+        by_round.setdefault(e["round"], []).append(e)
+    if not by_round:
+        raise HTTPException(404, "В плане не нашлось ни одного этапа.")
+
+    assignments = database.get_tb_platoon_assignments(guild_id, plan["id"])
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for round_num in sorted(by_round):
+            platoon_assignments, _skipped = _build_round_platoon_assignments(round_num, by_round[round_num], assignments)
+            body, filename = _echobase_export_bytes(round_num, platoon_assignments)
+            zf.writestr(filename, body)
+
+    safe_plan_name = re.sub(r'[\\/:*?"<>|]+', "_", plan["name"]).strip() or "plan"
+    zip_name = f"echobase-assignments-ROTE-{safe_plan_name}.zip"
+    return Response(content=buffer.getvalue(), media_type="application/zip", headers=_attachment_headers(zip_name))
 
 
 # Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так

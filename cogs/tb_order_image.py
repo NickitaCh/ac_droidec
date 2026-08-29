@@ -66,6 +66,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
+import tb_platoon_autofill
 from cogs.guild_events import TB_PLAN_HEADER_RE
 
 LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)(?:/(\d+))?")
@@ -405,12 +406,41 @@ class TBOrderImage(commands.Cog):
             return
 
         guild_id = guild_resolver.resolve_guild_id(inter.author)
-        database.save_tb_plan(guild_id, название, thread.id, total, created_by=str(inter.author.id))
+        plan_id = database.save_tb_plan(guild_id, название, thread.id, total, created_by=str(inter.author.id))
+
+        # Автозаполнение взводов сразу после сохранения плана — по прямому запросу
+        # пользователя (см. план "Автозаполнение взводов ТБ + фильтры" от 2026-08-29,
+        # пересказ разговора с Ильёй: "прописал команду и бот... подготовил взводы на 6
+        # этапов и сообщил, всего ли хватает"). Ошибка автозаполнения НЕ откатывает уже
+        # сохранённый план — он в любом случае корректно сохранён, просто взводы придётся
+        # расставить вручную на /tb/platoons.
+        autofill_note = ""
+        try:
+            result = await tb_platoon_autofill.autofill_plan(guild_id, plan_id)
+            reasons = {}
+            for outcome in result.unfilled:
+                if outcome.reason == "held_back":
+                    continue
+                reasons[outcome.reason] = reasons.get(outcome.reason, 0) + 1
+            labels = {
+                "no_owner": "нет владельцев", "no_eligible_owner": "нет подходящих доноров",
+                "unit_excluded": "юнит исключён фильтром", "unit_not_resolved": "юнит не распознан",
+            }
+            autofill_note = f"\n🧩 Взводы подготовлены: {result.filled_slots}/{result.total_slots} слотов занято"
+            if result.held_back:
+                autofill_note += f", {result.held_back} намеренно не добито («держим»)"
+            if reasons:
+                parts = [f"{labels.get(r, r)}: {c}" for r, c in reasons.items()]
+                autofill_note += " — не хватает (" + ", ".join(parts) + ")"
+            autofill_note += "\nПроверить/скорректировать: /tb/platoons на сайте."
+        except (ValueError, RuntimeError) as e:
+            autofill_note = f"\n⚠️ Не удалось автоматически расставить взводы: {e}. План сохранён, расставьте вручную на /tb/platoons."
 
         await inter.edit_original_response(
             f"{warning}✅ Опубликовано 6 сообщений в тред «{thread.name}».\n"
             f"💾 План сохранён как «{название}» ({total} ★) — выбрать его для ежедневной публикации: "
             f"`/тб_план выбрать`."
+            f"{autofill_note}"
         )
 
 

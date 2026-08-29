@@ -2,7 +2,7 @@
 {% block title %}Взводы ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/tb">← Назад к ТБ</a> · <a href="/tb/order-plans">Планы ордера</a></p>
+    <p><a href="/tb">← Назад к ТБ</a> · <a href="/tb/order-plans">Планы ордера</a> · <a href="/tb/platoons/filters">Фильтры автозаполнения</a></p>
     <h1>Конструктор взводов ТБ</h1>
     <p class="muted">
         Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
@@ -52,6 +52,29 @@
         </p>
     {% endif %}
 
+    {% if plan and planets %}
+        <p class="platoon-export-actions">
+            <form method="post" action="/tb/platoons/autofill" style="display:inline">
+                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                <button type="submit" class="button">⚡ Автозаполнить план (все этапы)</button>
+            </form>
+            <a class="button" href="/tb/platoons/export?plan_id={{ plan.id }}&round={{ selected_round_num }}">⬇ Скачать этап {{ selected_round_num }} (JSON для HotUtils)</a>
+            <a class="button" href="/tb/platoons/export/all?plan_id={{ plan.id }}">⬇ Скачать все этапы (ZIP, по файлу на этап)</a>
+        </p>
+        <p class="muted platoon-export-hint">
+            Формат — EchoBase Platoon Assigner, тот же, что импортирует HotUtils. Экспортируются
+            только заполненные слоты, включая Зеффо и Мандалор. Автозаполнение расставляет
+            донаторов сразу по всем распознанным этапам плана, с учётом
+            <a href="/tb/platoons/filters">фильтров</a> и лимита 10 юнитов на планету от игрока
+            за этап — уже занятые слоты не трогает.
+        </p>
+    {% endif %}
+
+    {% if autofill_summary %}
+        <p class="badge badge-ok">{{ autofill_summary }}</p>
+    {% endif %}
+
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}
@@ -71,7 +94,19 @@
                     <h3 class="platoon-planet-name">
                         {{ p.name }}
                         {% if min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ min_relic_label }}</span>{% endif %}
+                        {% if p.held %}<span class="badge badge-neutral">держим</span>{% endif %}
                     </h3>
+                    {% if not p.unresolved and plan %}
+                        <form method="post" action="/tb/platoons/hold" class="platoon-hold-toggle">
+                            <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                            <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                            <input type="hidden" name="planet" value="{{ p.name }}">
+                            <input type="hidden" name="held" value="{{ 0 if p.held else 1 }}">
+                            <button type="submit" class="button">
+                                {% if p.held %}Снять «держим» — можно добивать{% else %}Не добивать звёзды на этом этапе{% endif %}
+                            </button>
+                        </form>
+                    {% endif %}
                     {% if p.unresolved %}
                         <p class="error">
                             Название планеты не распознано — нет данных по взводам. Добавьте
@@ -92,6 +127,9 @@
                                                                 <span class="platoon-slot-unit">{{ slot.unit }}</span>
                                                                 {% if slot.assigned_name %}
                                                                     <span class="badge badge-ok">{{ slot.assigned_name }}</span>
+                                                                {% endif %}
+                                                                {% if slot.unit_excluded %}
+                                                                    <span class="badge badge-neutral">исключён фильтром</span>
                                                                 {% endif %}
                                                             </summary>
                                                             <div class="platoon-slot-candidates">
@@ -119,9 +157,11 @@
                                                                                     <input type="hidden" name="ally_code" value="{{ owner.ally_code }}">
                                                                                     <input type="hidden" name="anchor" value="{{ slot.anchor }}">
                                                                                     <button type="submit"
-                                                                                        {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere %}disabled{% endif %}>
+                                                                                        {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere or owner.excluded_by_filter or owner.at_cap %}disabled{% endif %}>
                                                                                         {{ "✅" if owner.meets_min else "⚠️" }} {{ owner.name }} — релик {{ owner.relic }}
                                                                                         {% if owner.used_elsewhere %} (уже занят на этом этапе){% endif %}
+                                                                                        {% if owner.excluded_by_filter %} (исключён фильтром){% endif %}
+                                                                                        {% if owner.at_cap %} (лимит 10/этап на планету исчерпан){% endif %}
                                                                                     </button>
                                                                                 </form>
                                                                             </li>

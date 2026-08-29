@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Фильтры автозаполнения ТБ — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/tb/platoons">← Назад к взводам</a></p>
+    <h1>Фильтры автозаполнения взводов</h1>
+    <p class="muted">
+        Одна строка — одно правило. Пустые строки и строки, начинающиеся с «#», игнорируются.
+        Правила применяются и к автозаполнению, и к списку кандидатов при ручной расстановке
+        на /tb/platoons.
+    </p>
+    <ul class="muted platoon-filters-syntax">
+        <li><code>exclude player [Имя игрока]</code> — игрок не предлагается ни на один слот</li>
+        <li><code>exclude unit [Имя юнита]</code> — юнит не предлагается ни на одну планету</li>
+        <li><code>bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...</code> — если игроку уже
+            назначен юнит-триггер, при выборе донора для юнитов из списка ему отдаётся
+            приоритет (не жёсткое требование — если он не владеет юнитом или не проходит
+            по другим правилам, слот всё равно уходит следующему подходящему кандидату)</li>
+    </ul>
+
+    {% if saved %}
+        <p class="badge badge-ok">Сохранено</p>
+    {% endif %}
+
+    {% if errors %}
+        <div class="error">
+            <p>Не сохранено — есть ошибки:</p>
+            <ul>
+                {% for line_num, message in errors %}
+                    <li>строка {{ line_num }}: {{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <form method="post" action="/tb/platoons/filters">
+        <textarea name="rules_text" rows="14" class="platoon-filters-textarea" spellcheck="false">{{ rules_text }}</textarea>
+        <p><button type="submit">Сохранить</button></p>
+    </form>
+
+    {% if described %}
+        <div class="panel">
+            <div class="panel-title"><span>Применяются сейчас</span></div>
+            <ul>
+                {% for line in described %}
+                    <li>{{ line }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}
