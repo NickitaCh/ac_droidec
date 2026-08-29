@@ -908,6 +908,22 @@ def get_game_unit_names(base_ids: list[str]) -> dict:
     conn.close()
     return result
 
+
+def get_unit_types(base_ids: list[str]) -> dict:
+    """base_id -> "ship"/"character" (game_units.unit_type, см. services/units_sync.py —
+    заполняется из Comlink combatType). Нужен конструктору взводов ТБ (tb_platoon_engine.py):
+    у кораблей нет реликвии, донат-требование для них — 7★, а не порог реликвии."""
+    if not base_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    unique_ids = list(set(base_ids))
+    placeholders = ", ".join("?" for _ in unique_ids)
+    cursor.execute(f"SELECT base_id, unit_type FROM game_units WHERE base_id IN ({placeholders})", unique_ids)
+    result = dict(cursor.fetchall())
+    conn.close()
+    return result
+
 # =====================================================================
 # ЗАДАЧИ НА ПРОКАЧКУ (/task_add + часовой аудит выполнения через Comlink)
 # =====================================================================

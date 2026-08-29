@@ -8,6 +8,7 @@
         Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
         снятия (2026-08-27), не жёсткое игровое требование — можно ставить и других юнитов.
         R — минимальная реликвия для донат-слота на этапе, реальное игровое требование.
+        У кораблей реликвии нет — для них требование 7★ вместо релика.
         Нажмите на юнита, чтобы раскрыть список кандидатов и закрепить игрока за слотом.
     </p>
 
@@ -94,9 +95,18 @@
                     <h3 class="platoon-planet-name">
                         {{ p.name }}
                         {% if min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ min_relic_label }}</span>{% endif %}
-                        {% if p.held %}<span class="badge badge-neutral">держим</span>{% endif %}
+                        {% if p.auto_held %}
+                            <span class="badge badge-neutral">держим (переходит на след. этап)</span>
+                        {% elif p.held %}
+                            <span class="badge badge-neutral">держим</span>
+                        {% endif %}
                     </h3>
-                    {% if not p.unresolved and plan %}
+                    {% if p.auto_held %}
+                        <p class="muted platoon-hold-toggle">
+                            Эта планета есть и на более позднем этапе плана — автозаполнение не
+                            добивает её здесь до конца автоматически, включать вручную не нужно.
+                        </p>
+                    {% elif not p.unresolved and plan %}
                         <form method="post" action="/tb/platoons/hold" class="platoon-hold-toggle">
                             <input type="hidden" name="plan_id" value="{{ plan.id }}">
                             <input type="hidden" name="round_num" value="{{ selected_round_num }}">
@@ -158,7 +168,7 @@
                                                                                     <input type="hidden" name="anchor" value="{{ slot.anchor }}">
                                                                                     <button type="submit"
                                                                                         {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere or owner.excluded_by_filter or owner.at_cap %}disabled{% endif %}>
-                                                                                        {{ "✅" if owner.meets_min else "⚠️" }} {{ owner.name }} — релик {{ owner.relic }}
+                                                                                        {{ "✅" if owner.meets_min else "⚠️" }} {{ owner.name }} — {% if owner.is_ship %}{{ owner.stars }}★{% else %}релик {{ owner.relic }}{% endif %}
                                                                                         {% if owner.used_elsewhere %} (уже занят на этом этапе){% endif %}
                                                                                         {% if owner.excluded_by_filter %} (исключён фильтром){% endif %}
                                                                                         {% if owner.at_cap %} (лимит 10/этап на планету исчерпан){% endif %}

@@ -95,6 +95,9 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
     player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
     base_ids = sorted({bid for bid in name_to_base_id.values() if bid})
+    # Корабли не имеют реликвии (см. tb_platoon_engine.SHIP_MIN_STARS) — донат-требование
+    # для них 7★, не порог реликвии этапа.
+    unit_types = database.get_unit_types(base_ids) if base_ids else {}
     owners_raw = database.get_player_unit_owners_bulk(ally_codes, base_ids) if base_ids else []
     owners_by_base_id: dict = {}
     for row in owners_raw:
@@ -102,9 +105,11 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             "ally_code": row["ally_code"],
             "name": player_name_by_ally.get(row["ally_code"], row["ally_code"]),
             "relic": stat_engine.get_current_relic_level(row["unit"]),
+            "stars": row["unit"].get("currentRarity", 0),
         })
-    for owners in owners_by_base_id.values():
-        owners.sort(key=lambda o: -o["relic"])
+    for base_id, owners in owners_by_base_id.items():
+        is_ship = unit_types.get(base_id) == "ship"
+        owners.sort(key=lambda o: -(o["stars"] if is_ship else o["relic"]))
         # Автозаполнению нужен ПОЛНЫЙ пул кандидатов, без обрезки в отличие от веб-страницы
         # (там PLATOON_CANDIDATES_LIMIT=20 — чисто UI-потолок на число кнопок) — иначе юнит
         # с 25 живыми владельцами ошибочно посчитается дефицитным на шаге сортировки.
@@ -144,7 +149,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         candidates = tb_platoon_engine.slot_candidates(
             owners=owners, base_id=base_id, here=(slot["planet"], slot["operation"], slot["slot_index"]),
             used_pairs=used_pairs, min_relic=min_relic, round_num=round_num, planet=slot["planet"],
-            filter_rules=filter_rules, round_counts=round_counts,
+            filter_rules=filter_rules, round_counts=round_counts, is_ship=unit_types.get(base_id) == "ship",
         )
         return sum(1 for c in candidates if tb_platoon_engine.is_eligible(c))
 
@@ -175,7 +180,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         candidates = tb_platoon_engine.slot_candidates(
             owners=owners, base_id=base_id, here=here, used_pairs=used_pairs,
             min_relic=min_relic, round_num=round_num, planet=planet,
-            filter_rules=filter_rules, round_counts=round_counts,
+            filter_rules=filter_rules, round_counts=round_counts, is_ship=unit_types.get(base_id) == "ship",
         )
 
         # bundle-предпочтение (tb_platoon_filters.py::ParsedRules.bundles): если этот юнит
@@ -205,45 +210,61 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             )
         result.newly_filled += 1
 
-    # "Держим": если после основного прохода операция на held-планете (database.py::
-    # get_tb_platoon_holds) заполнена на 100%, снимаем один слот — только из заполненных
-    # ИМЕННО В ЭТОМ прогоне (ручные назначения офицера не трогаем, он расставил их
-    # осознанно), с наименьшим реликом донора — он наименее ценный, чтобы держать занятым.
+    # "Держим": планета, которая появляется в плане ещё и на более позднем этапе, ещё не
+    # зачищена целиком — по прямому запросу пользователя 2026-08-29 ("на 3 этапе есть
+    # Датомир и на 4 этапе есть Датомир — значит на 3 этапе взводы не нужно заполнять
+    # полностью"), АВТОМАТИЧЕСКИ, без ручного тумблера. Плюс ручной флаг (database.py::
+    # get_tb_platoon_holds) — для планеты на единственном этапе, которую офицер решил не
+    # добивать по своим причинам. Определяется на уровне ПЛАНЕТЫ (не по каждому round_num
+    # из planets_by_round отдельно) — слоты планеты общие на все этапы, где она показана
+    # (см. database.py::_ensure_tb_platoon_assignments_table), у неё только ОДНО состояние
+    # заполненности, а не своё на каждый этап; round_num для held-планеты — её первое
+    # появление (planet_first_round), т.к. вся её заливка в основном проходе шла под этим
+    # тегом. Если после основного прохода операция на held-планете заполнена на 100%,
+    # снимаем один слот — только из заполненных ИМЕННО В ЭТОМ прогоне (ручные назначения
+    # офицера не трогаем, он расставил их осознанно), с наименьшим реликом/★ донора.
+    last_round_of_planet: dict = {}
     for round_num, planet_set in planets_by_round.items():
         for planet in planet_set:
-            if not hold_flags.get((round_num, planet)):
+            last_round_of_planet[planet] = max(last_round_of_planet.get(planet, round_num), round_num)
+
+    for planet in ordered_planets:
+        round_num = planet_first_round[planet]
+        auto_held = last_round_of_planet.get(planet, round_num) > round_num
+        if not auto_held and not hold_flags.get((round_num, planet)):
+            continue
+        for operation in range(1, 7):
+            unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
+            if not unit_list:
                 continue
-            for operation in range(1, 7):
-                unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
-                if not unit_list:
-                    continue
-                slots_here = [(planet, operation, idx) for idx in range(len(unit_list))]
-                if any(k not in unified for k in slots_here):
-                    continue  # операция и так не заполнена целиком — держать нечего
-                newly_here = [k for k in slots_here if k not in assignments]
-                if not newly_here:
-                    continue  # все слоты были заполнены раньше вручную — офицер сам решил добить
+            slots_here = [(planet, operation, idx) for idx in range(len(unit_list))]
+            if any(k not in unified for k in slots_here):
+                continue  # операция и так не заполнена целиком — держать нечего
+            newly_here = [k for k in slots_here if k not in assignments]
+            if not newly_here:
+                continue  # все слоты были заполнены раньше вручную — офицер сам решил добить
 
-                def relic_of(key):
-                    p, op, idx = key
-                    ul = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((p, op)) or []
-                    bid = name_to_base_id.get(ul[idx]) if idx < len(ul) else None
-                    ally_code = unified[key]["ally_code"]
-                    for o in owners_by_base_id.get(bid, []):
-                        if o["ally_code"] == ally_code:
-                            return o["relic"]
-                    return 0
+            def value_of(key):
+                p, op, idx = key
+                ul = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((p, op)) or []
+                bid = name_to_base_id.get(ul[idx]) if idx < len(ul) else None
+                ally_code = unified[key]["ally_code"]
+                is_ship = unit_types.get(bid) == "ship"
+                for o in owners_by_base_id.get(bid, []):
+                    if o["ally_code"] == ally_code:
+                        return o["stars"] if is_ship else o["relic"]
+                return 0
 
-                victim = min(newly_here, key=relic_of)
-                v_planet, v_op, v_idx = victim
-                if not dry_run:
-                    database.clear_tb_platoon_assignment(guild_id, plan_id, v_planet, v_op, v_idx)
-                del unified[victim]
-                result.newly_filled -= 1
-                result.held_back += 1
-                v_unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((v_planet, v_op)) or []
-                v_unit = v_unit_list[v_idx] if v_idx < len(v_unit_list) else "?"
-                result.unfilled.append(SlotOutcome(round_num, v_planet, v_op, v_idx, v_unit, "held_back"))
+            victim = min(newly_here, key=value_of)
+            v_planet, v_op, v_idx = victim
+            if not dry_run:
+                database.clear_tb_platoon_assignment(guild_id, plan_id, v_planet, v_op, v_idx)
+            del unified[victim]
+            result.newly_filled -= 1
+            result.held_back += 1
+            v_unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((v_planet, v_op)) or []
+            v_unit = v_unit_list[v_idx] if v_idx < len(v_unit_list) else "?"
+            result.unfilled.append(SlotOutcome(round_num, v_planet, v_op, v_idx, v_unit, "held_back"))
 
     # Отчёт по этапам считается по ФИНАЛЬНОМУ состоянию unified (после автозаполнения и
     # снятия held-back слотов), не инкрементально по ходу — планета, растянутая на 2+

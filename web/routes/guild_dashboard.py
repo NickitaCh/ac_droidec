@@ -418,6 +418,9 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
     player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
     base_ids = sorted({bid for bid in name_to_base_id.values() if bid})
+    # Корабли не имеют реликвии (см. tb_platoon_engine.SHIP_MIN_STARS) — донат-требование
+    # для них 7★, не порог реликвии этапа.
+    unit_types = database.get_unit_types(base_ids) if base_ids else {}
     owners_raw = database.get_player_unit_owners_bulk(ally_codes, base_ids) if base_ids else []
     owners_by_base_id: dict[str, list[dict]] = {}
     for row in owners_raw:
@@ -425,9 +428,11 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             "ally_code": row["ally_code"],
             "name": player_name_by_ally.get(row["ally_code"], row["ally_code"]),
             "relic": stat_engine.get_current_relic_level(row["unit"]),
+            "stars": row["unit"].get("currentRarity", 0),
         })
-    for owners in owners_by_base_id.values():
-        owners.sort(key=lambda o: -o["relic"])
+    for base_id, owners in owners_by_base_id.items():
+        is_ship = unit_types.get(base_id) == "ship"
+        owners.sort(key=lambda o: -(o["stars"] if is_ship else o["relic"]))
         del owners[PLATOON_CANDIDATES_LIMIT:]
 
     assignments = database.get_tb_platoon_assignments(guild_id, plan["id"]) if plan else {}
@@ -458,6 +463,18 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
 
     hold_flags = database.get_tb_platoon_holds(guild_id, plan["id"]) if plan else {}
 
+    # Автоматическое "держим": планета, которая ещё встречается на более позднем этапе
+    # этого же плана, ещё не зачищена целиком — по прямому запросу пользователя 2026-08-29
+    # ("на 3 этапе есть Датомир и на 4 этапе есть Датомир — значит на 3 этапе взводы не
+    # нужно заполнять полностью"), без ручного тумблера. Тот же расчёт использует
+    # tb_platoon_autofill.py — здесь он только для бейджа "держим" на странице, сама
+    # логика неполного заполнения — в автозаполнении.
+    planet_last_round: dict[str, int] = {}
+    for rn, es in by_round.items():
+        for e2 in es:
+            if e2["planet"]:
+                planet_last_round[e2["planet"]] = max(planet_last_round.get(e2["planet"], rn), rn)
+
     planet_blocks = []
     for planet_idx, e in enumerate(selected_entries):
         operations = []
@@ -473,6 +490,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     owners=owners, base_id=base_id, here=here, used_pairs=used_pairs_this_round,
                     min_relic=min_relic, round_num=selected_round_num, planet=e["planet"],
                     filter_rules=filter_rules, round_counts=round_counts,
+                    is_ship=unit_types.get(base_id) == "ship",
                 )
                 if base_id and filter_rules.is_unit_excluded(base_id):
                     for o in slot_owners:
@@ -487,11 +505,13 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
                 })
             operations.append({"number": operation, "slots": slots})
+        auto_held = bool(e["planet"] and planet_last_round.get(e["planet"], selected_round_num) > selected_round_num)
         planet_blocks.append({
             "name": e["planet"] or e["raw"],
             "unresolved": e["planet"] is None,
             "operations": operations,
-            "held": bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
+            "held": auto_held or bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
+            "auto_held": auto_held,
         })
 
     saved_plans = database.get_tb_saved_plans(guild_id)
