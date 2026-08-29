@@ -455,7 +455,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     # (уже не привязанные к round_num, см. database.py::_ensure_tb_platoon_assignments_table)
     # подхватываются здесь так же, как назначения любой другой планеты этого этапа.
     planets_this_round = {e["planet"] for e in selected_entries if e["planet"]}
-    used_pairs_this_round = tb_platoon_engine.compute_used_pairs(assignments, planets_this_round, name_to_base_id)
+    used_pairs_this_round = tb_platoon_engine.compute_used_pairs(assignments, planets_this_round, name_to_base_id, selected_round_num)
 
     # Лимит "не больше 10 юнитов на планету от игрока" — по этапу ПРОСМОТРА (round_num
     # первого назначения слота, не по планете целиком), см. tb_platoon_engine.py.
@@ -490,7 +490,9 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             for slot_index, unit_name in enumerate(unit_names or []):
                 base_id = name_to_base_id.get(unit_name)
                 owners = owners_by_base_id.get(base_id, []) if base_id else []
-                assignment = assignments.get((e["planet"], operation, slot_index))
+                assignment = tb_platoon_engine.visible_assignment(
+                    assignments.get((e["planet"], operation, slot_index)), selected_round_num,
+                )
                 here = (e["planet"], operation, slot_index)
                 slot_owners = tb_platoon_engine.slot_candidates(
                     owners=owners, base_id=base_id, here=here, used_pairs=used_pairs_this_round,
@@ -762,7 +764,12 @@ def _build_round_platoon_assignments(
         for operation in range(1, 7):
             unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
             for slot_index, unit_name in enumerate(unit_list):
-                assignment = assignments.get((planet, operation, slot_index))
+                # round-aware: донат, отложенный автозаполнением на более поздний этап
+                # многоэтапной планеты, не попадает в файл ЭТОГО этапа — он ещё "не сделан
+                # по времени" (см. tb_platoon_engine.visible_assignment).
+                assignment = tb_platoon_engine.visible_assignment(
+                    assignments.get((planet, operation, slot_index)), round_num,
+                )
                 if not assignment:
                     continue
                 base_id = name_to_base_id.get(unit_name)

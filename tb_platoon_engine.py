@@ -13,6 +13,21 @@ import tb_platoon_data
 
 MAX_UNITS_PER_PLANET_PER_ROUND = 10
 
+
+def visible_assignment(assignment, round_num: int):
+    """"Round-aware" видимость (см. database.py::set_tb_platoon_assignment, 2026-08-30): донат
+    считается сделанным на этапе round_num, только если assignment["round_num"] <= round_num —
+    донат, который автозаполнение отложило на более поздний этап многоэтапной планеты (см.
+    tb_platoon_autofill.py — "держим" теперь не убирает донора, а переносит его зачёт на
+    последний этап планеты), на текущем более раннем этапе показывается как ещё пустой слот.
+    Используется и веб-страницей (отображение/дедуп), и экспортом в HotUtils/EchoBase —
+    единая точка правды, чтобы обе стороны согласованно решали "виден ли донат на этом этапе"."""
+    if assignment is None:
+        return None
+    if assignment.get("round_num") is not None and assignment["round_num"] > round_num:
+        return None
+    return assignment
+
 # Корабли не имеют реликвии в игре вообще (relic-система — только для персонажей) —
 # донат-требование для них другое: 7★ (максимум звёздности), проверено по прямому запросу
 # пользователя 2026-08-29. До этой правки relic-порог применялся ко всем юнитам без
@@ -38,16 +53,23 @@ def compute_round_counts(assignments: dict, round_num: int) -> dict:
     return counts
 
 
-def compute_used_pairs(assignments: dict, planets_this_round: set, name_to_base_id: dict) -> dict:
+def compute_used_pairs(assignments: dict, planets_this_round: set, name_to_base_id: dict, round_num: int) -> dict:
     """(ally_code, base_id) -> (planet, operation, slot_index) для всех уже занятых слотов
     на планетах, показанных на текущем этапе просмотра/заполнения (planets_this_round) —
     в рамках ОДНОГО этапа игрок не может задонатить одного и того же юнита дважды (см.
     комментарий у web/routes/guild_dashboard.py::tb_platoons). name_to_base_id (имя юнита
     -> base_id) передаётся готовым — и веб-роут, и автозаполнение уже строят его сами
-    (один batch-запрос на всех юнитов сразу, дважды резолвить не нужно)."""
+    (один batch-запрос на всех юнитов сразу, дважды резолвить не нужно).
+
+    round_num — "round-aware" отсечка (см. database.py::set_tb_platoon_assignment, 2026-08-30):
+    донат считается уже сделанным на этапе round_num, только если assignment.round_num <=
+    round_num — донат, отложенный автозаполнением на более поздний этап многоэтапной планеты,
+    на текущем (более раннем) этапе не блокирует повторное использование того же донора."""
     pairs: dict = {}
     for (planet, operation, slot_index), assignment in assignments.items():
         if planet not in planets_this_round:
+            continue
+        if assignment.get("round_num") is not None and assignment["round_num"] > round_num:
             continue
         unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
         if slot_index >= len(unit_list):

@@ -1855,10 +1855,16 @@ def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
 # UNIQUE-ключ — донат, вписанный при просмотре этапа 3, был не виден на этапе 4 для той же
 # планеты (слот выглядел пустым), а фильтр "не более N юнитов на планету от игрока" в
 # принципе не мог посчитать верно (переносящаяся планета считалась как две разных). round_num
-# в схеме остаётся, но теперь это чисто информационное поле "на каком этапе донат впервые
-# вписан" — на identity слота не влияет (не входит в UNIQUE, не обновляется при повторном
-# ON CONFLICT). См. get_tb_platoon_assignments/set_/clear_ — все три больше не принимают/не
-# возвращают round_num как часть ключа слота.
+# в схеме остаётся — на identity слота НЕ влияет (не входит в UNIQUE), но с 2026-08-30
+# используется как "round-aware" маркер отображения: слот считается занятым на этапе R,
+# только если round_num <= R (см. set_tb_platoon_assignment — round_num ОБНОВЛЯЕТСЯ при
+# каждом вызове, и web/routes/guild_dashboard.py::tb_platoons/_build_round_platoon_assignments,
+# tb_platoon_autofill.py — все фильтруют по этому условию). Это позволяет автозаполнению
+# "откладывать" последний слот многоэтапной планеты на её ПОСЛЕДНИЙ этап, не убирая донора
+# совсем: с более раннего этапа слот выглядит пустым (донат туда ещё не сделан "по времени"),
+# а с этапа, на который донат отнесён — занятым. См. get_tb_platoon_assignments/set_/clear_ —
+# все три не принимают/не возвращают round_num как часть КЛЮЧА слота (идентичность слота —
+# planet+operation+slot_index), но round_num остаётся значимым для отображения/экспорта.
 # =====================================================================
 def _ensure_tb_platoon_assignments_table(cursor):
     # Миграция со старой схемы (UNIQUE включал round_num) — переносим существующие
@@ -1908,9 +1914,15 @@ def set_tb_platoon_assignment(
     guild_id: int, plan_id: int, round_num: int, planet: str, operation: int, slot_index: int,
     ally_code: str, assigned_by: str = None,
 ) -> None:
-    """round_num — этап, на котором донат ВПЕРВЫЕ вписан; чисто информационное поле (см.
-    комментарий над _ensure_tb_platoon_assignments_table) — при повторном назначении на тот
-    же слот (переназначение другого игрока) round_num НЕ перезаписывается."""
+    """round_num — этап, к которому сейчас отнесён донат — определяет, на каких этапах слот
+    показывается как занятый (см. "round-aware" фильтр в web/routes/guild_dashboard.py и
+    tb_platoon_autofill.py, 2026-08-30): слот считается занятым на этапе R, только если
+    assignment.round_num <= R — донат, отнесённый к более позднему этапу (например,
+    автозаполнение специально отложило последний слот многоэтапной планеты на её
+    завершающий этап), на более раннем этапе показывается как ещё пустой. round_num
+    ОБНОВЛЯЕТСЯ при каждом вызове (в т.ч. при переназначении слота другому игроку) — и
+    ручное переназначение, и решение автозаполнения "к какому этапу отнести донат" должны
+    сразу отражаться на том, где слот считается занятым."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_tb_platoon_assignments_table(cursor)
@@ -1919,7 +1931,7 @@ def set_tb_platoon_assignment(
             (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by, assigned_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(guild_id, plan_id, planet, operation, slot_index)
-        DO UPDATE SET ally_code = excluded.ally_code, assigned_by = excluded.assigned_by, assigned_at = excluded.assigned_at
+        DO UPDATE SET ally_code = excluded.ally_code, round_num = excluded.round_num, assigned_by = excluded.assigned_by, assigned_at = excluded.assigned_at
     """, (guild_id, plan_id, round_num, planet, operation, slot_index, ally_code, assigned_by))
     conn.commit()
     conn.close()

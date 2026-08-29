@@ -143,7 +143,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             return -1  # обрабатываем первыми — заведомо не заполнимо, не тратим время на пересчёт позже
         owners = owners_by_base_id.get(base_id, [])
         round_num = slot["round_num"]
-        used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id)
+        used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id, round_num)
         round_counts = tb_platoon_engine.compute_round_counts(unified, round_num)
         min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
         candidates = tb_platoon_engine.slot_candidates(
@@ -174,7 +174,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             continue
 
         owners = owners_by_base_id.get(base_id, [])
-        used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id)
+        used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id, round_num)
         round_counts = tb_platoon_engine.compute_round_counts(unified, round_num)
         min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
         candidates = tb_platoon_engine.slot_candidates(
@@ -244,6 +244,12 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         manually_held = bool(hold_flags.get((round_num, planet)))
         if not auto_held and not manually_held:
             continue
+        # Для авто-держим (многоэтапная планета) — конкретный этап, на который переносится
+        # зачёт придержанного слота: её ПОСЛЕДНЕЕ появление в плане. Упрощение: планета,
+        # растянутая на 3+ этапа, всё равно откладывает ровно 1 слот сразу на последний
+        # этап (не размазывает постепенно по промежуточным) — пока не встречалось реальных
+        # случаев длиннее 2 этапов, пересмотреть при необходимости.
+        defer_to_round = last_round_of_planet.get(planet, round_num) if auto_held else None
         for operation in range(1, 7):
             unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
             if not unit_list:
@@ -270,14 +276,35 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
 
             victim = min(newly_here, key=value_of)
             v_planet, v_op, v_idx = victim
-            if not dry_run:
-                database.clear_tb_platoon_assignment(guild_id, plan_id, v_planet, v_op, v_idx)
-            del unified[victim]
-            result.newly_filled -= 1
-            result.held_back += 1
-            v_unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((v_planet, v_op)) or []
-            v_unit = v_unit_list[v_idx] if v_idx < len(v_unit_list) else "?"
-            result.unfilled.append(SlotOutcome(round_num, v_planet, v_op, v_idx, v_unit, "held_back"))
+
+            if auto_held and defer_to_round is not None:
+                # Многоэтапная планета: не убираем донора — переносим зачёт слота на её
+                # ПОСЛЕДНИЙ этап, где она встречается в плане. Прямой запрос пользователя
+                # 2026-08-30: "на 4 этапе надо показать, что заполняем только 1/15, который
+                # не заполнили на 3, т.к. остальные уже стоят с прошлого этапа" — донор
+                # физически выбирается и записывается СРАЗУ, в этом же прогоне; round-aware
+                # отображение (tb_platoon_engine.visible_assignment, database.py::
+                # set_tb_platoon_assignment) само покажет слот пустым на текущем round_num и
+                # занятым начиная с defer_to_round — второй прогон автозаполнения не нужен.
+                ally_code = unified[victim]["ally_code"]
+                if not dry_run:
+                    database.clear_tb_platoon_assignment(guild_id, plan_id, v_planet, v_op, v_idx)
+                    database.set_tb_platoon_assignment(
+                        guild_id, plan_id, defer_to_round, v_planet, v_op, v_idx, ally_code, assigned_by="autofill",
+                    )
+                unified[victim]["round_num"] = defer_to_round
+                result.held_back += 1
+            else:
+                # Планета на единственном этапе (только ручной "держим" — переносить некуда)
+                # — слот остаётся реально пустым, как и раньше.
+                if not dry_run:
+                    database.clear_tb_platoon_assignment(guild_id, plan_id, v_planet, v_op, v_idx)
+                del unified[victim]
+                result.newly_filled -= 1
+                result.held_back += 1
+                v_unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((v_planet, v_op)) or []
+                v_unit = v_unit_list[v_idx] if v_idx < len(v_unit_list) else "?"
+                result.unfilled.append(SlotOutcome(round_num, v_planet, v_op, v_idx, v_unit, "held_back"))
 
     # Отчёт по этапам считается по ФИНАЛЬНОМУ состоянию unified (после автозаполнения и
     # снятия held-back слотов), не инкрементально по ходу — планета, растянутая на 2+
