@@ -504,7 +504,12 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     "assigned_ally_code": assignment["ally_code"] if assignment else None,
                     "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
                 })
-            operations.append({"number": operation, "slots": slots})
+            operations.append({
+                "number": operation,
+                "slots": slots,
+                "filled": sum(1 for s in slots if s["assigned_ally_code"]),
+                "total": len(slots),
+            })
         auto_held = bool(e["planet"] and planet_last_round.get(e["planet"], selected_round_num) > selected_round_num)
         planet_blocks.append({
             "name": e["planet"] or e["raw"],
@@ -633,6 +638,39 @@ async def tb_platoons_hold_route(
     if not plan or plan["guild_id"] != guild_id:
         return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
     database.set_tb_platoon_hold(guild_id, plan_id, round_num, planet, held == "1", set_by=f"web:{user['discord_id']}")
+    return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}", status_code=303)
+
+
+@router.post("/tb/platoons/clear", response_class=HTMLResponse)
+async def tb_platoons_clear_route(
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    scope: str = Form(...),  # "operation" / "planet" / "round" / "plan"
+    planet: str = Form(""),
+    operation: int = Form(0),
+    user: dict = Depends(require_guild_access),
+):
+    """Кнопки «очистить» на /tb/platoons — по операции/планете/этапу/всему плану. "Этап"
+    чистит все планеты, показанные на этом этапе (включая перенесённые с прошлого этапа —
+    они целиком общие с ним, см. database.py::_ensure_tb_platoon_assignments_table), не
+    только те, что впервые появились именно тут."""
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return RedirectResponse(f"/tb/platoons?{urlencode({'error': 'План не найден'})}", status_code=303)
+
+    if scope == "operation" and planet and operation:
+        database.clear_tb_platoon_assignments_for_operation(guild_id, plan_id, planet, operation)
+    elif scope == "planet" and planet:
+        database.clear_tb_platoon_assignments_for_planet(guild_id, plan_id, planet)
+    elif scope == "round":
+        entries, fetch_error = await tb_plan_reader.fetch_plan_planets(plan)
+        if not fetch_error:
+            for p in {e["planet"] for e in entries if e["planet"] and e["round"] == round_num}:
+                database.clear_tb_platoon_assignments_for_planet(guild_id, plan_id, p)
+    elif scope == "plan":
+        database.clear_tb_platoon_assignments_for_plan(guild_id, plan_id)
+
     return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}", status_code=303)
 
 

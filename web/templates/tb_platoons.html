@@ -70,6 +70,22 @@
             <a href="/tb/platoons/filters">фильтров</a> и лимита 10 юнитов на планету от игрока
             за этап — уже занятые слоты не трогает.
         </p>
+        <p class="platoon-export-actions">
+            <form method="post" action="/tb/platoons/clear" style="display:inline"
+                  onsubmit="return confirm('Очистить ВСЕ назначения на этапе {{ selected_round_num }} (все планеты этого этапа)?')">
+                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                <input type="hidden" name="scope" value="round">
+                <button type="submit" class="button-danger">🗑 Очистить этап {{ selected_round_num }}</button>
+            </form>
+            <form method="post" action="/tb/platoons/clear" style="display:inline"
+                  onsubmit="return confirm('Очистить ВСЕ назначения во ВСЁМ плане «{{ plan.name }}» (все этапы, все планеты)? Это нельзя отменить.')">
+                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                <input type="hidden" name="scope" value="plan">
+                <button type="submit" class="button-danger">🗑 Очистить весь план</button>
+            </form>
+        </p>
     {% endif %}
 
     {% if autofill_summary %}
@@ -123,11 +139,35 @@
                             «{{ p.name }}» в _PLANET_NAME_TO_RU в web/routes/guild_dashboard.py.
                         </p>
                     {% else %}
+                        {% if plan %}
+                            <form method="post" action="/tb/platoons/clear" class="platoon-hold-toggle"
+                                  onsubmit="return confirm('Очистить все назначения на планете «{{ p.name }}»?')">
+                                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                                <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                                <input type="hidden" name="scope" value="planet">
+                                <input type="hidden" name="planet" value="{{ p.name }}">
+                                <button type="submit" class="button-danger">Очистить планету</button>
+                            </form>
+                        {% endif %}
                         <div class="platoon-ops-scroll">
                             <div class="platoon-ops-grid">
                                 {% for op in p.operations %}
                                     <div class="platoon-op-card">
-                                        <h4>Операция {{ op.number }}</h4>
+                                        <h4>
+                                            Операция {{ op.number }}
+                                            <span class="platoon-op-count">{{ op.filled }}/{{ op.total }}</span>
+                                        </h4>
+                                        {% if plan and op.slots %}
+                                            <form method="post" action="/tb/platoons/clear" class="platoon-op-clear"
+                                                  onsubmit="return confirm('Очистить операцию {{ op.number }} на планете «{{ p.name }}»?')">
+                                                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                                                <input type="hidden" name="round_num" value="{{ selected_round_num }}">
+                                                <input type="hidden" name="scope" value="operation">
+                                                <input type="hidden" name="planet" value="{{ p.name }}">
+                                                <input type="hidden" name="operation" value="{{ op.number }}">
+                                                <button type="submit" class="button-danger">Очистить</button>
+                                            </form>
+                                        {% endif %}
                                         {% if op.slots %}
                                             <ul class="platoon-slot-list">
                                                 {% for slot in op.slots %}

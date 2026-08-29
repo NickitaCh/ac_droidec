@@ -1939,6 +1939,42 @@ def clear_tb_platoon_assignment(
     conn.close()
 
 
+def clear_tb_platoon_assignments_for_operation(guild_id: int, plan_id: int, planet: str, operation: int) -> None:
+    """Кнопка «очистить операцию» на /tb/platoons."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("""
+        DELETE FROM tb_platoon_assignments WHERE guild_id = ? AND plan_id = ? AND planet = ? AND operation = ?
+    """, (guild_id, plan_id, planet, operation))
+    conn.commit()
+    conn.close()
+
+
+def clear_tb_platoon_assignments_for_planet(guild_id: int, plan_id: int, planet: str) -> None:
+    """Кнопка «очистить планету» на /tb/platoons — все операции разом. Планета не привязана
+    к round_num (см. комментарий над _ensure_tb_platoon_assignments_table), поэтому чистит
+    её целиком независимо от того, на скольких этапах она сейчас показана."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("""
+        DELETE FROM tb_platoon_assignments WHERE guild_id = ? AND plan_id = ? AND planet = ?
+    """, (guild_id, plan_id, planet))
+    conn.commit()
+    conn.close()
+
+
+def clear_tb_platoon_assignments_for_plan(guild_id: int, plan_id: int) -> None:
+    """Кнопка «очистить весь план» на /tb/platoons — все планеты, все этапы."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_platoon_assignments_table(cursor)
+    cursor.execute("DELETE FROM tb_platoon_assignments WHERE guild_id = ? AND plan_id = ?", (guild_id, plan_id))
+    conn.commit()
+    conn.close()
+
+
 def get_tb_platoon_assignments(guild_id: int, plan_id: int) -> dict:
     """(planet, operation, slot_index) -> {"ally_code", "assigned_by", "round_num"} — все
     назначения плана разом (round_num — только для отображения "впервые вписан на этапе N",

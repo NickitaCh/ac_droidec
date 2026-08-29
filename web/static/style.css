@@ -564,6 +564,9 @@ table.data .dc-level-col {
 .platoon-op-card h4 { margin: 0 0 0.6em; font-size: 0.95em; color: var(--fg-secondary); }
 .platoon-op-card ul { margin: 0; padding-left: 1.2em; }
 .platoon-op-card li { margin-bottom: 0.3em; }
+.platoon-op-count { font-weight: normal; color: var(--fg-muted); margin-left: 0.4em; }
+.platoon-op-clear { margin: -0.3em 0 0.6em; }
+.platoon-op-clear button { font-size: 0.8em; padding: 0.2em 0.6em; }
 
 /* ---- Слоты взвода — конструктор назначения игроков (2026-08-28), см. память
    project_tb_platoon_unit_lists_rote_2026-08-27 ---- */
