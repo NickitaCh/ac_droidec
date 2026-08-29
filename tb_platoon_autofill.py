@@ -220,9 +220,19 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     # (см. database.py::_ensure_tb_platoon_assignments_table), у неё только ОДНО состояние
     # заполненности, а не своё на каждый этап; round_num для held-планеты — её первое
     # появление (planet_first_round), т.к. вся её заливка в основном проходе шла под этим
-    # тегом. Если после основного прохода операция на held-планете заполнена на 100%,
-    # снимаем один слот — только из заполненных ИМЕННО В ЭТОМ прогоне (ручные назначения
-    # офицера не трогаем, он расставил их осознанно), с наименьшим реликом/★ донора.
+    # тегом.
+    #
+    # ВАЖНО (исправлено 2026-08-30 по живому багу): авто-держим применяется только пока
+    # операция заполняется "с нуля" ОДНИМ прогоном. Если в операции уже стояло хоть что-то
+    # ДО этого прогона (с предыдущего запуска автозаполнения или вручную), это значит
+    # планета донабирается по частям на протяжении нескольких запусков — очередной запуск
+    # (например, когда реально наступил следующий этап и пора её добивать) должен спокойно
+    # дозаполнить остаток, а не снова придержать 1 слот. Живой пример пользователя: этап 3
+    # придержан на 14/15 первым прогоном — верно; на этапе 4 повторный прогон должен был
+    # добить оставшийся 1 юнит на операцию, а вместо этого снова срезал его обратно до
+    # 14/15 — бага в том, что held-проверка была БЕЗУСЛОВНОЙ на каждый прогон. Ручной флаг
+    # (не авто) — наоборот, держит планету СТАБИЛЬНО на всех прогонах, пока офицер сам его
+    # не снимет — это осознанная постоянная инструкция, а не разовая "оставь один слот".
     last_round_of_planet: dict = {}
     for round_num, planet_set in planets_by_round.items():
         for planet in planet_set:
@@ -231,7 +241,8 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     for planet in ordered_planets:
         round_num = planet_first_round[planet]
         auto_held = last_round_of_planet.get(planet, round_num) > round_num
-        if not auto_held and not hold_flags.get((round_num, planet)):
+        manually_held = bool(hold_flags.get((round_num, planet)))
+        if not auto_held and not manually_held:
             continue
         for operation in range(1, 7):
             unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
@@ -240,6 +251,8 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             slots_here = [(planet, operation, idx) for idx in range(len(unit_list))]
             if any(k not in unified for k in slots_here):
                 continue  # операция и так не заполнена целиком — держать нечего
+            if auto_held and not manually_held and any(k in assignments for k in slots_here):
+                continue  # донабор по частям (см. комментарий выше) — не держим повторно
             newly_here = [k for k in slots_here if k not in assignments]
             if not newly_here:
                 continue  # все слоты были заполнены раньше вручную — офицер сам решил добить

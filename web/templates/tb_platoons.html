@@ -105,6 +105,9 @@
             <div class="panel-title">
                 <span>Этап {{ selected_round_num }}</span>
                 <span class="panel-hint">планет: {{ planets|length }}</span>
+                {% if unplaceable_count %}
+                    <span class="badge badge-neutral" title="Незаполненные слоты, для которых прямо сейчас нет ни одного подходящего донора">не хватает доноров: {{ unplaceable_count }}</span>
+                {% endif %}
             </div>
             {% for p in planets %}
                 <div class="platoon-planet-block">

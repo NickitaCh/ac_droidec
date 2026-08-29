@@ -475,6 +475,12 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             if e2["planet"]:
                 planet_last_round[e2["planet"]] = max(planet_last_round.get(e2["planet"], rn), rn)
 
+    # Сводка "сколько юнитов не можем поставить на этапе" — незаполненные слоты, у которых
+    # прямо сейчас НЕТ ни одного подходящего кандидата (никто не проходит по релику/★,
+    # либо исключён фильтром/лимитом/занят в другом месте этого этапа) — не просто "ещё не
+    # назначено вручную". Считается по всем планетам выбранного этапа разом.
+    unplaceable_count = 0
+
     planet_blocks = []
     for planet_idx, e in enumerate(selected_entries):
         operations = []
@@ -495,6 +501,8 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                 if base_id and filter_rules.is_unit_excluded(base_id):
                     for o in slot_owners:
                         o["excluded_by_filter"] = True
+                if not assignment and not any(tb_platoon_engine.is_eligible(o) for o in slot_owners):
+                    unplaceable_count += 1
                 slots.append({
                     "index": slot_index,
                     "unit": unit_name,
@@ -534,6 +542,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         "saved_plans": saved_plans,
         "active_plan_id": active_plan_id,
         "autofill_summary": request.query_params.get("autofill_summary"),
+        "unplaceable_count": unplaceable_count,
     })
 
 
