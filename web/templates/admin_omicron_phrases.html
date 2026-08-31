@@ -28,6 +28,12 @@
         <div class="panel">
             <div class="table-toolbar">
                 <input type="search" placeholder="Поиск по персонажу или омикрону…" data-table-search="omicron-phrases-table">
+                <select data-table-filter="omicron-phrases-table">
+                    <option value="">Все режимы</option>
+                    {% for mode in modes %}
+                        <option value="{{ mode }}">{{ mode }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="table-scroll">
                 <table class="data" id="omicron-phrases-table">
@@ -41,7 +47,7 @@
                     </thead>
                     <tbody>
                         {% for c in characters %}
-                            <tr data-search="{{ (c.name ~ ' ' ~ (c.omicrons | map(attribute='label') | join(' '))) | lower }}">
+                            <tr data-search="{{ (c.name ~ ' ' ~ (c.omicrons | map(attribute='label') | join(' '))) | lower }}" data-mode="{{ c.modes }}">
                                 <td><strong>{{ c.name }}</strong></td>
                                 <td>{% if c.multi %}<span class="muted">все омикроны (по умолчанию)</span>{% else %}{{ c.omicrons[0].label }}{% if c.omicrons[0].extra %} <span class="muted">· {{ c.omicrons[0].extra }}</span>{% endif %}{% endif %}</td>
                                 <td>
@@ -57,7 +63,7 @@
                             </tr>
                             {% if c.multi %}
                                 {% for o in c.omicrons %}
-                                    <tr class="omicron-subrow" data-search="{{ (c.name ~ ' ' ~ o.label) | lower }}">
+                                    <tr class="omicron-subrow" data-search="{{ (c.name ~ ' ' ~ o.label) | lower }}" data-mode="{{ o.mode }}">
                                         <td class="muted">↳ {{ c.name }}</td>
                                         <td>{{ o.label }}{% if o.extra %} <span class="muted">· {{ o.extra }}</span>{% endif %}</td>
                                         <td>

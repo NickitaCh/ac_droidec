@@ -267,6 +267,16 @@ def _omicron_phrase_status(own_phrase: str, default_phrase: str, is_override_row
     return ("badge-neutral", "— не задана")
 
 
+# Порядок режимов в выпадающем фильтре — сперва самые актуальные для гильдии (ВГ/ТБ/ВА/рейд),
+# остальные (см. services/units_sync.py::_OMICRON_MODE_LABELS) — по алфавиту следом.
+_OMICRON_MODE_FILTER_ORDER = ["ВГ", "ТБ", "ВА", "рейд", "арена", "PvE", "PvE-ивент", "покорение", "галактический вызов", "все режимы"]
+
+
+def _sort_modes(modes) -> list:
+    order = {m: i for i, m in enumerate(_OMICRON_MODE_FILTER_ORDER)}
+    return sorted(modes, key=lambda m: (order.get(m, len(order)), m))
+
+
 @router.get("/omicron-phrases", response_class=HTMLResponse)
 async def omicron_phrases_page(request: Request, user: dict = Depends(require_super_admin)):
     skills_by_base = database.get_all_unit_omicron_skills()
@@ -284,22 +294,28 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_su
         return username_cache[discord_id]
 
     characters = []
+    all_modes = set()
     for base_id, skill_ids in skills_by_base.items():
         name = names.get(base_id) or base_id
         default_row = phrase_map.get((base_id, ""))
         default_phrase = default_row[3] if default_row else ""
 
         omicrons = []
+        char_modes = set()
         for skill_id in skill_ids:
             ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
             extra = " / ".join(p for p in (ability_type, omicron_mode) if p)
             row = phrase_map.get((base_id, skill_id))
             own_phrase = row[3] if row else ""
             badge_class, badge_text = _omicron_phrase_status(own_phrase, default_phrase, is_override_row=True)
+            if omicron_mode:
+                char_modes.add(omicron_mode)
+                all_modes.add(omicron_mode)
             omicrons.append({
                 "skill_id": skill_id,
                 "label": ability_name or skill_id,
                 "extra": extra,
+                "mode": omicron_mode or "",
                 "phrase": own_phrase,
                 "updated_by_name": _updated_by_name(row[4]) if row else None,
                 "badge_class": badge_class,
@@ -316,6 +332,7 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_su
             "default_badge_class": default_badge_class,
             "default_badge_text": default_badge_text,
             "omicrons": omicrons,
+            "modes": " ".join(_sort_modes(char_modes)),
             "multi": len(omicrons) > 1,
         })
     characters.sort(key=lambda c: c["name"].lower())
@@ -323,6 +340,7 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_su
     return templates.TemplateResponse(request, "admin_omicron_phrases.html", {
         "user": user,
         "characters": characters,
+        "modes": _sort_modes(all_modes),
         "error": request.query_params.get("error"),
         "synced": request.query_params.get("synced"),
     })

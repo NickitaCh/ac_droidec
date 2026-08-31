@@ -468,6 +468,14 @@ select { background: var(--page); }
     min-width: 16em;
 }
 .table-toolbar input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.table-toolbar select {
+    padding: 0.55em 0.8em;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--page);
+    color: var(--fg);
+    min-width: 10em;
+}
 .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
 /* ---- .table-toolbar как <form> (фильтры /activity) — генеральное правило `form`
    ниже задаёт flex-direction:column и max-width:20em для всех форм сайта, что

@@ -2,16 +2,28 @@
 // поиск по таблице (input[data-table-search]) и сортировка по клику на th[data-sort].
 
 document.addEventListener("DOMContentLoaded", () => {
+    // data-table-search — текстовый поиск по строке (row.dataset.search); необязательный
+    // соседний select[data-table-filter] с тем же id таблицы — точный фильтр по значению
+    // (row.dataset.mode для /admin/omicron-phrases: ТБ/ВГ/ВА/рейд/…, может быть несколько
+    // через пробел — строка "по умолчанию" совпадает, если ЛЮБОЙ из омикронов персонажа
+    // подходит под выбранный режим). Оба условия учитываются вместе, а не по отдельности,
+    // чтобы поиск и фильтр не перетирали видимость друг друга.
     document.querySelectorAll("[data-table-search]").forEach((input) => {
         const table = document.getElementById(input.dataset.tableSearch);
         if (!table) return;
         const rows = () => table.tBodies[0].rows;
-        input.addEventListener("input", () => {
+        const filterSelect = document.querySelector(`[data-table-filter="${input.dataset.tableSearch}"]`);
+        const apply = () => {
             const q = input.value.trim().toLowerCase();
+            const mode = filterSelect ? filterSelect.value : "";
             for (const row of rows()) {
-                row.style.display = !q || row.dataset.search.includes(q) ? "" : "none";
+                const matchesSearch = !q || row.dataset.search.includes(q);
+                const matchesMode = !mode || (row.dataset.mode || "").split(" ").includes(mode);
+                row.style.display = matchesSearch && matchesMode ? "" : "none";
             }
-        });
+        };
+        input.addEventListener("input", apply);
+        if (filterSelect) filterSelect.addEventListener("change", apply);
     });
 
     // Поиск по ленте активности (/activity) — структура там не таблица, а вложенные
