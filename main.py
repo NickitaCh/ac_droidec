@@ -41,35 +41,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 COMLINK_URL = "http://localhost:3000" 
 
-TUSA_GUILD_ID = 1105914797054238830  # dev/тестовый Discord-сервер, не привязан к SWGOH-гильдии
-SNG_GUILD_ID = 931280548402442310    # Discord-сервер AbsoluteChaos — используется и для seed_default_guild ниже
+SNG_GUILD_ID = 931280548402442310    # Discord-сервер AbsoluteChaos — используется для seed_default_guild ниже
 
-
-def _build_test_guilds_list() -> list:
-    """Discord-серверы (НЕ SWGOH-гильдии — Discord API тоже называет сервер "guild",
-    отсюда путаница), которым disnake регистрирует слэш-команды. Раньше это были 2
-    захардкоженных ID (TUSA/SNG) — при онбординге 3-й реальной SWGOH-гильдии через
-    "/гильдия добавить" на новом Discord-сервере команды там не появлялись вообще,
-    пока кто-то вручную не добавлял её discord_guild_id сюда и не делал деплой кода.
-    Теперь список = TUSA_GUILD_ID (фолбэк на случай пустой БД при самом первом
-    запуске, до seed_default_guild) + SNG_GUILD_ID + discord_guild_id каждой строки
-    в таблице guilds — так что новый Discord-сервер подхватывается после обычного
-    РЕСТАРТА бота (плюс обычный ручной REST-пуш команд на него, см. CLAUDE.md про
-    отключённый автосинк), без правки этого файла."""
-    guild_ids = {TUSA_GUILD_ID, SNG_GUILD_ID}
-    try:
-        for guild_config in database.get_all_guild_configs():
-            discord_id = guild_config.get("discord_guild_id")
-            if discord_id:
-                guild_ids.add(int(discord_id))
-    except Exception as e:
-        print(f"⚠️ Не удалось прочитать discord_guild_id гильдий из БД для test_guilds — используются только TUSA/SNG: {e}")
-    return list(guild_ids)
-
-
-test_guilds_list = _build_test_guilds_list()
-
-ALLY_CODE = "572624393"  
+ALLY_CODE = "572624393"
 N_LIMIT = 3              
 
 ALLOWED_ROLE_IDS = [1153753506772164629]
@@ -135,12 +109,22 @@ class GuildManagerBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
-            test_guilds=test_guilds_list,
+            # Команды ГЛОБАЛЬНЫЕ (не test_guilds) — гильдийные слэш-команды Discord
+            # принципиально не показывает в личке бота, только внутри своей гильдии.
+            # default_contexts=bot_dm разрешает вызывать их в ЛС; guild_resolver
+            # всё равно решает, что конкретному discord_id можно, не завися от
+            # контекста вызова. Побочный эффект: новый Discord-сервер, добавленный
+            # через "/гильдия добавить", получает все команды сразу (это глобальная
+            # регистрация), без ручного список-менеджмента, который был нужен раньше.
+            default_install_types=disnake.ApplicationInstallTypes(guild=True),
+            default_contexts=disnake.InteractionContextTypes(guild=True, bot_dm=True),
             # Автосинк слэш-команд (disnake) ловил баг: периодический авто-ресинк
             # иногда пушил ПУСТОЙ список в гильдию 931280548402442310, стирая все
             # слэш-команды гильдии целиком. Отключаем автосинк совсем, пока не
             # разобрались в первопричине — список команд теперь меняется только
-            # вручную через Discord REST API (см. память проекта).
+            # вручную через Discord REST API (см. память проекта). Раньше это была
+            # guild-scoped регистрация (test_guilds); теперь при ручном пуше
+            # список нужно слать на ГЛОБАЛЬНЫЙ endpoint (без guild_id), см. CLAUDE.md.
             command_sync_flags=commands.CommandSyncFlags.none()
         )
         self.comlink = comlink
