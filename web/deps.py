@@ -52,6 +52,15 @@ def get_current_user(request: Request) -> dict:
     return _apply_guild_switch(request, _refresh_access(user))
 
 
+def get_current_user_optional(request: Request) -> dict | None:
+    """Как get_current_user, но None вместо 401 для незалогиненных — для страниц вроде
+    главной, у которых есть гостевой вид. Залогиненным даёт то же самое (включая
+    switchable_guilds для супер-админов), просто без обязательной авторизации."""
+    if not request.session.get("user"):
+        return None
+    return get_current_user(request)
+
+
 def require_officer_access(request: Request) -> dict:
     """Как get_current_user, но также требует tier="officer" — веб-дашборд
     доступен только офицерам/лидерам (игровой ранг из Comlink, либо супер-админ,

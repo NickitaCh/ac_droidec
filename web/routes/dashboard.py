@@ -1,13 +1,14 @@
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday
 from services import dashboard_data, datacron_catalog
+from web.deps import get_current_user_optional
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -62,8 +63,7 @@ def _next_birthdays(guild_id: int, limit: int = 10):
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    user = request.session.get("user")
+async def home(request: Request, user: dict | None = Depends(get_current_user_optional)):
     guild_cfg = None
     widgets = None
     if user and user.get("guild_id") is not None:
