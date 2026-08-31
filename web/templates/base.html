@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}AC Droidec{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
+        // который грузится с defer и сработал бы уже после первого кадра —
+        // была бы вспышка не той темы).
+        (function () {
+            try {
+                var saved = localStorage.getItem("theme");
+                if (saved === "light" || saved === "dark") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) {}
+        })();
+    </script>
     <script src="/static/dashboard.js" defer></script>
 </head>
 <body>
@@ -62,6 +75,10 @@
                 <a href="/login">Войти через Discord</a>
                 <a href="/login/password">По логину и паролю</a>
             {% endif %}
+            <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Переключить тему" title="Переключить тему">
+                <span class="theme-icon-light">☀️</span>
+                <span class="theme-icon-dark">🌙</span>
+            </button>
         </nav>
     </header>
     <main class="{% block main_class %}{% endblock %}">

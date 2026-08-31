@@ -2,6 +2,21 @@
 // поиск по таблице (input[data-table-search]) и сортировка по клику на th[data-sort].
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Тумблер темы (base.html) — клик переключает light/dark и сохраняет выбор в
+    // localStorage; сам атрибут data-theme на <html> уже мог быть выставлен раньше
+    // инлайн-скриптом в <head>, чтобы не мигать не той темой при загрузке.
+    const themeToggle = document.getElementById("theme-toggle");
+    if (themeToggle) {
+        themeToggle.addEventListener("click", () => {
+            const root = document.documentElement;
+            const isDark = root.getAttribute("data-theme") === "dark"
+                || (!root.hasAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+            const next = isDark ? "light" : "dark";
+            root.setAttribute("data-theme", next);
+            try { localStorage.setItem("theme", next); } catch (e) {}
+        });
+    }
+
     // data-table-search — текстовый поиск по строке (row.dataset.search); необязательный
     // соседний select[data-table-filter] с тем же id таблицы — точный фильтр по значению
     // (row.dataset.mode для /admin/omicron-phrases: ТБ/ВГ/ВА/рейд/…, может быть несколько

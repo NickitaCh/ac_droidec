@@ -23,7 +23,7 @@
     --status-critical: #d03b3b;
 }
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
         --page: #0d0d0d;
         --surface: #1a1a19;
         --surface-2: color-mix(in srgb, #ffffff 5%, var(--surface));
@@ -43,6 +43,30 @@
         --status-warning: #fab219;
         --status-critical: #d03b3b;
     }
+}
+/* ---- Тумблер темы (base.html, dashboard.js) — явный выбор всегда побеждает над
+   prefers-color-scheme в обе стороны: этот блок переопределяет системную тёмную
+   тему при data-theme="dark", а :not([data-theme="light"]) выше уже не даёт
+   системной тёмной теме сработать при data-theme="light". ---- */
+:root[data-theme="dark"] {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: color-mix(in srgb, #ffffff 5%, var(--surface));
+    --fg: #ffffff;
+    --fg-secondary: #c3c2b7;
+    --fg-muted: #898781;
+    --border: #2c2c2a;
+    --border-strong: #383835;
+    --error: #e66767;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-1-track: #184f95;
+
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-critical: #d03b3b;
 }
 
 * { box-sizing: border-box; }
@@ -146,6 +170,32 @@ h1, h2 { letter-spacing: -0.01em; }
     border-left: 1px solid var(--border);
     color: var(--fg-muted);
     font-size: 0.9em;
+}
+
+/* ---- Тумблер светлой/тёмной темы — иконка-кнопка в шапке, см. dashboard.js
+   (theme-toggle) и data-theme в base.html/style.css выше. ---- */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1em;
+    height: 2.1em;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg-secondary);
+    font-size: 1em;
+    line-height: 1;
+    cursor: pointer;
+}
+.theme-toggle:hover { background: var(--surface-2); color: var(--fg); }
+.theme-toggle .theme-icon-dark { display: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-light { display: none; }
+:root[data-theme="dark"] .theme-toggle .theme-icon-dark { display: inline; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-toggle .theme-icon-light { display: none; }
+    :root:not([data-theme="light"]) .theme-toggle .theme-icon-dark { display: inline; }
 }
 
 /* ---- Переключатель гильдии в шапке (супер-админы, см. base.html) — form
@@ -532,6 +582,34 @@ table.data .dc-level-col {
 table.data tbody tr.omicron-subrow { background: color-mix(in srgb, var(--fg) 1%, transparent); }
 table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4em; }
 .muted { color: var(--fg-muted); }
+/* ---- Компактный сегментированный тумблер (напр. размер страницы на /activity внутри
+   игрока) — узкая группа-таблетка вместо .table-toolbar (у него justify-content:
+   space-between, что растягивает пару ссылок на всю ширину контейнера). ---- */
+.segmented-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.9em;
+}
+.segmented-toggle-options {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+}
+.segmented-toggle-options a,
+.segmented-toggle-options strong {
+    display: inline-block;
+    padding: 0.3em 0.8em;
+    text-decoration: none;
+    color: var(--fg-secondary);
+    font-weight: 400;
+}
+.segmented-toggle-options a:hover { background: var(--surface-2); }
+.segmented-toggle-options strong { background: var(--accent); color: white; font-weight: 600; }
+.segmented-toggle-options a + a,
+.segmented-toggle-options strong + a,
+.segmented-toggle-options a + strong { border-left: 1px solid var(--border); }
 /* ---- Вторичная строка в ячейке таблицы (напр. сырой ID под резолвленным именем) ---- */
 .cell-sub { display: block; color: var(--fg-muted); font-size: 0.8em; margin-top: 0.15em; }
 .empty-state {
