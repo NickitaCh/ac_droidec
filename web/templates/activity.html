@@ -85,11 +85,27 @@
                 <option value="30" {% if period == '30' %}selected{% endif %}>30 дней</option>
                 <option value="90" {% if period == '90' %}selected{% endif %}>90 дней</option>
             </select>
+            {% if player_filter %}
+                <input type="hidden" name="page_size" value="{{ page_size }}">
+            {% endif %}
             <button type="submit">Применить</button>
             {% if player_filter or action_type_filter or period %}
                 <a href="{{ reset_url }}">Сбросить фильтр</a>
             {% endif %}
         </form>
+
+        {% if player_filter %}
+            <div class="table-toolbar" style="margin-bottom: 0.75em;">
+                <span class="muted">Событий на странице:</span>
+                {% for size, url in page_size_urls %}
+                    {% if size == page_size %}
+                        <strong>{{ size }}</strong>
+                    {% else %}
+                        <a href="{{ url }}">{{ size }}</a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
 
         {% if not rows %}
             <p class="empty-state">По этому фильтру событий не найдено.</p>
