@@ -72,8 +72,8 @@
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout">Выйти</a>
             {% else %}
-                <a href="/login">Войти через Discord</a>
-                <a href="/login/password">По логину и паролю</a>
+                <a href="/login?next={{ request.url.path | urlencode }}">Войти через Discord</a>
+                <a href="/login/password?next={{ request.url.path | urlencode }}">По логину и паролю</a>
             {% endif %}
             <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Переключить тему" title="Переключить тему">
                 <span class="theme-icon-light">☀️</span>

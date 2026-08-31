@@ -27,6 +27,14 @@ DISCORD_API = "https://discord.com/api/v10"
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 
+
+def _safe_next(value: str | None) -> str:
+    """Только относительный путь на нашем же сайте — иначе ?next= превращается
+    в открытый редирект (например на //evil.example или https://evil.example)."""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value
+
 OAUTH_NOT_CONFIGURED_HTML = """
 <!doctype html><html><body style="font-family: sans-serif; max-width: 40em; margin: 4em auto;">
 <h2>Discord OAuth ещё не настроен</h2>
@@ -48,6 +56,7 @@ async def login(request: Request):
 
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
+    request.session["post_login_redirect"] = _safe_next(request.query_params.get("next"))
     params = {
         "client_id": DISCORD_CLIENT_ID,
         "redirect_uri": _redirect_uri(request),
@@ -106,7 +115,7 @@ async def callback(request: Request):
         "tier": access["tier"],
         "is_super_admin": access["is_super_admin"],
     }
-    return RedirectResponse("/")
+    return RedirectResponse(request.session.pop("post_login_redirect", "/"))
 
 
 @router.get("/logout")
@@ -130,14 +139,19 @@ async def login_password_form(request: Request):
     return templates.TemplateResponse(request, "login_password.html", {
         "user": request.session.get("user"),
         "error": request.query_params.get("error"),
+        "next": _safe_next(request.query_params.get("next")),
     })
 
 
 @router.post("/login/password")
-async def login_password_submit(request: Request, login: str = Form(...), password: str = Form(...)):
+async def login_password_submit(request: Request, login: str = Form(...), password: str = Form(...), next: str = Form("/")):
+    next_url = _safe_next(next)
     discord_id = database.verify_web_credential(login.strip(), password)
     if not discord_id:
-        return RedirectResponse(f"/login/password?{urlencode({'error': 'Неверный логин или пароль.'})}", status_code=303)
+        error_params = {"error": "Неверный логин или пароль."}
+        if next_url != "/":
+            error_params["next"] = next_url
+        return RedirectResponse(f"/login/password?{urlencode(error_params)}", status_code=303)
 
     access = guild_resolver.resolve_access(discord_id)
     # У логин/паролевых учёток нет Discord username из OAuth — берём лучшее
@@ -154,4 +168,4 @@ async def login_password_submit(request: Request, login: str = Form(...), passwo
         "tier": access["tier"],
         "is_super_admin": access["is_super_admin"],
     }
-    return RedirectResponse("/")
+    return RedirectResponse(next_url, status_code=303)

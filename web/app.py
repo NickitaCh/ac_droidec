@@ -9,10 +9,14 @@ database.py/guild_resolver.py/services/, которые лежат рядом с
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 load_dotenv()
@@ -23,6 +27,20 @@ from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, 
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="AC Droidec")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _redirect_unauthenticated_to_login(request: Request, exc: StarletteHTTPException):
+    """Прямой заход по ссылке (например /activity) без сессии раньше падал
+    голой JSON-ошибкой 401 от deps.get_current_user — вместо этого шлём на
+    /login с ?next=<исходный путь>, чтобы после входа (через Discord OAuth —
+    web/auth.py::callback — или логин/пароль) вернуться туда же."""
+    if exc.status_code == 401:
+        next_path = request.url.path
+        if request.url.query:
+            next_path += f"?{request.url.query}"
+        return RedirectResponse(f"/login?next={quote(next_path, safe='')}")
+    return await http_exception_handler(request, exc)
 
 session_secret = os.getenv("WEB_SESSION_SECRET")
 if not session_secret:
