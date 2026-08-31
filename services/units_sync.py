@@ -88,23 +88,31 @@ def _ability_names(abilities_list: list, loc_kv: dict) -> dict:
 
 
 def _omicron_skills_by_base_id(skills_list: list, units_list: list) -> dict:
-    """{base_id: [skill_id, ...]} для каждого юнита, у которого хотя бы одна реферснутая
-    (unit.skillReference) способность имеет тир с isOmicronTier=True — то же исходное
-    правило, что раньше давало только множество "у кого есть омикрон" (game_units.
-    has_omicron, см. database.set_omicron_capable_base_ids), но здесь сохраняем ещё и
-    КАКИЕ именно skill_id — персонаж может иметь больше одного омикрона (например,
-    отдельно на базовой и уникальной способностях), и /admin/omicron-phrases должна
-    уметь показать/задать фразу на каждый из них по отдельности, а не только "на
-    персонажа целиком". Перебираем ВСЕ вхождения base_id в units_list (не первое
-    попавшееся, в отличие от старой _omicron_capable_base_ids) — comlink хранит
-    несколько записей на baseId (по редкости, см. _is_canonical_playable_unit), и
-    набор skillReference теоретически может отличаться между ними."""
+    """{base_id: [skill_id, ...]} для каждого КАНОНИЧЕСКОГО игрового юнита (тот же фильтр
+    _is_canonical_playable_unit, что и основной цикл sync_units при заполнении game_units),
+    у которого хотя бы одна реферснутая (unit.skillReference) способность имеет тир с
+    isOmicronTier=True.
+
+    2026-08-31: раньше (и в старой _omicron_capable_base_ids, которую эта функция заменила)
+    фильтра не было — перебирались ВСЕ записи units_list, включая NPC/PVE-only боевые копии
+    персонажей (свой отдельный baseId, "PVE_"-префиксы, "_DUEL"/"_GLEVENT"-суффиксы и т.п.,
+    см. комментарий у _is_canonical_playable_unit) и лишние rarity-варианты. Раньше это было
+    безобидно: результат только флипал game_units.has_omicron, а game_units и так содержит
+    только канонические baseId — NPC-копии там просто не находили строку и no-op'ались.
+    Но /admin/omicron-phrases читает unit_omicron_skills НАПРЯМУЮ (без такого неявного join),
+    так что NPC-копии стали вылезать как отдельные "персонажи"-дубли с "именем" = сырой baseId
+    (у него просто нет строки в game_units, чтобы резолвнуть отображаемое имя) — баг, найденный
+    пользователем по факту (много дублей и "не очень" названия на странице). Фильтр гарантирует
+    ровно один base_id на реального персонажа/корабль, для которого database.get_game_unit_names
+    всегда найдёт нормальное имя."""
     omicron_skill_ids = {
         sk["id"] for sk in skills_list
         if any(t.get("isOmicronTier") for t in (sk.get("tier") or []))
     }
     result = {}
     for unit in units_list:
+        if not _is_canonical_playable_unit(unit):
+            continue
         bid = unit.get("baseId")
         if not bid:
             continue
