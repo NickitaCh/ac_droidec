@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Статистика по игрокам — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Активность гильдии — по игрокам</h1>
+    <p class="muted"><a href="/activity">← Назад к общей ленте</a></p>
+
+    <form method="get" action="/activity/players" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+        <select name="period" onchange="this.form.submit()">
+            <option value="" {% if not period %}selected{% endif %}>Всё время</option>
+            <option value="7" {% if period == '7' %}selected{% endif %}>7 дней</option>
+            <option value="30" {% if period == '30' %}selected{% endif %}>30 дней</option>
+            <option value="90" {% if period == '90' %}selected{% endif %}>90 дней</option>
+        </select>
+        <noscript><button type="submit">Применить</button></noscript>
+    </form>
+
+    {% if not rows %}
+        <p class="empty-state">Данных пока нет — активность считается по разнице между снимками ростера, см. страницу «Активность».</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по игроку…" data-table-search="activity-players-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="activity-players-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            {% for action_type, label in action_types %}
+                                <th class="num" data-sort="num">{{ label }}</th>
+                            {% endfor %}
+                            <th class="num" data-sort="num">Всего</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr data-search="{{ row.player_name|lower }}">
+                                <td><a href="{{ row.player_url }}">{{ row.player_name }}</a></td>
+                                {% for action_type, label in action_types %}
+                                    {% set n = row.counts.get(action_type, 0) %}
+                                    <td class="num">
+                                        {% if n > 0 %}
+                                            <a href="{{ row.type_urls[action_type] }}">{{ n }}</a>
+                                        {% else %}
+                                            <span class="muted">0</span>
+                                        {% endif %}
+                                    </td>
+                                {% endfor %}
+                                <td class="num"><strong>{{ row.total }}</strong></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

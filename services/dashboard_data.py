@@ -717,6 +717,29 @@ def get_guild_activity_players(guild_id: int) -> list:
     return sorted(((c, names_by_code.get(c, c)) for c in codes), key=lambda p: p[1].lower())
 
 
+def get_guild_activity_player_stats(guild_id: int, date_from: str | None = None) -> list[dict]:
+    """[{"ally_code", "player_name", "counts": {action_type: count}, "total": int}, ...] —
+    сводная матрица игрок×тип для /activity/players, отсортирована по total по убыванию.
+    Включает игроков без событий за период (counts пустой/total=0) — иначе строка человека
+    молча пропадала бы из таблицы при переключении на короткий период."""
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    all_codes = database.get_guild_activity_player_codes(guild_id)
+    triples = database.get_guild_activity_player_type_counts(guild_id, date_from=date_from)
+
+    by_player: dict[str, dict] = {code: {"ally_code": code, "player_name": names_by_code.get(code, code),
+                                          "counts": Counter(), "total": 0} for code in all_codes}
+    for ally_code, action_type, count in triples:
+        entry = by_player.setdefault(ally_code, {"ally_code": ally_code,
+                                                   "player_name": names_by_code.get(ally_code, ally_code),
+                                                   "counts": Counter(), "total": 0})
+        entry["counts"][action_type] += count
+        entry["total"] += count
+
+    rows = list(by_player.values())
+    rows.sort(key=lambda r: (-r["total"], r["player_name"].lower()))
+    return rows
+
+
 def _friendly_date_label(event_date: str, today) -> str:
     if event_date == today.isoformat():
         return "Сегодня"

@@ -1030,6 +1030,31 @@ async def activity_sync(
     return RedirectResponse(f"/activity?{urlencode(params)}", status_code=303)
 
 
+@router.get("/activity/players", response_class=HTMLResponse)
+async def activity_players(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    period = request.query_params.get("period") or ""
+    if period not in ACTIVITY_PERIOD_DAYS:
+        period = ""
+    date_from = _period_to_date_from(period)
+
+    rows = dashboard_data.get_guild_activity_player_stats(guild_id, date_from=date_from)
+    period_params = {"period": period} if period else {}
+    for row in rows:
+        row["player_url"] = f"/activity?{urlencode({'player': row['ally_code'], **period_params})}"
+        row["type_urls"] = {
+            action_type: f"/activity?{urlencode({'player': row['ally_code'], 'action_type': action_type, **period_params})}"
+            for action_type in row["counts"]
+        }
+
+    return templates.TemplateResponse(request, "activity_players.html", {
+        "user": user,
+        "rows": rows,
+        "period": period,
+        "action_types": list(dashboard_data.ACTIVITY_ACTION_LABELS.items()),
+    })
+
+
 @router.get("/violations", response_class=HTMLResponse)
 async def violations(request: Request, user: dict = Depends(require_guild_access)):
     show_all = request.query_params.get("all") == "1"
