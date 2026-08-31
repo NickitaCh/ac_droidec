@@ -95,15 +95,17 @@
         </form>
 
         {% if player_filter %}
-            <div class="table-toolbar" style="margin-bottom: 0.75em;">
+            <div class="segmented-toggle">
                 <span class="muted">Событий на странице:</span>
-                {% for size, url in page_size_urls %}
-                    {% if size == page_size %}
-                        <strong>{{ size }}</strong>
-                    {% else %}
-                        <a href="{{ url }}">{{ size }}</a>
-                    {% endif %}
-                {% endfor %}
+                <span class="segmented-toggle-options">
+                    {% for size, url in page_size_urls %}
+                        {% if size == page_size %}
+                            <strong>{{ size }}</strong>
+                        {% else %}
+                            <a href="{{ url }}">{{ size }}</a>
+                        {% endif %}
+                    {% endfor %}
+                </span>
             </div>
         {% endif %}
 
