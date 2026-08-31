@@ -87,23 +87,34 @@ def _ability_names(abilities_list: list, loc_kv: dict) -> dict:
     return names
 
 
-def _omicron_capable_base_ids(skills_list: list, units_list: list) -> set:
-    """base_id всех юнитов, у которых хотя бы одна реферснутая (unit.skillReference)
-    способность имеет тир с isOmicronTier=True."""
+def _omicron_skills_by_base_id(skills_list: list, units_list: list) -> dict:
+    """{base_id: [skill_id, ...]} для каждого юнита, у которого хотя бы одна реферснутая
+    (unit.skillReference) способность имеет тир с isOmicronTier=True — то же исходное
+    правило, что раньше давало только множество "у кого есть омикрон" (game_units.
+    has_omicron, см. database.set_omicron_capable_base_ids), но здесь сохраняем ещё и
+    КАКИЕ именно skill_id — персонаж может иметь больше одного омикрона (например,
+    отдельно на базовой и уникальной способностях), и /admin/omicron-phrases должна
+    уметь показать/задать фразу на каждый из них по отдельности, а не только "на
+    персонажа целиком". Перебираем ВСЕ вхождения base_id в units_list (не первое
+    попавшееся, в отличие от старой _omicron_capable_base_ids) — comlink хранит
+    несколько записей на baseId (по редкости, см. _is_canonical_playable_unit), и
+    набор skillReference теоретически может отличаться между ними."""
     omicron_skill_ids = {
         sk["id"] for sk in skills_list
         if any(t.get("isOmicronTier") for t in (sk.get("tier") or []))
     }
-    capable = set()
+    result = {}
     for unit in units_list:
         bid = unit.get("baseId")
-        if not bid or bid in capable:
+        if not bid:
             continue
         for ref in (unit.get("skillReference") or []):
-            if ref.get("skillId") in omicron_skill_ids:
-                capable.add(bid)
-                break
-    return capable
+            skill_id = ref.get("skillId")
+            if skill_id in omicron_skill_ids:
+                skills = result.setdefault(bid, [])
+                if skill_id not in skills:
+                    skills.append(skill_id)
+    return result
 
 
 # Тип способности (лидерка/базовая/особая/уникальная) не хранится отдельным полем в
@@ -243,7 +254,9 @@ async def sync_units(comlink) -> int:
     # имён важнее и не должно срываться из-за флага "есть ли омикрон".
     try:
         skills_list = await _fetch_skill_definitions(comlink)
-        database.set_omicron_capable_base_ids(_omicron_capable_base_ids(skills_list, units_list))
+        omicron_skills_map = _omicron_skills_by_base_id(skills_list, units_list)
+        database.set_omicron_capable_base_ids(omicron_skills_map.keys())
+        database.set_unit_omicron_skills(omicron_skills_map)
         abilities_list = await _fetch_ability_definitions(comlink)
         ability_names = _ability_names(abilities_list, loc_ru_kv)
         database.set_skill_tier_thresholds(_skill_tier_thresholds(skills_list, ability_names))

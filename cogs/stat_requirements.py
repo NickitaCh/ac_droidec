@@ -401,7 +401,11 @@ async def autocomplete_omicron_phrase_character(inter: disnake.ApplicationComman
         return ["❌ Список пуст — фразы ещё не заданы."]
     search = string.lower().strip()
     options = []
-    for _, base_id, phrase, _, _ in rows:
+    seen = set()
+    for _, base_id, _skill_id, _phrase, _, _ in rows:
+        if base_id in seen:
+            continue
+        seen.add(base_id)
         label = f"{_unit_display_name(base_id)} [{base_id}]"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=label))
@@ -555,7 +559,7 @@ class StatRequirementsCog(commands.Cog):
             if omicron_mode:
                 text += f" для {omicron_mode}"
             text += f" на **{_unit_display_name(base_id)}**."
-            phrase = database.get_omicron_phrase(base_id)
+            phrase = database.get_omicron_phrase(base_id, skill_id)
             if phrase:
                 text += f" {phrase}"
             try:
@@ -615,7 +619,15 @@ class StatRequirementsCog(commands.Cog):
         if not rows:
             await inter.response.send_message("Список пуст — фразы ещё не заданы.", ephemeral=True)
             return
-        lines = [f"**{_unit_display_name(char_key)}** — {phrase}" for _, char_key, phrase, _, _ in rows]
+        skill_info = database.get_skill_display_info([skill_id for _, _, skill_id, _, _, _ in rows if skill_id])
+        lines = []
+        for _, char_key, skill_id, phrase, _, _ in rows:
+            char_name = _unit_display_name(char_key)
+            if skill_id:
+                ability_name, _ability_id, _ability_type, _omicron_mode = skill_info.get(skill_id, (skill_id, None, None, None))
+                lines.append(f"**{char_name}** ({ability_name}) — {phrase}")
+            else:
+                lines.append(f"**{char_name}** (по умолчанию) — {phrase}")
         embeds = _lines_to_embeds("Фразы для омикронов", DATACRON_LIST_COLOR, lines)
         await inter.response.send_message(embed=embeds[0], ephemeral=True)
         for extra in embeds[1:]:

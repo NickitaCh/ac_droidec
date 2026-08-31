@@ -517,6 +517,12 @@ table.data .dc-level-col {
     max-width: 18em;
     white-space: normal;
 }
+/* ---- /admin/omicron-phrases: override-строка конкретного омикрона под
+   строкой "по умолчанию" персонажа — приглушаем и убираем полосу-разделитель,
+   чтобы группа читалась как одна визуальная единица (без rowspan, см. шаблон:
+   rowspan несовместим с JS-сортировкой таблицы, которая просто переставляет <tr>). ---- */
+table.data tbody tr.omicron-subrow { background: color-mix(in srgb, var(--fg) 1%, transparent); }
+table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4em; }
 .muted { color: var(--fg-muted); }
 /* ---- Вторичная строка в ячейке таблицы (напр. сырой ID под резолвленным именем) ---- */
 .cell-sub { display: block; color: var(--fg-muted); font-size: 0.8em; margin-top: 0.15em; }

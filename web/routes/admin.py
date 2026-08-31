@@ -2,11 +2,12 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
+from services.units_sync import sync_units
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -247,71 +248,116 @@ async def command_usage_page(request: Request, user: dict = Depends(require_supe
 # поэтому — как /admin/guilds и /admin/access — управляется супер-админами, а не
 # гильдийскими офицерами (в отличие от /plates, /datacrons и т.п.). Сама детекция
 # выдачи и отправка сообщения в Discord — cogs/stat_requirements.py::_announce_omicrons,
-# эта страница только редактирует соответствия персонаж → фраза, ничего не постит.
+# эта страница только редактирует соответствия персонаж(+омикрон) → фраза, ничего не постит.
+#
+# 2026-08-31: раньше страница была формой добавления + таблицей уже заданных фраз (нужно
+# было заранее знать персонажа). Переделано в один сплошной список ВСЕХ персонажей, у
+# которых В ИГРЕ есть омикрон (database.get_all_unit_omicron_skills, тот же источник, что
+# game_units.has_omicron) — сразу видно, у кого фраза уже задана, а у кого нет, без
+# отдельного поиска/формы. У персонажа с несколькими омикронами (isOmicronTier на
+# нескольких способностях) первая строка — фраза "по умолчанию" (skill_id='', используется
+# для любого его омикрона, пока не переопределена), плюс по строке на каждый конкретный
+# омикрон с собственным override — см. database.get_omicron_phrase за порядком резолва.
 # =====================================================================
+def _omicron_phrase_status(own_phrase: str, default_phrase: str, is_override_row: bool) -> tuple:
+    if own_phrase:
+        return ("badge-ok", "✅ своя" if is_override_row else "✅ задана")
+    if is_override_row and default_phrase:
+        return ("badge-neutral", "↳ по умолчанию")
+    return ("badge-neutral", "— не задана")
+
+
 @router.get("/omicron-phrases", response_class=HTMLResponse)
 async def omicron_phrases_page(request: Request, user: dict = Depends(require_super_admin)):
-    rows = database.get_all_omicron_phrases()
-    phrases = [
-        {
-            "character_key": character_key,
-            "character_name": database.get_game_unit_name(character_key) or character_key,
-            "phrase": phrase,
-            "updated_by_name": database.get_username_for_discord_id(updated_by) if updated_by else None,
-            "updated_at": updated_at,
-        }
-        for _id, character_key, phrase, updated_by, updated_at in rows
-    ]
-    phrases.sort(key=lambda p: p["character_name"].lower())
+    skills_by_base = database.get_all_unit_omicron_skills()
+    skill_info = database.get_skill_display_info([sid for sids in skills_by_base.values() for sid in sids])
+    names = database.get_game_unit_names(list(skills_by_base.keys()))
+
+    phrase_map = {(r[1], r[2]): r for r in database.get_all_omicron_phrases()}  # (character_key, skill_id) -> row
+    username_cache = {}
+
+    def _updated_by_name(discord_id):
+        if not discord_id:
+            return None
+        if discord_id not in username_cache:
+            username_cache[discord_id] = database.get_username_for_discord_id(discord_id)
+        return username_cache[discord_id]
+
+    characters = []
+    for base_id, skill_ids in skills_by_base.items():
+        name = names.get(base_id) or base_id
+        default_row = phrase_map.get((base_id, ""))
+        default_phrase = default_row[3] if default_row else ""
+
+        omicrons = []
+        for skill_id in skill_ids:
+            ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
+            extra = " / ".join(p for p in (ability_type, omicron_mode) if p)
+            row = phrase_map.get((base_id, skill_id))
+            own_phrase = row[3] if row else ""
+            badge_class, badge_text = _omicron_phrase_status(own_phrase, default_phrase, is_override_row=True)
+            omicrons.append({
+                "skill_id": skill_id,
+                "label": ability_name or skill_id,
+                "extra": extra,
+                "phrase": own_phrase,
+                "updated_by_name": _updated_by_name(row[4]) if row else None,
+                "badge_class": badge_class,
+                "badge_text": badge_text,
+            })
+        omicrons.sort(key=lambda o: o["label"].lower())
+
+        default_badge_class, default_badge_text = _omicron_phrase_status(default_phrase, default_phrase, is_override_row=False)
+        characters.append({
+            "base_id": base_id,
+            "name": name,
+            "default_phrase": default_phrase,
+            "default_updated_by_name": _updated_by_name(default_row[4]) if default_row else None,
+            "default_badge_class": default_badge_class,
+            "default_badge_text": default_badge_text,
+            "omicrons": omicrons,
+            "multi": len(omicrons) > 1,
+        })
+    characters.sort(key=lambda c: c["name"].lower())
+
     return templates.TemplateResponse(request, "admin_omicron_phrases.html", {
         "user": user,
-        "phrases": phrases,
+        "characters": characters,
         "error": request.query_params.get("error"),
+        "synced": request.query_params.get("synced"),
     })
 
 
-@router.get("/omicron-phrases/api/units", response_class=JSONResponse)
-async def omicron_phrases_units_search(q: str = "", user: dict = Depends(require_super_admin)):
-    # Только юниты, у которых омикрон реально существует В ИГРЕ (game_units.has_omicron,
-    # см. database.get_all_omicron_capable_units) — как в автокомплите /омикрон_текст
-    # фраза (cogs/stat_requirements.py::autocomplete_omicron_capable_character), а не
-    # весь справочник game_units, где большинство персонажей омикрона не имеют вовсе.
-    if not q or len(q.strip()) < 2:
-        return []
-    query = q.strip().lower()
-    matches = [
-        {"base_id": base_id, "name": name}
-        for base_id, name in database.get_all_omicron_capable_units()
-        if query in name.lower()
-    ]
-    matches.sort(key=lambda m: m["name"].lower())
-    return matches[:20]
-
-
-@router.post("/omicron-phrases/add", response_class=HTMLResponse)
-async def omicron_phrases_add(
+@router.post("/omicron-phrases/set", response_class=HTMLResponse)
+async def omicron_phrases_set(
     character_key: str = Form(...),
-    phrase: str = Form(...),
+    skill_id: str = Form(""),
+    phrase: str = Form(""),
     user: dict = Depends(require_super_admin),
 ):
     character_key = character_key.strip()
+    skill_id = skill_id.strip()
     phrase = phrase.strip()
-    if not character_key or not phrase:
-        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': 'Персонаж и текст фразы обязательны.'})}", status_code=303)
-    database.set_omicron_phrase(character_key, phrase, user["discord_id"])
+    if not character_key:
+        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': 'Некорректный персонаж.'})}", status_code=303)
+    # Пустое поле = убрать фразу (единая точка входа вместо отдельных add/edit/delete —
+    # так и default-строка, и override на конкретный омикрон правятся одной формой).
+    if phrase:
+        database.set_omicron_phrase(character_key, phrase, user["discord_id"], skill_id=skill_id)
+    else:
+        database.delete_omicron_phrase(character_key, skill_id=skill_id)
     return RedirectResponse("/admin/omicron-phrases", status_code=303)
 
 
-@router.post("/omicron-phrases/{character_key}/edit", response_class=HTMLResponse)
-async def omicron_phrases_edit(character_key: str, phrase: str = Form(...), user: dict = Depends(require_super_admin)):
-    phrase = phrase.strip()
-    if not phrase:
-        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': 'Текст фразы не может быть пустым.'})}", status_code=303)
-    database.set_omicron_phrase(character_key, phrase, user["discord_id"])
-    return RedirectResponse("/admin/omicron-phrases", status_code=303)
-
-
-@router.post("/omicron-phrases/{character_key}/delete", response_class=HTMLResponse)
-async def omicron_phrases_delete(character_key: str, user: dict = Depends(require_super_admin)):
-    database.delete_omicron_phrase(character_key)
-    return RedirectResponse("/admin/omicron-phrases", status_code=303)
+@router.post("/omicron-phrases/sync", response_class=HTMLResponse)
+async def omicron_phrases_sync(user: dict = Depends(require_super_admin)):
+    # Тот же sync_units, что кнопка "Обновить справочник юнитов" на /tasks (см.
+    # web/routes/tasks.py::sync_units_now) — он и так раз в час обновляет справочник
+    # омикронов (services/units_sync.py::sync_units), кнопка здесь просто даёт запустить
+    # его вручную сразу, не дожидаясь цикла, если появился новый персонаж/омикрон.
+    comlink = _get_comlink()
+    try:
+        total = await sync_units(comlink)
+    except Exception as e:
+        return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'error': f'Ошибка синхронизации: {e}'})}", status_code=303)
+    return RedirectResponse(f"/admin/omicron-phrases?{urlencode({'synced': str(total)})}", status_code=303)
