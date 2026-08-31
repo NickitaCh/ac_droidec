@@ -168,17 +168,28 @@ ROTE_PLATOON_SUGGESTIONS: dict[tuple[str, int], list[str]] = {
     ("Scarif", 5): ["Bastila Shan", "Ben Solo", "Ben Solo", "Han Solo", "Han Solo", "Ima-Gun Di", "Jedi Master Luke Skywalker", "Jedi Master Luke Skywalker", "Logray", "Razor Crest", "Resistance X-wing", "Rey", "Skiff Guard (Lando Calrissian)", "Tech", "Zaalbar"],
     ("Scarif", 6): ["Bastila Shan", "BB-8", "Ben Solo", "Ben Solo", "Dash Rendar", "Han Solo", "Han's Millennium Falcon", "Hermit Yoda", "Jedi Knight Revan", "Jedi Master Kenobi", "Jedi Master Luke Skywalker", "Razor Crest", "Rebel Officer Leia Organa", "Rey", "Skiff Guard (Lando Calrissian)"],}
 
-# Минимальная реликвия для донат-слота взвода, по этапу (1-6) — реальное игровое
-# требование (не подсказка, в отличие от ROTE_PLATOON_SUGGESTIONS выше), снято живьём
-# 2026-08-28 через comlink.get_game_data(request_segment=2)::territoryBattleDefinition
-# (id="t05D", он же "Восход Империи"): каждая reconZoneDefinition несёт unitRarity=7
-# (константа, генерик 7★) и unitRelicTier, который растёт по этапу и ОДИНАКОВ во всех
-# трёх ветках (conflict01/02/03, включая bonus-зоны Зеффо/Мандалора) внутри одного
-# этапа — проверено по всем 20 recon-зонам, ключ по одному только round достаточен, ветка
-# не нужна. Raw-значения из Comlink (7/8/8/9/10/11/11 по фазам 1-6, bonus совпадает со
-# своей фазой) переведены в отображаемый в игре/HotUtils релик через оффсет "-2",
-# подтверждённый кросс-чеком с HotUtils в память project_tb_platoon_gamedata_research_2026-08-25
-# ("Relic 5" в HotUtils == raw relic 7 в Comlink). Как и ROTE_PLATOON_SUGGESTIONS — это
-# t05D-специфичный справочник, актуален для текущего TB-типа гильдии ("Восход Империи");
-# если гильдия перейдёт на другой TB, эти цифры нужно переснять под его id.
-ROTE_MIN_RELIC_BY_ROUND: dict[int, int] = {1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 9}
+# Минимальная реликвия для донат-слота взвода — ПРИВЯЗАНА К ПЛАНЕТЕ, не к этапу гильдии.
+# Прежняя версия справочника индексировалась по номеру этапа (round_num) со значениями
+# 5/6/7/8/9/9 — это была живая выгрузка из Comlink territoryBattleDefinition (id="t05D"),
+# где показалось, что unitRelicTier растёт по этапу и одинаков во всех ветках внутри
+# этапа. По прямому запросу пользователя 2026-08-31 ("почему станция — это минимум р9?
+# Медстанция вообще то минимум р8") выяснилось, что это неверно: минимум фиксирован ЗА
+# ПЛАНЕТОЙ (одна и та же планета может стоять на разных этапах в разных планах гильдии —
+# см. комментарий в начале файла — а минимум для неё не меняется). Пользователь
+# подтвердил порядок планет по ветке (тёмная/микс/светлая, см. TB_PLANET_CONFLICT в
+# cogs/guild_events.py) и сопоставил его с прежней шкалой 5/6/7/8/9/9 — т.е. позиция
+# планеты внутри своей ветки задаёт её минимум, а не номер этапа, на который эту планету
+# сейчас поставила гильдия.
+ROTE_MIN_RELIC_BY_PLANET: dict[str, int] = {
+    # Тёмная ветка (conflict01)
+    "Mustafar": 5, "Geonosis": 6, "Dathomir": 7,
+    "Haven-class Medical Station": 8, "Malachor": 9, "Death Star": 9,
+    # Микс (conflict02)
+    "Corellia": 5, "Felucia": 6, "Tatooine": 7,
+    "Kessel": 8, "Vandor": 9, "Hoth": 9,
+    # Светлая (conflict03)
+    "Coruscant": 5, "Bracca": 6, "Kashyyyk": 7,
+    "Lothal": 8, "Ring of Kafrene": 9, "Scarif": 9,
+    # Бонус-зоны
+    "Zeffo": 7, "Mandalore": 8,
+}

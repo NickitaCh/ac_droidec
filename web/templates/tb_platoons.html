@@ -113,7 +113,7 @@
                 <details class="platoon-planet-block" open>
                     <summary class="platoon-planet-name">
                         {{ p.name }}
-                        {% if min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ min_relic_label }}</span>{% endif %}
+                        {% if p.min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ p.min_relic_label }}</span>{% endif %}
                         {% if p.auto_held %}
                             <span class="badge badge-neutral">держим (переходит на след. этап)</span>
                         {% elif p.held %}

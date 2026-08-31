@@ -145,7 +145,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         round_num = slot["round_num"]
         used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id, round_num)
         round_counts = tb_platoon_engine.compute_round_counts(unified, round_num)
-        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
+        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(slot["planet"])
         candidates = tb_platoon_engine.slot_candidates(
             owners=owners, base_id=base_id, here=(slot["planet"], slot["operation"], slot["slot_index"]),
             used_pairs=used_pairs, min_relic=min_relic, round_num=round_num, planet=slot["planet"],
@@ -176,7 +176,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         owners = owners_by_base_id.get(base_id, [])
         used_pairs = tb_platoon_engine.compute_used_pairs(unified, planets_by_round[round_num], name_to_base_id, round_num)
         round_counts = tb_platoon_engine.compute_round_counts(unified, round_num)
-        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(round_num)
+        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(planet)
         candidates = tb_platoon_engine.slot_candidates(
             owners=owners, base_id=base_id, here=here, used_pairs=used_pairs,
             min_relic=min_relic, round_num=round_num, planet=planet,

@@ -257,8 +257,8 @@ async def tb_order_plans_save_manual(
 # сохранённом плане ордера (по умолчанию — активный, guilds.tb_active_plan_id, но
 # можно переключиться на любой другой через ?plan_id=), показывает 6 операций,
 # подсказки юнитов на каждую (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS, см. память
-# project_tb_platoon_unit_lists_rote_2026-08-27), минимальную реликвию по этапу
-# (tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND) и назначение конкретного игрока гильдии
+# project_tb_platoon_unit_lists_rote_2026-08-27), минимальную реликвию по планете
+# (tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET) и назначение конкретного игрока гильдии
 # на конкретный донат-слот (database.*_tb_platoon_assignment*, аналог "Assign
 # Players" в HotUtils) — кандидаты на слот считаются из живого кэша ростера гильдии
 # (database.get_player_unit_owners_bulk + stat_engine.get_current_relic_level).
@@ -400,8 +400,6 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         round_options.append({"number": n, "label": f"Этап {n} — " + ", ".join(names)})
 
     selected_entries = by_round.get(selected_round_num, []) if selected_round_num is not None else []
-    min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_ROUND.get(selected_round_num) if selected_round_num else None
-    min_relic_label = f"R{min_relic}+" if min_relic is not None else None
 
     # Уникальные названия юнитов ТОЛЬКО выбранного этапа -> base_id -> живые владельцы в
     # гильдии (один батч-запрос вместо N на каждый слот, см. коммент над
@@ -483,6 +481,10 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
 
     planet_blocks = []
     for planet_idx, e in enumerate(selected_entries):
+        # Минимум фиксирован ЗА ПЛАНЕТОЙ (tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET), не за
+        # этапом гильдии — см. комментарий там же.
+        min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(e["planet"]) if e["planet"] else None
+        min_relic_label = f"R{min_relic}+" if min_relic is not None else None
         operations = []
         for operation in range(1, 7):
             unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
@@ -523,6 +525,13 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     "assigned_round_num": assigned_round_num,
                     "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
                 })
+            # Незаназначенные слоты — первыми в списке операции, т.к. на позднем этапе
+            # большинство слотов обычно уже заблокировано (перенесено с более раннего
+            # этапа) и реально требующие внимания слоты тонут среди них — прямой запрос
+            # пользователя 2026-08-31. Заполненные на ЭТОМ этапе — следом, перенесённые
+            # (carried_over) — в самом конце. slot_index (и anchor/forms) не меняется,
+            # сортировка влияет только на порядок отображения.
+            slots.sort(key=lambda s: 0 if not s["assigned_ally_code"] else (2 if s["carried_over"] else 1))
             operations.append({
                 "number": operation,
                 "slots": slots,
@@ -534,6 +543,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             "name": e["planet"] or e["raw"],
             "unresolved": e["planet"] is None,
             "operations": operations,
+            "min_relic_label": min_relic_label,
             "held": auto_held or bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
             "auto_held": auto_held,
             # Бейдж в свёрнутом виде заголовка планеты (см. .platoon-planet-block ->
@@ -552,7 +562,6 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         "round_options": round_options,
         "selected_round_num": selected_round_num,
         "planets": planet_blocks,
-        "min_relic_label": min_relic_label,
         "error": error,
         "plan": plan,
         "saved_plans": saved_plans,
