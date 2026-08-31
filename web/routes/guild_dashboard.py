@@ -505,6 +505,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                         o["excluded_by_filter"] = True
                 if not assignment and not any(tb_platoon_engine.is_eligible(o) for o in slot_owners):
                     unplaceable_count += 1
+                assigned_round_num = assignment["round_num"] if assignment else None
                 slots.append({
                     "index": slot_index,
                     "unit": unit_name,
@@ -512,6 +513,14 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     "unit_excluded": bool(base_id and filter_rules.is_unit_excluded(base_id)),
                     "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
                     "assigned_ally_code": assignment["ally_code"] if assignment else None,
+                    # "Донат сделан НА БОЛЕЕ РАННЕМ этапе, чем сейчас смотрим" — планета,
+                    # растянутая на 2+ этапа (см. tb_platoon_engine.visible_assignment):
+                    # слот уже виден заполненным на этом этапе, но заполнен он был раньше —
+                    # прямой запрос пользователя 2026-08-31 "нужно обозначить, что по плану
+                    # эти юниты уже размещены" (затемнение), не путать со свежим назначением
+                    # на ЭТОМ этапе.
+                    "carried_over": assigned_round_num is not None and assigned_round_num < selected_round_num,
+                    "assigned_round_num": assigned_round_num,
                     "anchor": f"slot-{selected_round_num}-{planet_idx}-{operation}-{slot_index}",
                 })
             operations.append({
@@ -527,6 +536,11 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             "operations": operations,
             "held": auto_held or bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
             "auto_held": auto_held,
+            # Бейдж в свёрнутом виде заголовка планеты (см. .platoon-planet-block ->
+            # <details>) — по прямому запросу пользователя 2026-08-31 "видно из кучи
+            # текста", чтобы не нужно было разворачивать блок, чтобы понять, чего не
+            # хватает.
+            "unfilled_count": sum(1 for op in operations for s in op["slots"] if not s["assigned_ally_code"]),
         })
 
     saved_plans = database.get_tb_saved_plans(guild_id)
@@ -683,6 +697,19 @@ async def tb_platoons_clear_route(
         database.clear_tb_platoon_assignments_for_plan(guild_id, plan_id)
 
     return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}", status_code=303)
+
+
+@router.get("/tb/platoons/api/units", response_class=JSONResponse)
+async def tb_platoons_units_search(q: str = "", user: dict = Depends(require_guild_access)):
+    """Подстрочный поиск юнита по имени (RU/EN) для интерактивного автодополнения на
+    /tb/platoons/filters (см. web/static/dashboard.js — контекст "unit") — по прямому
+    запросу пользователя 2026-08-31. Тот же database.search_game_units, что и
+    web/routes/stat_plates.py::units_search, отображаемое имя (cached_name) точно
+    резолвится обратно в base_id в tb_platoon_filters.parse_rules."""
+    if not q or len(q.strip()) < 2:
+        return []
+    rows = database.search_game_units(q.strip(), limit=20)
+    return [{"base_id": base_id, "name": name} for base_id, name in rows]
 
 
 @router.get("/tb/platoons/filters", response_class=HTMLResponse)

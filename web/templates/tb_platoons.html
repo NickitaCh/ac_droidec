@@ -106,12 +106,12 @@
                 <span>Этап {{ selected_round_num }}</span>
                 <span class="panel-hint">планет: {{ planets|length }}</span>
                 {% if unplaceable_count %}
-                    <span class="badge badge-neutral" title="Незаполненные слоты, для которых прямо сейчас нет ни одного подходящего донора">не хватает доноров: {{ unplaceable_count }}</span>
+                    <span class="badge badge-danger" title="Незаполненные слоты, для которых прямо сейчас нет ни одного подходящего донора">не хватает доноров: {{ unplaceable_count }}</span>
                 {% endif %}
             </div>
             {% for p in planets %}
-                <div class="platoon-planet-block">
-                    <h3 class="platoon-planet-name">
+                <details class="platoon-planet-block" open>
+                    <summary class="platoon-planet-name">
                         {{ p.name }}
                         {% if min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ min_relic_label }}</span>{% endif %}
                         {% if p.auto_held %}
@@ -119,7 +119,10 @@
                         {% elif p.held %}
                             <span class="badge badge-neutral">держим</span>
                         {% endif %}
-                    </h3>
+                        {% if p.unfilled_count %}
+                            <span class="badge badge-danger">не назначено: {{ p.unfilled_count }}</span>
+                        {% endif %}
+                    </summary>
                     {% if p.auto_held %}
                         <p class="muted platoon-hold-toggle">
                             Эта планета есть и на более позднем этапе плана — автозаполнение не
@@ -174,11 +177,14 @@
                                         {% if op.slots %}
                                             <ul class="platoon-slot-list">
                                                 {% for slot in op.slots %}
-                                                    <li id="{{ slot.anchor }}" class="platoon-slot">
+                                                    <li id="{{ slot.anchor }}"
+                                                        class="platoon-slot{% if slot.carried_over %} platoon-slot-carried{% elif not slot.assigned_ally_code %} platoon-slot-empty{% endif %}">
                                                         <details>
                                                             <summary>
                                                                 <span class="platoon-slot-unit">{{ slot.unit }}</span>
-                                                                {% if slot.assigned_name %}
+                                                                {% if slot.carried_over %}
+                                                                    <span class="badge badge-neutral" title="Назначено на этапе {{ slot.assigned_round_num }} — уже учтено, менять здесь не нужно">🔒 {{ slot.assigned_name }}</span>
+                                                                {% elif slot.assigned_name %}
                                                                     <span class="badge badge-ok">{{ slot.assigned_name }}</span>
                                                                 {% endif %}
                                                                 {% if slot.unit_excluded %}
@@ -211,7 +217,8 @@
                                                                                     <input type="hidden" name="anchor" value="{{ slot.anchor }}">
                                                                                     <button type="submit"
                                                                                         {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere or owner.excluded_by_filter or owner.at_cap %}disabled{% endif %}>
-                                                                                        {{ "✅" if owner.meets_min else "⚠️" }} {{ owner.name }} — {% if owner.is_ship %}{{ owner.stars }}★{% else %}релик {{ owner.relic }}{% endif %}
+                                                                                        {{ "✅" if owner.meets_min else "⚠️" }} {% if owner.is_priority %}⭐ {% endif %}{{ owner.name }} — {% if owner.is_ship %}{{ owner.stars }}★{% else %}релик {{ owner.relic }}{% endif %}
+                                                                                        {% if owner.is_priority %} (приоритет){% endif %}
                                                                                         {% if owner.used_elsewhere %} (уже занят на этом этапе){% endif %}
                                                                                         {% if owner.excluded_by_filter %} (исключён фильтром){% endif %}
                                                                                         {% if owner.at_cap %} (лимит 10/этап на планету исчерпан){% endif %}
@@ -236,7 +243,7 @@
                             </div>
                         </div>
                     {% endif %}
-                </div>
+                </details>
             {% endfor %}
         </div>
     {% endif %}

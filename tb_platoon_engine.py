@@ -117,6 +117,7 @@ def slot_candidates(
             "at_cap": count_here >= max_per_planet_per_round,
             "count_here": count_here,
             "is_ship": is_ship,
+            "is_priority": filter_rules is not None and filter_rules.is_player_priority(ally_code),
         })
     return result
 
@@ -137,16 +138,22 @@ def is_eligible(candidate: dict) -> bool:
 def pick_best_candidate(candidates: list, bundle_preferred_codes: frozenset = frozenset()):
     """Выбирает донора для автозаполнения из аннотированного списка (slot_candidates()).
     Приоритет: bundle-предпочтение (tb_platoon_filters.py::ParsedRules.bundles — тот же
-    игрок, которому уже отдан юнит-триггер, см. tb_platoon_autofill.py) > максимальный
-    релик (★ для кораблей — у них нет реликвии, сортировка по звёздности вместо неё) >
-    меньше всего уже занятых слотов на этой планете в этом этапе (размазывает нагрузку
-    вместо того, чтобы наваливать на одного и того же топ-донора). Возвращает None, если
-    подходящих кандидатов нет."""
+    игрок, которому уже отдан юнит-триггер, см. tb_platoon_autofill.py) > приоритетный
+    игрок (tb_platoon_filters.py::ParsedRules.priority_player_codes, правило "priority
+    player [...]" — по прямому запросу пользователя 2026-08-31 "чтобы по возможности ему
+    выдавалось максимальное кол-во взводов": приоритетный игрок обходит по очереди ЛЮБОГО
+    неприоритетного кандидата независимо от релика/★, и НЕ штрафуется count_here —
+    размазывание нагрузки специально отключено для него, чтобы не терять слоты в пользу
+    менее нужных доноров) > максимальный релик (★ для кораблей — у них нет реликвии,
+    сортировка по звёздности вместо неё) > меньше всего уже занятых слотов на этой планете
+    в этом этапе (размазывает нагрузку вместо того, чтобы наваливать на одного и того же
+    топ-донора). Возвращает None, если подходящих кандидатов нет."""
     eligible = [c for c in candidates if is_eligible(c)]
     if not eligible:
         return None
     eligible.sort(key=lambda c: (
         0 if c["ally_code"] in bundle_preferred_codes else 1,
+        0 if c.get("is_priority") else 1,
         -(c["stars"] if c["is_ship"] else c["relic"]),
         c["count_here"],
     ))

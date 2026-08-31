@@ -545,9 +545,26 @@ table.data .dc-level-col {
 .platoon-filters-syntax code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
 .platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
 .platoon-hold-toggle { font-size: 0.85em; }
-.platoon-planet-block { margin-bottom: 1.75em; }
+/* Планета — сворачиваемый <details> (по прямому запросу пользователя 2026-08-31 "разделить
+   блоки планет + добавить сворачивание"), не просто <div> — открыт по умолчанию, стрелка в
+   summary как у .platoon-slot ниже, но крупнее. */
+.platoon-planet-block { margin-bottom: 1.75em; border: 1px solid var(--border); border-radius: 12px; padding: 1em 1.2em; background: var(--surface); }
 .platoon-planet-block:last-child { margin-bottom: 0; }
-.platoon-planet-name { margin: 0 0 0.7em; font-size: 1.15em; }
+.platoon-planet-name {
+    margin: 0;
+    font-size: 1.15em;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em;
+}
+.platoon-planet-name::-webkit-details-marker { display: none; }
+.platoon-planet-name::before { content: "▾"; color: var(--fg-muted); font-size: 0.85em; }
+.platoon-planet-block:not([open]) > .platoon-planet-name::before { content: "▸"; }
+.platoon-planet-block:not([open]) > .platoon-planet-name { margin-bottom: 0; }
+.platoon-planet-block[open] > .platoon-planet-name { margin-bottom: 0.7em; }
 .platoon-ops-scroll { overflow-x: auto; padding-bottom: 0.25em; }
 .platoon-ops-grid {
     display: grid;
@@ -606,6 +623,12 @@ table.data .dc-level-col {
     font-size: 0.8em;
 }
 .platoon-slot details[open] > summary::before { content: "▾"; }
+/* Слот, донат в который уже засчитан на БОЛЕЕ РАННЕМ этапе (растянутая на 2+ этапа
+   планета, см. tb_platoon_engine.visible_assignment) — затемнён и помечен замком, чтобы
+   не путать со свежим назначением на этом этапе (прямой запрос пользователя 2026-08-31).
+   Незаполненный слот — наоборот, подсвечен красным, чтобы был виден "из кучи текста". */
+.platoon-slot-carried summary { opacity: 0.55; }
+.platoon-slot-empty summary { border-color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 10%, var(--surface)); }
 .platoon-slot-unit { text-decoration: underline dotted; text-underline-offset: 3px; }
 .platoon-slot-candidates { margin-top: 0.5em; padding-left: 0.8em; border-left: 2px solid var(--border); }
 .platoon-slot-candidates form { display: inline; }
@@ -622,6 +645,28 @@ table.data .dc-level-col {
 }
 .platoon-candidate-list button:hover { background: var(--surface-2); }
 .platoon-candidate-list button:disabled { opacity: 0.6; cursor: default; }
+
+/* ---- Автодополнение в текстовом поле /tb/platoons/filters (по прямому запросу
+   пользователя 2026-08-31 "интерактивный ввод, как в IDE/Discord") — см.
+   web/static/dashboard.js. position:fixed, не absolute внутри обёртки — координаты уже
+   viewport-relative (getCaretCoordinates считает их через getBoundingClientRect textarea),
+   а не relative какому-то contain-блоку, как у .unit-search-results. ---- */
+.pf-autocomplete {
+    display: none;
+    position: fixed;
+    z-index: 50;
+    max-height: 16em;
+    min-width: 14em;
+    max-width: 28em;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.pf-autocomplete.open { display: block; }
+.pf-autocomplete-item { padding: 0.5em 0.75em; cursor: pointer; font-size: 0.9em; }
+.pf-autocomplete-item:hover, .pf-autocomplete-item.active { background: var(--surface-2); }
 
 /* ---- Мини-тултип на наведение (для баров/точек графиков) ---- */
 [data-tip] { position: relative; }

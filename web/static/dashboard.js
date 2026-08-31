@@ -254,6 +254,164 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Интерактивное автодополнение в текстовом поле правил /tb/platoons/filters — по
+    // прямому запросу пользователя 2026-08-31 ("как в IDE или как в дискорде": начать
+    // печатать ключевое слово или имя юнита, код предлагает варианты). Контекст
+    // определяется чисто по тексту строки до курсора (без парсинга всего файла правил):
+    //   1) курсор внутри ещё не закрытой "[" на этой строке — ищем игрока или юнита в
+    //      зависимости от того, что стоит перед "[" (exclude/priority player -> игрок,
+    //      иначе — юнит: exclude unit, bundle-триггер, элементы пула bundle после "->");
+    //   2) курсор в самом начале строки, ничего похожего на "[" ещё нет — предлагаем
+    //      ключевые слова целиком (exclude player [ / exclude unit [ / bundle [ / priority
+    //      player [).
+    // Позиционирование — классический приём "textarea caret position" (клон стилей
+    // textarea в скрытый div, маркер-спан на месте курсора, координаты — через
+    // getBoundingClientRect маркера и самой textarea).
+    const getCaretCoordinates = (textarea, position) => {
+        const mirror = document.createElement("div");
+        const style = getComputedStyle(textarea);
+        [
+            "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+            "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+            "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
+        ].forEach((prop) => { mirror.style[prop] = style[prop]; });
+        mirror.style.position = "absolute";
+        mirror.style.visibility = "hidden";
+        mirror.style.whiteSpace = "pre-wrap";
+        mirror.style.wordWrap = "break-word";
+        mirror.style.top = "0";
+        mirror.style.left = "-9999px";
+        document.body.appendChild(mirror);
+        mirror.textContent = textarea.value.substring(0, position);
+        const marker = document.createElement("span");
+        marker.textContent = "​";
+        mirror.appendChild(marker);
+        const rectMirror = mirror.getBoundingClientRect();
+        const rectMarker = marker.getBoundingClientRect();
+        document.body.removeChild(mirror);
+        const rectTextarea = textarea.getBoundingClientRect();
+        const lineHeight = parseFloat(style.lineHeight) || 16;
+        return {
+            top: rectMarker.top - rectMirror.top + rectTextarea.top - textarea.scrollTop + lineHeight,
+            left: rectMarker.left - rectMirror.left + rectTextarea.left - textarea.scrollLeft,
+        };
+    };
+
+    document.querySelectorAll(".platoon-filters-textarea").forEach((textarea) => {
+        const KEYWORDS = [
+            { insert: "exclude player [", label: "exclude player […] — исключить игрока" },
+            { insert: "exclude unit [", label: "exclude unit […] — исключить юнита" },
+            { insert: "priority player [", label: "priority player […] — приоритет игроку" },
+            { insert: "bundle [", label: "bundle […] -> […] — привязать юнитов к тому же донору" },
+        ];
+
+        const box = document.createElement("div");
+        box.className = "pf-autocomplete";
+        document.body.appendChild(box);
+
+        let items = [];
+        let activeIndex = -1;
+        let replaceFrom = 0;
+        let replaceTo = 0;
+        let debounceTimer;
+
+        const close = () => { box.classList.remove("open"); items = []; activeIndex = -1; };
+
+        const render = () => {
+            box.innerHTML = "";
+            if (items.length === 0) { close(); return; }
+            items.forEach((item, i) => {
+                const el = document.createElement("div");
+                el.className = "pf-autocomplete-item" + (i === activeIndex ? " active" : "");
+                el.textContent = item.label;
+                el.addEventListener("mousedown", (e) => { e.preventDefault(); accept(item); });
+                box.appendChild(el);
+            });
+            const pos = getCaretCoordinates(textarea, textarea.selectionStart);
+            box.style.top = `${pos.top}px`;
+            box.style.left = `${pos.left}px`;
+            box.classList.add("open");
+        };
+
+        const accept = (item) => {
+            const value = item.insert !== undefined ? item.insert : `${item.name}]`;
+            const text = textarea.value;
+            textarea.value = text.slice(0, replaceFrom) + value + text.slice(replaceTo);
+            const newPos = replaceFrom + value.length;
+            textarea.setSelectionRange(newPos, newPos);
+            textarea.focus();
+            close();
+            evaluate();
+        };
+
+        const search = async (url, q, transform) => {
+            clearTimeout(debounceTimer);
+            if (q.trim().length < 2) { close(); return; }
+            debounceTimer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`${url}?q=${encodeURIComponent(q.trim())}`);
+                    const data = resp.ok ? await resp.json() : [];
+                    items = data.map(transform);
+                } catch {
+                    items = [];
+                }
+                activeIndex = items.length ? 0 : -1;
+                render();
+            }, 200);
+        };
+
+        const evaluate = () => {
+            if (textarea.selectionStart !== textarea.selectionEnd) { close(); return; }
+            const pos = textarea.selectionStart;
+            const text = textarea.value;
+            const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+            const lineSoFar = text.slice(lineStart, pos);
+
+            const bracketIdx = lineSoFar.lastIndexOf("[");
+            const closedAfter = bracketIdx >= 0 && lineSoFar.indexOf("]", bracketIdx) !== -1;
+            if (bracketIdx >= 0 && !closedAfter) {
+                const before = lineSoFar.slice(0, bracketIdx);
+                const partial = lineSoFar.slice(bracketIdx + 1);
+                replaceFrom = lineStart + bracketIdx + 1;
+                replaceTo = pos;
+                if (/(exclude|priority)\s+player\s*$/i.test(before)) {
+                    search("/violations/api/players", partial, (p) => ({ name: p.name, label: p.name }));
+                } else {
+                    search("/tb/platoons/api/units", partial, (u) => ({ name: u.name, label: u.name }));
+                }
+                return;
+            }
+
+            const trimmed = lineSoFar.trim();
+            if (bracketIdx === -1 && trimmed && /^[a-zA-Z ]*$/.test(trimmed)) {
+                const leadingWs = lineSoFar.length - lineSoFar.trimStart().length;
+                replaceFrom = lineStart + leadingWs;
+                replaceTo = pos;
+                const q = trimmed.toLowerCase();
+                items = KEYWORDS.filter((k) => k.insert.toLowerCase().startsWith(q));
+                activeIndex = items.length ? 0 : -1;
+                render();
+                return;
+            }
+
+            close();
+        };
+
+        textarea.addEventListener("input", evaluate);
+        textarea.addEventListener("click", evaluate);
+        textarea.addEventListener("keyup", (e) => {
+            if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) evaluate();
+        });
+        textarea.addEventListener("keydown", (e) => {
+            if (!box.classList.contains("open") || items.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); render(); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); render(); }
+            else if ((e.key === "Enter" || e.key === "Tab") && activeIndex >= 0) { e.preventDefault(); accept(items[activeIndex]); }
+            else if (e.key === "Escape") { close(); }
+        });
+        textarea.addEventListener("blur", () => setTimeout(close, 150));
+    });
+
     // Поповеры переименования/редактирования (details.row-actions) и выпадающие
     // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.

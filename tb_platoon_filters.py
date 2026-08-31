@@ -10,6 +10,7 @@
 #   exclude player [Имя игрока]
 #   exclude unit [Имя юнита]
 #   bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...
+#   priority player [Имя игрока]
 #
 # "bundle" читается так: если игроку уже назначен юнит-триггер где-либо в текущем
 # автозаполнении, при выборе донора для юнита из пула автозаполнение отдаёт предпочтение
@@ -17,6 +18,14 @@
 # дробить пачку между разными донорами. Это ПРЕДПОЧТЕНИЕ, не жёсткое требование: если игрок
 # не владеет юнитом из пула или не проходит по другим правилам, слот всё равно достаётся
 # следующему подходящему кандидату.
+#
+# "priority player" (добавлено 2026-08-31 по прямому запросу пользователя "добавить
+# возможность добавления игрока в приоритет, чтобы по возможности ему выдавалось
+# максимальное кол-во взводов") — тоже ПРЕДПОЧТЕНИЕ, не жёсткое требование: игрок обходит
+# по очереди любого неприоритетного подходящего кандидата на КАЖДЫЙ слот, где он вообще
+# годится (релик/★, не занят, не исключён, не упёрся в лимит 10/планету/этап) — см.
+# tb_platoon_engine.pick_best_candidate. Уступает только bundle-предпочтению (парная связка
+# юнитов важнее общего приоритета).
 import re
 from dataclasses import dataclass, field
 
@@ -25,6 +34,7 @@ import database
 _EXCLUDE_PLAYER_RE = re.compile(r"^exclude\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _EXCLUDE_UNIT_RE = re.compile(r"^exclude\s+unit\s+\[([^\]]+)\]$", re.IGNORECASE)
 _BUNDLE_RE = re.compile(r"^bundle\s+\[([^\]]+)\]\s*->\s*(.+)$", re.IGNORECASE)
+_PRIORITY_PLAYER_RE = re.compile(r"^priority\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _BRACKET_ITEM_RE = re.compile(r"\[([^\]]+)\]")
 
 
@@ -35,6 +45,8 @@ class ParsedRules:
     exclude_unit_ids: set = field(default_factory=set)
     exclude_unit_names: dict = field(default_factory=dict)  # base_id -> отображаемое имя
     bundles: dict = field(default_factory=dict)  # trigger_base_id -> [pool_base_id, ...]
+    priority_player_codes: set = field(default_factory=set)
+    priority_player_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя
     unit_display_names: dict = field(default_factory=dict)  # base_id -> отображаемое имя (для describe_rules, включает и триггеры, и пул bundle)
 
     def is_player_excluded(self, ally_code: str) -> bool:
@@ -42,6 +54,9 @@ class ParsedRules:
 
     def is_unit_excluded(self, base_id: str) -> bool:
         return base_id in self.exclude_unit_ids
+
+    def is_player_priority(self, ally_code: str) -> bool:
+        return ally_code in self.priority_player_codes
 
     def bundle_pool_for(self, trigger_base_id: str) -> list:
         return self.bundles.get(trigger_base_id, [])
@@ -85,6 +100,11 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             all_unit_names.add(trigger)
             all_unit_names.update(pool_names)
             parsed_lines.append((line_num, "bundle", (trigger, pool_names)))
+            continue
+
+        m = _PRIORITY_PLAYER_RE.match(stripped)
+        if m:
+            parsed_lines.append((line_num, "priority_player", m.group(1).strip()))
             continue
 
         errors.append((line_num, f"не распознана строка правила: {stripped!r}"))
@@ -136,6 +156,16 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             result.unit_display_names[trigger_base_id] = trigger
             result.bundles.setdefault(trigger_base_id, []).extend(pool_base_ids)
 
+        elif kind == "priority_player":
+            name = payload
+            hit = ally_code_by_name.get(name.lower())
+            if not hit:
+                errors.append((line_num, f"игрок не найден в гильдии: {name!r}"))
+                continue
+            ally_code, real_name = hit
+            result.priority_player_codes.add(ally_code)
+            result.priority_player_names[ally_code] = real_name
+
     return result, errors
 
 
@@ -151,4 +181,6 @@ def describe_rules(parsed: ParsedRules) -> list:
         trigger_name = parsed.unit_display_names.get(trigger_base_id, trigger_base_id)
         pool_names = [parsed.unit_display_names.get(b, b) for b in pool]
         lines.append(f"При донате «{trigger_name}» — приоритет тому же игроку на: {', '.join(pool_names)}")
+    for ally_code in sorted(parsed.priority_player_codes):
+        lines.append(f"Приоритет игроку: {parsed.priority_player_names.get(ally_code, ally_code)} (максимум взводов, где он подходит)")
     return lines
