@@ -187,6 +187,7 @@ def parse_mods_csv(raw_bytes: bytes) -> list[dict]:
             "id": row.get("id"),
             "level": int(row.get("level") or 15),
             "rarity": int(row.get("rarity_dots") or 6),
+            "tier": int(row.get("tier_pips") or 1),  # calculator.py::_calc_char_gp требует mod["tier"] (KeyError без него)
             "set_id": set_id,
             "set_name": MOD_SET_IDS[str(set_id)],  # каноничное написание с пробелом — для отображения
             "slot_id": slot_id,
@@ -203,12 +204,15 @@ def parse_mods_csv(raw_bytes: bytes) -> list[dict]:
 
 def _to_equipped_stat_mod(mod: dict) -> dict:
     """swgoh_comlink равнодушен ко 2-й цифре definitionId (rarity) — читает только [0]=сет и
-    [2]=слот (см. calculator.py::_calculate_mod_stats), но держим её реальной для аккуратности."""
+    [2]=слот (см. calculator.py::_calculate_mod_stats), но держим её реальной для аккуратности.
+    "tier" (пипсы 1-5) обязателен отдельным полем — calc_char_stats падает KeyError без него
+    (используется в _calc_char_gp для подсчёта GP, найдено на живом деплое 2026-09-01)."""
     def _stat_entry(s):
         return {"stat": {"unitStatId": s["unit_stat_id"], "unscaledDecimalValue": s["unscaled"]}}
     return {
         "definitionId": f"{mod['set_id']}{mod['rarity']}{mod['slot_id']}",
         "level": mod["level"],
+        "tier": mod["tier"],
         "primaryStat": _stat_entry(mod["primary"]),
         "secondaryStat": [_stat_entry(s) for s in mod["secondaries"]],
     }
