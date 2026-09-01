@@ -61,15 +61,22 @@ def compute_used_pairs(assignments: dict, planets_this_round: set, name_to_base_
     -> base_id) передаётся готовым — и веб-роут, и автозаполнение уже строят его сами
     (один batch-запрос на всех юнитов сразу, дважды резолвить не нужно).
 
-    round_num — "round-aware" отсечка (см. database.py::set_tb_platoon_assignment, 2026-08-30):
-    донат считается уже сделанным на этапе round_num, только если assignment.round_num <=
-    round_num — донат, отложенный автозаполнением на более поздний этап многоэтапной планеты,
-    на текущем (более раннем) этапе не блокирует повторное использование того же донора."""
+    round_num — юниты у игрока обновляются КАЖДЫЙ этап (прямое уточнение пользователя
+    2026-09-01: "в рамках этапа юзать одного юнита можно только один раз, но на следующем
+    этапе... юниты обновляются... игрок может поставить юнитов во взводы ещё раз") — донат
+    блокирует повторное использование того же (игрок, юнит) только В ТОМ ЖЕ round_num, что и
+    сейчас просматривается; донат, зафиксированный на ДРУГОМ этапе (раньше или позже — оба
+    исключены точным сравнением), для текущего этапа не в счёт. Раньше здесь стояла отсечка
+    "<=" (донат из ПРОШЛОГО этапа тоже блокировал), из-за чего второй слот того же юнита на
+    многоэтапной планете (её слоты хранятся под одним и тем же ключом на все её этапы, см.
+    database.py::set_tb_platoon_assignment) навсегда считался недостижимым, хотя донор к
+    этому моменту уже давно освободился — симметрично compute_round_counts, которая уже была
+    сделана точно per-round по той же причине."""
     pairs: dict = {}
     for (planet, operation, slot_index), assignment in assignments.items():
         if planet not in planets_this_round:
             continue
-        if assignment.get("round_num") is not None and assignment["round_num"] > round_num:
+        if assignment.get("round_num") is not None and assignment["round_num"] != round_num:
             continue
         unit_list = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
         if slot_index >= len(unit_list):
