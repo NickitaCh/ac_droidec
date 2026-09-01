@@ -36,10 +36,41 @@ PLANET_NAME_TO_RU = {
 RU_TO_PLANET_NAME = {ru: en for en, ru in PLANET_NAME_TO_RU.items()}
 
 
+def _scan_field(lines: list, start_i: int, field_ru: str, max_lines: int = 6):
+    """Ищет "**{field_ru}:** значение" среди строк ПОСЛЕ start_i, в пределах текущего
+    планетного блока (останавливается на следующей кружок-строке — начале следующей
+    планеты/этапа — или через max_lines). Используется и для "Цель:" (отличить планету от
+    произвольной офицерской заметки с тем же кружком-маркером — старая логика, раньше жила
+    прямо в цикле), и для "Взводы:" (новое, 2026-09-01: см. no_platoons ниже)."""
+    prefix = f"**{field_ru}:**".lower()
+    for j in range(start_i + 1, min(start_i + 1 + max_lines, len(lines))):
+        candidate = lines[j].strip()
+        if candidate.startswith(">"):
+            candidate = candidate[1:].strip()
+        if not candidate:
+            continue
+        if candidate[:1] in _TB_PLAN_CIRCLE_CHARS:
+            break
+        if candidate.lower().startswith(prefix):
+            return candidate[len(prefix):].strip()
+    return None
+
+
 async def fetch_plan_planets(plan: dict) -> tuple:
     """Возвращает (список {"planet": англ.название|None, "raw": как было в сообщении,
-    "round": N}, текст_ошибки|None). Планета=None — распознали блок этапа, но название
-    не нашлось в RU_TO_PLANET_NAME (новая планета/опечатка — raw всё равно показываем)."""
+    "round": N, "no_platoons": bool}, текст_ошибки|None). Планета=None — распознали блок
+    этапа, но название не нашлось в RU_TO_PLANET_NAME (новая планета/опечатка — raw всё
+    равно показываем).
+
+    no_platoons — офицер явно написал "**Взводы:** нет" под этой планетой (реальный пример,
+    2026-09-01: "43 базовых минимума", 6 этап, Малакор — Цель 0 звёзд, Взводы: нет, БЗ: нет,
+    т.к. это последний этап и добивать её больше негде — не путать со "Взводы: по боту"/
+    "только по боту", которые означают "взвод всё равно нужен для очков территории", см.
+    cogs/tb_order_image.py). Раньше это поле нигде не читалось — /tb/platoons и автозаполнение
+    строили полный набор из 90 слотов для ЛЮБОЙ распознанной планеты, даже когда ордер прямым
+    текстом говорит, что взводы на ней не нужны (прямая жалоба пользователя). Потребители
+    (web/routes/guild_dashboard.py::tb_platoons, tb_platoon_autofill.py) должны пропускать
+    планету с no_platoons=True при построении слотов."""
     token = os.environ.get("DISCORD_TOKEN")
     if not token:
         return [], "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
@@ -95,6 +126,10 @@ async def fetch_plan_planets(plan: dict) -> tuple:
                 # у произвольной заметки там что угодно другое. Известные (сопоставленные
                 # по словарю) названия эта проверка не трогает — только помогает не
                 # засорять список неопознанными "планетами".
+                # Проверяем РОВНО следующую непустую строку (не окно из нескольких, в
+                # отличие от _scan_field ниже) — сохраняет старое, уже проверенное на
+                # реальном ложном срабатывании "Текстовый гайд..." поведение: офицерский
+                # произвольный текст не должен случайно совпасть с "Цель:" где-то дальше.
                 next_line = ""
                 for j in range(i + 1, len(lines)):
                     candidate = lines[j].strip()
@@ -105,9 +140,13 @@ async def fetch_plan_planets(plan: dict) -> tuple:
                         break
                 if not next_line.lower().startswith("**цель:**"):
                     continue
+            # max_lines по умолчанию (6) здесь безопасен — "Взводы:" не используется для
+            # разграничения планета/не-планета (это уже решено выше), только для no_platoons.
+            vzvod = _scan_field(lines, i, "Взводы")
             entries.append({
                 "planet": planet,
                 "raw": stripped[1:].strip(" *#"),
                 "round": round_num,
+                "no_platoons": bool(vzvod) and vzvod.strip().lower().rstrip(".") == "нет",
             })
     return entries, None

@@ -122,8 +122,16 @@
                         {% if p.unfilled_count %}
                             <span class="badge badge-danger">не назначено: {{ p.unfilled_count }}</span>
                         {% endif %}
+                        {% if p.no_platoons %}
+                            <span class="badge badge-neutral">взводы не нужны</span>
+                        {% endif %}
                     </summary>
-                    {% if p.auto_held %}
+                    {% if p.no_platoons %}
+                        <p class="muted">
+                            В тексте ордера для этой планеты явно указано «Взводы: нет» — конструктор
+                            её пропускает, слоты не строятся и автозаполнение её не трогает.
+                        </p>
+                    {% elif p.auto_held %}
                         <p class="muted platoon-hold-toggle">
                             Эта планета есть и на более позднем этапе плана — автозаполнение не
                             добивает её здесь до конца автоматически, включать вручную не нужно.
@@ -144,7 +152,7 @@
                             Название планеты не распознано — нет данных по взводам. Добавьте
                             «{{ p.name }}» в _PLANET_NAME_TO_RU в web/routes/guild_dashboard.py.
                         </p>
-                    {% else %}
+                    {% elif not p.no_platoons %}
                         {% if plan %}
                             <form method="post" action="/tb/platoons/clear" class="platoon-hold-toggle"
                                   onsubmit="return confirm('Очистить все назначения на планете «{{ p.name }}»?')">
@@ -219,7 +227,7 @@
                                                                                         {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere or owner.excluded_by_filter or owner.at_cap %}disabled{% endif %}>
                                                                                         {{ "✅" if owner.meets_min else "⚠️" }} {% if owner.is_priority %}⭐ {% endif %}{{ owner.name }} — {% if owner.is_ship %}{{ owner.stars }}★{% else %}релик {{ owner.relic }}{% endif %}
                                                                                         {% if owner.is_priority %} (приоритет){% endif %}
-                                                                                        {% if owner.used_elsewhere %} (уже занят на этом этапе){% endif %}
+                                                                                        {% if owner.used_elsewhere %} (уже занят на этом этапе{% if owner.used_at_label %}: {{ owner.used_at_label }}{% endif %}){% endif %}
                                                                                         {% if owner.excluded_by_filter %} (исключён фильтром){% endif %}
                                                                                         {% if owner.at_cap %} (лимит 10/этап на планету исчерпан){% endif %}
                                                                                     </button>

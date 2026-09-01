@@ -61,7 +61,15 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
             continue
         seen.add(key)
         by_round.setdefault(e["round"], []).append(e)
-    planets_by_round = {rn: {e["planet"] for e in es if e["planet"]} for rn, es in by_round.items()}
+    # "Взводы: нет" на конкретном этапе (tb_plan_reader.py::fetch_plan_planets::no_platoons)
+    # — планета не участвует в раздаче слотов на ЭТОМ этапе; прямая жалоба пользователя
+    # 2026-09-01, живой пример — Малакор, 6 этап плана "43 базовых минимума" ("Цель: 0
+    # звёзд", "Взводы: нет", последний этап — переносить некуда), а конструктор всё равно
+    # строил и заполнял для неё все 90 слотов.
+    planets_by_round = {
+        rn: {e["planet"] for e in es if e["planet"] and not e.get("no_platoons")}
+        for rn, es in by_round.items()
+    }
 
     # Планета, растянутая на 2+ этапа, встречается в нескольких round_entries — донат-слоты
     # у неё физически ОДНИ и те же (см. database.py::_ensure_tb_platoon_assignments_table),
@@ -74,7 +82,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     ordered_planets: list = []
     for round_num in sorted(by_round):
         for e in by_round[round_num]:
-            if not e["planet"]:
+            if not e["planet"] or e.get("no_platoons"):
                 continue
             if e["planet"] not in planet_first_round:
                 planet_first_round[e["planet"]] = round_num

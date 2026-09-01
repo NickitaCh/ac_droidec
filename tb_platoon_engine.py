@@ -104,6 +104,10 @@ def slot_candidates(
     Возвращает owners, дополненные:
       meets_min — релик (или ★ для кораблей) проходит порог этапа
       used_elsewhere — тот же (игрок, юнит) уже стоит в ДРУГОМ слоте этого этапа
+      used_at_label — где именно (человекочитаемо: планета/операция/слот), когда
+               used_elsewhere True, иначе None — прямой запрос пользователя 2026-09-01
+               ("надо писать ещё где именно он стоит"), раньше used_pairs знал локацию
+               (planet, operation, slot_index), но наружу отдавался только булевый флаг
       excluded_by_filter — игрок исключён правилом "exclude player", ИЛИ сам юнит/его
                категория (флот/пешка) исключены правилом "exclude unit"/"exclude category"
                (объединено в один флаг 2026-09-01 — юнит исключён одинаково для ВСЕХ
@@ -123,12 +127,18 @@ def slot_candidates(
     for o in owners:
         ally_code = o["ally_code"]
         used_at = used_pairs.get((ally_code, base_id))
+        used_elsewhere = used_at is not None and used_at != here
+        used_at_label = None
+        if used_elsewhere:
+            at_planet, at_operation, at_slot_index = used_at
+            used_at_label = f"{at_planet}, операция {at_operation}, слот {at_slot_index + 1}"
         count_here = round_counts.get((ally_code, planet), 0)
         meets_min = o.get("stars", 0) >= SHIP_MIN_STARS if is_ship else (min_relic is not None and o["relic"] >= min_relic)
         result.append({
             **o,
             "meets_min": meets_min,
-            "used_elsewhere": used_at is not None and used_at != here,
+            "used_elsewhere": used_elsewhere,
+            "used_at_label": used_at_label,
             "excluded_by_filter": unit_or_category_excluded or (filter_rules is not None and filter_rules.is_player_excluded(ally_code)),
             "at_cap": count_here >= max_per_planet_per_round,
             "count_here": count_here,

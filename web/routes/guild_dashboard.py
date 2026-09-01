@@ -407,7 +407,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     unit_names_this_round = {
         name
         for e in selected_entries
-        if e["planet"]
+        if e["planet"] and not e.get("no_platoons")
         for operation in range(1, 7)
         for name in (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) or [])
     }
@@ -452,7 +452,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     # входит в selected_entries того этапа, на котором её сейчас смотрят — её назначения
     # (уже не привязанные к round_num, см. database.py::_ensure_tb_platoon_assignments_table)
     # подхватываются здесь так же, как назначения любой другой планеты этого этапа.
-    planets_this_round = {e["planet"] for e in selected_entries if e["planet"]}
+    planets_this_round = {e["planet"] for e in selected_entries if e["planet"] and not e.get("no_platoons")}
     used_pairs_this_round = tb_platoon_engine.compute_used_pairs(assignments, planets_this_round, name_to_base_id, selected_round_num)
 
     # Лимит "не больше 10 юнитов на планету от игрока" — по этапу ПРОСМОТРА (round_num
@@ -486,7 +486,12 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(e["planet"]) if e["planet"] else None
         min_relic_label = f"R{min_relic}+" if min_relic is not None else None
         operations = []
-        for operation in range(1, 7):
+        # Планета с явным "Взводы: нет" в тексте ордера (см. tb_plan_reader.py::
+        # fetch_plan_planets) — конструктор её пропускает целиком, ни одного слота не
+        # строится и не заполняется автозаполнением (прямая жалоба пользователя: план
+        # прямым текстом говорит "не бьём Малакор на 6 этапе", а страница всё равно
+        # предлагала 90 слотов и автозаполнение их занимало).
+        for operation in range(1, 7) if e["planet"] and not e.get("no_platoons") else []:
             unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) if e["planet"] else None
             slots = []
             for slot_index, unit_name in enumerate(unit_names or []):
@@ -546,6 +551,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         planet_blocks.append({
             "name": e["planet"] or e["raw"],
             "unresolved": e["planet"] is None,
+            "no_platoons": bool(e.get("no_platoons")),
             "operations": operations,
             "min_relic_label": min_relic_label,
             "held": auto_held or bool(e["planet"] and hold_flags.get((selected_round_num, e["planet"]))),
