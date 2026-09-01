@@ -6,7 +6,11 @@ hotutils.com/mods/management и скачать mods_export.csv), отмечае�
 достижимое распределение модов из ОБЩЕГО пула (включая уже надетые на других персонажах —
 пользователь разрешил трогать чужие моды, лишь бы не ломать сеты). Сам подбор — в
 services/mod_optimizer.py, эта страница только форма+рендер отчёта. Игрок — как и везде
-в проекте, "не указан = моя регистрация" (database.get_user_registration)."""
+в проекте, "не указан = моя регистрация" (database.get_user_registration).
+
+Доступ ограничен до super_admin (сужено 2026-09-01 — первый реальный расчёт оказался
+неточным, пользователь попросил спрятать страницу от рядовых офицеров, пока не доведена
+до ума; см. чат за деталями, идея сама пока отложена)."""
 
 from pathlib import Path
 
@@ -18,7 +22,7 @@ import database
 import stat_engine
 import services.stat_forecast as stat_forecast
 import services.mod_optimizer as mod_optimizer
-from web.deps import require_officer_access
+from web.deps import require_super_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -71,7 +75,7 @@ def _base_context(user: dict, guild_id: int) -> dict:
 
 
 @router.get("", response_class=HTMLResponse)
-async def optimizer_form(request: Request, user: dict = Depends(require_officer_access)):
+async def optimizer_form(request: Request, user: dict = Depends(require_super_admin)):
     context = _base_context(user, user["guild_id"])
     return templates.TemplateResponse(request, "mod_optimizer.html", context)
 
@@ -82,7 +86,7 @@ async def optimizer_run(
     plates: list[str] = Form(default=[]),
     force_refresh: bool = Form(default=False),
     mods_file: UploadFile = File(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(require_super_admin),
 ):
     guild_id = user["guild_id"]
     context = _base_context(user, guild_id)
