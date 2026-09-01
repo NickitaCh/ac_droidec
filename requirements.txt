@@ -11,3 +11,4 @@ httpx
 aiohttp
 beautifulsoup4
 google-genai
+pulp

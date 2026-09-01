@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Оптимизатор модов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Оптимизатор модов</h1>
+    <p class="muted">
+        Загружаешь CSV со всеми своими модами — и для каждого персонажа выбранных плейтов инструмент подбирает лучший набор из 6 модов из общего пула (включая уже надетые на других персонажах), стараясь не ломать сеты и закрыть нормы плейта. Статы считаются на РЕАЛЬНОЙ реликвии/шестерне персонажа прямо сейчас, без проекции на релик плейта — если не хватает реликвии, это будет явно видно в отчёте.
+    </p>
+    <details style="margin-bottom: 1em;">
+        <summary style="cursor: pointer;">Как получить CSV с модами?</summary>
+        <ol class="muted">
+            <li>Открой <code>hotutils.com/mods/management</code> в браузере (авторизованным).</li>
+            <li>Дай странице полностью загрузиться (заголовок должен показывать «Data fetched … ago»).</li>
+            <li>Это разовый ручной экспорт — если готового файла ещё нет, попроси того, кто настраивал эту страницу, прислать инструкцию/скрипт экспорта <code>mods_export.csv</code>.</li>
+        </ol>
+    </details>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 44em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="post" action="/mod-optimizer" enctype="multipart/form-data">
+            <label>
+                Файл с модами (CSV)
+                <input type="file" name="mods_file" accept=".csv" required>
+            </label>
+
+            <label>Плейты</label>
+            {% if not plates %}
+                <p class="empty-state">Плейтов пока нет — сначала создайте их через /статы_требования.</p>
+            {% else %}
+                <div style="display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; margin: 0.3em 0 0.8em;">
+                    {% for p in plates %}
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>
+                            {{ p }}
+                        </label>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <label class="checkbox-label">
+                <input type="checkbox" name="force_refresh" value="1">
+                Обновить мой ростер с сервера перед расчётом (медленнее, но актуальные релик/шестерня)
+            </label>
+
+            <p class="muted" style="margin: 0.3em 0;">
+                {% if self_ally_code %}Игрок: {{ self_player_name }} ({{ self_ally_code }}){% else %}⚠️ Ваш аккаунт не привязан через /регистрация — сначала зарегистрируйтесь.{% endif %}
+            </p>
+
+            <button type="submit">Рассчитать</button>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif results is not none %}
+        <h2>Результат ({{ mods_total }} модов в файле, игрок: {{ player_name }})</h2>
+        <p class="muted">
+            Плейтов пройдено целиком: <strong>{{ plates_passed|length }}/{{ plates_total }}</strong>{% if plates_passed %} — {{ plates_passed|join(", ") }}{% endif %}.
+            Это глобально оптимальный (не жадный) подбор — солвер сам решает, кому какие моды отдать, чтобы пройти максимум плейтов целиком, а не по порядку персонажей.
+            {% if solver_timed_out %}⚠️ Солвер упёрся в лимит времени — показан лучший найденный вариант, не факт что доказанно оптимальный.{% endif %}
+        </p>
+        {% if not results %}
+            <p class="empty-state">В выбранных плейтах нет ни одного персонажа с сохранёнными требованиями.</p>
+        {% endif %}
+        {% for r in results %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>{{ r.char_name }} <span class="panel-hint">({{ r.plate }})</span></span>
+                    <span class="panel-hint">
+                        {% if not r.owned %}не открыт{% elif not r.ok %}не собрать{% else %}{{ r.passed|length }}/{{ (r.passed|length) + (r.failed|length) }}{% endif %}
+                    </span>
+                </div>
+
+                {% if not r.owned %}
+                    <p class="empty-state">{{ r.reason }}</p>
+                {% else %}
+                    <p class="muted" style="margin-top: 0;">
+                        Релик игрока: {{ r.current_relic }}{% if r.required_relic is not none %} · нужен по плейту: {{ r.required_relic }}{% if r.relic_below %} ⚠️ ниже требуемого — часть норм может быть физически недостижима без апа реликвии{% endif %}{% endif %}
+                    </p>
+
+                    {% if r.reason %}
+                        <p class="empty-state">{{ r.reason }}</p>
+                    {% endif %}
+
+                    {% if r.passed or r.failed %}
+                        <table class="data-table">
+                            <thead><tr><th>Стат</th><th>Норма</th><th>Сейчас</th><th></th></tr></thead>
+                            <tbody>
+                                {% for req in r.passed %}
+                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td><td>{{ req.current_fmt }}</td><td>✅</td></tr>
+                                {% endfor %}
+                                {% for req in r.failed %}
+                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td><td>{{ req.current_fmt }}</td><td>❌</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% endif %}
+
+                    {% if r.mods_summary %}
+                        <p class="panel-hint" style="margin-bottom: 0.2em;">Предложенные моды:</p>
+                        <ul class="muted" style="margin-top: 0;">
+                            {% for s in r.mods_summary %}<li>{{ s }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock %}
