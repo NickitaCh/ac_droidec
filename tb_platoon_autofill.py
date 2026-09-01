@@ -83,6 +83,28 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     filter_rules, _errors = tb_platoon_filters.parse_rules(database.get_tb_platoon_filter_rules(guild_id), guild_id)
     hold_flags = database.get_tb_platoon_holds(guild_id, plan_id)
 
+    # Сколько ещё этапов планета встретится ПОСЛЕ round_num, под которым заводятся её новые
+    # слоты (planet_first_round) — используется и для ранжирования дефицитных юнитов между
+    # планетами (см. "ranked" ниже), и позже для held-back-переноса; посчитано один раз
+    # здесь, а не дважды в разных местах прохода.
+    last_round_of_planet: dict = {}
+    for round_num, planet_set in planets_by_round.items():
+        for planet in planet_set:
+            last_round_of_planet[planet] = max(last_round_of_planet.get(planet, round_num), round_num)
+
+    # Сколько ЕЩЁ этапов планета встретится ПОСЛЕ первого своего появления (0 — планета на
+    # единственном этапе, ИЛИ уже на своём последнем) — межпланетный приоритет для дефицитных
+    # юнитов (см. "ranked" ниже): по прямому запросу пользователя 2026-09-01 ("тёмную планету
+    # закрываем за 2 этапа, центральную — за один — малака нужно поставить на центр, а
+    # нехватку малаков добить на втором этапе тёмной") — донора в первую очередь получает
+    # планета БЕЗ запасного этапа (rounds_remaining=0), т.к. для неё это последний шанс;
+    # планета с запасным этапом просто останется недозаполненной СЕЙЧАС и добьётся
+    # следующим прогоном автозаполнения, когда этот запасной этап реально наступит — тот же
+    # принцип, что и для дефицита ВНУТРИ одной планеты (прямое подтверждение пользователя:
+    # "заполнить сколько можем сейчас, остальное — потом", без искусственного резервирования
+    # слотов под конкретный этап, т.к. разбивка операций по этапам не фиксирована).
+    planet_rounds_remaining = {p: last_round_of_planet.get(p, rn) - rn for p, rn in planet_first_round.items()}
+
     unit_names = {
         name
         for planet in ordered_planets
@@ -137,9 +159,13 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
 
     result = AutofillResult(total_slots=len(all_slots) + len(assignments), already_filled=len(assignments))
 
+    def is_excluded(base_id: str) -> bool:
+        is_ship = unit_types.get(base_id) == "ship"
+        return filter_rules.is_unit_excluded(base_id) or filter_rules.is_category_excluded("ship" if is_ship else "character")
+
     def eligible_count(slot: dict) -> int:
         base_id = slot["base_id"]
-        if not base_id or filter_rules.is_unit_excluded(base_id):
+        if not base_id or is_excluded(base_id):
             return -1  # обрабатываем первыми — заведомо не заполнимо, не тратим время на пересчёт позже
         owners = owners_by_base_id.get(base_id, [])
         round_num = slot["round_num"]
@@ -158,7 +184,16 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     # шаге — полный пересчёт used_pairs/round_counts после каждого заполненного слота дал
     # бы точнее результат, но на масштабе полного плана (~800-1200 слотов) это O(N²); текущий
     # компромисс — O(N log N + N·кандидатов) — редкие связки всё равно уходят вперёд частых.
-    ranked = sorted(range(len(all_slots)), key=lambda i: (eligible_count(all_slots[i]), i))
+    #
+    # Второй ключ — planet_rounds_remaining: при равной дефицитности (типичный случай для
+    # слотов одного и того же юнита на разных планетах — см. planet_rounds_remaining выше)
+    # слот планеты БЕЗ запасного этапа обрабатывается раньше слота планеты С запасным этапом,
+    # так что дефицитный донор в первую очередь достаётся планете, для которой это последний
+    # шанс — планета с запасным этапом добьёт нехватку следующим прогоном.
+    ranked = sorted(
+        range(len(all_slots)),
+        key=lambda i: (eligible_count(all_slots[i]), planet_rounds_remaining.get(all_slots[i]["planet"], 0), i),
+    )
 
     for i in ranked:
         slot = all_slots[i]
@@ -169,7 +204,7 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         if not base_id:
             result.unfilled.append(SlotOutcome(round_num, planet, operation, slot_index, slot["unit_name"], "unit_not_resolved"))
             continue
-        if filter_rules.is_unit_excluded(base_id):
+        if is_excluded(base_id):
             result.unfilled.append(SlotOutcome(round_num, planet, operation, slot_index, slot["unit_name"], "unit_excluded"))
             continue
 
@@ -197,7 +232,13 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
                 if name_to_base_id.get(unit_list2[idx2]) == trigger_base_id:
                     bundle_preferred.add(a2["ally_code"])
 
-        best = tb_platoon_engine.pick_best_candidate(candidates, frozenset(bundle_preferred))
+        # Кластеризация по операции: игроки, у которых в ЭТОЙ ЖЕ (планета, операция) уже
+        # есть назначение в этом прогоне — им отдаётся предпочтение перед чистым релик-
+        # рейтингом (см. tb_platoon_engine.pick_best_candidate), чтобы взводы одного игрока
+        # по возможности собирались в одной операции, а не размазывались по разным.
+        co_located = {a2["ally_code"] for (p2, op2, _idx2), a2 in unified.items() if p2 == planet and op2 == operation}
+
+        best = tb_platoon_engine.pick_best_candidate(candidates, frozenset(bundle_preferred), frozenset(co_located))
         if best is None:
             reason = "no_owner" if not owners else "no_eligible_owner"
             result.unfilled.append(SlotOutcome(round_num, planet, operation, slot_index, slot["unit_name"], reason))
@@ -233,11 +274,6 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
     # 14/15 — бага в том, что held-проверка была БЕЗУСЛОВНОЙ на каждый прогон. Ручной флаг
     # (не авто) — наоборот, держит планету СТАБИЛЬНО на всех прогонах, пока офицер сам его
     # не снимет — это осознанная постоянная инструкция, а не разовая "оставь один слот".
-    last_round_of_planet: dict = {}
-    for round_num, planet_set in planets_by_round.items():
-        for planet in planet_set:
-            last_round_of_planet[planet] = max(last_round_of_planet.get(planet, round_num), round_num)
-
     for planet in ordered_planets:
         round_num = planet_first_round[planet]
         auto_held = last_round_of_planet.get(planet, round_num) > round_num

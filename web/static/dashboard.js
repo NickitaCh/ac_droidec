@@ -328,8 +328,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const KEYWORDS = [
             { insert: "exclude player [", label: "exclude player […] — исключить игрока" },
             { insert: "exclude unit [", label: "exclude unit […] — исключить юнита" },
+            { insert: "exclude category [", label: "exclude category […] — исключить флот/пешку" },
             { insert: "priority player [", label: "priority player […] — приоритет игроку" },
             { insert: "bundle [", label: "bundle […] -> […] — привязать юнитов к тому же донору" },
+        ];
+        const CATEGORY_OPTIONS = [
+            { name: "флот", label: "флот" },
+            { name: "пешка", label: "пешка" },
         ];
 
         const box = document.createElement("div");
@@ -403,6 +408,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 replaceTo = pos;
                 if (/(exclude|priority)\s+player\s*$/i.test(before)) {
                     search("/violations/api/players", partial, (p) => ({ name: p.name, label: p.name }));
+                } else if (/exclude\s+category\s*$/i.test(before)) {
+                    const q = partial.trim().toLowerCase();
+                    items = CATEGORY_OPTIONS.filter((c) => c.name.startsWith(q));
+                    activeIndex = items.length ? 0 : -1;
+                    render();
                 } else {
                     search("/tb/platoons/api/units", partial, (u) => ({ name: u.name, label: u.name }));
                 }

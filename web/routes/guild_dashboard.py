@@ -502,17 +502,21 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                     filter_rules=filter_rules, round_counts=round_counts,
                     is_ship=unit_types.get(base_id) == "ship",
                 )
-                if base_id and filter_rules.is_unit_excluded(base_id):
-                    for o in slot_owners:
-                        o["excluded_by_filter"] = True
+                # Исключение юнита/категории (флот/пешка) теперь считается один раз внутри
+                # slot_candidates (владельцы уже приходят с excluded_by_filter=True) — раньше
+                # здесь был отдельный патч поверх owners, дублирующий ту же проверку.
                 if not assignment and not any(tb_platoon_engine.is_eligible(o) for o in slot_owners):
                     unplaceable_count += 1
+                unit_excluded = bool(base_id and (
+                    filter_rules.is_unit_excluded(base_id)
+                    or filter_rules.is_category_excluded("ship" if unit_types.get(base_id) == "ship" else "character")
+                ))
                 assigned_round_num = assignment["round_num"] if assignment else None
                 slots.append({
                     "index": slot_index,
                     "unit": unit_name,
                     "owners": slot_owners,
-                    "unit_excluded": bool(base_id and filter_rules.is_unit_excluded(base_id)),
+                    "unit_excluded": unit_excluded,
                     "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
                     "assigned_ally_code": assignment["ally_code"] if assignment else None,
                     # "Донат сделан НА БОЛЕЕ РАННЕМ этапе, чем сейчас смотрим" — планета,

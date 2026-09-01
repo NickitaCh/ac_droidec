@@ -635,6 +635,11 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .platoon-export-actions { display: flex; gap: 0.8em; flex-wrap: wrap; margin-bottom: 0.3em; }
 .platoon-export-hint { font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }
 .platoon-filters-syntax code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
+.platoon-filters-syntax li { margin-bottom: 0.9em; }
+/* Пример под описанием каждой команды на /tb/platoons/filters — отделён отступом и приглушён,
+   чтобы визуально не путался с самим описанием правила (прямой запрос пользователя
+   2026-09-01 "добавь все команды с примером и описанием"). */
+.pf-example { margin-top: 0.3em; margin-left: 0.2em; font-size: 0.9em; opacity: 0.8; }
 .platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
 .platoon-hold-toggle { font-size: 0.85em; }
 /* Планета — сворачиваемый <details> (по прямому запросу пользователя 2026-08-31 "разделить

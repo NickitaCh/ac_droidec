@@ -97,12 +97,21 @@ def slot_candidates(
     Возвращает owners, дополненные:
       meets_min — релик (или ★ для кораблей) проходит порог этапа
       used_elsewhere — тот же (игрок, юнит) уже стоит в ДРУГОМ слоте этого этапа
-      excluded_by_filter — игрок исключён правилом "exclude player"
+      excluded_by_filter — игрок исключён правилом "exclude player", ИЛИ сам юнит/его
+               категория (флот/пешка) исключены правилом "exclude unit"/"exclude category"
+               (объединено в один флаг 2026-09-01 — юнит исключён одинаково для ВСЕХ
+               кандидатов слота, поэтому раньше это патчилось отдельно в вызывающем коде
+               web/routes/guild_dashboard.py и tb_platoon_autofill.py; теперь единая точка
+               правды здесь, дублирующие патчи убраны)
       at_cap — игрок уже занимает max_per_planet_per_round слотов на этой планете в этом
                round_num (лимит НЕ по планете целиком, см. модульный комментарий)
       count_here — сколько слотов на этой планете/round_num у игрока УЖЕ занято (для
                    сортировки при автозаполнении — размазывать нагрузку)
       is_ship — прокинуто как есть, для отображения/сортировки по вызывающей стороне."""
+    unit_or_category_excluded = filter_rules is not None and (
+        filter_rules.is_unit_excluded(base_id)
+        or filter_rules.is_category_excluded("ship" if is_ship else "character")
+    )
     result = []
     for o in owners:
         ally_code = o["ally_code"]
@@ -113,7 +122,7 @@ def slot_candidates(
             **o,
             "meets_min": meets_min,
             "used_elsewhere": used_at is not None and used_at != here,
-            "excluded_by_filter": filter_rules is not None and filter_rules.is_player_excluded(ally_code),
+            "excluded_by_filter": unit_or_category_excluded or (filter_rules is not None and filter_rules.is_player_excluded(ally_code)),
             "at_cap": count_here >= max_per_planet_per_round,
             "count_here": count_here,
             "is_ship": is_ship,
@@ -135,7 +144,7 @@ def is_eligible(candidate: dict) -> bool:
     )
 
 
-def pick_best_candidate(candidates: list, bundle_preferred_codes: frozenset = frozenset()):
+def pick_best_candidate(candidates: list, bundle_preferred_codes: frozenset = frozenset(), co_located_codes: frozenset = frozenset()):
     """Выбирает донора для автозаполнения из аннотированного списка (slot_candidates()).
     Приоритет: bundle-предпочтение (tb_platoon_filters.py::ParsedRules.bundles — тот же
     игрок, которому уже отдан юнит-триггер, см. tb_platoon_autofill.py) > приоритетный
@@ -144,7 +153,14 @@ def pick_best_candidate(candidates: list, bundle_preferred_codes: frozenset = fr
     выдавалось максимальное кол-во взводов": приоритетный игрок обходит по очереди ЛЮБОГО
     неприоритетного кандидата независимо от релика/★, и НЕ штрафуется count_here —
     размазывание нагрузки специально отключено для него, чтобы не терять слоты в пользу
-    менее нужных доноров) > максимальный релик (★ для кораблей — у них нет реликвии,
+    менее нужных доноров) > кластеризация по операции (co_located_codes — игроки, у
+    которых в ЭТОЙ ЖЕ (планета, операция) уже есть назначение в этом прогоне; передаётся
+    готовым из tb_platoon_autofill.py, единого источника правды по assignments нет здесь —
+    добавлено 2026-09-01 по прямому запросу пользователя "чтобы по возможности у большего
+    количества игроков взводы были в одной операции", а не размазаны по разным операциям
+    одной планеты; ставится ВЫШЕ релика намеренно — кандидат уже прошёл порог meets_min,
+    так что "чуть меньше релик, но тот же игрок и та же операция" не хуже по факту, а
+    удобнее в исполнении) > максимальный релик (★ для кораблей — у них нет реликвии,
     сортировка по звёздности вместо неё) > меньше всего уже занятых слотов на этой планете
     в этом этапе (размазывает нагрузку вместо того, чтобы наваливать на одного и того же
     топ-донора). Возвращает None, если подходящих кандидатов нет."""
@@ -154,6 +170,7 @@ def pick_best_candidate(candidates: list, bundle_preferred_codes: frozenset = fr
     eligible.sort(key=lambda c: (
         0 if c["ally_code"] in bundle_preferred_codes else 1,
         0 if c.get("is_priority") else 1,
+        0 if c["ally_code"] in co_located_codes else 1,
         -(c["stars"] if c["is_ship"] else c["relic"]),
         c["count_here"],
     ))

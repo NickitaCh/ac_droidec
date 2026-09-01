@@ -9,8 +9,14 @@
 # Грамматика, одна строка — одно правило (пустые строки и строки с '#' — комментарии):
 #   exclude player [Имя игрока]
 #   exclude unit [Имя юнита]
+#   exclude category [флот|пешка]
 #   bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...
 #   priority player [Имя игрока]
+#
+# "exclude category" (добавлено 2026-09-01 по прямому запросу пользователя "исключать...
+# всех, кроме [флот|пешка]") — категорий всего две (is_ship — см. database.get_unit_types),
+# поэтому "оставить только флот" выражается как "exclude category [пешка]" и наоборот —
+# отдельного "only"-правила не нужно.
 #
 # "bundle" читается так: если игроку уже назначен юнит-триггер где-либо в текущем
 # автозаполнении, при выборе донора для юнита из пула автозаполнение отдаёт предпочтение
@@ -33,9 +39,14 @@ import database
 
 _EXCLUDE_PLAYER_RE = re.compile(r"^exclude\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _EXCLUDE_UNIT_RE = re.compile(r"^exclude\s+unit\s+\[([^\]]+)\]$", re.IGNORECASE)
+_EXCLUDE_CATEGORY_RE = re.compile(r"^exclude\s+category\s+\[([^\]]+)\]$", re.IGNORECASE)
 _BUNDLE_RE = re.compile(r"^bundle\s+\[([^\]]+)\]\s*->\s*(.+)$", re.IGNORECASE)
 _PRIORITY_PLAYER_RE = re.compile(r"^priority\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _BRACKET_ITEM_RE = re.compile(r"\[([^\]]+)\]")
+
+# "флот"/"пешка" — категории юнита те же, что и в database.get_unit_types ("ship"/иначе).
+_CATEGORY_RU_TO_KEY = {"флот": "ship", "пешка": "character"}
+_CATEGORY_KEY_TO_RU = {"ship": "флот", "character": "пешка"}
 
 
 @dataclass
@@ -44,6 +55,7 @@ class ParsedRules:
     exclude_player_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя
     exclude_unit_ids: set = field(default_factory=set)
     exclude_unit_names: dict = field(default_factory=dict)  # base_id -> отображаемое имя
+    exclude_categories: set = field(default_factory=set)  # "ship" / "character"
     bundles: dict = field(default_factory=dict)  # trigger_base_id -> [pool_base_id, ...]
     priority_player_codes: set = field(default_factory=set)
     priority_player_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя
@@ -54,6 +66,9 @@ class ParsedRules:
 
     def is_unit_excluded(self, base_id: str) -> bool:
         return base_id in self.exclude_unit_ids
+
+    def is_category_excluded(self, category: str) -> bool:
+        return category in self.exclude_categories
 
     def is_player_priority(self, ally_code: str) -> bool:
         return ally_code in self.priority_player_codes
@@ -88,6 +103,16 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             name = m.group(1).strip()
             all_unit_names.add(name)
             parsed_lines.append((line_num, "exclude_unit", name))
+            continue
+
+        m = _EXCLUDE_CATEGORY_RE.match(stripped)
+        if m:
+            raw_category = m.group(1).strip().lower()
+            category = _CATEGORY_RU_TO_KEY.get(raw_category)
+            if not category:
+                errors.append((line_num, f"неизвестная категория: {raw_category!r} (доступны: флот, пешка)"))
+                continue
+            parsed_lines.append((line_num, "exclude_category", category))
             continue
 
         m = _BUNDLE_RE.match(stripped)
@@ -135,6 +160,9 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             result.exclude_unit_names[base_id] = name
             result.unit_display_names[base_id] = name
 
+        elif kind == "exclude_category":
+            result.exclude_categories.add(payload)
+
         elif kind == "bundle":
             trigger, pool_names = payload
             trigger_base_id = name_to_base_id.get(trigger)
@@ -177,6 +205,8 @@ def describe_rules(parsed: ParsedRules) -> list:
         lines.append(f"Исключён игрок: {parsed.exclude_player_names.get(ally_code, ally_code)}")
     for base_id in sorted(parsed.exclude_unit_ids):
         lines.append(f"Юнит не предлагается: {parsed.exclude_unit_names.get(base_id, base_id)}")
+    for category in sorted(parsed.exclude_categories):
+        lines.append(f"Категория не предлагается: {_CATEGORY_KEY_TO_RU.get(category, category)}")
     for trigger_base_id, pool in parsed.bundles.items():
         trigger_name = parsed.unit_display_names.get(trigger_base_id, trigger_base_id)
         pool_names = [parsed.unit_display_names.get(b, b) for b in pool]
