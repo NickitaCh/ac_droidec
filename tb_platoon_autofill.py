@@ -29,6 +29,22 @@ class SlotOutcome:
 
 
 @dataclasses.dataclass
+class BlockedByRule:
+    """Слот, который не удалось заполнить ИМЕННО из-за правила "exclude player [...] unit
+    [...]" (2026-09-02) — был бы заполнен, если бы не оно (см.
+    tb_platoon_engine.would_be_eligible_without_player_unit_rule). blocked_players —
+    отображаемые имена игроков, которые подошли бы, если бы не это правило (обычно один, но
+    при нескольких пересекающихся правилах на одну пару может быть и больше владельцев,
+    исключённых одновременно)."""
+    round_num: int
+    planet: str
+    operation: int
+    slot_index: int
+    unit: str
+    blocked_players: list
+
+
+@dataclasses.dataclass
 class AutofillResult:
     total_slots: int = 0
     already_filled: int = 0
@@ -36,6 +52,7 @@ class AutofillResult:
     held_back: int = 0
     unfilled: list = dataclasses.field(default_factory=list)
     by_round: dict = dataclasses.field(default_factory=dict)  # round_num -> {"total": int, "filled": int}
+    blocked_by_exclude_rule: list = dataclasses.field(default_factory=list)  # [BlockedByRule, ...]
 
     @property
     def filled_slots(self) -> int:
@@ -248,6 +265,16 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
 
         best = tb_platoon_engine.pick_best_candidate(candidates, frozenset(bundle_preferred), frozenset(co_located))
         if best is None:
+            # Правило "exclude player [...] unit [...]" (2026-09-02) — если слот не заполнен
+            # ИМЕННО из-за него (кто-то стал бы eligible, если бы не оно), это отдельная
+            # причина от обычного "нет подходящих доноров" — см. модульный комментарий у
+            # BlockedByRule. Слот всё равно остаётся unfilled с обычной причиной для счётчиков
+            # (_AUTOFILL_REASON_LABELS), a blocked_by_exclude_rule — для явного алерта.
+            blockers = [c["name"] for c in candidates if tb_platoon_engine.would_be_eligible_without_player_unit_rule(c)]
+            if blockers:
+                result.blocked_by_exclude_rule.append(
+                    BlockedByRule(round_num, planet, operation, slot_index, slot["unit_name"], sorted(blockers)),
+                )
             reason = "no_owner" if not owners else "no_eligible_owner"
             result.unfilled.append(SlotOutcome(round_num, planet, operation, slot_index, slot["unit_name"], reason))
             continue

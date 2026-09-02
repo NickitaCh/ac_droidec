@@ -577,6 +577,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
         "saved_plans": saved_plans,
         "active_plan_id": active_plan_id,
         "autofill_summary": request.query_params.get("autofill_summary"),
+        "autofill_warning": request.query_params.get("autofill_warning"),
         "unplaceable_count": unplaceable_count,
     })
 
@@ -665,7 +666,23 @@ async def tb_platoons_autofill_route(
         parts = [f"{_AUTOFILL_REASON_LABELS.get(reason, reason)}: {count}" for reason, count in reasons.items()]
         summary += " — не хватает (" + ", ".join(parts) + ")"
 
-    suffix = urlencode({"autofill_summary": summary})
+    params = {"autofill_summary": summary}
+    if result.blocked_by_exclude_rule:
+        # Отдельный видный алерт (не просто строчка в общей сводке) — прямой запрос
+        # пользователя 2026-09-02: если правило "exclude player [...] unit [...]" — ЕДИНСТВЕННАЯ
+        # причина, по которой слот не заполнен (кто-то стал бы подходящим донором, если бы не
+        # оно), предупредить явно, с указанием какого игрока и юнита это касается — см.
+        # tb_platoon_autofill.py::AutofillResult.blocked_by_exclude_rule.
+        by_unit: dict[str, set] = {}
+        for item in result.blocked_by_exclude_rule:
+            by_unit.setdefault(item.unit, set()).update(item.blocked_players)
+        details = [f"{unit} (мог(ли) задонатить: {', '.join(sorted(players))})" for unit, players in sorted(by_unit.items())]
+        params["autofill_warning"] = (
+            f"⚠ Правило-исключение блокирует {len(result.blocked_by_exclude_rule)} слот(ов), "
+            "которые иначе были бы заполнены: " + "; ".join(details)
+        )
+
+    suffix = urlencode(params)
     return RedirectResponse(f"/tb/platoons?plan_id={plan_id}&round={round_num}&{suffix}", status_code=303)
 
 

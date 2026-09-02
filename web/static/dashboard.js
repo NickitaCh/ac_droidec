@@ -329,6 +329,7 @@ document.addEventListener("DOMContentLoaded", () => {
             { insert: "exclude player [", label: "exclude player […] — исключить игрока" },
             { insert: "exclude unit [", label: "exclude unit […] — исключить юнита" },
             { insert: "exclude category [", label: "exclude category […] — исключить флот/пешку" },
+            { insert: "exclude player [", label: "exclude player […] unit […] — исключить юнита только у этого игрока (+ stage […])" },
             { insert: "priority player [", label: "priority player […] — приоритет игроку" },
             { insert: "bundle [", label: "bundle […] -> […] — привязать юнитов к тому же донору" },
         ];
@@ -413,6 +414,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     items = CATEGORY_OPTIONS.filter((c) => c.name.startsWith(q));
                     activeIndex = items.length ? 0 : -1;
                     render();
+                } else if (/\bstage\s*$/i.test(before)) {
+                    // Номера этапов — не юниты, никаких подсказок не показываем.
+                    close();
                 } else {
                     search("/tb/platoons/api/units", partial, (u) => ({ name: u.name, label: u.name }));
                 }

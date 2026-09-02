@@ -92,6 +92,10 @@
         <p class="badge badge-ok">{{ autofill_summary }}</p>
     {% endif %}
 
+    {% if autofill_warning %}
+        <p class="badge badge-warn">{{ autofill_warning }}</p>
+    {% endif %}
+
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}

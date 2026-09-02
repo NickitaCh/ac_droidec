@@ -10,6 +10,8 @@
 #   exclude player [Имя игрока]
 #   exclude unit [Имя юнита]
 #   exclude category [флот|пешка]
+#   exclude player [Имя игрока] unit [Имя юнита]
+#   exclude player [Имя игрока] unit [Имя юнита] stage [1, 3]
 #   bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...
 #   priority player [Имя игрока]
 #
@@ -32,6 +34,20 @@
 # годится (релик/★, не занят, не исключён, не упёрся в лимит 10/планету/этап) — см.
 # tb_platoon_engine.pick_best_candidate. Уступает только bundle-предпочтению (парная связка
 # юнитов важнее общего приоритета).
+#
+# "exclude player [...] unit [...] [stage [...]]" (добавлено 2026-09-02 по прямому запросу
+# пользователя: "хочу бить бз, но ключевой юнит для этого бз я отдал во взвод, а есть
+# человек, который не бьёт это бз и не отдаёт юнита") — В ОТЛИЧИЕ от "exclude player"
+# (блокирует игрока целиком, на все юниты) и "exclude unit" (блокирует юнита целиком, у
+# ВСЕХ игроков), это правило блокирует ОДНУ конкретную пару игрок+юнит, и только на
+# указанных этапах (или на всех, если "stage [...]" не задан) — остальные владельцы этого
+# юнита по-прежнему предлагаются как доноры. round_num для проверки — этап ПРОСМОТРА слота
+# (тот же round_num, что уже приходит в tb_platoon_engine.slot_candidates), не этап первого
+# назначения — так что правило само "отпускает" игрока на других этапах той же планеты,
+# растянутой на несколько этапов. Жёсткое правило (не предпочтение, как bundle/priority):
+# если это единственный владелец юнита в гильдии, слот остаётся незаполненным — см. алерт
+# tb_platoon_autofill.py::AutofillResult.blocked_by_exclude_rule и
+# tb_platoon_engine.would_be_eligible_without_player_unit_rule.
 import re
 from dataclasses import dataclass, field
 
@@ -40,9 +56,16 @@ import database
 _EXCLUDE_PLAYER_RE = re.compile(r"^exclude\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _EXCLUDE_UNIT_RE = re.compile(r"^exclude\s+unit\s+\[([^\]]+)\]$", re.IGNORECASE)
 _EXCLUDE_CATEGORY_RE = re.compile(r"^exclude\s+category\s+\[([^\]]+)\]$", re.IGNORECASE)
+_EXCLUDE_PLAYER_UNIT_RE = re.compile(
+    r"^exclude\s+player\s+\[([^\]]+)\]\s+unit\s+\[([^\]]+)\](?:\s+stage\s+\[([^\]]+)\])?$", re.IGNORECASE,
+)
 _BUNDLE_RE = re.compile(r"^bundle\s+\[([^\]]+)\]\s*->\s*(.+)$", re.IGNORECASE)
 _PRIORITY_PLAYER_RE = re.compile(r"^priority\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _BRACKET_ITEM_RE = re.compile(r"\[([^\]]+)\]")
+
+# Сентинел для ParsedRules.exclude_player_unit_rules: пустой frozenset() = правило действует
+# на ВСЕ этапы (нет отдельного "stage [...]" в строке); непустой frozenset — конкретные этапы.
+# Отсутствие ключа в словаре = правила для этой пары вообще нет.
 
 # "флот"/"пешка" — категории юнита те же, что и в database.get_unit_types ("ship"/иначе).
 _CATEGORY_RU_TO_KEY = {"флот": "ship", "пешка": "character"}
@@ -60,6 +83,10 @@ class ParsedRules:
     priority_player_codes: set = field(default_factory=set)
     priority_player_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя
     unit_display_names: dict = field(default_factory=dict)  # base_id -> отображаемое имя (для describe_rules, включает и триггеры, и пул bundle)
+    # (ally_code, base_id) -> frozenset этапов (пусто = все этапы) — см. модульный комментарий
+    # у "exclude player [...] unit [...] [stage [...]]" выше.
+    exclude_player_unit_rules: dict = field(default_factory=dict)
+    player_display_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя (для exclude_player_unit_rules, независимо от exclude_player_names)
 
     def is_player_excluded(self, ally_code: str) -> bool:
         return ally_code in self.exclude_player_codes
@@ -75,6 +102,14 @@ class ParsedRules:
 
     def bundle_pool_for(self, trigger_base_id: str) -> list:
         return self.bundles.get(trigger_base_id, [])
+
+    def is_player_unit_excluded(self, ally_code: str, base_id: str, round_num: int) -> bool:
+        stages = self.exclude_player_unit_rules.get((ally_code, base_id))
+        if stages is None:
+            return False
+        if not stages:  # frozenset() пустой = все этапы
+            return True
+        return round_num in stages
 
 
 def parse_rules(rules_text: str, guild_id: int) -> tuple:
@@ -113,6 +148,31 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
                 errors.append((line_num, f"неизвестная категория: {raw_category!r} (доступны: флот, пешка)"))
                 continue
             parsed_lines.append((line_num, "exclude_category", category))
+            continue
+
+        m = _EXCLUDE_PLAYER_UNIT_RE.match(stripped)
+        if m:
+            player_name = m.group(1).strip()
+            unit_name = m.group(2).strip()
+            stage_raw = m.group(3)
+            all_unit_names.add(unit_name)
+            stages = None
+            if stage_raw is not None:
+                stages = set()
+                bad = False
+                for token in stage_raw.split(","):
+                    token = token.strip()
+                    if not token.isdigit():
+                        errors.append((line_num, f"этап должен быть числом: {token!r}"))
+                        bad = True
+                        continue
+                    stages.add(int(token))
+                if bad:
+                    continue
+                if not stages:
+                    errors.append((line_num, "stage [...]: не нашлось ни одного номера этапа"))
+                    continue
+            parsed_lines.append((line_num, "exclude_player_unit", (player_name, unit_name, stages)))
             continue
 
         m = _BUNDLE_RE.match(stripped)
@@ -163,6 +223,29 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
         elif kind == "exclude_category":
             result.exclude_categories.add(payload)
 
+        elif kind == "exclude_player_unit":
+            player_name, unit_name, stages = payload
+            hit = ally_code_by_name.get(player_name.lower())
+            if not hit:
+                errors.append((line_num, f"игрок не найден в гильдии: {player_name!r}"))
+                continue
+            ally_code, real_name = hit
+            base_id = name_to_base_id.get(unit_name)
+            if not base_id:
+                errors.append((line_num, f"юнит не найден: {unit_name!r}"))
+                continue
+            result.player_display_names[ally_code] = real_name
+            result.unit_display_names[base_id] = unit_name
+            new_stages = frozenset() if stages is None else frozenset(stages)
+            key = (ally_code, base_id)
+            prev = result.exclude_player_unit_rules.get(key)
+            if prev is None:
+                result.exclude_player_unit_rules[key] = new_stages
+            elif not prev or not new_stages:
+                result.exclude_player_unit_rules[key] = frozenset()  # любая сторона "все этапы" — доминирует
+            else:
+                result.exclude_player_unit_rules[key] = prev | new_stages
+
         elif kind == "bundle":
             trigger, pool_names = payload
             trigger_base_id = name_to_base_id.get(trigger)
@@ -207,6 +290,14 @@ def describe_rules(parsed: ParsedRules) -> list:
         lines.append(f"Юнит не предлагается: {parsed.exclude_unit_names.get(base_id, base_id)}")
     for category in sorted(parsed.exclude_categories):
         lines.append(f"Категория не предлагается: {_CATEGORY_KEY_TO_RU.get(category, category)}")
+    for (ally_code, base_id), stages in parsed.exclude_player_unit_rules.items():
+        player_name = parsed.player_display_names.get(ally_code, ally_code)
+        unit_name = parsed.unit_display_names.get(base_id, base_id)
+        if not stages:
+            lines.append(f"Игроку {player_name} не предлагается юнит {unit_name} (все этапы)")
+        else:
+            stage_list = ", ".join(str(s) for s in sorted(stages))
+            lines.append(f"Игроку {player_name} не предлагается юнит {unit_name} (этапы: {stage_list})")
     for trigger_base_id, pool in parsed.bundles.items():
         trigger_name = parsed.unit_display_names.get(trigger_base_id, trigger_base_id)
         pool_names = [parsed.unit_display_names.get(b, b) for b in pool]

@@ -109,11 +109,20 @@ def slot_candidates(
                ("надо писать ещё где именно он стоит"), раньше used_pairs знал локацию
                (planet, operation, slot_index), но наружу отдавался только булевый флаг
       excluded_by_filter — игрок исключён правилом "exclude player", ИЛИ сам юнит/его
-               категория (флот/пешка) исключены правилом "exclude unit"/"exclude category"
-               (объединено в один флаг 2026-09-01 — юнит исключён одинаково для ВСЕХ
-               кандидатов слота, поэтому раньше это патчилось отдельно в вызывающем коде
-               web/routes/guild_dashboard.py и tb_platoon_autofill.py; теперь единая точка
-               правды здесь, дублирующие патчи убраны)
+               категория (флот/пешка) исключены правилом "exclude unit"/"exclude category",
+               ИЛИ именно эта пара игрок+юнит исключена правилом "exclude player [...] unit
+               [...]" на этом этапе (round_num) (объединено в один флаг 2026-09-01 — юнит
+               исключён одинаково для ВСЕХ кандидатов слота, поэтому раньше это патчилось
+               отдельно в вызывающем коде web/routes/guild_dashboard.py и
+               tb_platoon_autofill.py; теперь единая точка правды здесь, дублирующие патчи
+               убраны)
+      excluded_by_player_unit_rule — True, только если СТАЛ БЫ eligible (проходит relic/★,
+               не занят, не упёрся в лимит), если бы не именно правило "exclude player
+               [...] unit [...]" для этой пары — т.е. это ЕДИНСТВЕННАЯ причина исключения
+               (не общий "exclude unit"/"exclude category"/"exclude player" целиком).
+               Добавлено 2026-09-02 для алерта "правило блокирует заполнение слота" — см.
+               would_be_eligible_without_player_unit_rule ниже и
+               tb_platoon_autofill.py::AutofillResult.blocked_by_exclude_rule.
       at_cap — игрок уже занимает max_per_planet_per_round слотов на этой планете в этом
                round_num (лимит НЕ по планете целиком, см. модульный комментарий)
       count_here — сколько слотов на этой планете/round_num у игрока УЖЕ занято (для
@@ -134,18 +143,34 @@ def slot_candidates(
             used_at_label = f"{at_planet}, операция {at_operation}, слот {at_slot_index + 1}"
         count_here = round_counts.get((ally_code, planet), 0)
         meets_min = o.get("stars", 0) >= SHIP_MIN_STARS if is_ship else (min_relic is not None and o["relic"] >= min_relic)
+        full_player_excluded = filter_rules is not None and filter_rules.is_player_excluded(ally_code)
+        player_unit_excluded = filter_rules is not None and filter_rules.is_player_unit_excluded(ally_code, base_id, round_num)
         result.append({
             **o,
             "meets_min": meets_min,
             "used_elsewhere": used_elsewhere,
             "used_at_label": used_at_label,
-            "excluded_by_filter": unit_or_category_excluded or (filter_rules is not None and filter_rules.is_player_excluded(ally_code)),
+            "excluded_by_filter": unit_or_category_excluded or full_player_excluded or player_unit_excluded,
+            "excluded_by_player_unit_rule": player_unit_excluded and not unit_or_category_excluded and not full_player_excluded,
             "at_cap": count_here >= max_per_planet_per_round,
             "count_here": count_here,
             "is_ship": is_ship,
             "is_priority": filter_rules is not None and filter_rules.is_player_priority(ally_code),
         })
     return result
+
+
+def would_be_eligible_without_player_unit_rule(candidate: dict) -> bool:
+    """Кандидат стал бы is_eligible(), если бы не именно правило "exclude player [...] unit
+    [...]" на этом этапе (candidate["excluded_by_player_unit_rule"], см. slot_candidates) —
+    используется автозаполнением (tb_platoon_autofill.py) для алерта "это правило блокирует
+    заполнение слота, у которого только этот игрок владеет юнитом"."""
+    return (
+        candidate["meets_min"]
+        and not candidate["used_elsewhere"]
+        and not candidate["at_cap"]
+        and candidate["excluded_by_player_unit_rule"]
+    )
 
 
 def is_eligible(candidate: dict) -> bool:
