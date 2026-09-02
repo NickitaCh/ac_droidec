@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Приоритет омикронов — AC Droidec{% endblock %}
-{% block main_class %}wide{% endblock %}
+{% block main_class %}wide omicron-priority-page{% endblock %}
 {% block content %}
     <h1>Приоритет омикронов для ВГ</h1>
     <p class="muted">
         Слева — порядок важности омикронов (перетащите, самые важные для ВГ — сверху),
         справа — требования к ростеру игрока, чтобы омикрон вообще предлагался (например,
-        «омик на Итано только если и Итано, и Микс на релике 7+»). Отчёт
+        «омик на Итано только если и Итано, и Кикс на релике 7+»). Отчёт
         (<a href="/omicrons/report">/omicrons/report</a>) показывает игрокам омикроны из
         списка слева, требования которых уже выполнены, в этом же порядке.
     </p>
@@ -24,7 +24,7 @@
                     <select id="omicron-add-select">
                         <option value="">— выбрать омикрон —</option>
                         {% for opt in catalog_options %}
-                            <option value="{{ opt.skill_id }}" data-unit="{{ opt.unit_name }}" data-skill="{{ opt.skill_name }}" data-mode="{{ opt.omicron_mode }}">{{ opt.unit_name }}{% if opt.skill_name %} — {{ opt.skill_name }}{% endif %}</option>
+                            <option value="{{ opt.skill_id }}" data-unit="{{ opt.unit_name }}" data-skill="{{ opt.skill_name }}" data-mode="{{ opt.omicron_mode }}" data-ability-type="{{ opt.ability_type }}">{{ opt.unit_name }}{% if opt.skill_name %} — {{ opt.skill_name }}{% endif %}{% if opt.ability_type %} ({{ opt.ability_type }}){% endif %}</option>
                         {% endfor %}
                     </select>
                     <button type="button" id="omicron-add-btn">Добавить</button>
@@ -36,9 +36,10 @@
 
                 <ul class="omicron-priority-list" id="omicron-priority-list">
                     {% for row in rows %}
-                        <li class="omicron-priority-row" data-skill-id="{{ row.skill_id }}" data-unit-name="{{ row.unit_name }}" data-skill-name="{{ row.skill_name }}" data-omicron-mode="{{ row.omicron_mode }}">
+                        <li class="omicron-priority-row" data-skill-id="{{ row.skill_id }}" data-unit-name="{{ row.unit_name }}" data-skill-name="{{ row.skill_name }}" data-omicron-mode="{{ row.omicron_mode }}" data-ability-type="{{ row.ability_type }}">
                             <span class="drag-handle">⠿</span>
                             <span class="omicron-priority-name">{{ row.unit_name }}{% if row.skill_name %} — {{ row.skill_name }}{% endif %}</span>
+                            {% if row.ability_type %}<span class="badge badge-neutral">{{ row.ability_type }}</span>{% endif %}
                             {% if row.omicron_mode %}<span class="badge badge-neutral">{{ row.omicron_mode }}</span>{% endif %}
                             <button type="button" class="omicron-priority-remove" title="Убрать из списка">✕</button>
                         </li>
@@ -72,8 +73,8 @@
                         требования должны выполниться разом.
                         <div class="pf-example">Пример:
                             <code>omicron [Итано] require unit [Итано] relic 7</code> +
-                            <code>omicron [Итано] require unit [Микс] relic 7</code> — омикрон
-                            на Итано предлагается, только если и Итано, и Микс на релике 7+.</div>
+                            <code>omicron [Итано] require unit [Кикс] relic 7</code> — омикрон
+                            на Итано предлагается, только если и Итано, и Кикс на релике 7+.</div>
                     </li>
                     <li>
                         Если у юнита несколько омикрон-способностей, уточните какую именно
@@ -106,7 +107,7 @@
             {% endif %}
 
             <form method="post" action="/omicrons/priority/rules">
-                <textarea name="rules_text" rows="22" class="platoon-filters-textarea omicron-rules-textarea" spellcheck="false">{{ rules_text }}</textarea>
+                <textarea name="rules_text" rows="30" class="platoon-filters-textarea omicron-rules-textarea" spellcheck="false">{{ rules_text }}</textarea>
                 <p><button type="submit">Сохранить</button></p>
             </form>
 
@@ -147,9 +148,10 @@
                 option.dataset.unit = li.dataset.unitName;
                 option.dataset.skill = li.dataset.skillName;
                 option.dataset.mode = li.dataset.omicronMode;
-                option.textContent = li.dataset.skillName
-                    ? `${li.dataset.unitName} — ${li.dataset.skillName}`
-                    : li.dataset.unitName;
+                option.dataset.abilityType = li.dataset.abilityType;
+                let label = li.dataset.skillName ? `${li.dataset.unitName} — ${li.dataset.skillName}` : li.dataset.unitName;
+                if (li.dataset.abilityType) label += ` (${li.dataset.abilityType})`;
+                option.textContent = label;
                 select.appendChild(option);
                 li.remove();
                 syncHidden();
@@ -160,13 +162,14 @@
 
         new Sortable(list, { handle: ".drag-handle", animation: 150, onEnd: syncHidden });
 
-        const addRow = (skillId, unitName, skillName, omicronMode) => {
+        const addRow = (skillId, unitName, skillName, omicronMode, abilityType) => {
             const li = document.createElement("li");
             li.className = "omicron-priority-row";
             li.dataset.skillId = skillId;
             li.dataset.unitName = unitName;
             li.dataset.skillName = skillName || "";
             li.dataset.omicronMode = omicronMode || "";
+            li.dataset.abilityType = abilityType || "";
 
             const handle = document.createElement("span");
             handle.className = "drag-handle";
@@ -178,6 +181,12 @@
 
             li.appendChild(handle);
             li.appendChild(name);
+            if (abilityType) {
+                const typeBadge = document.createElement("span");
+                typeBadge.className = "badge badge-neutral";
+                typeBadge.textContent = abilityType;
+                li.appendChild(typeBadge);
+            }
             if (omicronMode) {
                 const badge = document.createElement("span");
                 badge.className = "badge badge-neutral";
@@ -199,7 +208,7 @@
         addBtn.addEventListener("click", () => {
             const option = select.options[select.selectedIndex];
             if (!option || !option.value) return;
-            addRow(option.value, option.dataset.unit, option.dataset.skill, option.dataset.mode);
+            addRow(option.value, option.dataset.unit, option.dataset.skill, option.dataset.mode, option.dataset.abilityType);
             option.remove();
             select.value = "";
         });

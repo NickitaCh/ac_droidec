@@ -3397,22 +3397,25 @@ def set_guild_omicron_priority(guild_id: int, ordered_skill_ids: list) -> None:
     conn.close()
 
 
-def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple | None = ("ВГ", "ТБ"), limit: int = 20) -> list:
+def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple | None = ("ВГ",), limit: int = 20) -> list:
     """Поиск омикронов для добавления в приоритетный список (/omicrons/api/search, и весь
     каталог разом — query="", limit=большой — для выпадающего списка на /omicrons/priority)
     — join skill_tier_thresholds (omicron_tier IS NOT NULL) x unit_omicron_skills x
     game_units, минус то, что уже в списке гильдии. modes=None снимает фильтр по игровому
-    режиму (по умолчанию только "ВГ"/"ТБ" — Диме не нужны PvE/арена, но ручной поиск не
-    должен быть заблокирован, если понадобится что-то ещё, см. план). Регистронезависимый
-    Unicode-поиск в Python — та же причина, что и в search_game_units (SQLite LOWER() не
-    работает для кириллицы). Отсортировано по имени юнита/способности — предсказуемый
-    порядок в выпадающем списке."""
+    режиму (по умолчанию только "ВГ" — по прямому запросу пользователя 2026-09-02
+    "оставить только те, что ВГшные", сузили с изначального ВГ+ТБ; ручной поиск всё равно не
+    заблокирован, если понадобится что-то ещё, см. план). Регистронезависимый Unicode-поиск
+    в Python — та же причина, что и в search_game_units (SQLite LOWER() не работает для
+    кириллицы). Отсортировано по имени юнита/способности — предсказуемый порядок в
+    выпадающем списке. ability_type — "Лидерка"/"Базовая"/"Особая"/"Уникальная N" (по
+    прямому запросу пользователя 2026-09-02 "допишем какой это скил")."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_skill_tier_thresholds_table(cursor)
     _ensure_unit_omicron_skills_table(cursor)
+    _ensure_guild_omicron_priority_table(cursor)
     cursor.execute("""
-        SELECT t.skill_id, t.name, t.omicron_mode, u.base_id, g.cached_name
+        SELECT t.skill_id, t.name, t.omicron_mode, t.ability_type, u.base_id, g.cached_name
         FROM skill_tier_thresholds t
         JOIN unit_omicron_skills u ON u.skill_id = t.skill_id
         JOIN game_units g ON g.base_id = u.base_id
@@ -3426,7 +3429,7 @@ def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple 
 
     q = query.strip().lower()
     matches = []
-    for skill_id, skill_name, omicron_mode, base_id, unit_name in rows:
+    for skill_id, skill_name, omicron_mode, ability_type, base_id, unit_name in rows:
         if skill_id in already:
             continue
         if modes and omicron_mode not in modes:
@@ -3440,6 +3443,7 @@ def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple 
             "base_id": base_id,
             "skill_name": skill_name or "",
             "omicron_mode": omicron_mode or "",
+            "ability_type": ability_type or "",
         })
         if len(matches) >= limit:
             break

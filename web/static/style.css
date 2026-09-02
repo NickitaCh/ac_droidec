@@ -645,11 +645,17 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 /* /omicrons/priority — приоритет (drag-list, SortableJS) и требования (textarea) в двух
    колонках рядом (по прямому запросу пользователя 2026-09-02: раньше были отдельными
    страницами). 60em — тот же брейкпоинт, что у .dashboard-grid ниже, где раскладка уже
-   считается "достаточно узкой" для одной колонки. */
+   считается "достаточно узкой" для одной колонки. Страница шире обычного main.wide
+   (1440px) — по прямому запросу пользователя 2026-09-02 "расширить, а то до центра
+   далеко" — оверрайд только для этой страницы (.omicron-priority-page), не трогает
+   max-width остальных "wide" страниц (/tb/platoons и т.п.). */
+@media (min-width: 60em) {
+    main.wide.omicron-priority-page { max-width: 1800px; }
+}
 .omicron-priority-columns {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 2.5em;
+    gap: 3em;
     align-items: start;
     margin-top: 1.5em;
 }
@@ -694,7 +700,7 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
    textarea рядом с drag-list слева — по тому же 2026-09-02 запросу "увеличить поле ввода". */
 .omicron-rules-syntax-details { margin-bottom: 1em; }
 .omicron-rules-syntax-details summary { cursor: pointer; color: var(--accent); margin-bottom: 0.6em; }
-.omicron-rules-textarea { max-width: none; min-height: 26em; }
+.omicron-rules-textarea { max-width: none; min-height: 36em; }
 /* Планета — сворачиваемый <details> (по прямому запросу пользователя 2026-08-31 "разделить
    блоки планет + добавить сворачивание"), не просто <div> — открыт по умолчанию, стрелка в
    summary как у .platoon-slot ниже, но крупнее. */

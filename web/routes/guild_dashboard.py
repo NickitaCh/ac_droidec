@@ -799,8 +799,9 @@ def _omicron_priority_context(guild_id: int, rules_text: str = None) -> dict:
     parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
     return {
         "rows": omicron_priority.priority_list_display(guild_id),
-        # limit с большим запасом — это весь ВГ/ТБ-каталог для выпадающего списка, не
-        # постраничный поиск (см. database.search_omicron_catalog_for_priority).
+        # limit с большим запасом — это весь ВГ-каталог для выпадающего списка (modes по
+        # умолчанию = только "ВГ", см. database.search_omicron_catalog_for_priority), не
+        # постраничный поиск.
         "catalog_options": database.search_omicron_catalog_for_priority("", guild_id, limit=1000),
         "rules_text": rules_text,
         "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
@@ -838,14 +839,14 @@ async def omicrons_priority_save(
 
 @router.get("/omicrons/api/search", response_class=JSONResponse)
 async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depends(require_guild_access)):
-    """Поиск омикронов для добавления в приоритетный список — по умолчанию только "ВГ"/"ТБ"
-    (Диме не нужны PvE/арена), ?all=1 снимает фильтр по игровому режиму (см. план). Сама
-    страница /omicrons/priority теперь рендерит весь каталог сразу выпадающим списком (см.
-    _omicron_priority_context), этот эндпоинт остаётся для автодополнения юнитов в правилах
-    (общий с /tb/platoons/api/units по духу, но по омикрон-каталогу) — оставлен на случай,
-    если понадобится текстовый поиск по каталогу где-то ещё."""
+    """Поиск омикронов для добавления в приоритетный список — по умолчанию только "ВГ" (по
+    прямому запросу пользователя 2026-09-02 "оставить только те, что ВГшные", сузили с
+    исходного ВГ+ТБ), ?all=1 снимает фильтр по игровому режиму (см. план). Сама страница
+    /omicrons/priority теперь рендерит весь каталог сразу выпадающим списком (см.
+    _omicron_priority_context), этот эндпоинт оставлен на случай, если понадобится текстовый
+    поиск по каталогу где-то ещё."""
     guild_id = user["guild_id"]
-    modes = None if all == "1" else ("ВГ", "ТБ")
+    modes = None if all == "1" else ("ВГ",)
     return database.search_omicron_catalog_for_priority(q.strip(), guild_id, modes=modes)
 
 

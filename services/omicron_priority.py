@@ -37,20 +37,23 @@ def _load_catalog(guild_id: int) -> dict:
 
 
 def priority_list_display(guild_id: int) -> list:
-    """[{skill_id, base_id, unit_name, skill_name, omicron_mode}, ...] в порядке приоритета —
-    для рендера самого списка на /omicrons/priority (не подбор по игроку, просто отображение
-    того, что сохранено в guild_omicron_priority)."""
+    """[{skill_id, base_id, unit_name, skill_name, omicron_mode, ability_type}, ...] в
+    порядке приоритета — для рендера самого списка на /omicrons/priority (не подбор по
+    игроку, просто отображение того, что сохранено в guild_omicron_priority). ability_type
+    ("Лидерка"/"Базовая"/"Особая"/"Уникальная N") — по прямому запросу пользователя
+    2026-09-02 "допишем какой это скил"."""
     catalog = _load_catalog(guild_id)
     rows = []
     for skill_id, _priority in catalog["priority"]:
         base_id = catalog["skill_owner"].get(skill_id)
-        name, _ability_id, _ability_type, omicron_mode = catalog["display"].get(skill_id, ("", "", "", ""))
+        name, _ability_id, ability_type, omicron_mode = catalog["display"].get(skill_id, ("", "", "", ""))
         rows.append({
             "skill_id": skill_id,
             "base_id": base_id,
             "unit_name": catalog["unit_names"].get(base_id, base_id) if base_id else skill_id,
             "skill_name": name,
             "omicron_mode": omicron_mode,
+            "ability_type": ability_type,
         })
     return rows
 
