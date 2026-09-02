@@ -42,7 +42,7 @@ PAGES = [
     ("admin_web_accounts", "Админ — Логин/пароль", "/admin/web-accounts"),
     ("admin_access_log", "Админ — Лог входов", "/admin/access-log"),
     ("admin_command_usage", "Админ — Команды", "/admin/command-usage"),
-    ("admin_omicron_phrases", "Админ — Фразы для омикронов", "/admin/omicron-phrases"),
+    ("omicron_phrases", "Омикроны — Фразы для омикронов", "/omicron/phrases"),
 ]
 
 

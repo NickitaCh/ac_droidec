@@ -3204,7 +3204,7 @@ def get_all_omicron_capable_units() -> list:
     """[(base_id, name), ...] — все персонажи/корабли, у которых В ИГРЕ есть омикрон,
     по алфавиту отображаемого имени. Используется для фильтрации автокомплита в
     cogs/stat_requirements.py (/омикрон_текст фраза) и web/routes/admin.py
-    (/admin/omicron-phrases) — не весь справочник game_units, где омикрона у
+    (/omicron/phrases) — не весь справочник game_units, где омикрона у
     большинства юнитов нет вообще."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3229,7 +3229,7 @@ def set_unit_omicron_skills(mapping: dict) -> None:
     исходные данные (comlink SkillDefinitions.tier[].isOmicronTier + unit.skillReference),
     что уже дают game_units.has_omicron (см. set_omicron_capable_base_ids), но здесь —
     какие именно skill_id, а не просто факт "есть омикрон": персонаж может иметь больше
-    одного омикрона, /admin/omicron-phrases показывает и позволяет задать фразу на
+    одного омикрона, /omicron/phrases показывает и позволяет задать фразу на
     каждый из них по отдельности. Вызывается из того же цикла sync_units
     (services/units_sync.py), что и set_omicron_capable_base_ids/set_skill_tier_thresholds —
     без лишних запросов к Comlink."""
@@ -3246,7 +3246,7 @@ def set_unit_omicron_skills(mapping: dict) -> None:
 
 def get_all_unit_omicron_skills() -> dict:
     """{base_id: [skill_id, ...]} — весь справочник разом, для отображения "персонаж +
-    все его омикроны" на /admin/omicron-phrases (см. set_unit_omicron_skills)."""
+    все его омикроны" на /omicron/phrases (см. set_unit_omicron_skills)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_unit_omicron_skills_table(cursor)

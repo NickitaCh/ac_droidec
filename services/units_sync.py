@@ -99,7 +99,7 @@ def _omicron_skills_by_base_id(skills_list: list, units_list: list) -> dict:
     см. комментарий у _is_canonical_playable_unit) и лишние rarity-варианты. Раньше это было
     безобидно: результат только флипал game_units.has_omicron, а game_units и так содержит
     только канонические baseId — NPC-копии там просто не находили строку и no-op'ались.
-    Но /admin/omicron-phrases читает unit_omicron_skills НАПРЯМУЮ (без такого неявного join),
+    Но /omicron/phrases читает unit_omicron_skills НАПРЯМУЮ (без такого неявного join),
     так что NPC-копии стали вылезать как отдельные "персонажи"-дубли с "именем" = сырой baseId
     (у него просто нет строки в game_units, чтобы резолвнуть отображаемое имя) — баг, найденный
     пользователем по факту (много дублей и "не очень" названия на странице). Фильтр гарантирует

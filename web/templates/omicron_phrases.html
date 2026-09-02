@@ -17,7 +17,7 @@
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
 
-    <form method="post" action="/admin/omicron-phrases/sync" style="margin-bottom: 1em;">
+    <form method="post" action="/omicron/phrases/sync" style="margin-bottom: 1em;">
         <button type="submit">🔄 Обновить список персонажей с омикронами</button>
         <span class="muted" style="font-size: 0.85em;">— тянет свежие данные из Comlink; иначе обновляется автоматически раз в час.</span>
     </form>
@@ -51,7 +51,7 @@
                                 <td><strong>{{ c.name }}</strong></td>
                                 <td>{% if c.multi %}<span class="muted">все омикроны (по умолчанию)</span>{% else %}{{ c.omicrons[0].label }}{% if c.omicrons[0].extra %} <span class="muted">· {{ c.omicrons[0].extra }}</span>{% endif %}{% endif %}</td>
                                 <td>
-                                    <form method="post" action="/admin/omicron-phrases/set" class="inline-form">
+                                    <form method="post" action="/omicron/phrases/set" class="inline-form">
                                         <input type="hidden" name="character_key" value="{{ c.base_id }}">
                                         <input type="hidden" name="skill_id" value="">
                                         <input type="text" name="phrase" value="{{ c.default_phrase }}" placeholder="Фраза не задана — оставьте пустым, чтобы убрать" style="min-width: 18em;">
@@ -67,7 +67,7 @@
                                         <td class="muted">↳ {{ c.name }}</td>
                                         <td>{{ o.label }}{% if o.extra %} <span class="muted">· {{ o.extra }}</span>{% endif %}</td>
                                         <td>
-                                            <form method="post" action="/admin/omicron-phrases/set" class="inline-form">
+                                            <form method="post" action="/omicron/phrases/set" class="inline-form">
                                                 <input type="hidden" name="character_key" value="{{ c.base_id }}">
                                                 <input type="hidden" name="skill_id" value="{{ o.skill_id }}">
                                                 <input type="text" name="phrase" value="{{ o.phrase }}" placeholder="Своя фраза для этого омикрона — необязательно" style="min-width: 18em;">
