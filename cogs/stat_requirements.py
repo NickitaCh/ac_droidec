@@ -483,6 +483,17 @@ class StatRequirementsCog(commands.Cog):
         # Заодно, до перезаписи кэша, диффим новый снимок против старого и пишем события
         # гильдийской активности (guild_activity_events) — замена сдохшему из-за Cloudflare
         # скрапингу swgoh.gg, см. services/activity_diff.py.
+        # Подбираем "зависшие" omicron-события — записанные в БД (уже не всплывут повторным
+        # диффом), но так и не объявленные: либо рестарт бота случился между записью и
+        # объявлением с прошлого цикла (было живым инцидентом 2026-09-02), либо отправка тогда
+        # упала на временной ошибке Discord. Не завязано на guild_roster_caches (в отличие от
+        # остального цикла) — независимая проверка, чтобы отставание с ростером не откладывало
+        # и без того просроченное объявление.
+        stale_hits = [(event_id, ally_code, base_id, skill_id, guild_id)
+                      for event_id, guild_id, ally_code, base_id, skill_id in database.get_unannounced_omicron_events()]
+        if stale_hits:
+            print(f"🔁 [Омикрон] Хвост необъявленных событий с прошлых циклов: {len(stale_hits)}")
+            await self._announce_omicrons(stale_hits)
         if not self.bot.guild_roster_caches:
             return
         ally_to_guilds = {}
@@ -503,7 +514,6 @@ class StatRequirementsCog(commands.Cog):
         skill_tier_map = database.get_all_skill_tier_thresholds()
         synced = 0
         total_events = 0
-        all_omicron_hits = []  # (ally_code, base_id, skill_id, guild_id)
         today = datetime.now(MSK).date().isoformat()
         for ally_code in ally_codes:
             try:
@@ -513,59 +523,129 @@ class StatRequirementsCog(commands.Cog):
                 if fetched:
                     synced += 1
                 total_events += added
-                all_omicron_hits.extend(
-                    (ally_code, base_id, skill_id, guild_id) for base_id, skill_id, guild_id in omicron_hits
-                )
+                if omicron_hits:
+                    # Объявляем сразу за игрока, а не копим на весь ~50-игроков цикл до конца —
+                    # раньше рестарт бота посреди цикла терял объявления для ВСЕХ уже
+                    # обработанных игроков (их omicron уже в БД, диффом больше не всплывёт),
+                    # хотя объявить успевали единицы. Теперь окно потери — один игрок, а не весь
+                    # цикл, и его подберёт stale_hits на следующем запуске в любом случае.
+                    await self._announce_omicrons(
+                        (event_id, ally_code, base_id, skill_id, guild_id)
+                        for event_id, base_id, skill_id, guild_id in omicron_hits
+                    )
             except Exception as e:
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)
         print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}, событий активности: {total_events}")
-        if all_omicron_hits:
-            await self._announce_omicrons(all_omicron_hits)
 
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):
         await self.bot.wait_until_ready()
 
+    # Если в канал за один вызов набралось столько отдельных объявлений (обычно это
+    # database.get_unannounced_omicron_events после очень долгого простоя бота — см.
+    # player_units_sync_loop) — не заваливаем канал вереницей сообщений подряд, а склеиваем
+    # в одно (или несколько под лимит Discord в 2000 символов).
+    OMICRON_COMBINE_THRESHOLD = 10
+
+    @staticmethod
+    def _chunk_omicron_lines(header: str, lines: list[tuple[int, str]], limit: int = 2000):
+        """lines: [(event_id, строка), ...] → [(event_ids_чанка, текст_сообщения), ...],
+        каждое сообщение — header + маркированный список, порезанный по лимиту символов."""
+        chunks = []
+        chunk_ids: list[int] = []
+        chunk_text = header
+        continuation_header = "🔁 Омикроны (продолжение)…"
+        for event_id, line in lines:
+            bullet = f"\n• {line}"
+            if chunk_ids and len(chunk_text) + len(bullet) > limit:
+                chunks.append((chunk_ids, chunk_text))
+                chunk_ids = []
+                chunk_text = continuation_header
+            chunk_ids.append(event_id)
+            chunk_text += bullet
+        if chunk_ids:
+            chunks.append((chunk_ids, chunk_text))
+        return chunks
+
     async def _announce_omicrons(self, hits):
-        """hits: [(ally_code, base_id, skill_id, guild_id), ...] — новые омикроны, найденные за
-        этот цикл синка. Постит в guilds.omicron_channel_id гильдии (если он настроен через
-        /омикрон_текст канал); без настроенного канала для конкретной гильдии молча пропускает —
-        это НЕ ошибка, просто фича ещё не включена для этой гильдии.
-        Формат ("**{игрок}** выдал омикрон **{способность}** ({тип}) для {режим} на
-        **{персонаж}**.") — тип/режим резолвятся из skill_tier_thresholds (см.
+        """hits: [(event_id, ally_code, base_id, skill_id, guild_id), ...] — новые омикроны,
+        найденные за этот цикл синка, плюс необъявленный хвост с прошлых циклов (см.
+        database.get_unannounced_omicron_events). Постит в guilds.omicron_channel_id гильдии
+        (если он настроен через /омикрон_текст канал); без настроенного канала для конкретной
+        гильдии молча пропускает — это НЕ ошибка, просто фича ещё не включена для этой гильдии.
+        На каждый успешно отправленный hit сразу ставит database.mark_activity_event_announced,
+        поэтому рестарт бота посреди обработки списка не приводит к повторной отправке уже
+        объявленных — упавшие/недошедшие останутся announced=0 и подберутся заново.
+        Формат одиночного объявления ("**{игрок}** выдал омикрон **{способность}** ({тип})
+        для {режим} на **{персонаж}**.") — тип/режим резолвятся из skill_tier_thresholds (см.
         services/units_sync.py::_skill_tier_thresholds); если справочник ещё не успел
         досинкать конкретный skill_id (гонка с hourly sync_units), молча опускаем скобки/
-        "для ..." вместо кривого текста с пустышками."""
-        skill_info = database.get_skill_display_info([skill_id for _, _, skill_id, _ in hits])
+        "для ..." вместо кривого текста с пустышками. Если хитов на один канал набралось
+        OMICRON_COMBINE_THRESHOLD и больше (типичный случай — бот был недоступен долго,
+        накопился хвост в get_unannounced_omicron_events), склеиваются в одно/несколько
+        сообщений через _chunk_omicron_lines вместо отдельного сообщения на каждый."""
+        hits = list(hits)
+        if not hits:
+            return
+        skill_info = database.get_skill_display_info([skill_id for _, _, _, skill_id, _ in hits])
         names_by_guild = {}
-        for ally_code, base_id, skill_id, guild_id in hits:
+        channels_by_id: dict[int, object] = {}
+        items_by_channel: dict[int, list[tuple[int, str]]] = {}
+        for event_id, ally_code, base_id, skill_id, guild_id in hits:
             guild_cfg = database.get_guild_config(guild_id)
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
                 continue
-            channel = self.bot.get_channel(int(channel_id))
-            if channel is None:
+            channel_id = int(channel_id)
+            if channel_id not in channels_by_id:
+                channel = self.bot.get_channel(channel_id)
+                if channel is None:
+                    # get_channel — только кеш шлюза, иногда промахивается даже при достаточных
+                    # правах (см. тот же фикс и подробности в cogs/antispam.py).
+                    try:
+                        channel = await self.bot.fetch_channel(channel_id)
+                    except (disnake.NotFound, disnake.Forbidden, disnake.HTTPException):
+                        channel = None
+                channels_by_id[channel_id] = channel
+            if channels_by_id[channel_id] is None:
                 continue
             if guild_id not in names_by_guild:
                 names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
             ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
-            text = f"**{player_name}** выдал омикрон"
+            line = f"**{player_name}** выдал омикрон"
             if ability_name:
-                text += f" **{ability_name}**"
+                line += f" **{ability_name}**"
                 if ability_type:
-                    text += f" ({ability_type})"
+                    line += f" ({ability_type})"
             if omicron_mode:
-                text += f" для {omicron_mode}"
-            text += f" на **{_unit_display_name(base_id)}**."
+                line += f" для {omicron_mode}"
+            line += f" на **{_unit_display_name(base_id)}**."
             phrase = database.get_omicron_phrase(base_id, skill_id)
             if phrase:
-                text += f" {phrase}"
-            try:
-                await channel.send(text)
-            except Exception as e:
-                print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
+                line += f" {phrase}"
+            items_by_channel.setdefault(channel_id, []).append((event_id, line))
+
+        for channel_id, items in items_by_channel.items():
+            channel = channels_by_id[channel_id]
+            if len(items) >= self.OMICRON_COMBINE_THRESHOLD:
+                header = f"🔁 Накопилось объявлений об омикронах: {len(items)} (бот был недоступен)"
+                for chunk_event_ids, chunk_text in self._chunk_omicron_lines(header, items):
+                    try:
+                        await channel.send(chunk_text)
+                    except Exception as e:
+                        print(f"⚠️ [Омикрон] Не удалось отправить объединённое объявление в канал {channel_id}: {e}")
+                        continue
+                    for event_id in chunk_event_ids:
+                        database.mark_activity_event_announced(event_id)
+            else:
+                for event_id, line in items:
+                    try:
+                        await channel.send(line)
+                        database.mark_activity_event_announced(event_id)
+                    except Exception as e:
+                        print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
 
     # ------------------ /омикрон_текст (автообъявления о выдаче омикронов) ------------------
     # Сама выдача детектится автоматически в player_units_sync_loop/_announce_omicrons

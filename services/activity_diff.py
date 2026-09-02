@@ -103,11 +103,13 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
     Возвращает (fetched, added_events, omicron_hits): fetched=False при таймауте или пустом
     ростере — вызывающий код (player_units_sync_loop, /activity/sync) использует это для
     честного счётчика "сколько игроков реально обновилось", а не считает таймаут за успех.
-    omicron_hits — [(base_id, skill_id, guild_id), ...] только для реально новых (не дублей)
-    omicron-событий (skill_id нужен вызывающему коду, чтобы резолвить имя/тип способности и
-    игровой режим через database.get_skill_display_info — см. services/units_sync.py); используется
-    cogs/stat_requirements.py::_announce_omicrons для объявлений в Discord — веб-вызов
-    (/activity/sync) это поле игнорирует, т.к. веб-процесс не держит Discord-клиента и постить не может."""
+    omicron_hits — [(event_id, base_id, skill_id, guild_id), ...] только для реально новых (не
+    дублей) omicron-событий (skill_id нужен вызывающему коду, чтобы резолвить имя/тип способности
+    и игровой режим через database.get_skill_display_info — см. services/units_sync.py); event_id —
+    id строки в guild_activity_events, нужен для database.mark_activity_event_announced после
+    успешной отправки (см. cogs/stat_requirements.py::_announce_omicrons и восстановление
+    после рестарта бота через database.get_unannounced_omicron_events). Веб-вызов (/activity/sync)
+    это поле игнорирует, т.к. веб-процесс не держит Discord-клиента и постить не может."""
     try:
         new_units = await asyncio.wait_for(fetch_player_units(comlink, ally_code), timeout=timeout)
     except asyncio.TimeoutError:
@@ -121,12 +123,13 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
     omicron_hits = []
     for base_id, action_type, old_value, new_value in events:
         for guild_id in guild_ids:
-            if database.add_guild_activity_event(
+            event_id = database.add_guild_activity_event(
                 guild_id=guild_id, ally_code=ally_code, base_id=base_id,
                 action_type=action_type, old_value=old_value, new_value=new_value,
                 event_date=event_date,
-            ):
+            )
+            if event_id is not None:
                 added += 1
                 if action_type == "omicron":
-                    omicron_hits.append((base_id, new_value, guild_id))
+                    omicron_hits.append((event_id, base_id, new_value, guild_id))
     return True, added, omicron_hits

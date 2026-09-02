@@ -3367,23 +3367,66 @@ def _ensure_guild_activity_events_table(cursor):
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_guild_activity_guild_date ON guild_activity_events(guild_id, event_date)")
+    # announced — только для action_type='omicron' (см. add_guild_activity_event): пока запись
+    # в БД (упреждает будущие диффы) и Discord-объявление были одним шагом в конце часового
+    # цикла (cogs/stat_requirements.py::player_units_sync_loop), рестарт бота между "уже
+    # записали в БД" и "успели объявить" НАВСЕГДА терял объявление — событие уже задиффено,
+    # повторно не всплывёт. DEFAULT 1 нужен, чтобы при первом ALTER все существующие строки
+    # (в т.ч. старые omicron-события) не считались "ожидающими" и не устроили залповую рассылку
+    # объявлений о протухших событиях — по умолчанию считаем "уже решено", 0 явно ставит только
+    # add_guild_activity_event для новых omicron-строк.
+    try:
+        cursor.execute("ALTER TABLE guild_activity_events ADD COLUMN announced INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
 
 
 def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action_type: str,
-                              old_value: str | None, new_value: str, event_date: str) -> bool:
-    """Возвращает True, если строка реально добавлена (False — уже была, INSERT OR IGNORE проглотил дубль)."""
+                              old_value: str | None, new_value: str, event_date: str) -> int | None:
+    """Возвращает id новой строки, если она реально добавлена, иначе None (уже была,
+    INSERT OR IGNORE проглотил дубль) — id нужен вызывающему коду (services/activity_diff.py)
+    для omicron-событий, чтобы потом отметить их объявленными через mark_activity_event_announced."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    announced = 0 if action_type == "omicron" else 1
+    cursor.execute("""
+        INSERT OR IGNORE INTO guild_activity_events
+            (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at, announced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    """, (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, announced))
+    conn.commit()
+    event_id = cursor.lastrowid if cursor.rowcount > 0 else None
+    conn.close()
+    return event_id
+
+
+def get_unannounced_omicron_events() -> list[tuple]:
+    """[(id, guild_id, ally_code, base_id, skill_id), ...] — omicron-события, записанные в БД,
+    но ещё не объявленные в Discord (см. announced в _ensure_guild_activity_events_table).
+    Вызывается в начале каждого player_units_sync_loop — подбирает и хвосты после рестарта
+    бота между записью и объявлением, и объявления, которые упали на временной ошибке отправки."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
     cursor.execute("""
-        INSERT OR IGNORE INTO guild_activity_events
-            (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date))
-    conn.commit()
-    inserted = cursor.rowcount > 0
+        SELECT id, guild_id, ally_code, base_id, new_value
+        FROM guild_activity_events
+        WHERE action_type = 'omicron' AND announced = 0
+        ORDER BY id
+    """)
+    rows = cursor.fetchall()
     conn.close()
-    return inserted
+    return rows
+
+
+def mark_activity_event_announced(event_id: int) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    cursor.execute("UPDATE guild_activity_events SET announced = 1 WHERE id = ?", (event_id,))
+    conn.commit()
+    conn.close()
 
 
 def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, action_type: str | None,
