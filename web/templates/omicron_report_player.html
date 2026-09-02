@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ player_name }} — омикроны — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/omicrons/report">← Отчёт по всем игрокам</a></p>
+    <h1>{{ player_name }} — что можно поставить</h1>
+
+    {% if not has_priority %}
+        <p class="empty-state">Список приоритета омикронов пуст — <a href="/omicrons/priority">задайте порядок</a>, чтобы отчёт заработал.</p>
+    {% elif not missing %}
+        <p class="empty-state">Все омикроны из списка приоритета либо уже поставлены, либо требования пока не выполнены.</p>
+    {% else %}
+        <div class="panel">
+            <ul>
+                {% for m in missing %}
+                    <li>
+                        {{ m.unit_name }}{% if m.skill_name %} — {{ m.skill_name }}{% endif %}
+                        {% if m.omicron_mode %}<span class="badge badge-neutral">{{ m.omicron_mode }}</span>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}

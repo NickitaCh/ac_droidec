@@ -642,6 +642,32 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .pf-example { margin-top: 0.3em; margin-left: 0.2em; font-size: 0.9em; opacity: 0.8; }
 .platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
 .platoon-hold-toggle { font-size: 0.85em; }
+/* Перетаскиваемый список приоритета омикронов на /omicrons/priority (SortableJS) — план
+   "Приоритеты омикронов для ВГ". */
+.omicron-priority-search { max-width: 30em; margin-bottom: 1em; }
+.omicron-priority-list { list-style: none; margin: 0 0 1em; padding: 0; max-width: 40em; }
+.omicron-priority-row {
+    display: flex;
+    align-items: center;
+    gap: 0.7em;
+    padding: 0.55em 0.8em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    margin-bottom: 0.4em;
+}
+.omicron-priority-row.sortable-ghost { opacity: 0.4; }
+.drag-handle { cursor: grab; color: var(--fg-muted); font-size: 1.1em; user-select: none; }
+.omicron-priority-name { flex: 1; }
+.omicron-priority-remove {
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 1em;
+    padding: 0.1em 0.4em;
+}
+.omicron-priority-remove:hover { color: var(--status-critical); }
 /* Планета — сворачиваемый <details> (по прямому запросу пользователя 2026-08-31 "разделить
    блоки планет + добавить сворачивание"), не просто <div> — открыт по умолчанию, стрелка в
    summary как у .platoon-slot ниже, но крупнее. */

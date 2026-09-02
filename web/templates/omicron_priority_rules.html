@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Требования к омикронам — AC Droidec{% endblock %}
+{% block content %}
+    <p><a href="/omicrons/priority">← Назад к приоритету омикронов</a></p>
+    <h1>Требования к омикронам</h1>
+    <p class="muted">
+        Одна строка — одно правило. Пустые строки и строки, начинающиеся с «#», игнорируются.
+        Без единого правила для омикрона он попадает в отчёт (<a href="/omicrons/report">/omicrons/report</a>)
+        сразу, как только его не хватает игроку — просто по факту присутствия в
+        <a href="/omicrons/priority">списке приоритета</a>.
+    </p>
+    <ul class="muted platoon-filters-syntax">
+        <li>
+            <code>omicron [Юнит] require unit [Юнит]</code> — омикрон предлагается только
+            игрокам, у которых открыт указанный юнит.
+            <div class="pf-example">Пример: <code>omicron [Ген. Синдулла] require unit [Асока Тано]</code>
+                — омикрон на Ген. Синдуллу попадёт в отчёт только тем, у кого есть Асока Тано.</div>
+        </li>
+        <li>
+            <code>omicron [Юнит] require unit [Юнит] relic N</code> — то же самое, но юнит
+            должен быть ещё и на релике не ниже N.
+            <div class="pf-example">Пример: <code>omicron [Итано] require unit [Итано] relic 7</code>
+                — омикрон на Итано предлагается только тем, у кого сам Итано на релике 7+.</div>
+        </li>
+        <li>
+            Несколько строк с одинаковым <code>omicron [...]</code> — все требования должны
+            выполниться разом.
+            <div class="pf-example">Пример:
+                <code>omicron [Итано] require unit [Итано] relic 7</code> +
+                <code>omicron [Итано] require unit [Микс] relic 7</code> — омикрон на Итано
+                предлагается, только если и Итано, и Микс на релике 7+.</div>
+        </li>
+        <li>
+            Если у юнита несколько омикрон-способностей, уточните какую именно способность вы
+            имеете в виду по её названию.
+            <div class="pf-example">Пример: <code>omicron [Юнит: Название способности] require unit [...]</code></div>
+        </li>
+    </ul>
+    <p class="muted">
+        Начните печатать ключевое слово или имя юнита в квадратных скобках — появятся
+        подсказки (стрелки — выбор, Enter/Tab — вставить, Esc — закрыть).
+    </p>
+
+    {% if saved %}
+        <p class="badge badge-ok">Сохранено</p>
+    {% endif %}
+
+    {% if errors %}
+        <div class="error">
+            <p>Не сохранено — есть ошибки:</p>
+            <ul>
+                {% for line_num, message in errors %}
+                    <li>строка {{ line_num }}: {{ message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <form method="post" action="/omicrons/priority/rules">
+        <textarea name="rules_text" rows="14" class="platoon-filters-textarea omicron-rules-textarea" spellcheck="false">{{ rules_text }}</textarea>
+        <p><button type="submit">Сохранить</button></p>
+    </form>
+
+    {% if described %}
+        <div class="panel">
+            <div class="panel-title"><span>Применяются сейчас</span></div>
+            <ul>
+                {% for line in described %}
+                    <li>{{ line }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}

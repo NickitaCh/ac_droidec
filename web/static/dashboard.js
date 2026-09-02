@@ -453,6 +453,119 @@ document.addEventListener("DOMContentLoaded", () => {
         textarea.addEventListener("blur", () => setTimeout(close, 150));
     });
 
+    // Автодополнение в текстовом поле требований /omicrons/priority/rules — тот же приём,
+    // что и у автодополнения /tb/platoons/filters выше (переиспользует getCaretCoordinates,
+    // объявленный в этой же области видимости), но проще: единственный тип содержимого
+    // скобок — имя юнита (эндпоинт /tb/platoons/api/units, общий с ТБ-взводами — специфики
+    // ТБ в нём нет, см. план "Приоритеты омикронов для ВГ"), два ключевых слова строки:
+    // "omicron [" / "require unit [".
+    document.querySelectorAll(".omicron-rules-textarea").forEach((textarea) => {
+        const KEYWORDS = [
+            { insert: "omicron [", label: "omicron […] — к какому омикрону относится правило" },
+            { insert: "require unit [", label: "require unit […] — юнит должен быть открыт (+ relic N)" },
+        ];
+
+        const box = document.createElement("div");
+        box.className = "pf-autocomplete";
+        document.body.appendChild(box);
+
+        let items = [];
+        let activeIndex = -1;
+        let replaceFrom = 0;
+        let replaceTo = 0;
+        let debounceTimer;
+
+        const close = () => { box.classList.remove("open"); items = []; activeIndex = -1; };
+
+        const render = () => {
+            box.innerHTML = "";
+            if (items.length === 0) { close(); return; }
+            items.forEach((item, i) => {
+                const el = document.createElement("div");
+                el.className = "pf-autocomplete-item" + (i === activeIndex ? " active" : "");
+                el.textContent = item.label;
+                el.addEventListener("mousedown", (e) => { e.preventDefault(); accept(item); });
+                box.appendChild(el);
+            });
+            const pos = getCaretCoordinates(textarea, textarea.selectionStart);
+            box.style.top = `${pos.top}px`;
+            box.style.left = `${pos.left}px`;
+            box.classList.add("open");
+        };
+
+        const accept = (item) => {
+            const value = item.insert !== undefined ? item.insert : `${item.name}]`;
+            const text = textarea.value;
+            textarea.value = text.slice(0, replaceFrom) + value + text.slice(replaceTo);
+            const newPos = replaceFrom + value.length;
+            textarea.setSelectionRange(newPos, newPos);
+            textarea.focus();
+            close();
+            evaluate();
+        };
+
+        const search = (q) => {
+            clearTimeout(debounceTimer);
+            if (q.trim().length < 2) { close(); return; }
+            debounceTimer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`/tb/platoons/api/units?q=${encodeURIComponent(q.trim())}`);
+                    const data = resp.ok ? await resp.json() : [];
+                    items = data.map((u) => ({ name: u.name, label: u.name }));
+                } catch {
+                    items = [];
+                }
+                activeIndex = items.length ? 0 : -1;
+                render();
+            }, 200);
+        };
+
+        const evaluate = () => {
+            if (textarea.selectionStart !== textarea.selectionEnd) { close(); return; }
+            const pos = textarea.selectionStart;
+            const text = textarea.value;
+            const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+            const lineSoFar = text.slice(lineStart, pos);
+
+            const bracketIdx = lineSoFar.lastIndexOf("[");
+            const closedAfter = bracketIdx >= 0 && lineSoFar.indexOf("]", bracketIdx) !== -1;
+            if (bracketIdx >= 0 && !closedAfter) {
+                replaceFrom = lineStart + bracketIdx + 1;
+                replaceTo = pos;
+                search(lineSoFar.slice(bracketIdx + 1));
+                return;
+            }
+
+            const trimmed = lineSoFar.trim();
+            if (bracketIdx === -1 && trimmed && /^[a-zA-Z ]*$/.test(trimmed)) {
+                const leadingWs = lineSoFar.length - lineSoFar.trimStart().length;
+                replaceFrom = lineStart + leadingWs;
+                replaceTo = pos;
+                const q = trimmed.toLowerCase();
+                items = KEYWORDS.filter((k) => k.insert.toLowerCase().startsWith(q));
+                activeIndex = items.length ? 0 : -1;
+                render();
+                return;
+            }
+
+            close();
+        };
+
+        textarea.addEventListener("input", evaluate);
+        textarea.addEventListener("click", evaluate);
+        textarea.addEventListener("keyup", (e) => {
+            if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) evaluate();
+        });
+        textarea.addEventListener("keydown", (e) => {
+            if (!box.classList.contains("open") || items.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); render(); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); render(); }
+            else if ((e.key === "Enter" || e.key === "Tab") && activeIndex >= 0) { e.preventDefault(); accept(items[activeIndex]); }
+            else if (e.key === "Escape") { close(); }
+        });
+        textarea.addEventListener("blur", () => setTimeout(close, 150));
+    });
+
     // Поповеры переименования/редактирования (details.row-actions) и выпадающие
     // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.

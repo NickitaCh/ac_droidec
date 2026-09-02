@@ -3349,6 +3349,134 @@ def get_skill_display_info(skill_ids: list[str]) -> dict:
 
 
 # =====================================================================
+# ПРИОРИТЕТ ОМИКРОНОВ ДЛЯ ВГ (веб-конструктор /omicrons/priority) — см. план "Приоритеты
+# омикронов для ВГ" (~/.claude/plans/lively-noodling-moler.md). Не хранит имя юнита/омикрона,
+# только ссылку на skill_id из глобального каталога skill_tier_thresholds — имя резолвится на
+# чтении через unit_omicron_skills/skill_tier_thresholds/game_units (см. get_skill_display_info,
+# get_all_unit_omicron_skills выше). Требования — по образцу tb_platoon_filter_rules ниже.
+# =====================================================================
+def _ensure_guild_omicron_priority_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_omicron_priority (
+            guild_id INTEGER NOT NULL,
+            skill_id TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, skill_id)
+        )
+    """)
+
+
+def get_guild_omicron_priority(guild_id: int) -> list:
+    """[(skill_id, priority), ...] по возрастанию priority (0 — самый важный)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_omicron_priority_table(cursor)
+    cursor.execute(
+        "SELECT skill_id, priority FROM guild_omicron_priority WHERE guild_id = ? ORDER BY priority",
+        (guild_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def set_guild_omicron_priority(guild_id: int, ordered_skill_ids: list) -> None:
+    """Перезаписывает весь приоритетный список гильдии целиком (порядок в списке = приоритет) —
+    так же просто, как set_unit_omicron_skills/set_skill_tier_thresholds перезаписывают
+    справочники целиком, вместо построчного CRUD (список маленький, десятки записей)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_omicron_priority_table(cursor)
+    cursor.execute("DELETE FROM guild_omicron_priority WHERE guild_id = ?", (guild_id,))
+    if ordered_skill_ids:
+        rows = [(guild_id, skill_id, priority) for priority, skill_id in enumerate(ordered_skill_ids)]
+        cursor.executemany(
+            "INSERT INTO guild_omicron_priority (guild_id, skill_id, priority) VALUES (?, ?, ?)", rows,
+        )
+    conn.commit()
+    conn.close()
+
+
+def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple | None = ("ВГ", "ТБ"), limit: int = 20) -> list:
+    """Поиск омикронов для добавления в приоритетный список (/omicrons/api/search) — join
+    skill_tier_thresholds (omicron_tier IS NOT NULL) x unit_omicron_skills x game_units, минус
+    то, что уже в списке гильдии. modes=None снимает фильтр по игровому режиму (по умолчанию
+    только "ВГ"/"ТБ" — Диме не нужны PvE/арена, но ручной поиск не должен быть заблокирован,
+    если понадобится что-то ещё, см. план). Регистронезависимый Unicode-поиск в Python — та же
+    причина, что и в search_game_units (SQLite LOWER() не работает для кириллицы)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    _ensure_unit_omicron_skills_table(cursor)
+    cursor.execute("""
+        SELECT t.skill_id, t.name, t.omicron_mode, u.base_id, g.cached_name
+        FROM skill_tier_thresholds t
+        JOIN unit_omicron_skills u ON u.skill_id = t.skill_id
+        JOIN game_units g ON g.base_id = u.base_id
+        WHERE t.omicron_tier IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    cursor.execute("SELECT skill_id FROM guild_omicron_priority WHERE guild_id = ?", (guild_id,))
+    already = {r[0] for r in cursor.fetchall()}
+    conn.close()
+
+    q = query.strip().lower()
+    matches = []
+    for skill_id, skill_name, omicron_mode, base_id, unit_name in rows:
+        if skill_id in already:
+            continue
+        if modes and omicron_mode not in modes:
+            continue
+        haystack = f"{unit_name} {skill_name or ''}".lower()
+        if q and q not in haystack:
+            continue
+        matches.append({
+            "skill_id": skill_id,
+            "unit_name": unit_name,
+            "base_id": base_id,
+            "skill_name": skill_name or "",
+            "omicron_mode": omicron_mode or "",
+        })
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _ensure_guild_omicron_requirement_rules_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_omicron_requirement_rules (
+            guild_id INTEGER PRIMARY KEY,
+            rules_text TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def get_guild_omicron_requirement_rules(guild_id: int) -> str:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_omicron_requirement_rules_table(cursor)
+    cursor.execute("SELECT rules_text FROM guild_omicron_requirement_rules WHERE guild_id = ?", (guild_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+
+def set_guild_omicron_requirement_rules(guild_id: int, rules_text: str, updated_by: str = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_omicron_requirement_rules_table(cursor)
+    cursor.execute("""
+        INSERT INTO guild_omicron_requirement_rules (guild_id, rules_text, updated_by, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id) DO UPDATE SET rules_text = excluded.rules_text, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+    """, (guild_id, rules_text, updated_by))
+    conn.commit()
+    conn.close()
+
+
+# =====================================================================
 # АКТИВНОСТЬ ГИЛЬДИИ (скрапинг swgoh.gg/g/<hash>/activity/, cogs/gohgg_activity.py)
 # =====================================================================
 def _ensure_guild_activity_events_table(cursor):

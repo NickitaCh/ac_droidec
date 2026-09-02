@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Отчёт по омикронам — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/omicrons/priority">← Приоритет омикронов</a> · <a href="/omicrons/priority/rules">Требования</a></p>
+    <h1>Кому пора ставить омикроны</h1>
+    <p class="muted">
+        Игроки, у которых уже выполнены все требования (см. <a href="/omicrons/priority/rules">требования</a>)
+        для хотя бы одного омикрона из <a href="/omicrons/priority">списка приоритета</a>, но он ещё не поставлен.
+    </p>
+
+    {% if not has_priority %}
+        <p class="empty-state">Список приоритета омикронов пуст — <a href="/omicrons/priority">задайте порядок</a>, чтобы отчёт заработал.</p>
+    {% elif not rows %}
+        <p class="empty-state">Сейчас все омикроны из списка приоритета либо уже поставлены, либо требования ещё не выполнены ни у кого.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Игрок</th>
+                            <th class="num">Готово к постановке</th>
+                            <th>Топ по приоритету</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                <td><a href="{{ row.player_url }}">{{ row.name }}</a></td>
+                                <td class="num">{{ row.missing|length }}</td>
+                                <td>
+                                    {% for m in row.missing[:3] %}
+                                        <span class="badge badge-neutral">{{ m.unit_name }}{% if m.skill_name %} — {{ m.skill_name }}{% endif %}</span>
+                                    {% endfor %}
+                                    {% if row.missing|length > 3 %}
+                                        <span class="muted">и ещё {{ row.missing|length - 3 }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

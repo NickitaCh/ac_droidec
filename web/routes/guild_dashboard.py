@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 import database
+import guild_omicron_rules
 import stat_engine
 import tb_plan_reader
 import tb_platoon_autofill
@@ -20,7 +21,7 @@ import tb_platoon_data
 import tb_platoon_engine
 import tb_platoon_filters
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data
+from services import activity_diff, dashboard_data, omicron_priority
 from web.deps import require_guild_access
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -778,6 +779,114 @@ async def tb_platoons_filters_save(
         "described": tb_platoon_filters.describe_rules(parsed) if not errors else [],
         "errors": errors,
         "saved": not errors,
+    })
+
+
+# =====================================================================
+# Приоритет омикронов для ВГ — план "Приоритеты омикронов для ВГ"
+# (~/.claude/plans/lively-noodling-moler.md), для Димы (гильд-админ). Три страницы:
+# /omicrons/priority (перетаскиваемый список приоритета, SortableJS), /omicrons/priority/rules
+# (текстовые require-правила, по образцу /tb/platoons/filters выше) и /omicrons/report
+# (кто из игроков уже готов поставить какой омикрон, гильд-wide + по игроку).
+# =====================================================================
+@router.get("/omicrons/priority", response_class=HTMLResponse)
+async def omicrons_priority_page(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    return templates.TemplateResponse(request, "omicron_priority.html", {
+        "user": user,
+        "rows": omicron_priority.priority_list_display(guild_id),
+        "saved": False,
+    })
+
+
+@router.post("/omicrons/priority", response_class=HTMLResponse)
+async def omicrons_priority_save(
+    request: Request,
+    skill_ids: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    ordered = [s for s in skill_ids.split(",") if s.strip()]
+    database.set_guild_omicron_priority(guild_id, ordered)
+    return templates.TemplateResponse(request, "omicron_priority.html", {
+        "user": user,
+        "rows": omicron_priority.priority_list_display(guild_id),
+        "saved": True,
+    })
+
+
+@router.get("/omicrons/api/search", response_class=JSONResponse)
+async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depends(require_guild_access)):
+    """Поиск омикронов для добавления в приоритетный список — по умолчанию только "ВГ"/"ТБ"
+    (Диме не нужны PvE/арена), ?all=1 снимает фильтр по игровому режиму (см. план)."""
+    guild_id = user["guild_id"]
+    modes = None if all == "1" else ("ВГ", "ТБ")
+    return database.search_omicron_catalog_for_priority(q.strip(), guild_id, modes=modes)
+
+
+@router.get("/omicrons/priority/rules", response_class=HTMLResponse)
+async def omicrons_priority_rules_page(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    rules_text = database.get_guild_omicron_requirement_rules(guild_id)
+    parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
+    return templates.TemplateResponse(request, "omicron_priority_rules.html", {
+        "user": user,
+        "rules_text": rules_text,
+        "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
+        "errors": errors,
+        "saved": False,
+    })
+
+
+@router.post("/omicrons/priority/rules", response_class=HTMLResponse)
+async def omicrons_priority_rules_save(
+    request: Request,
+    rules_text: str = Form(""),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
+    if not errors:
+        database.set_guild_omicron_requirement_rules(guild_id, rules_text, updated_by=f"web:{user['discord_id']}")
+    return templates.TemplateResponse(request, "omicron_priority_rules.html", {
+        "user": user,
+        "rules_text": rules_text,
+        "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
+        "errors": errors,
+        "saved": not errors,
+    })
+
+
+@router.get("/omicrons/report", response_class=HTMLResponse)
+async def omicrons_report(request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    rows = omicron_priority.missing_omicrons_report(guild_id)
+    for row in rows:
+        row["player_url"] = f"/omicrons/report/{quote(row['name'])}"
+    return templates.TemplateResponse(request, "omicron_report.html", {
+        "user": user,
+        "rows": rows,
+        "has_priority": bool(database.get_guild_omicron_priority(guild_id)),
+    })
+
+
+@router.get("/omicrons/report/{name}", response_class=HTMLResponse)
+async def omicrons_report_player(name: str, request: Request, user: dict = Depends(require_guild_access)):
+    guild_id = user["guild_id"]
+    hit = next(
+        ((ally_code, ingame_name) for _discord_id, ally_code, ingame_name in database.get_all_user_mappings(guild_id)
+         if (ingame_name or "").strip().lower() == name.strip().lower()),
+        None,
+    )
+    if not hit:
+        raise HTTPException(status_code=404, detail=f"Игрок «{name}» не найден в гильдии")
+    ally_code, ingame_name = hit
+    missing = omicron_priority.missing_omicrons_for_player(ally_code, guild_id)
+    return templates.TemplateResponse(request, "omicron_report_player.html", {
+        "user": user,
+        "player_name": ingame_name,
+        "missing": missing,
+        "has_priority": bool(database.get_guild_omicron_priority(guild_id)),
     })
 
 
