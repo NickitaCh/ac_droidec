@@ -1,42 +1,127 @@
 {% extends "base.html" %}
 {% block title %}Приоритет омикронов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Приоритет омикронов для ВГ</h1>
     <p class="muted">
-        Перетащите омикроны так, чтобы самые важные для ВГ были сверху. Отчёт
-        (<a href="/omicrons/report">/omicrons/report</a>) показывает игрокам омикроны из этого
-        списка, которые они уже готовы поставить, в этом же порядке. Требования к ростеру
-        игрока (например, «омик на Итано только если и Итано, и Микс на релике 7+») задаются
-        отдельно на <a href="/omicrons/priority/rules">странице правил</a>.
+        Слева — порядок важности омикронов (перетащите, самые важные для ВГ — сверху),
+        справа — требования к ростеру игрока, чтобы омикрон вообще предлагался (например,
+        «омик на Итано только если и Итано, и Микс на релике 7+»). Отчёт
+        (<a href="/omicrons/report">/omicrons/report</a>) показывает игрокам омикроны из
+        списка слева, требования которых уже выполнены, в этом же порядке.
     </p>
 
-    {% if saved %}
-        <p class="badge badge-ok">Сохранено</p>
-    {% endif %}
+    <div class="omicron-priority-columns">
+        <section class="omicron-priority-col">
+            <h2>Порядок важности</h2>
 
-    <div class="unit-search omicron-priority-search">
-        <input type="text" id="omicron-search-input" class="unit-search-input" placeholder="Начните вводить имя юнита или способности…" autocomplete="off">
-        <div class="unit-search-results" id="omicron-search-results"></div>
+            {% if saved_priority %}
+                <p class="badge badge-ok">Сохранено</p>
+            {% endif %}
+
+            <form method="post" action="/omicrons/priority" id="omicron-priority-form">
+                <div class="omicron-priority-add">
+                    <select id="omicron-add-select">
+                        <option value="">— выбрать омикрон —</option>
+                        {% for opt in catalog_options %}
+                            <option value="{{ opt.skill_id }}" data-unit="{{ opt.unit_name }}" data-skill="{{ opt.skill_name }}" data-mode="{{ opt.omicron_mode }}">{{ opt.unit_name }}{% if opt.skill_name %} — {{ opt.skill_name }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" id="omicron-add-btn">Добавить</button>
+                </div>
+
+                {% if not rows %}
+                    <p class="empty-state" id="omicron-priority-empty">Список пуст — выберите омикрон выше и нажмите «Добавить».</p>
+                {% endif %}
+
+                <ul class="omicron-priority-list" id="omicron-priority-list">
+                    {% for row in rows %}
+                        <li class="omicron-priority-row" data-skill-id="{{ row.skill_id }}" data-unit-name="{{ row.unit_name }}" data-skill-name="{{ row.skill_name }}" data-omicron-mode="{{ row.omicron_mode }}">
+                            <span class="drag-handle">⠿</span>
+                            <span class="omicron-priority-name">{{ row.unit_name }}{% if row.skill_name %} — {{ row.skill_name }}{% endif %}</span>
+                            {% if row.omicron_mode %}<span class="badge badge-neutral">{{ row.omicron_mode }}</span>{% endif %}
+                            <button type="button" class="omicron-priority-remove" title="Убрать из списка">✕</button>
+                        </li>
+                    {% endfor %}
+                </ul>
+                <input type="hidden" name="skill_ids" id="omicron-priority-hidden">
+                <p><button type="submit">Сохранить порядок</button></p>
+            </form>
+        </section>
+
+        <section class="omicron-priority-col">
+            <h2>Требования к ростеру</h2>
+
+            <details class="omicron-rules-syntax-details">
+                <summary>Синтаксис правил</summary>
+                <ul class="muted platoon-filters-syntax">
+                    <li>
+                        <code>omicron [Юнит] require unit [Юнит]</code> — омикрон предлагается
+                        только игрокам, у которых открыт указанный юнит.
+                        <div class="pf-example">Пример: <code>omicron [Ген. Синдулла] require unit [Асока Тано]</code>
+                            — омикрон на Ген. Синдуллу попадёт в отчёт только тем, у кого есть Асока Тано.</div>
+                    </li>
+                    <li>
+                        <code>omicron [Юнит] require unit [Юнит] relic N</code> — то же самое,
+                        но юнит должен быть ещё и на релике не ниже N.
+                        <div class="pf-example">Пример: <code>omicron [Итано] require unit [Итано] relic 7</code>
+                            — омикрон на Итано предлагается только тем, у кого сам Итано на релике 7+.</div>
+                    </li>
+                    <li>
+                        Несколько строк с одинаковым <code>omicron [...]</code> — все
+                        требования должны выполниться разом.
+                        <div class="pf-example">Пример:
+                            <code>omicron [Итано] require unit [Итано] relic 7</code> +
+                            <code>omicron [Итано] require unit [Микс] relic 7</code> — омикрон
+                            на Итано предлагается, только если и Итано, и Микс на релике 7+.</div>
+                    </li>
+                    <li>
+                        Если у юнита несколько омикрон-способностей, уточните какую именно
+                        способность вы имеете в виду по её названию.
+                        <div class="pf-example">Пример: <code>omicron [Юнит: Название способности] require unit [...]</code></div>
+                    </li>
+                </ul>
+                <p class="muted">
+                    Одна строка — одно правило. Пустые строки и строки с «#» — комментарии.
+                    Омикрон без единой строки правил попадает в отчёт сразу, как только его не
+                    хватает игроку — просто по факту присутствия в списке приоритета слева.
+                    Начните печатать ключевое слово или имя юнита в квадратных скобках —
+                    появятся подсказки.
+                </p>
+            </details>
+
+            {% if saved_rules %}
+                <p class="badge badge-ok">Сохранено</p>
+            {% endif %}
+
+            {% if errors %}
+                <div class="error">
+                    <p>Не сохранено — есть ошибки:</p>
+                    <ul>
+                        {% for line_num, message in errors %}
+                            <li>строка {{ line_num }}: {{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            <form method="post" action="/omicrons/priority/rules">
+                <textarea name="rules_text" rows="22" class="platoon-filters-textarea omicron-rules-textarea" spellcheck="false">{{ rules_text }}</textarea>
+                <p><button type="submit">Сохранить</button></p>
+            </form>
+
+            {% if described %}
+                <div class="panel">
+                    <div class="panel-title"><span>Применяются сейчас</span></div>
+                    <ul>
+                        {% for line in described %}
+                            <li>{{ line }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+        </section>
     </div>
-
-    {% if not rows %}
-        <p class="empty-state" id="omicron-priority-empty">Список пуст — добавьте омикроны через поиск выше.</p>
-    {% endif %}
-
-    <form method="post" action="/omicrons/priority" id="omicron-priority-form">
-        <ul class="omicron-priority-list" id="omicron-priority-list">
-            {% for row in rows %}
-                <li class="omicron-priority-row" data-skill-id="{{ row.skill_id }}">
-                    <span class="drag-handle">⠿</span>
-                    <span class="omicron-priority-name">{{ row.unit_name }}{% if row.skill_name %} — {{ row.skill_name }}{% endif %}</span>
-                    {% if row.omicron_mode %}<span class="badge badge-neutral">{{ row.omicron_mode }}</span>{% endif %}
-                    <button type="button" class="omicron-priority-remove" title="Убрать из списка">✕</button>
-                </li>
-            {% endfor %}
-        </ul>
-        <input type="hidden" name="skill_ids" id="omicron-priority-hidden">
-        <p><button type="submit">Сохранить порядок</button></p>
-    </form>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
     <script>
@@ -44,8 +129,8 @@
         const list = document.getElementById("omicron-priority-list");
         const hidden = document.getElementById("omicron-priority-hidden");
         const form = document.getElementById("omicron-priority-form");
-        const searchInput = document.getElementById("omicron-search-input");
-        const searchResults = document.getElementById("omicron-search-results");
+        const select = document.getElementById("omicron-add-select");
+        const addBtn = document.getElementById("omicron-add-btn");
         const empty = document.getElementById("omicron-priority-empty");
 
         const syncHidden = () => {
@@ -55,6 +140,17 @@
 
         const bindRemove = (li) => {
             li.querySelector(".omicron-priority-remove").addEventListener("click", () => {
+                // Возвращаем омикрон обратно в выпадающий список, чтобы его можно было
+                // добавить снова без перезагрузки страницы.
+                const option = document.createElement("option");
+                option.value = li.dataset.skillId;
+                option.dataset.unit = li.dataset.unitName;
+                option.dataset.skill = li.dataset.skillName;
+                option.dataset.mode = li.dataset.omicronMode;
+                option.textContent = li.dataset.skillName
+                    ? `${li.dataset.unitName} — ${li.dataset.skillName}`
+                    : li.dataset.unitName;
+                select.appendChild(option);
                 li.remove();
                 syncHidden();
             });
@@ -64,11 +160,13 @@
 
         new Sortable(list, { handle: ".drag-handle", animation: 150, onEnd: syncHidden });
 
-        const addRow = (item) => {
-            if (list.querySelector(`[data-skill-id="${CSS.escape(item.skill_id)}"]`)) return;
+        const addRow = (skillId, unitName, skillName, omicronMode) => {
             const li = document.createElement("li");
             li.className = "omicron-priority-row";
-            li.dataset.skillId = item.skill_id;
+            li.dataset.skillId = skillId;
+            li.dataset.unitName = unitName;
+            li.dataset.skillName = skillName || "";
+            li.dataset.omicronMode = omicronMode || "";
 
             const handle = document.createElement("span");
             handle.className = "drag-handle";
@@ -76,14 +174,14 @@
 
             const name = document.createElement("span");
             name.className = "omicron-priority-name";
-            name.textContent = item.skill_name ? `${item.unit_name} — ${item.skill_name}` : item.unit_name;
+            name.textContent = skillName ? `${unitName} — ${skillName}` : unitName;
 
             li.appendChild(handle);
             li.appendChild(name);
-            if (item.omicron_mode) {
+            if (omicronMode) {
                 const badge = document.createElement("span");
                 badge.className = "badge badge-neutral";
-                badge.textContent = item.omicron_mode;
+                badge.textContent = omicronMode;
                 li.appendChild(badge);
             }
             const removeBtn = document.createElement("button");
@@ -98,41 +196,13 @@
             syncHidden();
         };
 
-        let debounceTimer;
-        searchInput.addEventListener("input", () => {
-            const q = searchInput.value.trim();
-            clearTimeout(debounceTimer);
-            if (q.length < 2) { searchResults.classList.remove("open"); searchResults.innerHTML = ""; return; }
-            debounceTimer = setTimeout(async () => {
-                let items = [];
-                try {
-                    const resp = await fetch(`/omicrons/api/search?q=${encodeURIComponent(q)}`);
-                    items = resp.ok ? await resp.json() : [];
-                } catch {
-                    items = [];
-                }
-                searchResults.innerHTML = "";
-                if (items.length === 0) {
-                    searchResults.innerHTML = '<div class="unit-search-empty">Ничего не найдено</div>';
-                } else {
-                    items.forEach((item) => {
-                        const el = document.createElement("div");
-                        el.className = "unit-search-result";
-                        el.textContent = item.skill_name ? `${item.unit_name} — ${item.skill_name}` : item.unit_name;
-                        el.addEventListener("mousedown", (e) => {
-                            e.preventDefault();
-                            addRow(item);
-                            searchInput.value = "";
-                            searchResults.classList.remove("open");
-                            searchResults.innerHTML = "";
-                        });
-                        searchResults.appendChild(el);
-                    });
-                }
-                searchResults.classList.add("open");
-            }, 200);
+        addBtn.addEventListener("click", () => {
+            const option = select.options[select.selectedIndex];
+            if (!option || !option.value) return;
+            addRow(option.value, option.dataset.unit, option.dataset.skill, option.dataset.mode);
+            option.remove();
+            select.value = "";
         });
-        searchInput.addEventListener("blur", () => setTimeout(() => searchResults.classList.remove("open"), 150));
 
         form.addEventListener("submit", syncHidden);
         syncHidden();

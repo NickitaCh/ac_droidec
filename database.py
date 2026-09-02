@@ -3398,12 +3398,15 @@ def set_guild_omicron_priority(guild_id: int, ordered_skill_ids: list) -> None:
 
 
 def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple | None = ("ВГ", "ТБ"), limit: int = 20) -> list:
-    """Поиск омикронов для добавления в приоритетный список (/omicrons/api/search) — join
-    skill_tier_thresholds (omicron_tier IS NOT NULL) x unit_omicron_skills x game_units, минус
-    то, что уже в списке гильдии. modes=None снимает фильтр по игровому режиму (по умолчанию
-    только "ВГ"/"ТБ" — Диме не нужны PvE/арена, но ручной поиск не должен быть заблокирован,
-    если понадобится что-то ещё, см. план). Регистронезависимый Unicode-поиск в Python — та же
-    причина, что и в search_game_units (SQLite LOWER() не работает для кириллицы)."""
+    """Поиск омикронов для добавления в приоритетный список (/omicrons/api/search, и весь
+    каталог разом — query="", limit=большой — для выпадающего списка на /omicrons/priority)
+    — join skill_tier_thresholds (omicron_tier IS NOT NULL) x unit_omicron_skills x
+    game_units, минус то, что уже в списке гильдии. modes=None снимает фильтр по игровому
+    режиму (по умолчанию только "ВГ"/"ТБ" — Диме не нужны PvE/арена, но ручной поиск не
+    должен быть заблокирован, если понадобится что-то ещё, см. план). Регистронезависимый
+    Unicode-поиск в Python — та же причина, что и в search_game_units (SQLite LOWER() не
+    работает для кириллицы). Отсортировано по имени юнита/способности — предсказуемый
+    порядок в выпадающем списке."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_skill_tier_thresholds_table(cursor)
@@ -3414,6 +3417,7 @@ def search_omicron_catalog_for_priority(query: str, guild_id: int, modes: tuple 
         JOIN unit_omicron_skills u ON u.skill_id = t.skill_id
         JOIN game_units g ON g.base_id = u.base_id
         WHERE t.omicron_tier IS NOT NULL
+        ORDER BY g.cached_name, t.name
     """)
     rows = cursor.fetchall()
     cursor.execute("SELECT skill_id FROM guild_omicron_priority WHERE guild_id = ?", (guild_id,))

@@ -784,18 +784,38 @@ async def tb_platoons_filters_save(
 
 # =====================================================================
 # Приоритет омикронов для ВГ — план "Приоритеты омикронов для ВГ"
-# (~/.claude/plans/lively-noodling-moler.md), для Димы (гильд-админ). Три страницы:
-# /omicrons/priority (перетаскиваемый список приоритета, SortableJS), /omicrons/priority/rules
-# (текстовые require-правила, по образцу /tb/platoons/filters выше) и /omicrons/report
-# (кто из игроков уже готов поставить какой омикрон, гильд-wide + по игроку).
+# (~/.claude/plans/lively-noodling-moler.md), для Димы (гильд-админ). Изначально было три
+# отдельные страницы; по прямому запросу пользователя 2026-09-02 приоритет (drag-list) и
+# правила (textarea) сведены в одну страницу /omicrons/priority, двумя колонками —
+# /omicrons/priority/rules теперь только редиректит туда же (не удалён совсем, чтобы не
+# ломать старые закладки/ссылки). /omicrons/report (гильд-wide + по игроку) — отдельно.
 # =====================================================================
+def _omicron_priority_context(guild_id: int, rules_text: str = None) -> dict:
+    """Общий контекст для GET/POST /omicrons/priority — обе колонки строятся всегда разом,
+    т.к. они теперь на одной странице (сохранение одной колонки должно тут же показать
+    актуальное состояние обеих)."""
+    if rules_text is None:
+        rules_text = database.get_guild_omicron_requirement_rules(guild_id)
+    parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
+    return {
+        "rows": omicron_priority.priority_list_display(guild_id),
+        # limit с большим запасом — это весь ВГ/ТБ-каталог для выпадающего списка, не
+        # постраничный поиск (см. database.search_omicron_catalog_for_priority).
+        "catalog_options": database.search_omicron_catalog_for_priority("", guild_id, limit=1000),
+        "rules_text": rules_text,
+        "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
+        "errors": errors,
+    }
+
+
 @router.get("/omicrons/priority", response_class=HTMLResponse)
 async def omicrons_priority_page(request: Request, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]
     return templates.TemplateResponse(request, "omicron_priority.html", {
         "user": user,
-        "rows": omicron_priority.priority_list_display(guild_id),
-        "saved": False,
+        **_omicron_priority_context(guild_id),
+        "saved_priority": False,
+        "saved_rules": False,
     })
 
 
@@ -810,32 +830,30 @@ async def omicrons_priority_save(
     database.set_guild_omicron_priority(guild_id, ordered)
     return templates.TemplateResponse(request, "omicron_priority.html", {
         "user": user,
-        "rows": omicron_priority.priority_list_display(guild_id),
-        "saved": True,
+        **_omicron_priority_context(guild_id),
+        "saved_priority": True,
+        "saved_rules": False,
     })
 
 
 @router.get("/omicrons/api/search", response_class=JSONResponse)
 async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depends(require_guild_access)):
     """Поиск омикронов для добавления в приоритетный список — по умолчанию только "ВГ"/"ТБ"
-    (Диме не нужны PvE/арена), ?all=1 снимает фильтр по игровому режиму (см. план)."""
+    (Диме не нужны PvE/арена), ?all=1 снимает фильтр по игровому режиму (см. план). Сама
+    страница /omicrons/priority теперь рендерит весь каталог сразу выпадающим списком (см.
+    _omicron_priority_context), этот эндпоинт остаётся для автодополнения юнитов в правилах
+    (общий с /tb/platoons/api/units по духу, но по омикрон-каталогу) — оставлен на случай,
+    если понадобится текстовый поиск по каталогу где-то ещё."""
     guild_id = user["guild_id"]
     modes = None if all == "1" else ("ВГ", "ТБ")
     return database.search_omicron_catalog_for_priority(q.strip(), guild_id, modes=modes)
 
 
-@router.get("/omicrons/priority/rules", response_class=HTMLResponse)
-async def omicrons_priority_rules_page(request: Request, user: dict = Depends(require_guild_access)):
-    guild_id = user["guild_id"]
-    rules_text = database.get_guild_omicron_requirement_rules(guild_id)
-    parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
-    return templates.TemplateResponse(request, "omicron_priority_rules.html", {
-        "user": user,
-        "rules_text": rules_text,
-        "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
-        "errors": errors,
-        "saved": False,
-    })
+@router.get("/omicrons/priority/rules", response_class=RedirectResponse)
+async def omicrons_priority_rules_page_redirect():
+    """Правила теперь показаны прямо на /omicrons/priority (правая колонка) — редирект
+    сохранён ради старых закладок/ссылок на прежний отдельный URL."""
+    return RedirectResponse("/omicrons/priority", status_code=308)
 
 
 @router.post("/omicrons/priority/rules", response_class=HTMLResponse)
@@ -848,12 +866,11 @@ async def omicrons_priority_rules_save(
     parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
     if not errors:
         database.set_guild_omicron_requirement_rules(guild_id, rules_text, updated_by=f"web:{user['discord_id']}")
-    return templates.TemplateResponse(request, "omicron_priority_rules.html", {
+    return templates.TemplateResponse(request, "omicron_priority.html", {
         "user": user,
-        "rules_text": rules_text,
-        "described": guild_omicron_rules.describe_rules(parsed) if not errors else [],
-        "errors": errors,
-        "saved": not errors,
+        **_omicron_priority_context(guild_id, rules_text=rules_text),
+        "saved_priority": False,
+        "saved_rules": not errors,
     })
 
 

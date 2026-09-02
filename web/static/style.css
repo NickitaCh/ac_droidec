@@ -642,10 +642,32 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .pf-example { margin-top: 0.3em; margin-left: 0.2em; font-size: 0.9em; opacity: 0.8; }
 .platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
 .platoon-hold-toggle { font-size: 0.85em; }
-/* Перетаскиваемый список приоритета омикронов на /omicrons/priority (SortableJS) — план
-   "Приоритеты омикронов для ВГ". */
-.omicron-priority-search { max-width: 30em; margin-bottom: 1em; }
-.omicron-priority-list { list-style: none; margin: 0 0 1em; padding: 0; max-width: 40em; }
+/* /omicrons/priority — приоритет (drag-list, SortableJS) и требования (textarea) в двух
+   колонках рядом (по прямому запросу пользователя 2026-09-02: раньше были отдельными
+   страницами). 60em — тот же брейкпоинт, что у .dashboard-grid ниже, где раскладка уже
+   считается "достаточно узкой" для одной колонки. */
+.omicron-priority-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2.5em;
+    align-items: start;
+    margin-top: 1.5em;
+}
+.omicron-priority-col h2 { margin-top: 0; font-size: 1.15em; }
+@media (max-width: 60em) {
+    .omicron-priority-columns { grid-template-columns: 1fr; gap: 2em; }
+}
+.omicron-priority-add { display: flex; gap: 0.6em; margin-bottom: 1em; }
+.omicron-priority-add select {
+    flex: 1;
+    min-width: 0;
+    padding: 0.5em 0.7em;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+}
+.omicron-priority-list { list-style: none; margin: 0 0 1em; padding: 0; }
 .omicron-priority-row {
     display: flex;
     align-items: center;
@@ -668,6 +690,11 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
     padding: 0.1em 0.4em;
 }
 .omicron-priority-remove:hover { color: var(--status-critical); }
+/* Синтаксис правил свёрнут по умолчанию (<details>), чтобы не отъедать высоту у большого
+   textarea рядом с drag-list слева — по тому же 2026-09-02 запросу "увеличить поле ввода". */
+.omicron-rules-syntax-details { margin-bottom: 1em; }
+.omicron-rules-syntax-details summary { cursor: pointer; color: var(--accent); margin-bottom: 0.6em; }
+.omicron-rules-textarea { max-width: none; min-height: 26em; }
 /* Планета — сворачиваемый <details> (по прямому запросу пользователя 2026-08-31 "разделить
    блоки планет + добавить сворачивание"), не просто <div> — открыт по умолчанию, стрелка в
    summary как у .platoon-slot ниже, но крупнее. */
