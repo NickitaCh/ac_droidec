@@ -132,25 +132,23 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
-    @settings_group.sub_command(name="антиспам_вкл", description="Включить антиспам-детектор (кросс-постинг/компрометация аккаунта)")
-    async def antispam_enable(self, inter: disnake.ApplicationCommandInteraction):
+    @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (кросс-постинг/компрометация аккаунта)")
+    async def set_antispam_mode(
+        self, inter: disnake.ApplicationCommandInteraction,
+        включить: bool = commands.Param(description="True — включить детектор, False — выключить"),
+    ):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        database.update_guild_config(guild_id, antispam_enabled=1)
-        await inter.response.send_message(
-            "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`/настройки антиспам`) — без него сработавший "
-            "детектор всё равно удалит сообщения и выдаст тайм-аут, но алерт офицерам отправить будет некуда.",
-            ephemeral=True,
-        )
-
-    @settings_group.sub_command(name="антиспам_выкл", description="Выключить антиспам-детектор")
-    async def antispam_disable(self, inter: disnake.ApplicationCommandInteraction):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        database.update_guild_config(guild_id, antispam_enabled=0)
-        await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
+        database.update_guild_config(guild_id, antispam_enabled=int(включить))
+        if включить:
+            await inter.response.send_message(
+                "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`/настройки антиспам`) — без него сработавший "
+                "детектор всё равно удалит сообщения и выдаст тайм-аут, но алерт офицерам отправить будет некуда.",
+                ephemeral=True,
+            )
+        else:
+            await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
 
     @settings_group.sub_command(name="антиспам", description="Канал/роль/текст/таймаут алерта антиспама — что не укажете, останется как было")
     async def set_antispam(
