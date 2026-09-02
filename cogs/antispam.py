@@ -188,7 +188,16 @@ class AntiSpamCog(commands.Cog):
             role_id=alert_role_id,
             reason=preview,
         )
-        allowed_mentions = disnake.AllowedMentions(everyone=False, roles=[int(alert_role_id)] if alert_role_id else False, users=[member.id])
+        # AllowedMentions.users/roles требуют объекты с атрибутом .id (Snowflake), а не голые
+        # int — to_dict() делает [x.id for x in ...], так что raw ID тут падает AttributeError
+        # (найдено вживую 2026-09-02: именно это ловило все 5 первых срабатываний детектора —
+        # алерт вообще не долетал, .send() падал до формирования запроса). disnake.Object
+        # оборачивает голый ID в Snowflake-совместимый объект для roles.
+        allowed_mentions = disnake.AllowedMentions(
+            everyone=False,
+            roles=[disnake.Object(id=int(alert_role_id))] if alert_role_id else False,
+            users=[member],
+        )
 
         channel_id = guild_cfg.get("antispam_alert_channel_id")
         alert_channel = self.bot.get_channel(int(channel_id)) if channel_id else None
