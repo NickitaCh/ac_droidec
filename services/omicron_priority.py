@@ -58,8 +58,22 @@ def priority_list_display(guild_id: int) -> list:
     return rows
 
 
-def _requirements_met(reqs: list, units: dict) -> bool:
+def _skill_tier(unit: dict, skill_id: str):
+    return next((s.get("tier") for s in (unit.get("skill") or []) if s.get("id") == skill_id), None)
+
+
+def _requirements_met(reqs: list, units: dict, catalog: dict) -> bool:
     for r in reqs:
+        if r["type"] == "omicron":
+            req_base_id = catalog["skill_owner"].get(r["skill_id"])
+            unit = units.get(req_base_id) if req_base_id else None
+            if unit is None:
+                return False
+            _zeta_tier, req_omicron_tier = catalog["thresholds"].get(r["skill_id"], (None, None))
+            current_tier = _skill_tier(unit, r["skill_id"])
+            if req_omicron_tier is None or current_tier is None or current_tier < req_omicron_tier:
+                return False
+            continue
         unit = units.get(r["base_id"])
         if unit is None:
             return False
@@ -81,12 +95,12 @@ def _missing_for_units(units: dict, catalog: dict, parsed_rules: guild_omicron_r
         _zeta_tier, omicron_tier = catalog["thresholds"].get(skill_id, (None, None))
         if omicron_tier is None:
             continue
-        current_tier = next((s.get("tier") for s in (unit.get("skill") or []) if s.get("id") == skill_id), None)
+        current_tier = _skill_tier(unit, skill_id)
         if current_tier is not None and current_tier >= omicron_tier:
             continue  # омикрон уже поставлен
 
         reqs = parsed_rules.requirements_for(skill_id)
-        if reqs and not _requirements_met(reqs, units):
+        if reqs and not _requirements_met(reqs, units, catalog):
             continue
 
         name, _ability_id, _ability_type, omicron_mode = catalog["display"].get(skill_id, ("", "", "", ""))

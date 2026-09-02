@@ -8,14 +8,21 @@
 #   omicron [Юнит] require unit [Юнит] relic N
 #   omicron [Юнит: Название способности] require unit [Юнит] relic N   — только если у
 #       юнита несколько омикрон-способностей (редкий кейс реворка), иначе достаточно имени.
+#   omicron [Юнит] require omicron [Юнит]                              — парный омикрон:
+#       предлагается только если у игрока УЖЕ ПОСТАВЛЕН другой указанный омикрон (не просто
+#       юнит открыт/на релике, а именно skill.tier >= omicron_tier у него). Добавлено
+#       2026-09-02 по прямому запросу пользователя: у Мастера-джедая Мейс Винду омикроны на
+#       лидерке и уникалке работают только в паре — если выдан один, надо выдать и другой.
+#       relic N с "require omicron" не сочетается (омикрон уже подразумевает релик 7+).
 #
 # "omicron [X]" определяет, к какому омикрону относится правило — юнит резолвится в base_id
 # (database.resolve_unit_display_names, тот же резолвер, что и в tb_platoon_filters), а
 # base_id — в skill_id через database.get_all_unit_omicron_skills. Если у юнита ровно один
-# омикрон-скилл — однозначно, без уточнения. Несколько строк с одинаковым "omicron [X]"
-# работают по AND — все require должны выполниться, чтобы омикрон попал в рекомендованный
-# список (см. services/omicron_priority.py). Омикрон без единой строки правил в тексте —
-# требований нет, попадания в приоритетный список достаточно.
+# омикрон-скилл — однозначно, без уточнения. "require omicron [Y]" резолвится тем же путём
+# (Y тоже может быть "Юнит: Способность"), просто цель — другой skill_id, а не base_id.
+# Несколько строк с одинаковым "omicron [X]" работают по AND — все require должны выполниться,
+# чтобы омикрон попал в рекомендованный список (см. services/omicron_priority.py). Омикрон без
+# единой строки правил в тексте — требований нет, попадания в приоритетный список достаточно.
 #
 # Зета (суффикс "zeta" у require) — на будущее, в v1 не реализуем (пользователь подтвердил,
 # что это не k v1) — грамматика (regex ниже) НЕ ловит его сейчас, добавится позже без слома
@@ -26,7 +33,7 @@ from dataclasses import dataclass, field
 import database
 
 _RULE_RE = re.compile(
-    r"^omicron\s+\[([^\]]+)\]\s+require\s+unit\s+\[([^\]]+)\](?:\s+relic\s+(\d+))?$",
+    r"^omicron\s+\[([^\]]+)\]\s+require\s+(unit|omicron)\s+\[([^\]]+)\](?:\s+relic\s+(\d+))?$",
     re.IGNORECASE,
 )
 
@@ -96,18 +103,21 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
         if not m:
             errors.append((line_num, f"не распознана строка правила: {stripped!r}"))
             continue
-        omicron_raw, unit_raw, relic_raw = m.group(1).strip(), m.group(2).strip(), m.group(3)
+        omicron_raw, kind, target_raw, relic_raw = m.group(1).strip(), m.group(2).lower(), m.group(3).strip(), m.group(4)
+        if kind == "omicron" and relic_raw is not None:
+            errors.append((line_num, "relic N не применим к 'require omicron' — омикрон уже подразумевает релик 7+"))
+            continue
         all_unit_names.add(omicron_raw.split(":", 1)[0].strip())
-        all_unit_names.add(unit_raw)
+        all_unit_names.add(target_raw.split(":", 1)[0].strip())
         relic = int(relic_raw) if relic_raw is not None else None
-        parsed_lines.append((line_num, omicron_raw, unit_raw, relic))
+        parsed_lines.append((line_num, omicron_raw, kind, target_raw, relic))
 
     # Один batch-запрос на все имена юнитов сразу, а не один на строку — тот же приём, что и
     # в tb_platoon_filters.parse_rules.
     name_to_base_id = database.resolve_unit_display_names(list(all_unit_names)) if all_unit_names else {}
 
     result = ParsedRules()
-    for line_num, omicron_raw, unit_raw, relic in parsed_lines:
+    for line_num, omicron_raw, kind, target_raw, relic in parsed_lines:
         skill_id, omicron_unit_name, error = _resolve_omicron_target(
             omicron_raw, name_to_base_id, base_id_to_skills, skill_names,
         )
@@ -115,20 +125,41 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             errors.append((line_num, error))
             continue
 
-        req_base_id = name_to_base_id.get(unit_raw)
-        if not req_base_id:
-            errors.append((line_num, f"юнит не найден: {unit_raw!r}"))
-            continue
-
-        result.unit_display_names[req_base_id] = unit_raw
         skill_name = skill_names.get(skill_id, "")
         result.omicron_display_names[skill_id] = f"{omicron_unit_name} — {skill_name}" if skill_name else omicron_unit_name
 
-        result.requirements.setdefault(skill_id, []).append({
-            "base_id": req_base_id,
-            "unit_name": unit_raw,
-            "relic": relic,
-        })
+        if kind == "unit":
+            req_base_id = name_to_base_id.get(target_raw)
+            if not req_base_id:
+                errors.append((line_num, f"юнит не найден: {target_raw!r}"))
+                continue
+            result.unit_display_names[req_base_id] = target_raw
+            result.requirements.setdefault(skill_id, []).append({
+                "type": "unit",
+                "base_id": req_base_id,
+                "unit_name": target_raw,
+                "relic": relic,
+            })
+        else:  # kind == "omicron" — парный омикрон, см. комментарий в шапке файла
+            req_skill_id, req_unit_name, req_error = _resolve_omicron_target(
+                target_raw, name_to_base_id, base_id_to_skills, skill_names,
+            )
+            if req_error:
+                errors.append((line_num, req_error))
+                continue
+            if req_skill_id == skill_id:
+                errors.append((line_num, "омикрон не может требовать сам себя"))
+                continue
+            req_skill_name = skill_names.get(req_skill_id, "")
+            result.omicron_display_names[req_skill_id] = (
+                f"{req_unit_name} — {req_skill_name}" if req_skill_name else req_unit_name
+            )
+            result.requirements.setdefault(skill_id, []).append({
+                "type": "omicron",
+                "skill_id": req_skill_id,
+                "unit_name": req_unit_name,
+                "skill_name": req_skill_name,
+            })
 
     return result, errors
 
@@ -141,7 +172,10 @@ def describe_rules(parsed: ParsedRules) -> list:
         omicron_name = parsed.omicron_display_names.get(skill_id, skill_id)
         parts = []
         for r in reqs:
-            if r["relic"] is not None:
+            if r["type"] == "omicron":
+                label = f"{r['unit_name']} — {r['skill_name']}" if r["skill_name"] else r["unit_name"]
+                parts.append(f"омикрон «{label}» уже поставлен")
+            elif r["relic"] is not None:
                 parts.append(f"{r['unit_name']} (релик ≥{r['relic']})")
             else:
                 parts.append(r["unit_name"])

@@ -463,6 +463,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const KEYWORDS = [
             { insert: "omicron [", label: "omicron […] — к какому омикрону относится правило" },
             { insert: "require unit [", label: "require unit […] — юнит должен быть открыт (+ relic N)" },
+            { insert: "require omicron [", label: "require omicron […] — другой омикрон должен уже быть поставлен (парные омикроны)" },
         ];
 
         const box = document.createElement("div");
@@ -504,14 +505,14 @@ document.addEventListener("DOMContentLoaded", () => {
             evaluate();
         };
 
-        const search = (q) => {
+        const search = (url, q, transform, sep = "?") => {
             clearTimeout(debounceTimer);
             if (q.trim().length < 2) { close(); return; }
             debounceTimer = setTimeout(async () => {
                 try {
-                    const resp = await fetch(`/tb/platoons/api/units?q=${encodeURIComponent(q.trim())}`);
+                    const resp = await fetch(`${url}${sep}q=${encodeURIComponent(q.trim())}`);
                     const data = resp.ok ? await resp.json() : [];
-                    items = data.map((u) => ({ name: u.name, label: u.name }));
+                    items = data.map(transform);
                 } catch {
                     items = [];
                 }
@@ -520,6 +521,10 @@ document.addEventListener("DOMContentLoaded", () => {
             }, 200);
         };
 
+        // "omicron [" и "require omicron [" допускают "Юнит: Название способности" — после
+        // ":" внутри скобок ищем не юнитов, а омикрон-способности УЖЕ введённого юнита
+        // (/omicrons/api/abilities, см. web/routes/guild_dashboard.py), нужно только когда у
+        // юнита несколько омикрон-способностей. "require unit [" — всегда просто юнит.
         const evaluate = () => {
             if (textarea.selectionStart !== textarea.selectionEnd) { close(); return; }
             const pos = textarea.selectionStart;
@@ -530,9 +535,31 @@ document.addEventListener("DOMContentLoaded", () => {
             const bracketIdx = lineSoFar.lastIndexOf("[");
             const closedAfter = bracketIdx >= 0 && lineSoFar.indexOf("]", bracketIdx) !== -1;
             if (bracketIdx >= 0 && !closedAfter) {
+                const before = lineSoFar.slice(0, bracketIdx);
+                const partial = lineSoFar.slice(bracketIdx + 1);
+                const isOmicronTarget = /(^|require\s+)omicron\s*$/i.test(before.trim());
+                const colonIdx = isOmicronTarget ? partial.indexOf(":") : -1;
+                if (colonIdx !== -1) {
+                    const unitPart = partial.slice(0, colonIdx).trim();
+                    const abilityPart = partial.slice(colonIdx + 1);
+                    const leadingWs = abilityPart.length - abilityPart.trimStart().length;
+                    replaceFrom = lineStart + bracketIdx + 1 + colonIdx + 1 + leadingWs;
+                    replaceTo = pos;
+                    if (unitPart) {
+                        search(
+                            `/omicrons/api/abilities?unit=${encodeURIComponent(unitPart)}`,
+                            abilityPart,
+                            (a) => ({ name: a.name, label: a.name }),
+                            "&",
+                        );
+                    } else {
+                        close();
+                    }
+                    return;
+                }
                 replaceFrom = lineStart + bracketIdx + 1;
                 replaceTo = pos;
-                search(lineSoFar.slice(bracketIdx + 1));
+                search("/tb/platoons/api/units", partial, (u) => ({ name: u.name, label: u.name }));
                 return;
             }
 

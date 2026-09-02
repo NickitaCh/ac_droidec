@@ -850,6 +850,29 @@ async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depe
     return database.search_omicron_catalog_for_priority(q.strip(), guild_id, modes=modes)
 
 
+@router.get("/omicrons/api/abilities", response_class=JSONResponse)
+async def omicrons_priority_ability_search(unit: str = "", q: str = "", user: dict = Depends(require_guild_access)):
+    """Автодополнение названия способности после "Юнит: " внутри скобок [...] на
+    /omicrons/priority (см. web/static/dashboard.js, textarea .omicron-rules-textarea) — нужно
+    только когда у юнита несколько омикрон-способностей (guild_omicron_rules._resolve_omicron_target
+    требует уточнения в этом случае). unit резолвится точно (database.resolve_unit_display_names,
+    как в guild_omicron_rules.parse_rules), q — подстрочный поиск по названию способности."""
+    unit = unit.strip()
+    if not unit:
+        return []
+    base_id = database.resolve_unit_display_names([unit]).get(unit)
+    if not base_id:
+        return []
+    skill_ids = database.get_all_unit_omicron_skills().get(base_id, [])
+    if not skill_ids:
+        return []
+    display = database.get_skill_display_info(skill_ids)
+    q_lower = q.strip().lower()
+    names = [info[0] for info in display.values() if info[0] and (not q_lower or q_lower in info[0].lower())]
+    names.sort()
+    return [{"name": n} for n in names]
+
+
 @router.get("/omicrons/priority/rules", response_class=RedirectResponse)
 async def omicrons_priority_rules_page_redirect():
     """Правила теперь показаны прямо на /omicrons/priority (правая колонка) — редирект
