@@ -192,9 +192,20 @@ class AntiSpamCog(commands.Cog):
 
         channel_id = guild_cfg.get("antispam_alert_channel_id")
         alert_channel = self.bot.get_channel(int(channel_id)) if channel_id else None
+        if channel_id and alert_channel is None:
+            # get_channel — только кеш шлюза; для приватных/редко обновляемых каналов (как
+            # тут — алерт обычно уходит в закрытый офицерский канал) кеш иногда не содержит
+            # канал даже когда прав достаточно (подтверждено вживую 2026-09-02: прямой REST
+            # GET/POST в канал проходил 200, пока get_channel() стабильно возвращал None) —
+            # fetch_channel делает реальный HTTP-запрос в обход кеша.
+            try:
+                alert_channel = await self.bot.fetch_channel(int(channel_id))
+            except (disnake.NotFound, disnake.Forbidden, disnake.HTTPException):
+                alert_channel = None
         if alert_channel:
             try:
                 await alert_channel.send(content=alert_content, embed=embed, allowed_mentions=allowed_mentions)
+                print(f"[antispam] алерт отправлен в канал {channel_id} (guild {guild_cfg['id']}), сработал по {member.id}")
             except (disnake.Forbidden, disnake.HTTPException) as e:
                 print(f"[antispam] не удалось отправить алерт в канал {channel_id}: {e}")
         elif channel_id:
