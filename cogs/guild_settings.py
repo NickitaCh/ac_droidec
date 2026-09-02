@@ -6,6 +6,7 @@
 существующего /омикрон_текст канал в stat_requirements.py) — не единая
 generic-команда с выбором типа настройки, это отдельная задача на будущее."""
 
+from datetime import datetime, timezone
 from typing import Union
 
 import disnake
@@ -25,6 +26,11 @@ SETTINGS_FIELDS = [
     ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ"),
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
     ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ (для /вг_ордер)"),
+    ("antispam_enabled", "Антиспам-детектор включён"),
+    ("antispam_alert_channel_id", "Канал алертов антиспам-детектора (кросс-постинг/компрометация)"),
+    ("antispam_alert_role_id", "Роль, тегаемая в алерте антиспама"),
+    ("antispam_alert_message", "Кастомный текст алерта антиспама"),
+    ("antispam_timeout_minutes", "Длительность автотайм-аута при обнаружении спам-рассылки (мин.)"),
 ]
 
 # Те же поля, сгруппированные по режиму — используется только для отображения
@@ -39,6 +45,10 @@ SETTINGS_GROUPS = [
     ("ТБ — итоговый отчёт", ["officer_channel_id"]),
     ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
     ("Территориальная Война (ВГ)", ["tw_guide_forum_channel_id"]),
+    ("Антиспам (защита от компрометации)", [
+        "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
+        "antispam_alert_message", "antispam_timeout_minutes",
+    ]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
 
@@ -122,6 +132,114 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
+    @settings_group.sub_command(name="антиспам_канал", description="Канал для алертов антиспам-детектора (подозрение на скомпрометированный аккаунт)")
+    async def set_antispam_channel(
+        self, inter: disnake.ApplicationCommandInteraction,
+        канал: disnake.TextChannel = commands.Param(description="Канал для алертов антиспама"),
+    ):
+        await self._set_field(inter, "antispam_alert_channel_id", канал, "Канал алертов антиспам-детектора")
+
+    @settings_group.sub_command(name="антиспам_таймаут", description="Длительность автоматического тайм-аута при обнаружении спам-рассылки")
+    async def set_antispam_timeout(
+        self, inter: disnake.ApplicationCommandInteraction,
+        минуты: int = commands.Param(description="Любое кастомное значение, 1–40320 мин. (28 дней — максимум Discord)", min_value=1, max_value=40320),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        database.update_guild_config(guild_id, antispam_timeout_minutes=минуты)
+        await inter.response.send_message(f"✅ Автотайм-аут при обнаружении спам-рассылки теперь: {минуты} мин.", ephemeral=True)
+
+    @settings_group.sub_command(name="антиспам_вкл", description="Включить антиспам-детектор (кросс-постинг/компрометация аккаунта)")
+    async def antispam_enable(self, inter: disnake.ApplicationCommandInteraction):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        database.update_guild_config(guild_id, antispam_enabled=1)
+        await inter.response.send_message(
+            "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`антиспам_канал`) — без него сработавший "
+            "детектор всё равно удалит сообщения и выдаст тайм-аут, но алерт офицерам отправить будет некуда.",
+            ephemeral=True,
+        )
+
+    @settings_group.sub_command(name="антиспам_выкл", description="Выключить антиспам-детектор")
+    async def antispam_disable(self, inter: disnake.ApplicationCommandInteraction):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        database.update_guild_config(guild_id, antispam_enabled=0)
+        await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
+
+    @settings_group.sub_command(name="антиспам_роль", description="Роль, которую бот тегает в алерте антиспама (необязательно)")
+    async def set_antispam_role(
+        self, inter: disnake.ApplicationCommandInteraction,
+        роль: disnake.Role = commands.Param(default=None, description="Роль для тега в алерте"),
+        очистить: bool = commands.Param(default=False, description="Убрать тег роли из алерта"),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        if очистить:
+            database.update_guild_config(guild_id, antispam_alert_role_id=None)
+            await inter.response.send_message("✅ Тег роли в алерте антиспама убран.", ephemeral=True)
+            return
+        if роль is None:
+            await inter.response.send_message("❌ Укажите роль либо `очистить: True`.", ephemeral=True)
+            return
+        database.update_guild_config(guild_id, antispam_alert_role_id=str(роль.id))
+        await inter.response.send_message(f"✅ В алерте антиспама теперь тегается: {роль.mention}", ephemeral=True)
+
+    @settings_group.sub_command(name="антиспам_сообщение", description="Кастомный текст алерта антиспама")
+    async def set_antispam_message(
+        self, inter: disnake.ApplicationCommandInteraction,
+        текст: str = commands.Param(
+            default=None,
+            description="Плейсхолдеры: {member} автор, {channels} каналы, {count} их число, {timeout} мин. тайм-аута, {role} тег роли",
+        ),
+        сброс: bool = commands.Param(default=False, description="Вернуть текст по умолчанию"),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        if сброс:
+            database.update_guild_config(guild_id, antispam_alert_message=None)
+            await inter.response.send_message("✅ Текст алерта антиспама возвращён к значению по умолчанию.", ephemeral=True)
+            return
+        if not текст:
+            await inter.response.send_message("❌ Укажите текст либо `сброс: True`.", ephemeral=True)
+            return
+        database.update_guild_config(guild_id, antispam_alert_message=текст)
+        await inter.response.send_message(f"✅ Текст алерта антиспама обновлён:\n{текст}", ephemeral=True)
+
+    @settings_group.sub_command(name="антиспам_история", description="Последние срабатывания антиспам-детектора: кто, сколько удалено, тайм-аут на сколько")
+    async def antispam_history(
+        self, inter: disnake.ApplicationCommandInteraction,
+        лимит: int = commands.Param(default=10, description="Сколько последних записей показать", min_value=1, max_value=25),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        rows = database.get_antispam_log(guild_id, limit=лимит)
+        if not rows:
+            await inter.response.send_message("Пока нет ни одного срабатывания антиспам-детектора.", ephemeral=True)
+            return
+        embed = disnake.Embed(title=f"🚨 История антиспама (последние {len(rows)})", color=disnake.Color.orange())
+        for row in rows:
+            try:
+                ts = int(datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+                when = f"<t:{ts}:f>"
+            except ValueError:
+                when = row["created_at"]
+            timeout_part = f"тайм-аут {row['timeout_minutes']} мин." if row["timeout_applied"] else "⚠️ тайм-аут НЕ выдан (не хватило прав)"
+            value = (
+                f"🗑 Удалено: {row['messages_deleted']}"
+                + (f" (не вышло: {row['messages_delete_failed']})" if row["messages_delete_failed"] else "")
+                + f"\n⏱ {timeout_part}"
+                + (f"\n📍 {row['channels']}" if row["channels"] else "")
+            )
+            embed.add_field(name=f"<@{row['discord_user_id']}> — {when}", value=value, inline=False)
+        await inter.response.send_message(embed=embed, ephemeral=True)
+
     @settings_group.sub_command(name="список", description="Показать текущие настройки каналов и ролей гильдии")
     async def settings_list(self, inter: disnake.ApplicationCommandInteraction):
         guild_id = await guild_resolver.require_guild_id(inter)
@@ -134,12 +252,20 @@ class GuildSettings(commands.Cog):
             for field in fields:
                 label = _SETTINGS_LABELS[field]
                 raw = guild_cfg.get(field)
+                if field == "antispam_enabled":
+                    lines.append(f"• {label}: {'✅ да' if raw else '❌ нет'}")
+                    continue
                 if not raw:
                     lines.append(f"• {label}: *не задано*")
                     continue
-                is_role = field.endswith("_role_id")
-                resolved = (inter.guild.get_role(int(raw)) if is_role else self.bot.get_channel(int(raw))) if inter.guild else None
-                shown = resolved.mention if resolved else f"`{raw}` (не найден)"
+                if field.endswith("_role_id"):
+                    resolved = inter.guild.get_role(int(raw)) if inter.guild else None
+                    shown = resolved.mention if resolved else f"`{raw}` (не найден)"
+                elif field.endswith("_channel_id"):
+                    resolved = self.bot.get_channel(int(raw))
+                    shown = resolved.mention if resolved else f"`{raw}` (не найден)"
+                else:
+                    shown = raw
                 lines.append(f"• {label}: {shown}")
             embed.add_field(name=group_name, value="\n".join(lines), inline=False)
         await inter.response.send_message(embed=embed, ephemeral=True)

@@ -164,6 +164,8 @@ GUILD_CONFIG_COLUMNS = [
     "swgoh_gg_guild_id",
     "omicron_channel_id",
     "tw_guide_forum_channel_id",
+    "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
+    "antispam_alert_message", "antispam_timeout_minutes",
     "is_active",
 ]
 
@@ -206,6 +208,26 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tb_active_plan_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_alert_channel_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_timeout_minutes INTEGER")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_enabled INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_alert_role_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_alert_message TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -305,6 +327,74 @@ def seed_default_guild(**fields) -> int | None:
     if count > 0:
         return None
     return create_guild(**fields)
+
+# =====================================================================
+# ЖУРНАЛ СРАБАТЫВАНИЙ АНТИСПАМ-ДЕТЕКТОРА (cogs/antispam.py) — переживший
+# рестарт бота лог: кто попал в кросс-постинг-детектор, сколько сообщений
+# удалено, выдан ли тайм-аут и на сколько. Сам детектор трекает "кто сейчас
+# постит одинаковое" только в памяти процесса (см. docstring antispam.py) —
+# это отдельная, постоянная история для команды /настройки антиспам_история.
+# =====================================================================
+def _ensure_antispam_log_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS antispam_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            discord_user_id TEXT NOT NULL,
+            channels TEXT,
+            messages_deleted INTEGER NOT NULL DEFAULT 0,
+            messages_delete_failed INTEGER NOT NULL DEFAULT 0,
+            timeout_minutes INTEGER,
+            timeout_applied INTEGER NOT NULL DEFAULT 0,
+            content_preview TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def log_antispam_incident(
+    guild_id: int, discord_user_id, channels: str,
+    messages_deleted: int, messages_delete_failed: int,
+    timeout_minutes: int | None, timeout_applied: bool, content_preview: str,
+) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_antispam_log_table(cursor)
+    cursor.execute("""
+        INSERT INTO antispam_log (
+            guild_id, discord_user_id, channels, messages_deleted, messages_delete_failed,
+            timeout_minutes, timeout_applied, content_preview, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (
+        guild_id, str(discord_user_id), channels, messages_deleted, messages_delete_failed,
+        timeout_minutes, int(timeout_applied), content_preview,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_antispam_log(guild_id: int, limit: int = 20) -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_antispam_log_table(cursor)
+    cursor.execute("""
+        SELECT discord_user_id, channels, messages_deleted, messages_delete_failed,
+               timeout_minutes, timeout_applied, content_preview, created_at
+        FROM antispam_log
+        WHERE guild_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+    """, (guild_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "discord_user_id": r[0], "channels": r[1], "messages_deleted": r[2],
+            "messages_delete_failed": r[3], "timeout_minutes": r[4],
+            "timeout_applied": bool(r[5]), "content_preview": r[6], "created_at": r[7],
+        }
+        for r in rows
+    ]
 
 # =====================================================================
 # СУПЕР-АДМИНЫ БОТА: полный доступ ко всем гильдиям + управление гильдиями/
