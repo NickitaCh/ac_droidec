@@ -652,6 +652,12 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 @media (min-width: 60em) {
     main.wide.omicron-priority-page { max-width: 1800px; }
 }
+/* Реальная причина узкого textarea/select (не кэш браузера — воспроизведено локально и
+   проверено getComputedStyle): сайтовый дефолт `form { max-width: 20em }` (см. комментарий
+   у .settings-form ниже про тот же баг на /settings) резал ОБА <form> на этой странице до
+   320px, а max-width:none на самом textarea ничего не решал, раз его РОДИТЕЛЬ уже был узким.
+   Тот же приём, что у .builder-form/.settings-form — снять ограничение на форме. */
+.omicron-priority-form { max-width: none; }
 .omicron-priority-columns {
     display: grid;
     grid-template-columns: 1fr 1fr;

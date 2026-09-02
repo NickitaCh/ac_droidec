@@ -19,7 +19,7 @@
                 <p class="badge badge-ok">Сохранено</p>
             {% endif %}
 
-            <form method="post" action="/omicrons/priority" id="omicron-priority-form">
+            <form method="post" action="/omicrons/priority" id="omicron-priority-form" class="omicron-priority-form">
                 <div class="omicron-priority-add">
                     <select id="omicron-add-select">
                         <option value="">— выбрать омикрон —</option>
@@ -106,7 +106,7 @@
                 </div>
             {% endif %}
 
-            <form method="post" action="/omicrons/priority/rules">
+            <form method="post" action="/omicrons/priority/rules" class="omicron-priority-form">
                 <textarea name="rules_text" rows="30" class="platoon-filters-textarea omicron-rules-textarea" spellcheck="false">{{ rules_text }}</textarea>
                 <p><button type="submit">Сохранить</button></p>
             </form>
