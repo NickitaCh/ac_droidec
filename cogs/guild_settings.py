@@ -132,7 +132,8 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
-    @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (кросс-постинг/компрометация аккаунта)")
+    @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (только супер-админ)")
+    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
     async def set_antispam_mode(
         self, inter: disnake.ApplicationCommandInteraction,
         включить: bool = commands.Param(description="True — включить детектор, False — выключить"),
@@ -150,7 +151,8 @@ class GuildSettings(commands.Cog):
         else:
             await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
 
-    @settings_group.sub_command(name="антиспам", description="Канал/роль/текст/таймаут алерта антиспама — что не укажете, останется как было")
+    @settings_group.sub_command(name="антиспам", description="Канал/роль/текст/таймаут алерта антиспама (только супер-админ)")
+    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
     async def set_antispam(
         self, inter: disnake.ApplicationCommandInteraction,
         канал: disnake.TextChannel = commands.Param(default=None, description="Канал для алертов антиспама"),
@@ -189,7 +191,8 @@ class GuildSettings(commands.Cog):
         ]
         await inter.response.send_message("✅ Настройки антиспама обновлены:\n" + "\n".join(lines), ephemeral=True)
 
-    @settings_group.sub_command(name="антиспам_история", description="Последние срабатывания антиспам-детектора: кто, сколько удалено, тайм-аут на сколько")
+    @settings_group.sub_command(name="антиспам_история", description="Последние срабатывания антиспам-детектора (только супер-админ)")
+    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
     async def antispam_history(
         self, inter: disnake.ApplicationCommandInteraction,
         лимит: int = commands.Param(default=10, description="Сколько последних записей показать", min_value=1, max_value=25),
