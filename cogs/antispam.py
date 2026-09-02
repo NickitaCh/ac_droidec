@@ -6,9 +6,8 @@
 кросс-постинг: один автор публикует message с одинаковым (после нормализации)
 содержимым/вложениями в N разных каналах за T секунд. Реакция полностью
 автоматическая: тайм-аут автора, удаление всех запалившихся сообщений, алерт
-офицерам в настраиваемый канал (см. cogs/guild_settings.py::антиспам_канал,
-антиспам_таймаут — оба поля per-guild, guilds.antispam_alert_channel_id/
-antispam_timeout_minutes).
+офицерам в настраиваемый канал (см. cogs/guild_settings.py::/настройки антиспам —
+канал/роль/текст/таймаут одной командой, per-guild).
 
 Фича гейтится флагом antispam_enabled (/настройки антиспам_вкл/антиспам_выкл) —
 в отличие от остальных опциональных per-guild фич бота (TB-план, ДР и т.д.), где
@@ -38,24 +37,24 @@ CROSS_POST_WINDOW_SECONDS = 15     # окно, в котором ищем кро
 DEFAULT_TIMEOUT_MINUTES = 60       # если officer не задал antispam_timeout_minutes через /настройки
 CONTENT_PREVIEW_LIMIT = 300
 
-DEFAULT_ALERT_MESSAGE = (
-    "{role}🚨 Похоже на скомпрометированный аккаунт или спам-рассылку: {member} отправил(а) "
-    "одинаковое сообщение в {count} каналов ({channels}) за короткое время."
-)
+DEFAULT_ALERT_MESSAGE = "{role}пользователь {member} был отправлен в таймаут на {timeout} минут из-за:\n{reason}"
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
-def _render_alert_message(template: str, *, member: disnake.Member, channels_hit: list[str], timeout_minutes: int, role_id) -> str:
+def _render_alert_message(template: str, *, member: disnake.Member, channels_hit: list[str], timeout_minutes: int, role_id, reason: str) -> str:
     """Подстановка плейсхолдеров в кастомный текст алерта — обычный str.replace,
     не str.format, чтобы произвольный текст officer'а с фигурными скобками
-    (код-блок, JSON-пример и т.п.) не падал с KeyError на незнакомых {ключах}."""
-    role_prefix = f"<@&{role_id}> " if role_id else ""
+    (код-блок, JSON-пример и т.п.) не падал с KeyError на незнакомых {ключах}.
+    role_prefix с запятой — под дефолтный шаблон "(роль), пользователь ...", без
+    роли фраза просто начинается с "пользователь..." без висящей запятой."""
+    role_prefix = f"<@&{role_id}>, " if role_id else ""
     text = template.replace("{role}", role_prefix)
     text = text.replace("{member}", member.mention)
     text = text.replace("{channels}", ", ".join(channels_hit))
     text = text.replace("{count}", str(len(channels_hit)))
     text = text.replace("{timeout}", str(timeout_minutes))
+    text = text.replace("{reason}", reason)
     return text.strip()
 
 
@@ -178,7 +177,7 @@ class AntiSpamCog(commands.Cog):
                   + f"\n{timeout_note}",
             inline=False,
         )
-        embed.set_footer(text="Если это ложное срабатывание — снимите тайм-аут вручную и проверьте настройки /настройки антиспам_*")
+        embed.set_footer(text="Если это ложное срабатывание — снимите тайм-аут вручную и проверьте настройки /настройки антиспам")
 
         alert_role_id = guild_cfg.get("antispam_alert_role_id")
         alert_content = _render_alert_message(
@@ -187,6 +186,7 @@ class AntiSpamCog(commands.Cog):
             channels_hit=channels_hit,
             timeout_minutes=timeout_minutes,
             role_id=alert_role_id,
+            reason=preview,
         )
         allowed_mentions = disnake.AllowedMentions(everyone=False, roles=[int(alert_role_id)] if alert_role_id else False, users=[member.id])
 

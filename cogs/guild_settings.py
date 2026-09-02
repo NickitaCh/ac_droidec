@@ -132,24 +132,6 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
-    @settings_group.sub_command(name="антиспам_канал", description="Канал для алертов антиспам-детектора (подозрение на скомпрометированный аккаунт)")
-    async def set_antispam_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для алертов антиспама"),
-    ):
-        await self._set_field(inter, "antispam_alert_channel_id", канал, "Канал алертов антиспам-детектора")
-
-    @settings_group.sub_command(name="антиспам_таймаут", description="Длительность автоматического тайм-аута при обнаружении спам-рассылки")
-    async def set_antispam_timeout(
-        self, inter: disnake.ApplicationCommandInteraction,
-        минуты: int = commands.Param(description="Любое кастомное значение, 1–40320 мин. (28 дней — максимум Discord)", min_value=1, max_value=40320),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        database.update_guild_config(guild_id, antispam_timeout_minutes=минуты)
-        await inter.response.send_message(f"✅ Автотайм-аут при обнаружении спам-рассылки теперь: {минуты} мин.", ephemeral=True)
-
     @settings_group.sub_command(name="антиспам_вкл", description="Включить антиспам-детектор (кросс-постинг/компрометация аккаунта)")
     async def antispam_enable(self, inter: disnake.ApplicationCommandInteraction):
         guild_id = await guild_resolver.require_guild_id(inter)
@@ -157,7 +139,7 @@ class GuildSettings(commands.Cog):
             return
         database.update_guild_config(guild_id, antispam_enabled=1)
         await inter.response.send_message(
-            "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`антиспам_канал`) — без него сработавший "
+            "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`/настройки антиспам`) — без него сработавший "
             "детектор всё равно удалит сообщения и выдаст тайм-аут, но алерт офицерам отправить будет некуда.",
             ephemeral=True,
         )
@@ -170,46 +152,44 @@ class GuildSettings(commands.Cog):
         database.update_guild_config(guild_id, antispam_enabled=0)
         await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
 
-    @settings_group.sub_command(name="антиспам_роль", description="Роль, которую бот тегает в алерте антиспама (необязательно)")
-    async def set_antispam_role(
+    @settings_group.sub_command(name="антиспам", description="Канал/роль/текст/таймаут алерта антиспама — что не укажете, останется как было")
+    async def set_antispam(
         self, inter: disnake.ApplicationCommandInteraction,
-        роль: disnake.Role = commands.Param(default=None, description="Роль для тега в алерте"),
-        очистить: bool = commands.Param(default=False, description="Убрать тег роли из алерта"),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        if очистить:
-            database.update_guild_config(guild_id, antispam_alert_role_id=None)
-            await inter.response.send_message("✅ Тег роли в алерте антиспама убран.", ephemeral=True)
-            return
-        if роль is None:
-            await inter.response.send_message("❌ Укажите роль либо `очистить: True`.", ephemeral=True)
-            return
-        database.update_guild_config(guild_id, antispam_alert_role_id=str(роль.id))
-        await inter.response.send_message(f"✅ В алерте антиспама теперь тегается: {роль.mention}", ephemeral=True)
-
-    @settings_group.sub_command(name="антиспам_сообщение", description="Кастомный текст алерта антиспама")
-    async def set_antispam_message(
-        self, inter: disnake.ApplicationCommandInteraction,
+        канал: disnake.TextChannel = commands.Param(default=None, description="Канал для алертов антиспама"),
+        роль: disnake.Role = commands.Param(default=None, description="Роль, тегаемая в алерте"),
+        таймаут: int = commands.Param(default=None, description="Длительность тайм-аута в минутах, 1–40320", min_value=1, max_value=40320),
         текст: str = commands.Param(
             default=None,
-            description="Плейсхолдеры: {member} автор, {channels} каналы, {count} их число, {timeout} мин. тайм-аута, {role} тег роли",
+            description="Свой текст алерта. Плейсхолдеры: {role} {member} {timeout} {reason} {channels} {count}",
         ),
-        сброс: bool = commands.Param(default=False, description="Вернуть текст по умолчанию"),
     ):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        if сброс:
-            database.update_guild_config(guild_id, antispam_alert_message=None)
-            await inter.response.send_message("✅ Текст алерта антиспама возвращён к значению по умолчанию.", ephemeral=True)
+        updates = {}
+        if канал is not None:
+            updates["antispam_alert_channel_id"] = str(канал.id)
+        if роль is not None:
+            updates["antispam_alert_role_id"] = str(роль.id)
+        if таймаут is not None:
+            updates["antispam_timeout_minutes"] = таймаут
+        if текст is not None:
+            updates["antispam_alert_message"] = текст
+        if not updates:
+            await inter.response.send_message("❌ Укажите хотя бы один параметр: канал, роль, таймаут или текст.", ephemeral=True)
             return
-        if not текст:
-            await inter.response.send_message("❌ Укажите текст либо `сброс: True`.", ephemeral=True)
-            return
-        database.update_guild_config(guild_id, antispam_alert_message=текст)
-        await inter.response.send_message(f"✅ Текст алерта антиспама обновлён:\n{текст}", ephemeral=True)
+        database.update_guild_config(guild_id, **updates)
+
+        guild_cfg = database.get_guild_config(guild_id)
+        ch = self.bot.get_channel(int(guild_cfg["antispam_alert_channel_id"])) if guild_cfg.get("antispam_alert_channel_id") else None
+        r = inter.guild.get_role(int(guild_cfg["antispam_alert_role_id"])) if guild_cfg.get("antispam_alert_role_id") and inter.guild else None
+        lines = [
+            f"Канал: {ch.mention if ch else '*не задано*'}",
+            f"Роль: {r.mention if r else '*не задано*'}",
+            f"Таймаут: {guild_cfg.get('antispam_timeout_minutes') or 60} мин.",
+            f"Текст: {guild_cfg.get('antispam_alert_message') or '*по умолчанию*'}",
+        ]
+        await inter.response.send_message("✅ Настройки антиспама обновлены:\n" + "\n".join(lines), ephemeral=True)
 
     @settings_group.sub_command(name="антиспам_история", description="Последние срабатывания антиспам-детектора: кто, сколько удалено, тайм-аут на сколько")
     async def antispam_history(
