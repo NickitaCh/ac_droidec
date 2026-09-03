@@ -304,6 +304,61 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     return char_name, block, matched, total, updated_at
 
 
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1) -> dict:
+    """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
+    ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
+    персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
+    без обращений к Comlink — то же самое, что видит /статы без "обновить"). Раскладывает
+    игроков на три бакета для рендера и в Discord, и в вебе."""
+    roster = database.get_all_user_mappings(guild_id)
+    if not roster:
+        return {
+            "error": "Никто из гильдии не зарегистрирован (/регистрация) — проверять некого.",
+            "total_players": 0, "compliant": [], "problem": [], "no_data": [],
+        }
+
+    # required_relic на персонажа — не меняется от игрока к игроку, считаем один раз
+    # (не в цикле по ростеру) и приклеиваем к каждой "проблемной" строке ниже: пригодится
+    # для кнопки "поставить задачу" в вебе (см. web/routes/stat_forecast.py) — цель по
+    # реликвии берётся прямо из требования плейта, без пересчёта.
+    required_relic_by_char = {}
+    for base_id in char_keys:
+        loaded = _load_char_rows(plate_name, base_id, guild_id)
+        if loaded is not None:
+            required_relic_by_char[base_id] = loaded[2]
+
+    compliant, problem, no_data = [], [], []
+    for _discord_id, ally_code, name in roster:
+        matched_total = 0
+        rows_total = 0
+        char_problems = []
+        for base_id in char_keys:
+            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id)
+            if result is None:
+                continue
+            char_name, _block, matched, total, _updated_at = result
+            matched_total += matched
+            rows_total += total
+            if total > 0 and matched < total:
+                char_problems.append({
+                    "char_name": char_name, "base_id": base_id, "matched": matched, "total": total,
+                    "required_relic": required_relic_by_char.get(base_id),
+                })
+
+        entry = {"name": name, "ally_code": ally_code, "matched": matched_total, "total": rows_total, "chars": char_problems}
+        if rows_total == 0:
+            no_data.append(entry)
+        elif matched_total == rows_total:
+            compliant.append(entry)
+        else:
+            problem.append(entry)
+
+    problem.sort(key=lambda r: (r["matched"] - r["total"], r["name"].lower()))
+    compliant.sort(key=lambda r: r["name"].lower())
+    no_data.sort(key=lambda r: r["name"].lower())
+    return {"error": None, "total_players": len(roster), "compliant": compliant, "problem": problem, "no_data": no_data}
+
+
 async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1):
     """Возвращает (char_name, block) — пересчёт уже заданных в плейте норм на другой релик.
     Модель — та же, что в гильдийской Google-таблице (BASESTAT*MODMULT+flat): порог на
@@ -945,6 +1000,7 @@ class StatRequirementsCog(commands.Cog):
         игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
+        гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
     ):
         await inter.response.defer()
 
@@ -959,6 +1015,40 @@ class StatRequirementsCog(commands.Cog):
         char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
         if not char_keys:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+            return
+
+        if гильдия:
+            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+                await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
+                return
+
+            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id)
+            if report["error"]:
+                await inter.edit_original_response(f"❌ {report['error']}")
+                return
+
+            lines = [f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
+            if report["no_data"]:
+                lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
+            lines.append("")
+            if report["problem"]:
+                for r in report["problem"]:
+                    lines.append(f"❌ {r['name']} — {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
+            else:
+                lines.append("Все закрыли все требования! 🎉")
+
+            if not report["problem"]:
+                color = DATACRON_CHECK_COLOR_FULL
+            elif not report["compliant"]:
+                color = DATACRON_CHECK_COLOR_NONE
+            else:
+                color = DATACRON_CHECK_COLOR_PARTIAL
+
+            title = f"📋 {плейт} — гильдия"
+            embeds = _lines_to_embeds(title, color, lines)
+            await inter.edit_original_response(embed=embeds[0])
+            for e in embeds[1:]:
+                await inter.followup.send(embed=e)
             return
 
         if игрок is None:

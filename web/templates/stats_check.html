@@ -3,7 +3,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Прогноз статов</h1>
-    <p class="muted">Сравнивает реальные статы игрока (на релике плейта) с сохранёнными в плейте нормами — то же самое, что делает Discord-команда /статы. Пересчёт нормы плейта на другой релик — на <a href="/stats-check/relic">отдельной странице</a>.</p>
+    <p class="muted">Сравнивает реальные статы игрока (на релике плейта) с сохранёнными в плейте нормами — то же самое, что делает Discord-команда /статы. Игрок не выбран — проверка идёт сразу по всей гильдии. Пересчёт нормы плейта на другой релик — на <a href="/stats-check/relic">отдельной странице</a>.</p>
 
     {% if error %}
         <p class="error">{{ error }}</p>
@@ -24,9 +24,9 @@
 
             {% if selected_plate %}
                 <label>
-                    Игрок
+                    Игрок (необязательно)
                     <select name="ally_code">
-                        <option value="">{% if self_ally_code %}— свой аккаунт ({{ self_ally_code }}) —{% else %}— свой аккаунт не привязан, выберите игрока —{% endif %}</option>
+                        <option value="">— вся гильдия —</option>
                         {% for code, name in roster %}
                             <option value="{{ code }}" {% if code == selected_ally_code %}selected{% endif %}>{{ name }}</option>
                         {% endfor %}
@@ -69,6 +69,55 @@
                     <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
                 </div>
             {% endfor %}
+        {% endif %}
+    {% elif guild_report is not none %}
+        {% if guild_report.error %}
+            <p class="error">{{ guild_report.error }}</p>
+        {% else %}
+            <div class="stats-grid">
+                <div class="stat-tile"><div class="stat-value">{{ guild_report.total_players }}</div><div class="stat-label">Проверено</div></div>
+                <div class="stat-tile status-danger"><div class="stat-value">{{ guild_report.problem|length }}</div><div class="stat-label">Есть проблемы</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ guild_report.compliant|length }}</div><div class="stat-label">Полностью соответствуют</div></div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title"><span>❌ Есть проблемы</span><span class="panel-hint">{{ guild_report.problem|length }}</span></div>
+                {% if not guild_report.problem %}
+                    <p class="empty-state">Все закрыли все требования! 🎉</p>
+                {% else %}
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead><tr><th>Игрок</th><th>Прогресс</th><th>Персонажи с проблемами</th></tr></thead>
+                            <tbody>
+                                {% for r in guild_report.problem %}
+                                    <tr>
+                                        <td>{{ r.name }}</td>
+                                        <td>{{ r.matched }}/{{ r.total }}</td>
+                                        <td>
+                                            {% for c in r.chars %}
+                                                <span>{{ c.char_name }} ({{ c.matched }}/{{ c.total }})</span>
+                                                {% if c.required_relic is not none %}
+                                                    <a href="/tasks?prefill_ally={{ r.ally_code }}&prefill_unit={{ c.base_id }}&prefill_type=relic&prefill_value={{ c.required_relic }}" class="badge badge-neutral" title="Поставить задачу на реликвию {{ c.required_relic }}">+ задача</a>
+                                                {% endif %}
+                                                {% if not loop.last %}<br>{% endif %}
+                                            {% endfor %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="panel">
+                <div class="panel-title"><span>✅ Полностью соответствуют</span><span class="panel-hint">{{ guild_report.compliant|length }}</span></div>
+                <p>{{ guild_report.compliant|map(attribute="name")|join(", ") if guild_report.compliant else "—" }}</p>
+            </div>
+
+            {% if guild_report.no_data %}
+                <p class="muted">⚠️ Нет кэшированных данных ни по одному юниту: {{ guild_report.no_data|map(attribute="name")|join(", ") }}</p>
+            {% endif %}
         {% endif %}
     {% endif %}
 {% endblock %}

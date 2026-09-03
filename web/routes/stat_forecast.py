@@ -56,27 +56,17 @@ async def stats_check_form(
         "force_refresh": force_refresh,
         "characters": [],
         "results": None,
+        "guild_report": None,
         "loading": False,
         "error": None,
-        "self_ally_code": None,
     }
-
-    self_reg = database.get_user_registration(user["discord_id"], guild_id=guild_id)
-    if self_reg:
-        context["self_ally_code"] = self_reg[0]
 
     if not plate:
         return templates.TemplateResponse(request, "stats_check.html", context)
 
     char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
     context["characters"] = [(base_id, database.get_game_unit_name(base_id) or base_id) for base_id in char_keys]
-
-    target_ally_code = ally_code.strip() or (self_reg[0] if self_reg else None)
-    if not target_ally_code:
-        context["error"] = "Не указан игрок, и ваш собственный аккаунт не привязан через /регистрация — выберите игрока из списка."
-        return templates.TemplateResponse(request, "stats_check.html", context)
-
-    player_label = next((name for code, name in roster if code == target_ally_code), target_ally_code)
+    target_chars = [character] if character else char_keys
 
     try:
         comlink = _get_comlink()
@@ -85,7 +75,13 @@ async def stats_check_form(
         context["loading"] = True
         return templates.TemplateResponse(request, "stats_check.html", context)
 
-    target_chars = [character] if character else char_keys
+    target_ally_code = ally_code.strip()
+    if not target_ally_code:
+        # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
+        context["guild_report"] = await stat_forecast.build_guild_report(comlink, stat_calc, plate, target_chars, guild_id=guild_id)
+        return templates.TemplateResponse(request, "stats_check.html", context)
+
+    player_label = next((name for code, name in roster if code == target_ally_code), target_ally_code)
     results = []
     for base_id in target_chars:
         outcome = await stat_forecast.evaluate_character_player(

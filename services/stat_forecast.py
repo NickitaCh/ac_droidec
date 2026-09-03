@@ -13,7 +13,7 @@ import time
 import types
 
 import stat_engine
-from cogs.stat_requirements import _evaluate_character_player, _project_character_relic
+from cogs.stat_requirements import _evaluate_character_player, _project_character_relic, _build_guild_report
 
 _TTL_SECONDS = 12 * 60 * 60
 
@@ -61,3 +61,10 @@ async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: 
     либо None, если для этого персонажа нет сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
     return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id)
+
+
+async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1) -> dict:
+    """Обёртка над cogs.stat_requirements._build_guild_report — см. её докстринг для формата
+    результата ({"error", "total_players", "compliant", "problem", "no_data"})."""
+    bot_stand_in = _bot_stand_in(comlink, stat_calc)
+    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id)
