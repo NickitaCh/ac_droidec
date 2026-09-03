@@ -28,20 +28,17 @@
         <nav>
             {% if user %}
                 {% if user.tier == "officer" %}
+                    <a href="/activity">Активность</a>
+                    <a href="/violations">Нарушения</a>
                     <a href="/tb">ТБ</a>
                     <a href="/tw">ВГ</a>
-                    <a href="/violations">Нарушения</a>
-                    <a href="/activity">Активность</a>
+                    <a href="/tasks">Задания</a>
                     <a href="/datacrons">Датакроны</a>
-                    <a href="/birthdays">Дни рождения</a>
-                    <a href="/registration">Регистрация</a>
-                    <a href="/settings">Настройки</a>
                     <details class="nav-dropdown">
                         <summary>Моды</summary>
                         <div class="nav-dropdown-menu">
                             <a href="/plates">Плейты</a>
                             <a href="/stats-check">Статы</a>
-                            <a href="/tasks">Задания</a>
                             <a href="/mod-builder">Конструктор</a>
                         </div>
                     </details>
@@ -53,19 +50,24 @@
                             <a href="/omicrons/report">Отчёт по игрокам</a>
                         </div>
                     </details>
-                {% endif %}
-                {% if user.is_super_admin %}
+                    <a href="/birthdays">Дни рождения</a>
                     <details class="nav-dropdown">
                         <summary>Админ меню</summary>
                         <div class="nav-dropdown-menu">
-                            <a href="/admin/guilds">Гильдии</a>
-                            <a href="/admin/access">Админы</a>
-                            <a href="/admin/web-accounts">Логин/пароль</a>
-                            <a href="/admin/access-log">Лог входов</a>
-                            <a href="/admin/command-usage">Команды</a>
-                            <a href="/mod-optimizer">Оптимизатор модов</a>
+                            <a href="/registration">Регистрация</a>
+                            <a href="/settings">Настройки</a>
+                            {% if user.is_super_admin %}
+                                <a href="/admin/guilds">Гильдии</a>
+                                <a href="/admin/access">Админы</a>
+                                <a href="/admin/web-accounts">Логин/пароль</a>
+                                <a href="/admin/access-log">Лог входов</a>
+                                <a href="/admin/command-usage">Команды</a>
+                                <a href="/mod-optimizer">Оптимизатор модов</a>
+                            {% endif %}
                         </div>
                     </details>
+                {% endif %}
+                {% if user.is_super_admin %}
                     {% if user.switchable_guilds %}
                         <form method="post" action="/admin/switch-guild" class="guild-switch-form">
                             <select name="guild_id" onchange="this.form.submit()">

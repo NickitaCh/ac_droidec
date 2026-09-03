@@ -276,6 +276,64 @@
                         </div>
                     {% endif %}
                 </div>
+
+                <div class="widget wc-wide">
+                    <div class="widget-header">
+                        <h2>🎯 Задания на прокачку</h2>
+                        <a class="widget-link" href="/tasks">Все задания →</a>
+                    </div>
+                    <div class="mini-stats">
+                        <div class="mini-stat">
+                            <span class="mini-stat-value">{{ widgets.tasks_summary.counts.ACTIVE }}</span>
+                            <span class="mini-stat-label">В работе</span>
+                        </div>
+                        <div class="mini-stat status-danger">
+                            <span class="mini-stat-value">{{ widgets.tasks_summary.counts.FAILED }}</span>
+                            <span class="mini-stat-label">Провалено</span>
+                        </div>
+                        <div class="mini-stat">
+                            <span class="mini-stat-value">{{ widgets.tasks_summary.counts.COMPLETED }}</span>
+                            <span class="mini-stat-label">Выполнено</span>
+                        </div>
+                    </div>
+                    {% if not widgets.tasks_summary.rows %}
+                        <p class="widget-empty">Активных или проваленных заданий нет — всё чисто. 🎉</p>
+                    {% else %}
+                        <div class="table-scroll">
+                            <table class="data">
+                                <thead>
+                                    <tr>
+                                        <th>Игрок</th>
+                                        <th>Юнит</th>
+                                        <th>Цель</th>
+                                        <th>Дедлайн</th>
+                                        <th>Статус</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for r in widgets.tasks_summary.rows %}
+                                        <tr>
+                                            <td>{{ r.player_name }}</td>
+                                            <td>{{ r.unit_name }}</td>
+                                            <td>{{ r.target_label }}</td>
+                                            <td class="num">{{ r.deadline }}</td>
+                                            <td>
+                                                {% if r.status == "FAILED" %}
+                                                    <span class="badge badge-danger">Провалено</span>
+                                                {% else %}
+                                                    <span class="badge badge-neutral">В работе</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% if widgets.tasks_summary.open_total > widgets.tasks_summary.rows|length %}
+                            <p class="muted">И ещё {{ widgets.tasks_summary.open_total - widgets.tasks_summary.rows|length }} — см. <a href="/tasks">все задания</a>.</p>
+                        {% endif %}
+                    {% endif %}
+                </div>
             </div>
             </div>
         </div>

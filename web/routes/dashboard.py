@@ -9,6 +9,7 @@ import database
 from cogs.birthday import next_birthday
 from services import dashboard_data, datacron_catalog
 from web.deps import get_current_user_optional
+from web.routes.tasks import _target_label as _task_target_label
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -62,6 +63,31 @@ def _next_birthdays(guild_id: int, limit: int = 10):
     return rows[:limit]
 
 
+def _tasks_summary(guild_id: int, limit: int = 8):
+    """Счётчики по статусам + короткий список "требует внимания" (провалено — первым,
+    затем активные с ближайшим дедлайном) для виджета на главной — та же логика форматирования
+    цели, что и на самой /tasks (web/routes/tasks.py::_target_label), не дублируем."""
+    rows = database.get_all_tasks(guild_id)
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    unit_names = database.get_game_unit_names([r[2] for r in rows])
+
+    counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
+    open_rows = []
+    for task_id, ally_code, base_id, target_type, target_value, deadline, status, _batch_id in rows:
+        counts[status] = counts.get(status, 0) + 1
+        if status in ("ACTIVE", "FAILED"):
+            open_rows.append({
+                "player_name": names_by_code.get(ally_code, ally_code),
+                "unit_name": unit_names.get(base_id) or base_id,
+                "target_label": _task_target_label(target_type, target_value),
+                "deadline": deadline,
+                "status": status,
+            })
+
+    open_rows.sort(key=lambda r: (r["status"] != "FAILED", r["deadline"]))
+    return {"counts": counts, "rows": open_rows[:limit], "open_total": len(open_rows)}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request, user: dict | None = Depends(get_current_user_optional)):
     guild_cfg = None
@@ -86,6 +112,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
             "activity_rows": activity_rows,
             "datacron_seasons": await _active_datacron_seasons(guild_id),
             "birthdays": _next_birthdays(guild_id, limit=10),
+            "tasks_summary": _tasks_summary(guild_id),
         }
 
     error = request.query_params.get("error")
