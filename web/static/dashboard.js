@@ -505,9 +505,9 @@ document.addEventListener("DOMContentLoaded", () => {
             evaluate();
         };
 
-        const search = (url, q, transform, sep = "?") => {
+        const search = (url, q, transform, sep = "?", minLen = 2) => {
             clearTimeout(debounceTimer);
-            if (q.trim().length < 2) { close(); return; }
+            if (q.trim().length < minLen) { close(); return; }
             debounceTimer = setTimeout(async () => {
                 try {
                     const resp = await fetch(`${url}${sep}q=${encodeURIComponent(q.trim())}`);
@@ -546,11 +546,15 @@ document.addEventListener("DOMContentLoaded", () => {
                     replaceFrom = lineStart + bracketIdx + 1 + colonIdx + 1 + leadingWs;
                     replaceTo = pos;
                     if (unitPart) {
+                        // minLen 0 — со списком способностей одного юнита (обычно 1-3
+                        // штуки) нет смысла заставлять сначала что-то набрать: список должен
+                        // появиться сразу после "Юнит:", чтобы было видно, что вообще писать.
                         search(
                             `/omicrons/api/abilities?unit=${encodeURIComponent(unitPart)}`,
                             abilityPart,
                             (a) => ({ name: a.name, label: a.name }),
                             "&",
+                            0,
                         );
                     } else {
                         close();
@@ -563,12 +567,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            const trimmed = lineSoFar.trim();
-            if (bracketIdx === -1 && trimmed && /^[a-zA-Z ]*$/.test(trimmed)) {
-                const leadingWs = lineSoFar.length - lineSoFar.trimStart().length;
-                replaceFrom = lineStart + leadingWs;
+            // Ключевые слова ("omicron [", "require unit [", "require omicron [") нужно
+            // предлагать не только в начале строки, но и после уже закрытой скобки —
+            // например второе "omicron" в "omicron [...] require omicron" (парные омикроны).
+            // bracketIdx — это lastIndexOf("["), он остаётся >= 0 и после закрытой скобки,
+            // поэтому проверка "bracketIdx === -1" ошибочно отсекала этот случай — сравнивать
+            // нужно с хвостом строки после последней "]", а не с bracketIdx.
+            const lastCloseIdx = lineSoFar.lastIndexOf("]");
+            const tail = lineSoFar.slice(lastCloseIdx + 1);
+            const trimmedTail = tail.trim();
+            if (trimmedTail && /^[a-zA-Z ]*$/.test(trimmedTail)) {
+                const leadingWs = tail.length - tail.trimStart().length;
+                replaceFrom = lineStart + lastCloseIdx + 1 + leadingWs;
                 replaceTo = pos;
-                const q = trimmed.toLowerCase();
+                const q = trimmedTail.toLowerCase();
                 items = KEYWORDS.filter((k) => k.insert.toLowerCase().startsWith(q));
                 activeIndex = items.length ? 0 : -1;
                 render();
