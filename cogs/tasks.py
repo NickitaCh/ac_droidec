@@ -54,10 +54,12 @@ async def autocomplete_task_target_value(inter: disnake.ApplicationCommandIntera
 class TasksCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Запускаем фоновый аудит задач
+        # Запускаем фоновый аудит задач + плановую синхронизацию справочника юнитов
+        self.units_sync_loop.start()
         self.tasks_audit_loop.start()
 
     def cog_unload(self):
+        self.units_sync_loop.cancel()
         self.tasks_audit_loop.cancel()
 
     # =====================================================================
@@ -69,6 +71,25 @@ class TasksCog(commands.Cog):
         UnitDefinitions + RUS_RU локализация, см. докстринг sync_units) живёт там,
         чтобы бот и веб не расходились при будущих правках."""
         return await sync_units(self.bot.comlink)
+
+    @tasks.loop(hours=24)
+    async def units_sync_loop(self):
+        """Плановое обновление справочника юнитов раз в сутки — раньше синхронизация
+        была только при старте бота (см. before_tasks_audit ниже), и при стабильном
+        аптайме без рестартов новые персонажи/корабли просто не появлялись в
+        автокомплите. disnake.ext.tasks запускает тело цикла сразу при старте (не ждёт
+        первый интервал), так что отдельный "первый прогон при старте" теперь не нужен —
+        этот цикл сам закрывает и старт, и дальнейшее ежедневное обновление."""
+        print("🔄 [Задания] Плановая синхронизация справочника юнитов...")
+        try:
+            total = await self._do_units_synchronization()
+            print(f"✅ [Задания] Справочник обновлён: {total} юнитов")
+        except Exception as e:
+            print(f"⚠️ [Задания] Не удалось обновить справочник: {e}")
+
+    @units_sync_loop.before_loop
+    async def before_units_sync(self):
+        await self.bot.wait_until_ready()
 
     def _format_target_label(self, target_type: str, target_value: str) -> str:
         if target_type == "stars":
@@ -237,14 +258,6 @@ class TasksCog(commands.Cog):
     @tasks_audit_loop.before_loop
     async def before_tasks_audit(self):
         await self.bot.wait_until_ready()
-
-        print("🔄 [Авто-старт] Начинаю автоматическую синхронизацию справочника юнитов...")
-        try:
-            total = await self._do_units_synchronization()
-            print(f"✅ [Авто-старт] Справочник успешно обновлен! Загружено юнитов: {total}")
-        except Exception as e:
-            print(f"⚠️ [Авто-старт] Не удалось обновить справочник при запуске: {e}")
-            print("Бот продолжит работу на старой/текущей базе данных.")
 
     # =====================================================================
     # ГРУППА /задания
