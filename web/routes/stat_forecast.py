@@ -40,6 +40,7 @@ async def stats_check_form(
     ally_code: str = "",
     character: str = "",
     force_refresh: bool = False,
+    action: str = "",
     user: dict = Depends(require_officer_access),
 ):
     guild_id = user["guild_id"]
@@ -66,6 +67,13 @@ async def stats_check_form(
 
     char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
     context["characters"] = [(base_id, database.get_game_unit_name(base_id) or base_id) for base_id in char_keys]
+
+    if action != "run":
+        # Плейт выбран (или это просто автосабмит смены плейта/подгрузки списка персонажей) —
+        # только показываем поля выбора игрока/персонажа, сам расчёт запускается отдельной
+        # кнопкой "Проверить", чтобы выбор плейта не сразу запускал проверку по всей гильдии.
+        return templates.TemplateResponse(request, "stats_check.html", context)
+
     target_chars = [character] if character else char_keys
 
     try:

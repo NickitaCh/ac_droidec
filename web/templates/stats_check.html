@@ -14,7 +14,7 @@
         <form method="get" action="/stats-check">
             <label>
                 Плейт
-                <select name="plate" required onchange="this.form.character.value=''; this.form.submit();">
+                <select name="plate" required onchange="if (this.form.character) this.form.character.value=''; this.form.submit();">
                     <option value="">— выберите плейт —</option>
                     {% for p in plates %}
                         <option value="{{ p }}" {% if p == selected_plate %}selected{% endif %}>{{ p }}</option>
@@ -49,7 +49,9 @@
                 </label>
             {% endif %}
 
-            <button type="submit">{% if selected_plate %}Показать{% else %}Выбрать{% endif %}</button>
+            {% if selected_plate %}
+                <button type="submit" name="action" value="run">Проверить</button>
+            {% endif %}
         </form>
     </div>
 
