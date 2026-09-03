@@ -132,6 +132,10 @@ document.addEventListener("DOMContentLoaded", () => {
             hidden.value = item[valueField];
             input.setCustomValidity("");
             results.classList.remove("open");
+            // Программная установка value не рождает нативное 'change' — страницам,
+            // которым нужно среагировать на выбор (например, подгрузить омикроны
+            // выбранного юнита на /tasks), приходится слушать это явно.
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
         };
 
         input.addEventListener("input", () => {

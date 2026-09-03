@@ -83,6 +83,19 @@ def init_db():
         cursor.execute("ALTER TABLE tasks ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Метка группы задач, поставленных одним действием (массовая постановка в вебе
+        # либо "поставить задачи" из гильдийского отчёта по плейту) — позволяет отменить
+        # всю группу разом. NULL у задач, поставленных по одной (/задания добавить).
+        cursor.execute("ALTER TABLE tasks ADD COLUMN batch_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Когда бот уже отправил напоминание о приближающемся дедлайне — чтобы не
+        # слать его повторно на каждом часовом проходе аудита (см. tasks_reminder_loop).
+        cursor.execute("ALTER TABLE tasks ADD COLUMN reminder_sent_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # 4. Справочник игровых юнитов (Персонажи и Корабли) — глобальный, общий
     #    для всех гильдий (игровой каталог SWGOH, не привязан к guild_id).
@@ -166,6 +179,7 @@ GUILD_CONFIG_COLUMNS = [
     "tw_guide_forum_channel_id",
     "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
     "antispam_alert_message", "antispam_timeout_minutes",
+    "tasks_log_channel_id",
     "is_active",
 ]
 
@@ -228,6 +242,10 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN antispam_alert_message TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tasks_log_channel_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -1015,15 +1033,15 @@ def get_unit_types(base_ids: list[str]) -> dict:
     return result
 
 # =====================================================================
-# ЗАДАЧИ НА ПРОКАЧКУ (/task_add + часовой аудит выполнения через Comlink)
+# ЗАДАНИЯ НА ПРОКАЧКУ (/задания + часовой аудит выполнения через Comlink)
 # =====================================================================
-def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1) -> int:
+def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1, batch_id: str = None) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by, date_created, guild_id)
-        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?)
-    """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id))
+        INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by, date_created, guild_id, batch_id)
+        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?, ?)
+    """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id, batch_id))
     conn.commit()
     task_id = cursor.lastrowid
     conn.close()
@@ -1045,16 +1063,44 @@ def get_active_tasks(guild_id: int = 1):
 def get_all_tasks(guild_id: int = 1):
     """Как get_active_tasks, но без фильтра по статусу — вся история (ACTIVE/
     COMPLETED/FAILED), для веб-дашборда (/tasks), которому нужно показывать
-    не только активные задачи."""
+    не только активные задачи. batch_id — последней колонкой (аддитивно,
+    существующие вызывающие по индексу 0-6 не ломаются)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id
         FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def get_tasks_for_ally(ally_code, guild_id: int = 1):
+    """Задачи одного игрока (все статусы) — для self-view в /задания отчёт."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status
+        FROM tasks WHERE guild_id = ? AND ally_code = ? ORDER BY task_id DESC
+    """, (guild_id, ally_code))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_task(task_id: int):
+    """Одна задача целиком (со всеми колонками, включая guild_id/batch_id) — для
+    проверки владения гильдией перед редактированием/удалением. None, если не найдена."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, guild_id, batch_id
+        FROM tasks WHERE task_id = ?
+    """, (task_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 
 def update_task_status(task_id, status):
@@ -1063,6 +1109,88 @@ def update_task_status(task_id, status):
     cursor.execute("UPDATE tasks SET status = ? WHERE task_id = ?", (status, task_id))
     conn.commit()
     conn.close()
+
+
+def update_task(task_id: int, base_id: str = None, target_type: str = None, target_value: str = None, deadline: str = None) -> None:
+    """Частичное обновление (только переданные поля) — для редактирования уже
+    поставленной задачи в вебе. Не трогает status/batch_id."""
+    updates = {}
+    if base_id is not None:
+        updates["base_id"] = base_id
+    if target_type is not None:
+        updates["target_type"] = target_type
+    if target_value is not None:
+        updates["target_value"] = target_value
+    if deadline is not None:
+        updates["deadline"] = deadline
+    if not updates:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    set_clause = ", ".join(f"{col} = ?" for col in updates)
+    cursor.execute(f"UPDATE tasks SET {set_clause} WHERE task_id = ?", (*updates.values(), task_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_task(task_id: int) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_tasks_by_batch(batch_id: str, guild_id: int) -> int:
+    """Отменяет разом всю группу задач, поставленных одним массовым действием.
+    Возвращает число удалённых строк."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tasks WHERE batch_id = ? AND guild_id = ?", (batch_id, guild_id))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return deleted
+
+
+def mark_task_reminder_sent(task_id: int) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tasks SET reminder_sent_at = datetime('now') WHERE task_id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_tasks_needing_reminder(guild_id: int, days_before: int):
+    """Активные задачи этой гильдии, чей дедлайн наступает в пределах days_before дней,
+    и по которым напоминание ещё не отправлялось — для tasks_reminder_loop."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline
+        FROM tasks
+        WHERE guild_id = ? AND status = 'ACTIVE' AND reminder_sent_at IS NULL
+          AND julianday(deadline) - julianday('now') <= ?
+    """, (guild_id, days_before))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_discord_id_for_ally(ally_code: str, guild_id: int = 1):
+    """Обратный резолв ally_code -> discord_id основной регистрации в этой гильдии
+    (/регистрация) — для личных уведомлений о завершении/провале/дедлайне задачи.
+    None, если игрок не регистрировался."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT discord_id FROM user_registration WHERE guild_id = ? AND ally_code = ? ORDER BY is_main DESC LIMIT 1",
+        (guild_id, ally_code),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
 
 # ================== Дни рождения ==================
 

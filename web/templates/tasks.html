@@ -1,33 +1,69 @@
 {% extends "base.html" %}
-{% block title %}Задачи — AC Droidec{% endblock %}
+{% block title %}Задания — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Задачи на прокачку</h1>
-    <p class="muted">Статус задачи (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница только создаёт задачи и показывает уже проставленный ботом статус, дедлайны сама не проверяет.</p>
+    <h1>Задания на прокачку</h1>
+    <p class="muted">Статус задания (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница создаёт, редактирует и удаляет задания, дедлайны и уведомления сама не проверяет (см. /настройки задания_канал в Discord).</p>
 
     {% if error %}
         <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if notice %}
+        <p class="badge badge-ok">✅ {{ notice }}</p>
     {% endif %}
     {% if synced %}
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
 
+    <div class="stats-grid">
+        <div class="stat-tile"><div class="stat-value">{{ counts.ACTIVE }}</div><div class="stat-label">В работе</div></div>
+        <div class="stat-tile status-danger"><div class="stat-value">{{ counts.FAILED }}</div><div class="stat-label">Провалено</div></div>
+        <div class="stat-tile"><div class="stat-value">{{ counts.COMPLETED }}</div><div class="stat-label">Выполнено</div></div>
+    </div>
+
+    {% if batch_list %}
+        <div class="panel">
+            <div class="panel-title"><span>Активные группы заданий</span><span class="panel-hint">{{ batch_list|length }}</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
+                    <tbody>
+                        {% for b in batch_list %}
+                            <tr>
+                                <td>{{ b.players|join(", ") }}</td>
+                                <td>{{ b.count }}</td>
+                                <td>
+                                    <form method="post" action="/tasks/batch/{{ b.batch_id }}/delete" onsubmit="return confirm('Отменить всю группу ({{ b.count }} заданий)?');">
+                                        <button type="submit" class="button-danger">Отменить группу</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
     <div class="panel" style="max-width: 32em;">
-        <div class="panel-title"><span>Новая задача</span></div>
-        <form method="post" action="/tasks/add">
+        <div class="panel-title"><span>Новая задача — один игрок</span></div>
+        {% if prefill.active %}
+            <p class="muted">Предзаполнено из отчёта по плейту.</p>
+        {% endif %}
+        <form method="post" action="/tasks/add" id="task-add-form">
             <label>
                 Игрок
-                <div class="unit-search" data-live-search data-url="/tasks/api/players" data-value-field="ally_code" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя игрока…" autocomplete="off" required>
-                    <input type="hidden" name="ally_code" class="unit-search-value" required>
+                <div class="unit-search" data-role="player-picker" data-live-search data-url="/tasks/api/players" data-value-field="ally_code" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя игрока…" autocomplete="off" required value="{{ prefill.ally_name }}">
+                    <input type="hidden" name="ally_code" class="unit-search-value" required value="{{ prefill.ally_code }}">
                     <div class="unit-search-results"></div>
                 </div>
             </label>
             <label>
                 Персонаж/корабль
-                <div class="unit-search" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required>
-                    <input type="hidden" name="base_id" class="unit-search-value" required>
+                <div class="unit-search" data-role="unit-picker" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required value="{{ prefill.unit_name }}">
+                    <input type="hidden" name="base_id" class="unit-search-value" required value="{{ prefill.unit }}">
                     <div class="unit-search-results"></div>
                 </div>
             </label>
@@ -35,13 +71,14 @@
                 Критерий прокачки
                 <select name="target_type" required>
                     {% for value, label in target_type_options %}
-                        <option value="{{ value }}">{{ label }}</option>
+                        <option value="{{ value }}" {% if value == prefill.type %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </label>
-            <label>
-                Целевое значение (например: 7 для звёзд, 5 для R5, 1 для омикрона)
-                <input type="text" name="target_value" required>
+            <label data-omicron-picker>
+                Целевое значение
+                <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)" value="{{ prefill.value }}">
+                <select name="target_value" class="target-value-select" style="display:none" disabled></select>
             </label>
             <label>
                 Срок выполнения, дней
@@ -49,6 +86,55 @@
             </label>
             <button type="submit">Поставить задачу</button>
         </form>
+    </div>
+
+    <div class="panel" style="max-width: 40em;">
+        <details>
+            <summary class="link-btn">Массовая постановка — несколько игроков сразу</summary>
+            <form method="post" action="/tasks/add-bulk" class="inline-form" id="task-add-bulk-form" style="flex-direction: column; align-items: stretch;">
+                <label>
+                    Игроки
+                    <input type="search" placeholder="Фильтр по имени…" data-table-search="bulk-player-table">
+                </label>
+                <div class="table-scroll" style="max-height: 16em;">
+                    <table class="data" id="bulk-player-table">
+                        <tbody>
+                            {% for code, name in roster %}
+                                <tr data-search="{{ name|lower }}">
+                                    <td><label class="checkbox-label"><input type="checkbox" name="ally_codes" value="{{ code }}"> {{ name }}</label></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <label>
+                    Персонаж/корабль
+                    <div class="unit-search" data-role="unit-picker" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Критерий прокачки
+                    <select name="target_type" required>
+                        {% for value, label in target_type_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label data-omicron-picker>
+                    Целевое значение
+                    <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)">
+                    <select name="target_value" class="target-value-select" style="display:none" disabled></select>
+                </label>
+                <label>
+                    Срок выполнения, дней
+                    <input type="number" name="days_to_complete" min="1" max="365" value="14" required>
+                </label>
+                <button type="submit">Поставить всем выбранным</button>
+            </form>
+        </details>
     </div>
 
     <div class="panel" style="max-width: 24em;">
@@ -63,46 +149,164 @@
         <div class="table-toolbar">
             <input type="search" placeholder="Поиск по игроку…" data-table-search="tasks-table">
             <span class="panel-hint">
-                {% if status_filter %}
-                    <a href="/tasks">Все статусы</a>
-                {% else %}
-                    Все статусы
-                {% endif %}
+                {% if status_filter %}<a href="/tasks?view={{ view }}">Все статусы</a>{% else %}Все статусы{% endif %}
                 ·
-                <a href="/tasks?status=ACTIVE">В работе</a>
+                <a href="/tasks?status=ACTIVE&view={{ view }}">В работе</a>
                 ·
-                <a href="/tasks?status=COMPLETED">Выполнено</a>
+                <a href="/tasks?status=COMPLETED&view={{ view }}">Выполнено</a>
                 ·
-                <a href="/tasks?status=FAILED">Провалено</a>
+                <a href="/tasks?status=FAILED&view={{ view }}">Провалено</a>
             </span>
         </div>
-        {% if not tasks %}
-            <p class="empty-state">Задач пока нет.</p>
-        {% else %}
-            <div class="table-scroll">
-                <table class="data" id="tasks-table">
-                    <thead>
-                        <tr>
-                            <th data-sort="text">Игрок</th>
-                            <th data-sort="text">Юнит</th>
-                            <th data-sort="text">Цель</th>
-                            <th data-sort="text">Дедлайн</th>
-                            <th data-sort="text">Статус</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for t in tasks %}
-                            <tr data-search="{{ t.player_name|lower }}">
-                                <td>{{ t.player_name }}</td>
-                                <td>{{ t.unit_name }}</td>
-                                <td>{{ t.target_label }} → {{ t.target_value }}</td>
-                                <td>{{ t.deadline }}</td>
-                                <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        <div class="segmented-toggle">
+            <div class="segmented-toggle-options">
+                {% if view == "players" %}<a href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% else %}<strong>Список</strong>{% endif %}
+                {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
             </div>
+        </div>
+
+        {% if view == "players" %}
+            {% if not players_view %}
+                <p class="empty-state">Активных или проваленных заданий нет — все чисто. 🎉</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Игрок</th><th>В работе / провалено</th><th>Задания</th></tr></thead>
+                        <tbody>
+                            {% for p in players_view %}
+                                <tr>
+                                    <td>{{ p.name }}</td>
+                                    <td>{{ p.tasks|selectattr("status", "equalto", "ACTIVE")|list|length }} / {{ p.tasks|selectattr("status", "equalto", "FAILED")|list|length }}</td>
+                                    <td>
+                                        {% for t in p.tasks %}
+                                            <span class="badge {{ t.status_badge }}">{{ t.unit_name }} — {{ t.target_label }}</span>
+                                        {% endfor %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        {% else %}
+            {% if not tasks %}
+                <p class="empty-state">Задач пока нет.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data" id="tasks-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="text">Игрок</th>
+                                <th data-sort="text">Юнит</th>
+                                <th data-sort="text">Цель</th>
+                                <th data-sort="text">Дедлайн</th>
+                                <th data-sort="text">Статус</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tasks %}
+                                <tr data-search="{{ t.player_name|lower }}">
+                                    <td>{{ t.player_name }}</td>
+                                    <td>{{ t.unit_name }}</td>
+                                    <td>{{ t.target_label }}</td>
+                                    <td>{{ t.deadline }}</td>
+                                    <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                                    <td class="row-actions">
+                                        <details>
+                                            <summary class="link-btn">править</summary>
+                                            <form method="post" action="/tasks/{{ t.task_id }}/edit" class="inline-form">
+                                                {% if t.target_type == "omicron" %}
+                                                    <select name="target_value">
+                                                        {% for opt in omicron_options_by_unit.get(t.base_id, []) %}
+                                                            <option value="{{ opt.skill_id }}" {% if opt.skill_id == t.target_value %}selected{% endif %}>{{ opt.label }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                {% else %}
+                                                    <input type="text" name="target_value" value="{{ t.target_value }}" style="width: 4em;">
+                                                {% endif %}
+                                                <input type="date" name="deadline" value="{{ t.deadline }}">
+                                                <button type="submit">Сохранить</button>
+                                            </form>
+                                        </details>
+                                        <form method="post" action="/tasks/{{ t.task_id }}/delete" onsubmit="return confirm('Удалить задание «{{ t.unit_name }}» для {{ t.player_name }}?');">
+                                            <button type="submit" class="button-danger">Удалить</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
         {% endif %}
     </div>
+
+    <script>
+document.addEventListener("DOMContentLoaded", () => {
+    // Переключение "Целевое значение" между свободным текстом (звёзды/реликвия) и
+    // выпадающим списком омикронов конкретного выбранного юнита (см. /tasks/api/omicron-skills)
+    // — общая логика для формы точечной и массовой постановки на этой странице.
+    document.querySelectorAll("[data-omicron-picker]").forEach((wrap) => {
+        const form = wrap.closest("form");
+        const typeSelect = form.querySelector('select[name="target_type"]');
+        const unitWrap = form.querySelector('[data-role="unit-picker"]');
+        const unitHidden = unitWrap ? unitWrap.querySelector(".unit-search-value") : null;
+        const textInput = wrap.querySelector(".target-value-text");
+        const selectInput = wrap.querySelector(".target-value-select");
+        if (!typeSelect || !textInput || !selectInput) return;
+
+        const fillSelect = (options) => {
+            selectInput.innerHTML = "";
+            if (options.length === 0) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "— у юнита нет омикрона —";
+                selectInput.appendChild(opt);
+                return;
+            }
+            options.forEach((item) => {
+                const opt = document.createElement("option");
+                opt.value = item.skill_id;
+                opt.textContent = item.label;
+                selectInput.appendChild(opt);
+            });
+        };
+
+        const refresh = async () => {
+            if (typeSelect.value === "omicron") {
+                textInput.style.display = "none";
+                textInput.disabled = true;
+                textInput.required = false;
+                selectInput.style.display = "";
+                selectInput.disabled = false;
+                selectInput.required = true;
+                const baseId = unitHidden ? unitHidden.value : "";
+                if (!baseId) {
+                    selectInput.innerHTML = '<option value="">— сначала выберите юнита —</option>';
+                    return;
+                }
+                try {
+                    const resp = await fetch(`/tasks/api/omicron-skills?base_id=${encodeURIComponent(baseId)}`);
+                    fillSelect(resp.ok ? await resp.json() : []);
+                } catch {
+                    selectInput.innerHTML = '<option value="">— ошибка загрузки —</option>';
+                }
+            } else {
+                selectInput.style.display = "none";
+                selectInput.disabled = true;
+                selectInput.required = false;
+                textInput.style.display = "";
+                textInput.disabled = false;
+                textInput.required = true;
+            }
+        };
+
+        typeSelect.addEventListener("change", refresh);
+        if (unitHidden) unitHidden.addEventListener("change", refresh);
+        refresh();
+    });
+});
+</script>
 {% endblock %}
+
