@@ -1027,7 +1027,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
-        учитывать_релик: bool = commands.Param(default=True, description="При гильдийской проверке: True — как есть сейчас (низкий релик валит статы), False — прогноз на релик плейта"),
+        учитывать_релик: bool = commands.Param(default=True, description="Гильдия: True — как сейчас (низкий релик валит статы), False — прогноз на релик плейта"),
     ):
         await inter.response.defer()
 
