@@ -47,6 +47,11 @@
                     <input type="checkbox" name="force_refresh" value="1" {% if force_refresh %}checked{% endif %}>
                     Обновить статы игрока с сервера (медленнее, но актуально прямо сейчас)
                 </label>
+
+                <label class="checkbox-label">
+                    <input type="checkbox" name="ignore_relic" value="1" {% if ignore_relic %}checked{% endif %}>
+                    Игнорировать нехватку реликвии (только при проверке всей гильдии) — считать по прогнозу на релик плейта, а не по факту
+                </label>
             {% endif %}
 
             {% if selected_plate %}
@@ -76,6 +81,9 @@
         {% if guild_report.error %}
             <p class="error">{{ guild_report.error }}</p>
         {% else %}
+            {% if ignore_relic %}
+                <p class="muted">⚠️ Без учёта нехватки реликвии — прогноз на релик плейта, требование к самой реликвии в подсчёт не входит.</p>
+            {% endif %}
             <div class="stats-grid">
                 <div class="stat-tile"><div class="stat-value">{{ guild_report.total_players }}</div><div class="stat-label">Проверено</div></div>
                 <div class="stat-tile status-danger"><div class="stat-value">{{ guild_report.problem|length }}</div><div class="stat-label">Есть проблемы</div></div>

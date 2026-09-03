@@ -41,6 +41,7 @@ async def stats_check_form(
     character: str = "",
     force_refresh: bool = False,
     action: str = "",
+    ignore_relic: bool = False,
     user: dict = Depends(require_officer_access),
 ):
     guild_id = user["guild_id"]
@@ -55,6 +56,7 @@ async def stats_check_form(
         "selected_ally_code": ally_code,
         "selected_character": character,
         "force_refresh": force_refresh,
+        "ignore_relic": ignore_relic,
         "characters": [],
         "results": None,
         "guild_report": None,
@@ -86,7 +88,9 @@ async def stats_check_form(
     target_ally_code = ally_code.strip()
     if not target_ally_code:
         # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
-        context["guild_report"] = await stat_forecast.build_guild_report(comlink, stat_calc, plate, target_chars, guild_id=guild_id)
+        context["guild_report"] = await stat_forecast.build_guild_report(
+            comlink, stat_calc, plate, target_chars, guild_id=guild_id, account_for_relic=not ignore_relic,
+        )
         return templates.TemplateResponse(request, "stats_check.html", context)
 
     player_label = next((name for code, name in roster if code == target_ally_code), target_ally_code)
@@ -97,7 +101,7 @@ async def stats_check_form(
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at = outcome
+        char_name, block, matched, total, updated_at, _matched_rf, _total_rf = outcome
         results.append({
             "char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at,
         })

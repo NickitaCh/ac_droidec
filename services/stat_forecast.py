@@ -63,8 +63,9 @@ async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: 
     return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id)
 
 
-async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1) -> dict:
+async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, account_for_relic: bool = True) -> dict:
     """Обёртка над cogs.stat_requirements._build_guild_report — см. её докстринг для формата
-    результата ({"error", "total_players", "compliant", "problem", "no_data"})."""
+    результата ({"error", "total_players", "compliant", "problem", "no_data"}) и параметра
+    account_for_relic."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id)
+    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, account_for_relic=account_for_relic)

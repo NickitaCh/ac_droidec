@@ -218,8 +218,15 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
 
 
 async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1):
-    """Возвращает (char_name, block, matched, total, updated_at) для одного персонажа плейта
-    у конкретного игрока — статы берутся из его реальных модов/шмота, прогноз на релик плейта.
+    """Возвращает (char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free)
+    для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
+    прогноз на релик плейта. matched/total — соответствие СЕЙЧАС (при текущем релике игрока, как
+    видно в колонке "Сейчас"); matched_relic_free/total_relic_free — соответствие БЕЗ УЧЁТА нехватки
+    реликвии (при показанном прогнозе — как в колонке "Релик N", т.е. прошёл бы билд/моды норму,
+    если бы релик уже был нужного уровня; строка Relic из этого счёта исключена — сравнивать
+    "реликвию с самой собой" бессмысленно). Используется гильдийским отчётом (_build_guild_report)
+    для переключателя "учитывать реликвию" — сама детальная таблица блока не меняется, там и так
+    видны обе колонки одновременно.
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
     loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
@@ -227,11 +234,13 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     rows, char_name, required_relic, comments, legend = loaded
     matched = 0
     total = 0
+    matched_relic_free = 0
+    total_relic_free = 0
 
     unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
     if not unit:
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
-        return char_name, block, 0, 0, None
+        return char_name, block, 0, 0, None, 0, 0
 
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
@@ -276,6 +285,16 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             matched += 1
         cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
 
+        # relic-free счёт: для Relic — пропускаем строку целиком (сравнивать реликвию саму
+        # с собой на прогнозе бессмысленно); для остальных статов — берём прогнозное значение
+        # на целевой релик, если есть прогноз, иначе (игрок уже на нужном релике) то же cur_val.
+        if stat_name != "Relic":
+            relic_free_val = (projected_values.get(stat_name) if projected_values else None) if show_projection else cur_val
+            if relic_free_val is not None:
+                total_relic_free += 1
+                if _compare(relic_free_val, operator, threshold):
+                    matched_relic_free += 1
+
         if not show_projection:
             table_rows.append([label, cur_cell, req_cell])
             continue
@@ -301,15 +320,21 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total, updated_at
+    return char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free
 
 
-async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1) -> dict:
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, account_for_relic: bool = True) -> dict:
     """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
     ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
     персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
     без обращений к Comlink — то же самое, что видит /статы без "обновить"). Раскладывает
-    игроков на три бакета для рендера и в Discord, и в вебе."""
+    игроков на три бакета для рендера и в Discord, и в вебе.
+
+    account_for_relic (по умолчанию True — прежнее поведение без изменений): считать
+    соответствие по РЕАЛЬНЫМ текущим статам игрока (низкий релик естественно валит многие
+    строки). False — игнорировать нехватку реликвии: считать по прогнозу на релик плейта
+    (билд/моды уже готовы, реликвию просто ещё не подняли) — сама реликвия как требование
+    из подсчёта в этом режиме исключается (см. _evaluate_character_player)."""
     roster = database.get_all_user_mappings(guild_id)
     if not roster:
         return {
@@ -336,7 +361,8 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
             result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id)
             if result is None:
                 continue
-            char_name, _block, matched, total, _updated_at = result
+            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf = result
+            matched, total = (matched_cur, total_cur) if account_for_relic else (matched_rf, total_rf)
             matched_total += matched
             rows_total += total
             if total > 0 and matched < total:
@@ -1001,6 +1027,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
+        учитывать_релик: bool = commands.Param(default=True, description="При гильдийской проверке: True — как есть сейчас (низкий релик валит статы), False — прогноз на релик плейта"),
     ):
         await inter.response.defer()
 
@@ -1022,12 +1049,14 @@ class StatRequirementsCog(commands.Cog):
                 await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
                 return
 
-            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id)
+            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, account_for_relic=учитывать_релик)
             if report["error"]:
                 await inter.edit_original_response(f"❌ {report['error']}")
                 return
 
             lines = [f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
+            if not учитывать_релик:
+                lines.append("_(без учёта нехватки реликвии — прогноз на релик плейта)_")
             if report["no_data"]:
                 lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
             lines.append("")
@@ -1075,7 +1104,7 @@ class StatRequirementsCog(commands.Cog):
             result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id)
             if result is None:
                 continue
-            char_name, block, matched, total, updated_at = result
+            char_name, block, matched, total, updated_at, _matched_rf, _total_rf = result
             any_char_shown = True
             lines.append(f"## {char_name}")
             lines.append(block)
