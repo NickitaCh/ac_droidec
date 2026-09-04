@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import os
@@ -1674,6 +1675,39 @@ def set_bot_state(key: str, value: str, guild_id: int = 1):
     """, (guild_id, key, value))
     conn.commit()
     conn.close()
+
+
+# =====================================================================
+# УЧЁТ РАСХОДА MISTRAL (для /фарм, /тб_ордер_из_картинки — см. services/mistral_vision.py)
+# =====================================================================
+def _mistral_usage_key() -> str:
+    # Бот-вайд (не per-guild), но bot_state сам по себе per-guild — используем
+    # guild_id=1 как единственный "глобальный" бакет, тот же приём, что и для
+    # остального бот-вайд состояния в этой таблице (get_bot_state/set_bot_state
+    # по умолчанию уже guild_id=1).
+    year_month = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
+    return f"mistral_usage_{year_month}"
+
+
+def record_mistral_usage(prompt_tokens: int, completion_tokens: int):
+    """Копит input/output токены за текущий календарный месяц (UTC) в bot_state как
+    JSON — не отдельная таблица ради двух чисел. Не атомарно (read-then-write через
+    get_bot_state/set_bot_state), но при редких vision-вызовах этого бота (не десятки
+    в секунду) риск потерять инкремент из гонки пренебрежимо мал."""
+    key = _mistral_usage_key()
+    raw = get_bot_state(key)
+    current = json.loads(raw) if raw else {"input": 0, "output": 0}
+    current["input"] += int(prompt_tokens or 0)
+    current["output"] += int(completion_tokens or 0)
+    set_bot_state(key, json.dumps(current))
+
+
+def get_mistral_usage_this_month() -> tuple[int, int]:
+    raw = get_bot_state(_mistral_usage_key())
+    if not raw:
+        return (0, 0)
+    data = json.loads(raw)
+    return (data.get("input", 0), data.get("output", 0))
 
 
 # =====================================================================

@@ -30,6 +30,17 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # /тб_ордер_из_картинки, бот не падает.
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
+# Free-тариф Mistral даёт $10/мес включённого API-кредита (проверено вживую в консоли
+# console.mistral.ai — Subscription/Billing, 2026-09-04), официального usage/billing API
+# на этом тарифе нет (их Admin API требует Enterprise Backoffice — проверено вживую,
+# backoffice.mistral.ai на Free-аккаунте редиректит в обычную консоль). Поэтому расход
+# считаем сами по токенам из каждого vision-ответа (services/mistral_vision.py::
+# call_vision_json -> database.record_mistral_usage) и сравниваем со порогом здесь —
+# это оценка, не официальный биллинг, может немного разойтись, если ключ когда-нибудь
+# станет использоваться ещё где-то помимо /тб_ордер_из_картинки и /фарм.
+MISTRAL_MONTHLY_BUDGET_USD = 10.0
+MISTRAL_BUDGET_WARNING_RATIO = 0.9
+
 # Ключ для Groq API — не используется: их API целиком (не только vision) блокирует
 # запросы с датацентр-IP этого VPS (проверено 2026-08-24 изнутри контейнера,
 # GET /models -> 403 "Access denied. Please check your network settings.",
@@ -165,6 +176,8 @@ class GuildManagerBot(commands.Bot):
 
         self.google_api_key = GOOGLE_API_KEY
         self.mistral_api_key = MISTRAL_API_KEY
+        self.mistral_monthly_budget_usd = MISTRAL_MONTHLY_BUDGET_USD
+        self.mistral_budget_warning_ratio = MISTRAL_BUDGET_WARNING_RATIO
         self.groq_api_key = GROQ_API_KEY
 
 bot = GuildManagerBot()

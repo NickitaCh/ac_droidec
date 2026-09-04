@@ -57,7 +57,6 @@ Dark=🔴, Mixed=🟡 (жёлтый, не оранжевый), Light=🔵, Bonus
 """
 
 import asyncio
-import json
 import re
 
 import disnake
@@ -68,6 +67,7 @@ import guild_resolver
 import tb_platoon_autofill
 from cogs.guild_events import TB_PLAN_HEADER_RE
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
+from services.mistral_vision import budget_used_ratio, call_vision_json
 
 ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
 
@@ -166,38 +166,6 @@ def _overall_contribution(zone: str, stars: int) -> int:
     return max(0, stars)
 
 
-def _parse_strategy_summary_sync(image_bytes: bytes, mime_type: str, api_key: str) -> dict:
-    import base64
-
-    import requests
-
-    b64 = base64.b64encode(image_bytes).decode()
-    response = requests.post(
-        "https://api.mistral.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": "mistral-medium-latest",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": PROMPT},
-                        {"type": "image_url", "image_url": f"data:{mime_type};base64,{b64}"},
-                    ],
-                }
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    text = response.json()["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
-    return json.loads(text)
-
-
 def _build_order_blocks(data: dict):
     """Возвращает (список из 6 текстов этапов, сумма звёзд в общий зачёт)."""
     rounds = data.get("rounds") or []
@@ -289,6 +257,17 @@ class TBOrderImage(commands.Cog):
             )
             return
 
+        # Общий с /фарм месячный бюджет Mistral (см. services/mistral_vision.py) — проверяем
+        # ДО вызова API, чтобы не тратить последние токены на распознавание, которое всё равно
+        # не пригодится, если лимит и так почти исчерпан.
+        if budget_used_ratio(self.bot.mistral_monthly_budget_usd) >= self.bot.mistral_budget_warning_ratio:
+            await inter.response.send_message(
+                "⏳ Команда временно недоступна — почти исчерпан месячный лимит на распознавание "
+                "картинок (Mistral, ~90%). Лимит сбрасывается в начале следующего месяца.",
+                ephemeral=True,
+            )
+            return
+
         await inter.response.defer(ephemeral=True)
 
         channel_id = extract_channel_id(ссылка)
@@ -335,7 +314,7 @@ class TBOrderImage(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                _parse_strategy_summary_sync, image_bytes, mime_type, self.bot.mistral_api_key
+                call_vision_json, image_bytes, mime_type, self.bot.mistral_api_key, PROMPT
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")
