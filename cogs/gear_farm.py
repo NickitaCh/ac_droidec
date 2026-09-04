@@ -1,7 +1,7 @@
 """/фарм — по прямой ссылке на сообщение C3PO (`inventory unit`) распознаёт картинку со
-списком недостающих деталей снаряжения/релик-материалов через Mistral vision (тот же
-MISTRAL_API_KEY/mistral-medium-latest, что и cogs/tb_order_image.py) и подсказывает, на каких
-битвах их фармить.
+списком недостающих деталей снаряжения/релик-материалов через OpenRouter vision (тот же
+OPENROUTER_API_KEY, что и cogs/tb_order_image.py — см. services/openrouter_vision.py за тем,
+почему не Mistral) и подсказывает, на каких битвах их фармить.
 
 Почему через ИИ, хотя сам список "чего не хватает" мы честно посчитать не можем: C3PO вычитает
 из общего количества то, что уже лежит у игрока на складе (доступ к аккаунту через что-то вроде
@@ -20,7 +20,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 from services.message_image import extract_channel_id, extract_message_id, guess_mime_type, is_image_attachment
-from services.mistral_vision import budget_used_ratio, call_vision_json
+from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
 
 PROMPT = """На картинке — список недостающих деталей снаряжения/релик-материалов персонажа
 (бот C3PO, команда inventory unit, Star Wars: Galaxy of Heroes). Обычно два раздела:
@@ -78,20 +78,20 @@ class GearFarm(commands.Cog):
             description="Прямая ссылка на сообщение C3PO (inventory unit) с картинкой недостающих деталей"
         ),
     ):
-        if not self.bot.mistral_api_key:
+        if not self.bot.openrouter_api_key:
             await inter.response.send_message(
-                "❌ MISTRAL_API_KEY не настроен на сервере — обратитесь к администратору бота.",
+                "❌ OPENROUTER_API_KEY не настроен на сервере — обратитесь к администратору бота.",
                 ephemeral=True,
             )
             return
 
-        # Общий с /тб_ордер_из_картинки месячный бюджет Mistral (см. services/mistral_vision.py) —
-        # проверяем ДО вызова API, чтобы не расходовать последние токены на запрос, который
-        # всё равно не пригодится, если лимит и так почти исчерпан.
-        if budget_used_ratio(self.bot.mistral_monthly_budget_usd) >= self.bot.mistral_budget_warning_ratio:
+        # Общий с /тб_ордер_из_картинки дневной лимит OpenRouter (см.
+        # services/openrouter_vision.py) — проверяем ДО вызова API, чтобы не тратить
+        # последний запрос из дневной квоты впустую, если лимит и так почти исчерпан.
+        if daily_used_ratio(OPENROUTER_DAILY_REQUEST_LIMIT) >= self.bot.openrouter_daily_warning_ratio:
             await inter.response.send_message(
-                "⏳ Команда временно недоступна — почти исчерпан месячный лимит на распознавание "
-                "картинок (Mistral, ~90%). Лимит сбрасывается в начале следующего месяца.",
+                "⏳ Команда временно недоступна — почти исчерпан дневной лимит на распознавание "
+                "картинок (~90%). Лимит сбрасывается в начале следующих суток (UTC).",
                 ephemeral=True,
             )
             return
@@ -127,7 +127,7 @@ class GearFarm(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                call_vision_json, image_bytes, mime_type, self.bot.mistral_api_key, PROMPT
+                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")

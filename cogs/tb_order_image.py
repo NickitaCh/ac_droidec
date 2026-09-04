@@ -67,7 +67,7 @@ import guild_resolver
 import tb_platoon_autofill
 from cogs.guild_events import TB_PLAN_HEADER_RE
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
-from services.mistral_vision import budget_used_ratio, call_vision_json
+from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
 
 ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
 
@@ -250,20 +250,20 @@ class TBOrderImage(commands.Cog):
             description="Опубликовать заново, даже если ордер для этих этапов уже есть в треде (будут дубли)",
         ),
     ):
-        if not self.bot.mistral_api_key:
+        if not self.bot.openrouter_api_key:
             await inter.response.send_message(
-                "❌ MISTRAL_API_KEY не настроен на сервере — обратитесь к администратору бота.",
+                "❌ OPENROUTER_API_KEY не настроен на сервере — обратитесь к администратору бота.",
                 ephemeral=True,
             )
             return
 
-        # Общий с /фарм месячный бюджет Mistral (см. services/mistral_vision.py) — проверяем
-        # ДО вызова API, чтобы не тратить последние токены на распознавание, которое всё равно
-        # не пригодится, если лимит и так почти исчерпан.
-        if budget_used_ratio(self.bot.mistral_monthly_budget_usd) >= self.bot.mistral_budget_warning_ratio:
+        # Общий с /фарм дневной лимит OpenRouter (см. services/openrouter_vision.py) —
+        # проверяем ДО вызова API, чтобы не тратить последний запрос из дневной квоты
+        # впустую, если лимит и так почти исчерпан.
+        if daily_used_ratio(OPENROUTER_DAILY_REQUEST_LIMIT) >= self.bot.openrouter_daily_warning_ratio:
             await inter.response.send_message(
-                "⏳ Команда временно недоступна — почти исчерпан месячный лимит на распознавание "
-                "картинок (Mistral, ~90%). Лимит сбрасывается в начале следующего месяца.",
+                "⏳ Команда временно недоступна — почти исчерпан дневной лимит на распознавание "
+                "картинок (~90%). Лимит сбрасывается в начале следующих суток (UTC).",
                 ephemeral=True,
             )
             return
@@ -314,7 +314,7 @@ class TBOrderImage(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                call_vision_json, image_bytes, mime_type, self.bot.mistral_api_key, PROMPT
+                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")

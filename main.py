@@ -41,6 +41,17 @@ MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 MISTRAL_MONTHLY_BUDGET_USD = 10.0
 MISTRAL_BUDGET_WARNING_RATIO = 0.9
 
+# Ключ для OpenRouter API (services/openrouter_vision.py) — АКТУАЛЬНЫЙ провайдер для
+# /фарм и /тб_ордер_из_картинки с 2026-09-04, заменил Mistral (см. комментарий выше —
+# Mistral Free с этой даты требует включённого Pay-As-You-Go, которого нет; MISTRAL_API_KEY
+# и весь код вокруг него оставлены нетронутыми на случай, если это включат позже).
+# Бесплатно, без привязки карты — проверено вживую с этого VPS перед переключением
+# (OpenRouter не блокирует IP датацентра, в отличие от Gemini/Groq). Лимит без покупки
+# кредитов: 20 запросов/мин, 50/сутки (их документация) — считаем по суткам, см.
+# database.record_openrouter_request/get_openrouter_requests_today.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_DAILY_BUDGET_WARNING_RATIO = 0.9
+
 # Ключ для Groq API — не используется: их API целиком (не только vision) блокирует
 # запросы с датацентр-IP этого VPS (проверено 2026-08-24 изнутри контейнера,
 # GET /models -> 403 "Access denied. Please check your network settings.",
@@ -178,6 +189,8 @@ class GuildManagerBot(commands.Bot):
         self.mistral_api_key = MISTRAL_API_KEY
         self.mistral_monthly_budget_usd = MISTRAL_MONTHLY_BUDGET_USD
         self.mistral_budget_warning_ratio = MISTRAL_BUDGET_WARNING_RATIO
+        self.openrouter_api_key = OPENROUTER_API_KEY
+        self.openrouter_daily_warning_ratio = OPENROUTER_DAILY_BUDGET_WARNING_RATIO
         self.groq_api_key = GROQ_API_KEY
 
 bot = GuildManagerBot()

@@ -1711,6 +1711,27 @@ def get_mistral_usage_this_month() -> tuple[int, int]:
 
 
 # =====================================================================
+# УЧЁТ ЗАПРОСОВ OPENROUTER (для /фарм, /тб_ордер_из_картинки — см.
+# services/openrouter_vision.py) — у OpenRouter free-тир ограничен не деньгами, а
+# числом запросов В СУТКИ (не в месяц, как у Mistral), поэтому отдельный счётчик,
+# ключ по дню (UTC), не по месяцу.
+# =====================================================================
+def _openrouter_usage_key() -> str:
+    day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    return f"openrouter_requests_{day}"
+
+
+def record_openrouter_request():
+    key = _openrouter_usage_key()
+    current = int(get_bot_state(key) or 0)
+    set_bot_state(key, str(current + 1))
+
+
+def get_openrouter_requests_today() -> int:
+    return int(get_bot_state(_openrouter_usage_key()) or 0)
+
+
+# =====================================================================
 # ИСТОРИЯ ТБ (последние N событий, для команд compare / player_compare)
 # =====================================================================
 TB_HISTORY_KEEP = 10  # было 6 — увеличено, чтобы график ТБ на дашборде вмещал больше истории
