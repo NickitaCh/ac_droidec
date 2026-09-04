@@ -218,7 +218,7 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
 
 
 async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1):
-    """Возвращает (char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free)
+    """Возвращает (char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free, failed_required)
     для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
     прогноз на релик плейта. matched/total — соответствие СЕЙЧАС (при текущем релике игрока, как
     видно в колонке "Сейчас"); matched_relic_free/total_relic_free — соответствие БЕЗ УЧЁТА нехватки
@@ -226,7 +226,11 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     если бы релик уже был нужного уровня; строка Relic из этого счёта исключена — сравнивать
     "реликвию с самой собой" бессмысленно). Используется гильдийским отчётом (_build_guild_report)
     для переключателя "учитывать реликвию" — сама детальная таблица блока не меняется, там и так
-    видны обе колонки одновременно.
+    видны обе колонки одновременно. failed_required — список обязательных (priority=="required")
+    строк, не прошедших норму, ПЕРЕСЧИТАННУЮ на текущий релик игрока (то же "ok", что и в колонке
+    "Нужно" — т.е. билд/моды сравниваются с нормой, скорректированной под фактический релик,
+    а не в лоб с порогом плейта, который был задан для другого релика); используется для итогового
+    блока в /статы, чтобы низкий релик сам по себе не превращал приемлемый билд в "не пройдено".
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
     loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
@@ -236,11 +240,12 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     total = 0
     matched_relic_free = 0
     total_relic_free = 0
+    failed_required = []
 
     unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
     if not unit:
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
-        return char_name, block, 0, 0, None, 0, 0
+        return char_name, block, 0, 0, None, 0, 0, []
 
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
@@ -295,32 +300,46 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 if _compare(relic_free_val, operator, threshold):
                     matched_relic_free += 1
 
+        # adjusted_ok/adjusted_req_text — норма, пересчитанная под ФАКТИЧЕСКИЙ релик игрока
+        # (та же величина, что показана в колонке "Нужно"), а не порог плейта в лоб. Для
+        # строки Relic и для случаев без прогноза пересчитывать нечего — сравниваем как есть.
+        adjusted_ok = cur_ok
+        adjusted_req_text = req_cell
+
         if not show_projection:
             table_rows.append([label, cur_cell, req_cell])
-            continue
+        else:
+            needed_cell = "—"
+            proj_cell = "—"
+            if stat_name != "Relic":
+                proj_val = projected_values.get(stat_name) if projected_values else None
+                if proj_val is not None:
+                    proj_ok = _compare(proj_val, operator, threshold)
+                    proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
+                    # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
+                    # при тех же модах/шмоте, не зависит от текущего значения (см. план фичи).
+                    # needed = порог минус этот рост = сколько нужно ИМЕННО СЕЙЧАС, чтобы после
+                    # апа реликвии стат дотянул до нормы плейта.
+                    delta = proj_val - cur_val
+                    needed_now = threshold - delta
+                    needed_ok = _compare(cur_val, operator, needed_now)
+                    needed_cell = f"{_fmt_compact(needed_now)} {'✅' if needed_ok else '❌'}"
+                    adjusted_ok = needed_ok
+                    adjusted_req_text = f"{operator} {_fmt_compact(needed_now)}"
+            table_rows.append([label, cur_cell, needed_cell, proj_cell, req_cell])
 
-        needed_cell = "—"
-        proj_cell = "—"
-        if stat_name != "Relic":
-            proj_val = projected_values.get(stat_name) if projected_values else None
-            if proj_val is not None:
-                proj_ok = _compare(proj_val, operator, threshold)
-                proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
-                # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
-                # при тех же модах/шмоте, не зависит от текущего значения (см. план фичи).
-                # needed = порог минус этот рост = сколько нужно ИМЕННО СЕЙЧАС, чтобы после
-                # апа реликвии стат дотянул до нормы плейта.
-                delta = proj_val - cur_val
-                needed_now = threshold - delta
-                needed_ok = _compare(cur_val, operator, needed_now)
-                needed_cell = f"{_fmt_compact(needed_now)} {'✅' if needed_ok else '❌'}"
-        table_rows.append([label, cur_cell, needed_cell, proj_cell, req_cell])
+        if priority == PRIORITY_REQUIRED and not adjusted_ok:
+            failed_required.append({
+                "stat": label,
+                "current": _fmt_compact(cur_val),
+                "requirement": adjusted_req_text,
+            })
 
     block = caption + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free
+    return char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free, failed_required
 
 
 async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, account_for_relic: bool = True) -> dict:
@@ -361,7 +380,7 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
             result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id)
             if result is None:
                 continue
-            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf = result
+            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf, _failed_required = result
             matched, total = (matched_cur, total_cur) if account_for_relic else (matched_rf, total_rf)
             matched_total += matched
             rows_total += total
@@ -1100,11 +1119,12 @@ class StatRequirementsCog(commands.Cog):
         rows_total = 0
         updated_ats = []
         any_char_shown = False
+        failed_required_by_char = []
         for base_id in char_keys:
             result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id)
             if result is None:
                 continue
-            char_name, block, matched, total, updated_at, _matched_rf, _total_rf = result
+            char_name, block, matched, total, updated_at, _matched_rf, _total_rf, failed_required = result
             any_char_shown = True
             lines.append(f"## {char_name}")
             lines.append(block)
@@ -1112,10 +1132,24 @@ class StatRequirementsCog(commands.Cog):
             rows_total += total
             if updated_at:
                 updated_ats.append(updated_at)
+            if failed_required:
+                failed_required_by_char.append((char_name, failed_required))
 
         if not any_char_shown:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
+
+        # Итоговый блок внизу отчёта: только ОБЯЗАТЕЛЬНЫЕ статы, не прошедшие норму, где норма
+        # пересчитана под фактический релик игрока (см. failed_required в
+        # _evaluate_character_player) — низкий релик сам по себе не топит билд в этом счёте,
+        # только реально плохие моды/шмот.
+        lines.append("## ⚠️ Итог: обязательные статы (с пересчётом на текущий релик)")
+        if failed_required_by_char:
+            for char_name, failed_items in failed_required_by_char:
+                for item in failed_items:
+                    lines.append(f"❌ **{char_name}** — {item['stat']}: сейчас {item['current']}, нужно {item['requirement']}")
+        else:
+            lines.append("✅ Все обязательные статы в норме.")
 
         if rows_total and matched_total == rows_total:
             color = DATACRON_CHECK_COLOR_FULL

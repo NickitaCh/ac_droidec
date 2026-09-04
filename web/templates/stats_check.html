@@ -76,6 +76,29 @@
                     <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
                 </div>
             {% endfor %}
+
+            <div class="panel">
+                <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
+                {% if not failed_required %}
+                    <p class="empty-state">✅ Все обязательные статы в норме.</p>
+                {% else %}
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead><tr><th>Персонаж</th><th>Стат</th><th>Сейчас</th><th>Нужно</th></tr></thead>
+                            <tbody>
+                                {% for item in failed_required %}
+                                    <tr>
+                                        <td>{{ item.char_name }}</td>
+                                        <td>{{ item.stat }}</td>
+                                        <td>{{ item.current }}</td>
+                                        <td>{{ item.requirement }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
         {% endif %}
     {% elif guild_report is not none %}
         {% if guild_report.error %}

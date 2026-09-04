@@ -95,18 +95,22 @@ async def stats_check_form(
 
     player_label = next((name for code, name in roster if code == target_ally_code), target_ally_code)
     results = []
+    failed_required = []
     for base_id in target_chars:
         outcome = await stat_forecast.evaluate_character_player(
             comlink, stat_calc, plate, base_id, target_ally_code, force_refresh, player_label, guild_id=guild_id,
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at, _matched_rf, _total_rf = outcome
+        char_name, block, matched, total, updated_at, _matched_rf, _total_rf, char_failed_required = outcome
         results.append({
             "char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at,
         })
+        for item in char_failed_required:
+            failed_required.append({"char_name": char_name, **item})
     context["results"] = results
     context["player_label"] = player_label
+    context["failed_required"] = failed_required
     return templates.TemplateResponse(request, "stats_check.html", context)
 
 

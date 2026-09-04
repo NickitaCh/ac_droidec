@@ -50,8 +50,9 @@ async def evaluate_character_player(
     comlink, stat_calc, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1
 ):
     """Обёртка над cogs.stat_requirements._evaluate_character_player — см. её докстринг
-    для формата результата: (char_name, block, matched, total, updated_at) либо None,
-    если для этого персонажа нет сохранённых требований в плейте."""
+    для формата результата (char_name, block, matched, total, updated_at, matched_relic_free,
+    total_relic_free, failed_required) либо None, если для этого персонажа нет сохранённых
+    требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
     return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id)
 
