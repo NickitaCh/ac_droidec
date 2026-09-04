@@ -22,6 +22,7 @@ Pay-As-You-Go (проверено вживую, x-ratelimit-limit-req-minute: 0 
 
 import json
 import re
+import time
 
 import requests
 
@@ -30,30 +31,56 @@ import database
 OPENROUTER_VISION_MODEL = "minimax/minimax-m3:free"
 OPENROUTER_DAILY_REQUEST_LIMIT = 50
 
+# Повтор при 429 — подтверждено вживую 2026-09-04: реальный запрос от пользователя словил
+# 429, но диагностический перезапрос буквально через минуту (тем же ключом/моделью, и без
+# картинки, и с ней) прошёл 200 без изменений с нашей стороны — это разовая перегрузка
+# бесплатного shared-пула провайдера (в тот раз ответ пришёл через 'GMICloud'), не наш
+# суточный лимит (счётчик в БД был всего 2 из 50). OpenRouter не всегда шлёт Retry-After на
+# 429 — если есть, используем его (с потолком, чтобы не морозить ephemeral-ответ надолго),
+# если нет — фиксированный бэкофф.
+_RETRY_BACKOFF_SECONDS = [2, 5]  # пауза перед 2-й и 3-й попыткой (итого до 3 попыток)
+_RETRY_AFTER_CAP_SECONDS = 10
+
 
 def call_vision_json(image_bytes: bytes, mime_type: str, api_key: str, prompt: str) -> dict:
     import base64
 
     b64 = base64.b64encode(image_bytes).decode()
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": OPENROUTER_VISION_MODEL,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-                    ],
-                }
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0,
-        },
-        timeout=60,
-    )
+    request_json = {
+        "model": OPENROUTER_VISION_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                ],
+            }
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    response = None
+    for attempt in range(len(_RETRY_BACKOFF_SECONDS) + 1):
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=request_json,
+            timeout=60,
+        )
+        if response.status_code != 429 or attempt == len(_RETRY_BACKOFF_SECONDS):
+            break
+        wait_seconds = _RETRY_BACKOFF_SECONDS[attempt]
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                wait_seconds = min(float(retry_after), _RETRY_AFTER_CAP_SECONDS)
+            except ValueError:
+                pass
+        time.sleep(wait_seconds)
+
     response.raise_for_status()
     payload = response.json()
 
