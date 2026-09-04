@@ -14,6 +14,12 @@ DB_NAME = "guild_management.db"
 # держать два независимых числа, которые могут разойтись при правке одного и не другого.
 PLAYER_STATS_SYNC_HOURS = 1
 
+# Через сколько дней после завершения (COMPLETED/FAILED) задача на прокачку (/задачи)
+# уходит из "текущего" списка в архив — и в вебе (/tasks), и в отчётах бота. Живёт
+# здесь по той же причине, что PLAYER_STATS_SYNC_HOURS выше: используется и веб-
+# процессом (web/routes/tasks.py), который не поднимает main.py/bot вообще.
+TASK_ARCHIVE_AFTER_DAYS = 7
+
 def init_db():
     """Создает все таблицы в единой БД, если они еще не созданы"""
     conn = sqlite3.connect(DB_NAME)
@@ -87,7 +93,7 @@ def init_db():
     try:
         # Метка группы задач, поставленных одним действием (массовая постановка в вебе
         # либо "поставить задачи" из гильдийского отчёта по плейту) — позволяет отменить
-        # всю группу разом. NULL у задач, поставленных по одной (/задания добавить).
+        # всю группу разом. NULL у задач, поставленных по одной (/задачи добавить).
         cursor.execute("ALTER TABLE tasks ADD COLUMN batch_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
@@ -95,6 +101,31 @@ def init_db():
         # Когда бот уже отправил напоминание о приближающемся дедлайне — чтобы не
         # слать его повторно на каждом часовом проходе аудита (см. tasks_reminder_loop).
         cursor.execute("ALTER TABLE tasks ADD COLUMN reminder_sent_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Снимок состояния юнита (звёзды/тир реликвии/тир нужного омикрон-скилла) в
+        # момент постановки задачи — "Начальное состояние" в отчётах, см. cogs/tasks.py.
+        cursor.execute("ALTER TABLE tasks ADD COLUMN initial_value TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # То же самое, но обновляется на каждом часовом проходе tasks_audit_loop —
+        # "Текущее состояние", без лишних live-запросов к Comlink при построении отчёта.
+        cursor.execute("ALTER TABLE tasks ADD COLUMN current_value TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # 0 = "Назначено" (с момента постановки прогресса не было), 1 = "В работе"
+        # (current_value разошёлся с initial_value). Однонаправленный переключатель —
+        # выставляется в 1 и больше не сбрасывается назад.
+        cursor.execute("ALTER TABLE tasks ADD COLUMN in_progress INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Момент, когда status стал COMPLETED/FAILED — основа для архивации
+        # (TASK_ARCHIVE_AFTER_DAYS дней спустя задача уходит из "текущего" списка).
+        cursor.execute("ALTER TABLE tasks ADD COLUMN resolved_at TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -223,7 +254,7 @@ GUILD_CONFIG_COLUMNS = [
     "tw_guide_forum_channel_id",
     "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
     "antispam_alert_message", "antispam_timeout_minutes",
-    "tasks_log_channel_id",
+    "tasks_log_channel_id", "tasks_notify_time",
     "is_active",
 ]
 
@@ -290,6 +321,10 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tasks_log_channel_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tasks_notify_time TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -1216,26 +1251,51 @@ def get_unit_types(base_ids: list[str]) -> dict:
     return result
 
 # =====================================================================
-# ЗАДАНИЯ НА ПРОКАЧКУ (/задания + часовой аудит выполнения через Comlink)
+# ЗАДАЧИ НА ПРОКАЧКУ (/задачи + часовой аудит выполнения через Comlink)
 # =====================================================================
-def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1, batch_id: str = None) -> int:
+def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1,
+             batch_id: str = None, initial_value: str = None) -> int:
+    """initial_value — снимок текущего состояния юнита на момент постановки (см.
+    cogs/tasks.py::_current_progress_value), сохраняется и как current_value, пока
+    tasks_audit_loop не обновит его первый раз."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by, date_created, guild_id, batch_id)
-        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?, ?)
-    """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id, batch_id))
+        INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by,
+                            date_created, guild_id, batch_id, initial_value, current_value)
+        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?, ?, ?, ?)
+    """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id, batch_id,
+          initial_value, initial_value))
     conn.commit()
     task_id = cursor.lastrowid
     conn.close()
     return task_id
 
 
-def get_active_tasks(guild_id: int = 1):
+def get_active_task_for_unit(guild_id: int, ally_code: str, base_id: str):
+    """Есть ли у игрока уже АКТИВНАЯ задача на этот юнит (любой target_type/value) —
+    для запрета дублей при постановке (см. Discord-тред "Гайд по АС Боту", 2026-09-04:
+    "Задача по данному персонажу уже назначена"). Возвращает task_id или None."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT task_id, ally_code, base_id, target_type, target_value, deadline
+        SELECT task_id FROM tasks
+        WHERE guild_id = ? AND ally_code = ? AND base_id = ? AND status = 'ACTIVE'
+        LIMIT 1
+    """, (guild_id, ally_code, base_id))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_active_tasks(guild_id: int = 1):
+    """initial_value/current_value/in_progress — последними тремя колонками
+    (аддитивно, существующие вызывающие по индексу 0-5 не ломаются)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline,
+               initial_value, current_value, in_progress
         FROM tasks WHERE status = 'ACTIVE' AND guild_id = ?
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -1245,13 +1305,14 @@ def get_active_tasks(guild_id: int = 1):
 
 def get_all_tasks(guild_id: int = 1):
     """Как get_active_tasks, но без фильтра по статусу — вся история (ACTIVE/
-    COMPLETED/FAILED), для веб-дашборда (/tasks), которому нужно показывать
-    не только активные задачи. batch_id — последней колонкой (аддитивно,
-    существующие вызывающие по индексу 0-6 не ломаются)."""
+    COMPLETED/FAILED), для веб-дашборда (/tasks) и гильдийского отчёта бота.
+    initial_value/current_value/in_progress/created_by/resolved_at — аддитивно
+    после batch_id, существующие вызывающие по индексу 0-7 не ломаются."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
+               initial_value, current_value, in_progress, created_by, resolved_at
         FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -1260,11 +1321,14 @@ def get_all_tasks(guild_id: int = 1):
 
 
 def get_tasks_for_ally(ally_code, guild_id: int = 1):
-    """Задачи одного игрока (все статусы) — для self-view в /задания отчёт."""
+    """Задачи одного игрока (все статусы) — для self-view в /задачи отчёт.
+    initial_value/current_value/in_progress/created_by/resolved_at — аддитивно
+    после status, существующие вызывающие по индексу 0-6 не ломаются."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status,
+               initial_value, current_value, in_progress, created_by, resolved_at
         FROM tasks WHERE guild_id = ? AND ally_code = ? ORDER BY task_id DESC
     """, (guild_id, ally_code))
     rows = cursor.fetchall()
@@ -1274,11 +1338,14 @@ def get_tasks_for_ally(ally_code, guild_id: int = 1):
 
 def get_task(task_id: int):
     """Одна задача целиком (со всеми колонками, включая guild_id/batch_id) — для
-    проверки владения гильдией перед редактированием/удалением. None, если не найдена."""
+    проверки владения гильдией перед редактированием/удалением. None, если не найдена.
+    initial_value/current_value/in_progress/created_by/resolved_at — аддитивно после
+    batch_id, существующие вызывающие по индексу 0-8 не ломаются."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, guild_id, batch_id
+        SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, guild_id, batch_id,
+               initial_value, current_value, in_progress, created_by, resolved_at
         FROM tasks WHERE task_id = ?
     """, (task_id,))
     row = cursor.fetchone()
@@ -1287,11 +1354,43 @@ def get_task(task_id: int):
 
 
 def update_task_status(task_id, status):
+    """При переходе в COMPLETED/FAILED дополнительно фиксирует resolved_at —
+    основа архивации (TASK_ARCHIVE_AFTER_DAYS), см. is_task_archived ниже."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("UPDATE tasks SET status = ? WHERE task_id = ?", (status, task_id))
+    if status in ("COMPLETED", "FAILED"):
+        cursor.execute("UPDATE tasks SET status = ?, resolved_at = datetime('now') WHERE task_id = ?", (status, task_id))
+    else:
+        cursor.execute("UPDATE tasks SET status = ? WHERE task_id = ?", (status, task_id))
     conn.commit()
     conn.close()
+
+
+def update_task_progress(task_id: int, current_value: str, in_progress: bool) -> None:
+    """Обновляется на каждом часовом проходе tasks_audit_loop — "Текущее состояние"
+    юнита + однонаправленный флаг "В работе" (in_progress никогда не сбрасывается
+    обратно в 0, см. схему в _ensure-блоке init_db)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE tasks SET current_value = ?, in_progress = MAX(in_progress, ?) WHERE task_id = ?",
+        (current_value, 1 if in_progress else 0, task_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def is_task_archived(resolved_at: str | None) -> bool:
+    """resolved_at старше TASK_ARCHIVE_AFTER_DAYS дней — задача уходит из "текущего"
+    списка (веб /tasks, /задачи отчёт) в архив. ACTIVE-задачи (resolved_at is None)
+    никогда не архивные."""
+    if not resolved_at:
+        return False
+    try:
+        resolved = datetime.datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return False
+    return (datetime.datetime.utcnow() - resolved).days >= TASK_ARCHIVE_AFTER_DAYS
 
 
 def update_task(task_id: int, base_id: str = None, target_type: str = None, target_value: str = None, deadline: str = None) -> None:

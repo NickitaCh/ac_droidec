@@ -1447,6 +1447,15 @@ GUILD_SETTINGS_GROUPS = [
             ("birthday_role_id", "Роль, выдаваемая в ДР", "role"),
         ],
     },
+    {
+        "name": "Задачи — уведомления",
+        "hint": "Канал для уведомлений о задачах (выполнена/провалена/скоро дедлайн) задаётся командой "
+                "/настройки задачи_канал в Discord. Здесь — только время (МСК), в которое раз в сутки "
+                "бот шлёт напоминания о скором дедлайне и отмечает просроченные задачи. По умолчанию 10:00.",
+        "fields": [
+            ("tasks_notify_time", "Время уведомлений (МСК)", "time"),
+        ],
+    },
 ]
 
 
@@ -1482,6 +1491,7 @@ async def guild_settings_save(
     tb_plan_channel_id: str = Form(""),
     tb_order_source_channel_id: str = Form(""),
     tb_order_role_id: str = Form(""),
+    tasks_notify_time: str = Form(""),
     user: dict = Depends(require_guild_access),
 ):
     values = {
@@ -1502,5 +1512,14 @@ async def guild_settings_save(
                 f"/settings?{urlencode({'error': f'ID должен состоять только из цифр ({field})'})}", status_code=303
             )
         cleaned[field] = raw or None
+
+    tasks_notify_time = tasks_notify_time.strip()
+    if tasks_notify_time and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", tasks_notify_time):
+        return RedirectResponse(
+            f"/settings?{urlencode({'error': 'Время уведомлений должно быть в формате ЧЧ:ММ (00:00–23:59)'})}",
+            status_code=303,
+        )
+    cleaned["tasks_notify_time"] = tasks_notify_time or None
+
     database.update_guild_config(user["guild_id"], **cleaned)
     return RedirectResponse("/settings?saved=1", status_code=303)

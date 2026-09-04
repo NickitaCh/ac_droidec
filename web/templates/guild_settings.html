@@ -26,14 +26,23 @@
                 {% for row in group.rows %}
                     <label>
                         {{ row.label }}
-                        <input
-                            type="text"
-                            name="{{ row.field }}"
-                            value="{{ row.value }}"
-                            placeholder="ID {{ 'роли' if row.kind == 'role' else 'канала/ветки' }} (пусто — не задано)"
-                            inputmode="numeric"
-                            pattern="[0-9]*"
-                        >
+                        {% if row.kind == 'time' %}
+                            <input
+                                type="time"
+                                name="{{ row.field }}"
+                                value="{{ row.value }}"
+                                placeholder="10:00 (пусто — по умолчанию)"
+                            >
+                        {% else %}
+                            <input
+                                type="text"
+                                name="{{ row.field }}"
+                                value="{{ row.value }}"
+                                placeholder="ID {{ 'роли' if row.kind == 'role' else 'канала/ветки' }} (пусто — не задано)"
+                                inputmode="numeric"
+                                pattern="[0-9]*"
+                            >
+                        {% endif %}
                     </label>
                 {% endfor %}
             </div>

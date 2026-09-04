@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Задания — AC Droidec{% endblock %}
+{% block title %}Задачи — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Задания на прокачку</h1>
-    <p class="muted">Статус задания (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница создаёт, редактирует и удаляет задания, дедлайны и уведомления сама не проверяет (см. /настройки задания_канал в Discord).</p>
+    <h1>Задачи на прокачку</h1>
+    <p class="muted">Статус задачи (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница создаёт, редактирует и удаляет задачи, дедлайны и уведомления сама не проверяет (см. /настройки задачи_канал в Discord и время рассылки на /settings).</p>
 
     {% if error %}
         <p class="error">{{ error }}</p>
@@ -81,8 +81,8 @@
                 <select name="target_value" class="target-value-select" style="display:none" disabled></select>
             </label>
             <label>
-                Срок выполнения, дней
-                <input type="number" name="days_to_complete" min="1" max="365" value="14" required>
+                Дедлайн
+                <input type="date" name="deadline" required>
             </label>
             <button type="submit">Поставить задачу</button>
         </form>
@@ -95,6 +95,9 @@
                 <label>
                     Игроки
                     <input type="search" placeholder="Фильтр по имени…" data-table-search="bulk-player-table">
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="bulk-select-all"> Выбрать всех
                 </label>
                 <div class="table-scroll" style="max-height: 16em;">
                     <table class="data" id="bulk-player-table">
@@ -129,8 +132,8 @@
                     <select name="target_value" class="target-value-select" style="display:none" disabled></select>
                 </label>
                 <label>
-                    Срок выполнения, дней
-                    <input type="number" name="days_to_complete" min="1" max="365" value="14" required>
+                    Дедлайн
+                    <input type="date" name="deadline" required>
                 </label>
                 <button type="submit">Поставить всем выбранным</button>
             </form>
@@ -160,18 +163,22 @@
         </div>
         <div class="segmented-toggle">
             <div class="segmented-toggle-options">
-                {% if view == "players" %}<a href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% else %}<strong>Список</strong>{% endif %}
+                {% if view == "flat" or not view %}<strong>Список</strong>{% else %}<a href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% endif %}
                 {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
+                {% if view == "archive" %}<strong>Архив</strong>{% else %}<a href="/tasks?view=archive{% if status_filter %}&status={{ status_filter }}{% endif %}">Архив</a>{% endif %}
             </div>
         </div>
+        {% if view == "archive" %}
+            <p class="muted">Задачи, завершённые или проваленные более {{ archive_after_days }} дней назад — не влияют на счётчики и отчёты бота.</p>
+        {% endif %}
 
         {% if view == "players" %}
             {% if not players_view %}
-                <p class="empty-state">Активных или проваленных заданий нет — все чисто. 🎉</p>
+                <p class="empty-state">Активных или проваленных задач нет — все чисто. 🎉</p>
             {% else %}
                 <div class="table-scroll">
                     <table class="data">
-                        <thead><tr><th>Игрок</th><th>В работе / провалено</th><th>Задания</th></tr></thead>
+                        <thead><tr><th>Игрок</th><th>В работе / провалено</th><th>Задачи</th></tr></thead>
                         <tbody>
                             {% for p in players_view %}
                                 <tr>
@@ -190,7 +197,7 @@
             {% endif %}
         {% else %}
             {% if not tasks %}
-                <p class="empty-state">Задач пока нет.</p>
+                <p class="empty-state">{% if view == "archive" %}Архив пуст.{% else %}Задач пока нет.{% endif %}</p>
             {% else %}
                 <div class="table-scroll">
                     <table class="data" id="tasks-table">
@@ -199,8 +206,10 @@
                                 <th data-sort="text">Игрок</th>
                                 <th data-sort="text">Юнит</th>
                                 <th data-sort="text">Цель</th>
+                                <th data-sort="text">Прогресс</th>
                                 <th data-sort="text">Дедлайн</th>
                                 <th data-sort="text">Статус</th>
+                                <th data-sort="text">Кем</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -210,8 +219,10 @@
                                     <td>{{ t.player_name }}</td>
                                     <td>{{ t.unit_name }}</td>
                                     <td>{{ t.target_label }}</td>
+                                    <td>{{ t.progress }}</td>
                                     <td>{{ t.deadline }}</td>
                                     <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                                    <td>{{ t.created_by_name }}</td>
                                     <td class="row-actions">
                                         <details>
                                             <summary class="link-btn">править</summary>
@@ -229,7 +240,7 @@
                                                 <button type="submit">Сохранить</button>
                                             </form>
                                         </details>
-                                        <form method="post" action="/tasks/{{ t.task_id }}/delete" onsubmit="return confirm('Удалить задание «{{ t.unit_name }}» для {{ t.player_name }}?');">
+                                        <form method="post" action="/tasks/{{ t.task_id }}/delete" onsubmit="return confirm('Удалить задачу «{{ t.unit_name }}» для {{ t.player_name }}?');">
                                             <button type="submit" class="button-danger">Удалить</button>
                                         </form>
                                     </td>
@@ -244,6 +255,16 @@
 
     <script>
 document.addEventListener("DOMContentLoaded", () => {
+    // "Выбрать всех" в массовой постановке — отмечает все чекбоксы ростера разом.
+    const selectAll = document.getElementById("bulk-select-all");
+    if (selectAll) {
+        selectAll.addEventListener("change", () => {
+            document.querySelectorAll('#bulk-player-table input[name="ally_codes"]').forEach((cb) => {
+                cb.checked = selectAll.checked;
+            });
+        });
+    }
+
     // Переключение "Целевое значение" между свободным текстом (звёзды/реликвия) и
     // выпадающим списком омикронов конкретного выбранного юнита (см. /tasks/api/omicron-skills)
     // — общая логика для формы точечной и массовой постановки на этой странице.

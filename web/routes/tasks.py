@@ -1,12 +1,13 @@
-"""Веб-управление заданиями на прокачку (аналог /задания в Discord) — список с
+"""Веб-управление задачами на прокачку (аналог /задачи в Discord) — список с
 фильтром/группировкой по игроку, точечная и массовая постановка, редактирование
 (значение цели + дедлайн) и удаление (по одному и целой группой), плюс предзаполнение
 формы из гильдийского отчёта по плейту (кнопка "+ задача" на /stats-check).
-Аудит выполнения, уведомления и напоминания остаются только в боте
-(cogs/tasks.py::tasks_audit_loop) — веб лишь читает уже проставленный ботом статус."""
+Аудит выполнения остаётся только в боте (cogs/tasks.py::tasks_audit_loop); просрочка
+и напоминания — там же (tasks_notify_loop) — веб лишь читает уже проставленный ботом
+статус и настраивает время рассылки (guilds.tasks_notify_time, см. /settings)."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -28,8 +29,27 @@ TARGET_TYPE_OPTIONS = [
 ]
 TARGET_TYPE_LABELS = dict(TARGET_TYPE_OPTIONS)
 
-STATUS_LABELS = {"ACTIVE": "В работе", "COMPLETED": "Выполнено", "FAILED": "Провалено"}
 STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger"}
+
+
+def _status_label(status: str, in_progress) -> str:
+    """ACTIVE различается на "Назначено"/"В работе" по in_progress — см.
+    database.update_task_progress / cogs/tasks.py::TasksCog._status_label (тот же
+    паттерн, продублирован здесь по общей для этого файла конвенции — см.
+    _target_label ниже, который так же дублирует cogs/tasks.py)."""
+    if status == "COMPLETED":
+        return "Выполнено"
+    if status == "FAILED":
+        return "Провалено"
+    return "В работе" if in_progress else "Назначено"
+
+
+def _progress_label(initial_value, current_value) -> str:
+    if initial_value is None or current_value is None:
+        return "—"
+    if initial_value == current_value:
+        return str(current_value)
+    return f"{initial_value} → {current_value}"
 
 
 def _get_comlink():
@@ -37,6 +57,56 @@ def _get_comlink():
     # диска-клиента, строит свой SwgohComlink на тот же сайдкар.
     from swgoh_comlink import SwgohComlink
     return SwgohComlink(url="http://localhost:3000")
+
+
+def _fetch_unit_data(comlink, ally_code: str, base_id: str) -> dict | None:
+    """Та же логика, что cogs/tasks.py::TasksCog._fetch_unit_data — синхронная
+    версия (веб-процесс уже вызывает Comlink напрямую без to_thread, см.
+    stat_forecast.py и другие роуты этого файла)."""
+    try:
+        player_data = comlink.get_player(ally_code)
+    except Exception:
+        return None
+    roster = player_data.get('rosterUnit') or player_data.get('roster')
+    if not roster:
+        return None
+    for u in roster:
+        u_id = u.get('baseId') or u.get('definitionId', '').split(':')[0]
+        if u_id == base_id:
+            return u
+    return None
+
+
+def _current_progress_value(unit_data: dict, target_type: str, target_value: str) -> str:
+    if target_type == 'stars':
+        return str(unit_data.get('currentRarity', 0))
+    if target_type == 'relic':
+        return str(unit_data.get('relic', {}).get('currentTier', 0))
+    if target_type == 'omicron':
+        for skill in unit_data.get('skill', []):
+            if skill.get('id') == target_value:
+                return str(skill.get('tier', 0))
+        return "0"
+    return ""
+
+
+def _is_target_completed(unit_data: dict, target_type: str, target_value: str, skill_thresholds: dict) -> bool:
+    if target_type == 'stars':
+        return unit_data.get('currentRarity', 0) >= int(target_value)
+    if target_type == 'relic':
+        current_relic_tier = unit_data.get('relic', {}).get('currentTier', 0)
+        target_val_int = int(target_value)
+        required_tier = target_val_int + 2 if target_val_int > 0 else 0
+        return current_relic_tier >= required_tier
+    if target_type == 'omicron':
+        omicron_tier = skill_thresholds.get(target_value, (None, None))[1]
+        if omicron_tier is None:
+            return False
+        return any(
+            skill.get('id') == target_value and skill.get('tier', -1) >= omicron_tier
+            for skill in unit_data.get('skill', [])
+        )
+    return False
 
 
 def _omicron_options(base_id: str) -> list:
@@ -80,6 +150,20 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
     return None
 
 
+def _validate_deadline(deadline: str) -> str | None:
+    """None — ок, иначе текст ошибки. Дедлайн вводится датой (не количеством дней,
+    см. Discord-тред "Гайд по АС Боту", 2026-09-04) — <input type="date"> в шаблоне
+    уже даёт и календарь, и ручной ввод, нормализуя формат до ГГГГ-ММ-ДД."""
+    deadline = deadline.strip()
+    try:
+        parsed = datetime.strptime(deadline, "%Y-%m-%d").date()
+    except ValueError:
+        return "Некорректная дата дедлайна (ГГГГ-ММ-ДД)."
+    if parsed < datetime.now().date():
+        return "Дедлайн не может быть в прошлом."
+    return None
+
+
 @router.get("", response_class=HTMLResponse)
 async def tasks_list(request: Request, user: dict = Depends(require_officer_access)):
     guild_id = user["guild_id"]
@@ -89,14 +173,10 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
     rows = database.get_all_tasks(guild_id)
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
     unit_names = database.get_game_unit_names([r[2] for r in rows])
+    creator_ids = {r[11] for r in rows if r[11]}
+    creator_names = {cid: (database.get_username_for_discord_id(cid) or cid) for cid in creator_ids}
 
-    counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
-    for r in rows:
-        counts[r[6]] = counts.get(r[6], 0) + 1
-
-    filtered = [r for r in rows if not status_filter or r[6] == status_filter]
-
-    tasks_ctx = [
+    all_ctx = [
         {
             "task_id": task_id, "ally_code": ally_code, "base_id": base_id,
             "player_name": names_by_code.get(ally_code, ally_code),
@@ -104,12 +184,30 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
             "target_type": target_type, "target_value": target_value,
             "target_label": _target_label(target_type, target_value),
             "deadline": deadline, "status": status,
-            "status_label": STATUS_LABELS.get(status, status),
+            "status_label": _status_label(status, in_progress),
             "status_badge": STATUS_BADGE.get(status, "badge-neutral"),
+            "progress": _progress_label(initial_value, current_value),
+            "created_by_name": creator_names.get(created_by, "—"),
             "batch_id": batch_id,
+            "archived": database.is_task_archived(resolved_at),
         }
-        for task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id in filtered
+        for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
+             initial_value, current_value, in_progress, created_by, resolved_at) in rows
     ]
+
+    # "Архив" — отдельная вкладка (COMPLETED/FAILED старше database.TASK_ARCHIVE_AFTER_DAYS
+    # дней); везде остальное ("Список"/"По игрокам") — только текущие задачи, как и в
+    # отчётах бота (см. Discord-тред "Гайд по АС Боту", пункт "Архив").
+    if view == "archive":
+        scope = [t for t in all_ctx if t["archived"]]
+    else:
+        scope = [t for t in all_ctx if not t["archived"]]
+
+    counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
+    for t in scope:
+        counts[t["status"]] = counts.get(t["status"], 0) + 1
+
+    tasks_ctx = [t for t in scope if not status_filter or t["status"] == status_filter]
 
     # Омикрон-варианты для инлайн-редактирования — только для реально показанных задач
     # этого типа, не весь справочник разом.
@@ -162,6 +260,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
         "synced": request.query_params.get("synced"),
+        "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
     })
 
 
@@ -201,7 +300,7 @@ async def task_add(
     base_id: str = Form(...),
     target_type: str = Form(...),
     target_value: str = Form(...),
-    days_to_complete: int = Form(..., ge=1, le=365),
+    deadline: str = Form(...),
     user: dict = Depends(require_officer_access),
 ):
     guild_id = user["guild_id"]
@@ -218,8 +317,35 @@ async def task_add(
     if err:
         return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
 
-    deadline_date = (datetime.now() + timedelta(days=days_to_complete)).strftime("%Y-%m-%d")
-    database.add_task(ally_code, base_id, target_type, target_value.strip(), deadline_date, str(user["discord_id"]), guild_id=guild_id)
+    err = _validate_deadline(deadline)
+    if err:
+        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
+
+    # Запрет дублей — см. cogs/tasks.py::task_add за тем же правилом/обоснованием.
+    if database.get_active_task_for_unit(guild_id, ally_code, base_id):
+        return RedirectResponse(
+            f"/tasks?{urlencode({'error': f'Задача по юниту {unit_name} для {names_by_code[ally_code]} уже назначена.'})}",
+            status_code=303,
+        )
+
+    target_value = target_value.strip()
+    initial_value = None
+    try:
+        comlink = _get_comlink()
+        unit_data = _fetch_unit_data(comlink, ally_code, base_id)
+        if unit_data is not None:
+            skill_thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
+            if _is_target_completed(unit_data, target_type, target_value, skill_thresholds):
+                return RedirectResponse(
+                    f"/tasks?{urlencode({'notice': f'{names_by_code[ally_code]}: цель уже выполнена, задача не создана.'})}",
+                    status_code=303,
+                )
+            initial_value = _current_progress_value(unit_data, target_type, target_value)
+    except Exception:
+        pass  # Comlink недоступен — создаём без снимка initial_value, не блокируем постановку
+
+    database.add_task(ally_code, base_id, target_type, target_value, deadline, str(user["discord_id"]),
+                       guild_id=guild_id, initial_value=initial_value)
     return RedirectResponse("/tasks", status_code=303)
 
 
@@ -229,7 +355,7 @@ async def task_add_bulk(
     base_id: str = Form(...),
     target_type: str = Form(...),
     target_value: str = Form(...),
-    days_to_complete: int = Form(..., ge=1, le=365),
+    deadline: str = Form(...),
     user: dict = Depends(require_officer_access),
 ):
     guild_id = user["guild_id"]
@@ -247,13 +373,49 @@ async def task_add_bulk(
     if err:
         return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
 
-    deadline_date = (datetime.now() + timedelta(days=days_to_complete)).strftime("%Y-%m-%d")
+    err = _validate_deadline(deadline)
+    if err:
+        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
+
     batch_id = uuid.uuid4().hex[:12]
     target_value = target_value.strip()
-    for code in valid_codes:
-        database.add_task(code, base_id, target_type, target_value, deadline_date, str(user["discord_id"]), guild_id=guild_id, batch_id=batch_id)
+    skill_thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
+    try:
+        comlink = _get_comlink()
+    except Exception:
+        comlink = None
 
-    return RedirectResponse(f"/tasks?{urlencode({'notice': f'Поставлено заданий: {len(valid_codes)}'})}", status_code=303)
+    created, skipped_dup, skipped_done = 0, 0, 0
+    for code in valid_codes:
+        # Дубль — уже есть активная задача на этот юнит для этого игрока (пропускаем
+        # молча при массовой постановке, см. Ricardo 2026-09-04: "просто не добавлять
+        # в таблицу дубли" — в отличие от точечной постановки, где это явная ошибка).
+        if database.get_active_task_for_unit(guild_id, code, base_id):
+            skipped_dup += 1
+            continue
+
+        initial_value = None
+        if comlink is not None:
+            try:
+                unit_data = _fetch_unit_data(comlink, code, base_id)
+                if unit_data is not None:
+                    if _is_target_completed(unit_data, target_type, target_value, skill_thresholds):
+                        skipped_done += 1
+                        continue
+                    initial_value = _current_progress_value(unit_data, target_type, target_value)
+            except Exception:
+                pass
+
+        database.add_task(code, base_id, target_type, target_value, deadline, str(user["discord_id"]),
+                           guild_id=guild_id, batch_id=batch_id, initial_value=initial_value)
+        created += 1
+
+    parts = [f"поставлено: {created}"]
+    if skipped_dup:
+        parts.append(f"пропущено (уже назначено): {skipped_dup}")
+    if skipped_done:
+        parts.append(f"пропущено (уже выполнено): {skipped_done}")
+    return RedirectResponse(f"/tasks?{urlencode({'notice': ', '.join(parts)})}", status_code=303)
 
 
 @router.post("/{task_id}/edit", response_class=HTMLResponse)
@@ -266,7 +428,7 @@ async def task_edit(
     guild_id = user["guild_id"]
     task = database.get_task(task_id)
     if not task or task[7] != guild_id:
-        return RedirectResponse(f"/tasks?{urlencode({'error': 'Задание не найдено.'})}", status_code=303)
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'Задача не найдена.'})}", status_code=303)
 
     base_id, target_type = task[2], task[3]
     err = _validate_target(base_id, target_type, target_value)
@@ -279,7 +441,7 @@ async def task_edit(
         return RedirectResponse(f"/tasks?{urlencode({'error': 'Некорректная дата дедлайна (ГГГГ-ММ-ДД).'})}", status_code=303)
 
     database.update_task(task_id, target_value=target_value.strip(), deadline=deadline)
-    return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задание обновлено'})}", status_code=303)
+    return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача обновлена'})}", status_code=303)
 
 
 @router.post("/{task_id}/delete", response_class=HTMLResponse)
@@ -288,7 +450,7 @@ async def task_delete(task_id: int, user: dict = Depends(require_officer_access)
     task = database.get_task(task_id)
     if task and task[7] == guild_id:
         database.delete_task(task_id)
-    return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задание удалено'})}", status_code=303)
+    return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача удалена'})}", status_code=303)
 
 
 @router.post("/batch/{batch_id}/delete", response_class=HTMLResponse)

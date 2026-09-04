@@ -31,7 +31,7 @@ SETTINGS_FIELDS = [
     ("antispam_alert_role_id", "Роль, тегаемая в алерте антиспама"),
     ("antispam_alert_message", "Кастомный текст алерта антиспама"),
     ("antispam_timeout_minutes", "Длительность автотайм-аута при обнаружении спам-рассылки (мин.)"),
-    ("tasks_log_channel_id", "Канал уведомлений о заданиях на прокачку (выполнено/провалено/напоминание)"),
+    ("tasks_log_channel_id", "Канал уведомлений о задачах на прокачку (выполнено/провалено/напоминание)"),
 ]
 
 # Те же поля, сгруппированные по режиму — используется только для отображения
@@ -50,7 +50,7 @@ SETTINGS_GROUPS = [
         "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
         "antispam_alert_message", "antispam_timeout_minutes",
     ]),
-    ("Задания на прокачку", ["tasks_log_channel_id"]),
+    ("Задачи на прокачку", ["tasks_log_channel_id"]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
 
@@ -134,12 +134,12 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
-    @settings_group.sub_command(name="задания_канал", description="Канал, куда бот пишет о выполнении/провале задания и напоминания о дедлайне")
+    @settings_group.sub_command(name="задачи_канал", description="Канал, куда бот пишет о выполнении/провале задачи и напоминания о дедлайне")
     async def set_tasks_log_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для уведомлений по заданиям"),
+        канал: disnake.TextChannel = commands.Param(description="Канал для уведомлений по задачам"),
     ):
-        await self._set_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о заданиях на прокачку")
+        await self._set_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о задачах на прокачку")
 
     @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (только супер-админ)")
     @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))

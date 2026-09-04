@@ -68,9 +68,14 @@ SNG_GUILD_ID = 931280548402442310    # Discord-сервер AbsoluteChaos — и
 ALLY_CODE = "572624393"
 N_LIMIT = 3
 
-# За сколько дней до дедлайна задания на прокачку (/задания) слать напоминание —
+# За сколько дней до дедлайна задачи на прокачку (/задачи) слать напоминание —
 # один раз на задачу (см. database.get_tasks_needing_reminder/mark_task_reminder_sent).
 TASK_REMINDER_DAYS_BEFORE = 1
+
+# Время (МСК, "ЧЧ:ММ"), в которое раз в сутки шлются напоминания о скором дедлайне
+# и отмечаются просроченные задачи — по умолчанию, если гильдия не задала своё
+# значение в guilds.tasks_notify_time (веб /settings). См. cogs/tasks.py::tasks_notify_loop.
+TASKS_DEFAULT_NOTIFY_TIME = "10:00"
 
 ALLOWED_ROLE_IDS = [1153753506772164629]
 ALLOWED_USER_IDS = [291656027659698176]
@@ -89,7 +94,7 @@ MEMBER_ACCESSIBLE_COMMANDS = {
     "статы",
     "статы_релик",
     "регистрация",
-    "задания отчёт",
+    "задачи отчёт",
 }
 
 # === Настройки ротационного тега ===
@@ -184,6 +189,7 @@ class GuildManagerBot(commands.Bot):
 
         self.PLAYER_STATS_SYNC_HOURS = PLAYER_STATS_SYNC_HOURS
         self.TASK_REMINDER_DAYS_BEFORE = TASK_REMINDER_DAYS_BEFORE
+        self.TASKS_DEFAULT_NOTIFY_TIME = TASKS_DEFAULT_NOTIFY_TIME
 
         self.google_api_key = GOOGLE_API_KEY
         self.mistral_api_key = MISTRAL_API_KEY

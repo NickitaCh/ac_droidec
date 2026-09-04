@@ -279,8 +279,8 @@
 
                 <div class="widget wc-wide">
                     <div class="widget-header">
-                        <h2>🎯 Задания на прокачку</h2>
-                        <a class="widget-link" href="/tasks">Все задания →</a>
+                        <h2>🎯 Задачи на прокачку</h2>
+                        <a class="widget-link" href="/tasks">Все задачи →</a>
                     </div>
                     <div class="mini-stats">
                         <div class="mini-stat">
@@ -297,7 +297,7 @@
                         </div>
                     </div>
                     {% if not widgets.tasks_summary.rows %}
-                        <p class="widget-empty">Активных или проваленных заданий нет — всё чисто. 🎉</p>
+                        <p class="widget-empty">Активных или проваленных задач нет — всё чисто. 🎉</p>
                     {% else %}
                         <div class="table-scroll">
                             <table class="data">
@@ -320,8 +320,10 @@
                                             <td>
                                                 {% if r.status == "FAILED" %}
                                                     <span class="badge badge-danger">Провалено</span>
-                                                {% else %}
+                                                {% elif r.in_progress %}
                                                     <span class="badge badge-neutral">В работе</span>
+                                                {% else %}
+                                                    <span class="badge badge-neutral">Назначено</span>
                                                 {% endif %}
                                             </td>
                                         </tr>
@@ -330,7 +332,7 @@
                             </table>
                         </div>
                         {% if widgets.tasks_summary.open_total > widgets.tasks_summary.rows|length %}
-                            <p class="muted">И ещё {{ widgets.tasks_summary.open_total - widgets.tasks_summary.rows|length }} — см. <a href="/tasks">все задания</a>.</p>
+                            <p class="muted">И ещё {{ widgets.tasks_summary.open_total - widgets.tasks_summary.rows|length }} — см. <a href="/tasks">все задачи</a>.</p>
                         {% endif %}
                     {% endif %}
                 </div>
