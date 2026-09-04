@@ -13,6 +13,7 @@ HotUtils) — Comlink складом не располагает и никогд
 """
 
 import asyncio
+import math
 
 import disnake
 from disnake.ext import commands
@@ -40,6 +41,49 @@ PROMPT = """На картинке — список недостающих дет
   ]
 }
 "items" — общий список для обоих разделов вперемешку, без деления на секции в самом JSON."""
+
+
+# Кнопка «Показать всем» на скрытом (ephemeral) ответе — по образцу
+# cogs/datacron_requirements.py::DatacronCheckRevealView (там для embed'ов, здесь для
+# простого текста, т.к. /фарм отвечает обычным сообщением, не embed'ом).
+class GearFarmRevealView(disnake.ui.View):
+    def __init__(self, content: str):
+        super().__init__(timeout=1800)
+        self.content = content
+        self.revealed = False
+
+    @disnake.ui.button(label="Показать всем", emoji="🔓", style=disnake.ButtonStyle.secondary)
+    async def reveal(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if self.revealed:
+            await interaction.response.defer()
+            return
+        self.revealed = True
+        button.disabled = True
+        button.label = "Показано всем"
+        await interaction.response.edit_message(view=self)
+        await interaction.channel.send(self.content)
+
+
+def _choose_recipe_ingredient(ingredients: list, already_needed_ids: set):
+    """ingredients: [(ingredient_base_id, point_cost), ...] из database.get_scavenger_recipe.
+    Выбирает один "лучший" вариант эвристикой (см. план фичи, чат-обсуждение при реализации):
+    1) деталь, которая и так уже нужна напрямую в этом же списке (расшаривает локацию);
+    2) иначе — деталь с наименьшим числом известных локаций (проще объяснить "иди туда");
+    3) при равенстве — с большей ценой за штуку (нужно меньше ходок).
+    Варианты без известных локаций вообще пропускаются. None, если ни у одного нет локаций.
+    Совместная оптимизация между несколькими материалами одновременно — осознанно за рамками,
+    см. план фичи."""
+    best = None
+    best_key = None
+    for ingredient_id, cost in ingredients:
+        locs = database.get_equipment_locations(ingredient_id)
+        if not locs:
+            continue
+        key = (0 if ingredient_id in already_needed_ids else 1, len(locs), -cost)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (ingredient_id, cost, locs)
+    return best
 
 
 def _greedy_location_plan(base_id_locations: dict) -> list:
@@ -155,14 +199,39 @@ class GearFarm(commands.Cog):
                 unmatched.append((name, quantity))
 
         names_by_base_id = dict(matched)
+        matched_ids = set(names_by_base_id.keys())
         base_id_locations = {}
         no_location = []
+        # [(материал, ingredient_id, кол-во, нужно_очков), ...] — материалы, которые не
+        # фармятся, а собираются переработкой деталей у Мусорщика (см. план фичи/чат: часть
+        # релик-материалов, SCV_xxx-семейство, лежит только за ротационными ивентами).
+        recycled = []
         for base_id, name in matched:
+            recipe = database.get_scavenger_recipe(base_id)
+            if recipe:
+                points_needed, ingredients = recipe
+                choice = _choose_recipe_ingredient(ingredients, matched_ids)
+                if choice:
+                    ingredient_id, cost, locs = choice
+                    qty = math.ceil(points_needed / cost)
+                    recycled.append((name, ingredient_id, qty, points_needed))
+                    base_id_locations[ingredient_id] = locs
+                    continue
+                no_location.append(f"{name} (есть рецепт переработки, но нет данных о фарме деталей под него)")
+                continue
+
             locs = database.get_equipment_locations(base_id)
             if locs:
                 base_id_locations[base_id] = locs
             else:
                 no_location.append(name)
+
+        # Имена деталей-ингредиентов под переработку, которых не было в исходном
+        # распознанном списке (значит их нет в names_by_base_id) — иначе плану будет
+        # нечем подписать локацию, которая их закрывает.
+        missing_names = set(base_id_locations.keys()) - names_by_base_id.keys()
+        if missing_names:
+            names_by_base_id.update(database.get_game_equipment_names(list(missing_names)))
 
         plan = _greedy_location_plan(base_id_locations)
 
@@ -175,8 +244,15 @@ class GearFarm(commands.Cog):
         if plan:
             lines.append("**Где фармить:**")
             for label, covered_ids in plan:
-                covered_names = ", ".join(names_by_base_id[bid] for bid in covered_ids)
+                covered_names = ", ".join(names_by_base_id.get(bid, bid) for bid in covered_ids)
                 lines.append(f"📍 **{label}** — закрывает: {covered_names}")
+            lines.append("")
+
+        if recycled:
+            lines.append("**Через переработку у Мусорщика:**")
+            for material_name, ingredient_id, qty, points_needed in recycled:
+                ingredient_name = names_by_base_id.get(ingredient_id, ingredient_id)
+                lines.append(f"♻️ **{material_name}** — нужно {points_needed} очк.: {qty}x {ingredient_name}")
             lines.append("")
 
         if no_location:
@@ -189,7 +265,8 @@ class GearFarm(commands.Cog):
             lines.append(", ".join(f"{n} x{q}" for n, q in unmatched))
 
         text = "\n".join(lines).strip() or "Не удалось построить план фарма."
-        await inter.edit_original_response(text[:2000])
+        text = text[:2000]
+        await inter.edit_original_response(content=text, view=GearFarmRevealView(text))
 
 
 def setup(bot: commands.Bot):

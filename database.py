@@ -148,6 +148,23 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_equipment_locations_base ON game_equipment_locations(base_id)")
 
+    # Рецепты переработки у "Мусорщика" (scavengerConversionSet из Comlink) — часть релик-
+    # материалов (game_equipment.base_id из коллекции material, не equipment — те же таблицы,
+    # см. выше) не фармится битвами вообще, только собирается из деталей снаряжения через
+    # переработку. base_id здесь — материал-результат, ingredient_base_id — деталь снаряжения,
+    # которую нужно сдать. Перезаписывается целиком на материал за проход синка (как
+    # game_equipment_locations), не построчным UPDATE.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_scavenger_recipes (
+            base_id TEXT NOT NULL,
+            ingredient_base_id TEXT NOT NULL,
+            point_cost INTEGER NOT NULL,
+            points_needed INTEGER NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scavenger_recipes_base ON game_scavenger_recipes(base_id)")
+
     # Создаем индексы для быстродействия
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_ally ON tasks(ally_code)")
@@ -1038,7 +1055,8 @@ def upsert_game_equipment(equipment_dict: dict):
 
 
 def prune_game_equipment(keep_base_ids):
-    """Аналог prune_game_units — убирает детали, выпавшие из игры/каталога."""
+    """Аналог prune_game_units — убирает детали (снаряжение и материалы — общий справочник,
+    см. services/equipment_sync.py), выпавшие из игры/каталога."""
     keep_base_ids = list(keep_base_ids)
     if not keep_base_ids:
         return
@@ -1047,6 +1065,7 @@ def prune_game_equipment(keep_base_ids):
     placeholders = ",".join("?" for _ in keep_base_ids)
     cursor.execute(f"DELETE FROM game_equipment WHERE base_id NOT IN ({placeholders})", keep_base_ids)
     cursor.execute(f"DELETE FROM game_equipment_locations WHERE base_id NOT IN ({placeholders})", keep_base_ids)
+    cursor.execute(f"DELETE FROM game_scavenger_recipes WHERE base_id NOT IN ({placeholders})", keep_base_ids)
     conn.commit()
     conn.close()
 
@@ -1100,6 +1119,61 @@ def find_game_equipment_by_name_en(name: str) -> str | None:
         if " ".join(name_en.split()).lower() == key:
             return base_id
     return None
+
+
+def get_game_equipment_names(base_ids: list[str]) -> dict[str, str]:
+    """{base_id: name_ru} — обратная к find_game_equipment_by_name_en, нужна для деталей,
+    которых не было в исходном распознанном с картинки списке (см. /фарм: выбранный
+    ингредиент для переработки у Мусорщика)."""
+    base_ids = list(set(base_ids))
+    if not base_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    placeholders = ",".join("?" for _ in base_ids)
+    cursor.execute(f"SELECT base_id, name_ru FROM game_equipment WHERE base_id IN ({placeholders})", base_ids)
+    rows = dict(cursor.fetchall())
+    conn.close()
+    return rows
+
+
+def set_scavenger_recipe(material_base_id: str, points_needed: int, ingredients: list[tuple[str, int]]):
+    """ingredients: [(ingredient_base_id, point_cost), ...] — полная перезапись рецепта ОДНОГО
+    материала (в отличие от set_all_equipment_locations, синк идёт по scavengerConversionSet,
+    там ровно один элемент на материал, не нужен общий DELETE всей таблицы за проход)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM game_scavenger_recipes WHERE base_id = ?", (material_base_id,))
+    data = [
+        (material_base_id, ingredient_id, cost, points_needed, i)
+        for i, (ingredient_id, cost) in enumerate(ingredients)
+    ]
+    if data:
+        cursor.executemany("""
+            INSERT INTO game_scavenger_recipes (base_id, ingredient_base_id, point_cost, points_needed, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+        """, data)
+    conn.commit()
+    conn.close()
+
+
+def get_scavenger_recipe(material_base_id: str):
+    """Возвращает (points_needed, [(ingredient_base_id, point_cost), ...]) или None, если у
+    материала нет рецепта переработки (либо это не материал, а обычное снаряжение)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT points_needed, ingredient_base_id, point_cost FROM game_scavenger_recipes "
+        "WHERE base_id = ? ORDER BY sort_order",
+        (material_base_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows:
+        return None
+    points_needed = rows[0][0]
+    ingredients = [(r[1], r[2]) for r in rows]
+    return points_needed, ingredients
 
 
 def get_game_unit_name(base_id: str) -> str | None:
