@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import database
 import guild_resolver
 from services.units_sync import sync_units
+from services.equipment_sync import sync_equipment
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
 from cogs.datacron_requirements import DATACRON_LIST_COLOR, _lines_to_embeds
@@ -54,12 +55,14 @@ async def autocomplete_task_target_value(inter: disnake.ApplicationCommandIntera
 class TasksCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Запускаем фоновый аудит задач + плановую синхронизацию справочника юнитов
+        # Запускаем фоновый аудит задач + плановую синхронизацию справочников юнитов/снаряжения
         self.units_sync_loop.start()
+        self.equipment_sync_loop.start()
         self.tasks_audit_loop.start()
 
     def cog_unload(self):
         self.units_sync_loop.cancel()
+        self.equipment_sync_loop.cancel()
         self.tasks_audit_loop.cancel()
 
     # =====================================================================
@@ -89,6 +92,25 @@ class TasksCog(commands.Cog):
 
     @units_sync_loop.before_loop
     async def before_units_sync(self):
+        await self.bot.wait_until_ready()
+
+    # =====================================================================
+    # СИНХРОНИЗАЦИЯ СПРАВОЧНИКА СНАРЯЖЕНИЯ (для /фарм, cogs/gear_farm.py)
+    # =====================================================================
+    @tasks.loop(hours=24)
+    async def equipment_sync_loop(self):
+        """Плановое обновление справочника снаряжения/мест фарма — тот же цикл 24ч,
+        что units_sync_loop выше, отдельным независимым тиком (свои try/except), чтобы
+        сбой одного справочника не мешал другому."""
+        print("🔄 [Задания] Плановая синхронизация справочника снаряжения...")
+        try:
+            total = await sync_equipment(self.bot.comlink)
+            print(f"✅ [Задания] Справочник снаряжения обновлён: {total} деталей")
+        except Exception as e:
+            print(f"⚠️ [Задания] Не удалось обновить справочник снаряжения: {e}")
+
+    @equipment_sync_loop.before_loop
+    async def before_equipment_sync(self):
         await self.bot.wait_until_ready()
 
     def _format_target_label(self, target_type: str, target_value: str) -> str:

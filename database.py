@@ -121,6 +121,32 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
+    # 4b. Справочник снаряжения/релик-материалов (детали) — тот же глобальный,
+    #     не привязанный к guild_id принцип, что и game_units. Заполняется/обновляется
+    #     services/equipment_sync.py::sync_equipment (раз в сутки, cogs/tasks.py). Имя
+    #     хранится и на русском, и на английском (английское — чтобы сопоставлять с тем,
+    #     что распознаёт Mistral vision с картинок C3PO в cogs/gear_farm.py, см. /фарм).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_equipment (
+            base_id TEXT PRIMARY KEY,
+            name_ru TEXT NOT NULL,
+            name_en TEXT NOT NULL
+        )
+    """)
+    # Локации фарма для детали — один-ко-многим (одна деталь может падать в нескольких
+    # местах: обычная кампания + несколько мифических событий и т.п., см. lookupMission
+    # в services/equipment_sync.py). Перезаписывается целиком на каждую деталь при
+    # синхронизации (database.set_equipment_locations), а не ALTER/UPDATE построчно.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_equipment_locations (
+            base_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (base_id) REFERENCES game_equipment(base_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_equipment_locations_base ON game_equipment_locations(base_id)")
+
     # Создаем индексы для быстродействия
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_warns_ally ON position_warns(ally_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_ally ON tasks(ally_code)")
@@ -991,6 +1017,88 @@ def resolve_unit_display_names(names: list[str]) -> dict[str, str | None]:
             by_name.setdefault(name_en.lower(), base_id)
 
     return {name: by_name.get(name.lower()) for name in names}
+
+
+# =====================================================================
+# ФУНКЦИИ ДЛЯ СПРАВОЧНИКА СНАРЯЖЕНИЯ (game_equipment) — см. /фарм, cogs/gear_farm.py
+# =====================================================================
+def upsert_game_equipment(equipment_dict: dict):
+    """equipment_dict: {base_id: (name_ru, name_en)} — INSERT OR REPLACE, тот же
+    паттерн, что upsert_game_units."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    data = [(base_id, name_ru, name_en) for base_id, (name_ru, name_en) in equipment_dict.items()]
+    cursor.executemany("""
+        INSERT OR REPLACE INTO game_equipment (base_id, name_ru, name_en)
+        VALUES (?, ?, ?)
+    """, data)
+    conn.commit()
+    conn.close()
+
+
+def prune_game_equipment(keep_base_ids):
+    """Аналог prune_game_units — убирает детали, выпавшие из игры/каталога."""
+    keep_base_ids = list(keep_base_ids)
+    if not keep_base_ids:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    placeholders = ",".join("?" for _ in keep_base_ids)
+    cursor.execute(f"DELETE FROM game_equipment WHERE base_id NOT IN ({placeholders})", keep_base_ids)
+    cursor.execute(f"DELETE FROM game_equipment_locations WHERE base_id NOT IN ({placeholders})", keep_base_ids)
+    conn.commit()
+    conn.close()
+
+
+def set_all_equipment_locations(locations_by_base_id: dict[str, list[str]]):
+    """locations_by_base_id: {base_id: [метка, ...]} — полная перезапись таблицы за один
+    проход синхронизации (как database.set_unit_omicron_skills делает для омикронов), а не
+    точечный UPDATE по каждой детали — синк всегда знает актуальный набор целиком."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM game_equipment_locations")
+    data = [
+        (base_id, label, i)
+        for base_id, labels in locations_by_base_id.items()
+        for i, label in enumerate(labels)
+    ]
+    if data:
+        cursor.executemany("""
+            INSERT INTO game_equipment_locations (base_id, label, sort_order)
+            VALUES (?, ?, ?)
+        """, data)
+    conn.commit()
+    conn.close()
+
+
+def get_equipment_locations(base_id: str) -> list[str]:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT label FROM game_equipment_locations WHERE base_id = ? ORDER BY sort_order",
+        (base_id,),
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def find_game_equipment_by_name_en(name: str) -> str | None:
+    """Точный (после нормализации регистра/пробелов) поиск base_id по английскому
+    названию — так распознанное Mistral vision название детали (см. cogs/gear_farm.py)
+    сопоставляется со справочником. Тот же принцип полного full-scan в Python, что
+    resolve_unit_display_names — таблица небольшая (~700 деталей)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT base_id, name_en FROM game_equipment")
+    rows = cursor.fetchall()
+    conn.close()
+
+    key = " ".join(name.split()).lower()
+    for base_id, name_en in rows:
+        if " ".join(name_en.split()).lower() == key:
+            return base_id
+    return None
 
 
 def get_game_unit_name(base_id: str) -> str | None:

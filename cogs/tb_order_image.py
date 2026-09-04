@@ -58,7 +58,6 @@ Dark=🔴, Mixed=🟡 (жёлтый, не оранжевый), Light=🔵, Bonus
 
 import asyncio
 import json
-import mimetypes
 import re
 
 import disnake
@@ -68,8 +67,8 @@ import database
 import guild_resolver
 import tb_platoon_autofill
 from cogs.guild_events import TB_PLAN_HEADER_RE
+from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 
-LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)(?:/(\d+))?")
 ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
 
 ZONE_EMOJI = {"dark": "🔴", "mixed": "🟡", "light": "🔵", "bonus": "⚪"}
@@ -129,29 +128,6 @@ Galaxy of Heroes, "Восход Империи"). Таблица: строки D
   ]
 }
 Массив "rounds" должен содержать ровно 6 элементов (round: 1..6)."""
-
-
-def _extract_channel_id(link: str):
-    link = link.strip()
-    m = LINK_RE.search(link)
-    if m:
-        return int(m.group(2))
-    if link.isdigit():
-        return int(link)
-    return None
-
-
-def _is_image_attachment(a: disnake.Attachment) -> bool:
-    if a.content_type and a.content_type.startswith("image/"):
-        return True
-    return a.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
-
-
-def _guess_mime_type(a: disnake.Attachment) -> str:
-    if a.content_type:
-        return a.content_type.split(";")[0].strip()
-    guessed, _ = mimetypes.guess_type(a.filename)
-    return guessed or "image/png"
 
 
 async def _find_existing_order_phases(thread: disnake.Thread, bot_user_id: int) -> list:
@@ -315,7 +291,7 @@ class TBOrderImage(commands.Cog):
 
         await inter.response.defer(ephemeral=True)
 
-        channel_id = _extract_channel_id(ссылка)
+        channel_id = extract_channel_id(ссылка)
         if channel_id is None:
             await inter.edit_original_response("❌ Не удалось распознать ссылку на тред.")
             return
@@ -337,7 +313,7 @@ class TBOrderImage(commands.Cog):
             return
 
         image_attachment = next(
-            (a for a in first_message.attachments if _is_image_attachment(a)), None
+            (a for a in first_message.attachments if is_image_attachment(a)), None
         )
         if image_attachment is None:
             await inter.edit_original_response("❌ В первом сообщении треда нет картинки.")
@@ -355,7 +331,7 @@ class TBOrderImage(commands.Cog):
                 return
 
         image_bytes = await image_attachment.read()
-        mime_type = _guess_mime_type(image_attachment)
+        mime_type = guess_mime_type(image_attachment)
 
         try:
             data = await asyncio.to_thread(
@@ -500,7 +476,7 @@ class TBOrderImage(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
-        channel_id = _extract_channel_id(ссылка)
+        channel_id = extract_channel_id(ссылка)
         if channel_id is None:
             await inter.edit_original_response("❌ Не удалось распознать ссылку на тред.")
             return
