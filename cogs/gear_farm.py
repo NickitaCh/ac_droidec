@@ -235,24 +235,41 @@ class GearFarm(commands.Cog):
 
         plan = _greedy_location_plan(base_id_locations)
 
+        # Обратный индекс "деталь → куда идти" (не "локация → что она закрывает") — так вывод
+        # читается построчно по списку недостающего, а не отдельным списком локаций, который
+        # нужно самому сверять с деталями. Одна и та же локация вполне может повториться в
+        # нескольких строках подряд — это и есть "тут фармится сразу несколько деталей",
+        # просто показано с точки зрения детали, а не битвы.
+        location_by_id = {}
+        for label, covered_ids in plan:
+            for bid in covered_ids:
+                location_by_id[bid] = label
+
         lines = []
         header_bits = [b for b in (data.get("gear_tier"), data.get("relic_tier")) if b]
         if header_bits:
             lines.append(f"**Цель:** {' / '.join(header_bits)}")
             lines.append("")
 
-        if plan:
+        direct_farm_lines = [
+            f"🔧 **{name}** — {location_by_id[base_id]}"
+            for base_id, name in matched
+            if base_id in location_by_id
+        ]
+        if direct_farm_lines:
             lines.append("**Где фармить:**")
-            for label, covered_ids in plan:
-                covered_names = ", ".join(names_by_base_id.get(bid, bid) for bid in covered_ids)
-                lines.append(f"📍 **{label}** — закрывает: {covered_names}")
+            lines.extend(direct_farm_lines)
             lines.append("")
 
         if recycled:
             lines.append("**Через переработку у Мусорщика:**")
             for material_name, ingredient_id, qty, points_needed in recycled:
                 ingredient_name = names_by_base_id.get(ingredient_id, ingredient_id)
-                lines.append(f"♻️ **{material_name}** — нужно {points_needed} очк.: {qty}x {ingredient_name}")
+                ingredient_location = location_by_id.get(ingredient_id, "нет данных о фарме")
+                lines.append(
+                    f"♻️ **{material_name}** — нужно {points_needed} очк.: "
+                    f"{qty}x {ingredient_name} — {ingredient_location}"
+                )
             lines.append("")
 
         if no_location:
