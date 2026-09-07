@@ -158,7 +158,8 @@
             <p><a href="{{ card.omicron_report_url }}">→ Полный отчёт</a></p>
         </div>
 
-        <div class="widget wc-wide">
+        <div class="wc-wide widget-cols-even">
+        <div class="widget">
             <div class="widget-header">
                 <h2>📐 Проверка статов</h2>
             </div>
@@ -221,7 +222,7 @@
             {% endif %}
         </div>
 
-        <div class="widget wc-wide">
+        <div class="widget">
             <div class="widget-header">
                 <h2>🔮 Проверка датакронов</h2>
             </div>
@@ -309,6 +310,7 @@
                     {% endif %}
                 {% endfor %}
             {% endif %}
+        </div>
         </div>
     </div>
 {% endblock %}

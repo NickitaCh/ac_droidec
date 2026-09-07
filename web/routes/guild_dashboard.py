@@ -1410,20 +1410,34 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     if card is None:
         raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
 
-    # ---- Статы: выпадашка из уже сохранённых плейтов, результат "прилипает" через
-    # query-параметр ?plate= (обычный GET-редирект на себя же — тот же паттерн, что
-    # /stats-check), пока не отправлена форма заново (в т.ч. с тем же плейтом, если
-    # нажали "Проверить" повторно за счёт ?force_refresh=1). ----
+    # ---- Статы: выпадашка из уже сохранённых плейтов. Последний выбор + его результат
+    # переживают рефреш и видны любому другому офицеру, открывшему эту же карточку —
+    # persist через bot_state (guild_id-скоуп уже встроен в get/set_bot_state, ключ
+    # дополнительно несёт ally_code, т.к. состояние своё у каждой карточки). Явная отправка
+    # формы (ключ "plate" ЕСТЬ в query, даже пустой — значит выбрали "— выберите —") эту
+    # память перезаписывает; открытие страницы без параметров ("голый" /player/<код>) —
+    # читает её и сразу пересчитывает, чтобы показать актуальные данные под сохранённым
+    # выбором, а не замороженный текст с прошлого раза.
     stats_plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
-    selected_plate = request.query_params.get("plate") or ""
+    stats_state_key = f"player_card_stats_plate:{ally_code}"
+    if "plate" in request.query_params:
+        selected_plate = request.query_params.get("plate") or ""
+        database.set_bot_state(stats_state_key, selected_plate, guild_id=guild_id)
+    else:
+        selected_plate = database.get_bot_state(stats_state_key, guild_id=guild_id) or ""
     force_refresh = request.query_params.get("force_refresh") == "1"
     stats_result = None
     if selected_plate:
         stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh)
 
-    # ---- Датакроны: тот же принцип, сезон вместо плейта, "прилипает" через ?season=. ----
+    # ---- Датакроны: тот же принцип (сохранённый сезон вместо плейта). ----
     datacron_seasons = []
-    selected_season = request.query_params.get("season") or ""
+    datacron_state_key = f"player_card_datacron_season:{ally_code}"
+    if "season" in request.query_params:
+        selected_season = request.query_params.get("season") or ""
+        database.set_bot_state(datacron_state_key, selected_season, guild_id=guild_id)
+    else:
+        selected_season = database.get_bot_state(datacron_state_key, guild_id=guild_id) or ""
     datacron_result = None
     catalog = await _safe_datacron_catalog()
     if catalog:
