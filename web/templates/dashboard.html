@@ -7,10 +7,63 @@
     {% endif %}
 
     {% if not user %}
-        <h1>AC Droidec</h1>
-        <p>Веб-дашборд гильдии SWGOH — войдите через Discord, чтобы увидеть свою регистрацию и гильдию.</p>
-        <a class="button" href="/login">Войти через Discord</a>
-        <p class="muted" style="margin-top: 0.5em;">Нет доступа к Discord? <a href="/login/password">Войти по логину и паролю</a>.</p>
+        <div class="landing-page">
+        <section class="landing-hero">
+            <h1>AC Droidec</h1>
+            <p class="landing-tagline">Бот и веб-дашборд для управления гильдией Star Wars: Galaxy of Heroes.</p>
+        </section>
+
+        <section class="landing-features">
+            <div class="landing-feature">
+                <span class="landing-feature-icon">⚔️</span>
+                <div>
+                    <strong>ТБ и ВГ</strong>
+                    <p class="muted">Отчёты по Территориальным Битвам и Войнам гильдий, история и графики очков.</p>
+                </div>
+            </div>
+            <div class="landing-feature">
+                <span class="landing-feature-icon">🎯</span>
+                <div>
+                    <strong>Задачи</strong>
+                    <p class="muted">Требования по прокачке участников с дедлайнами и отслеживанием прогресса.</p>
+                </div>
+            </div>
+            <div class="landing-feature">
+                <span class="landing-feature-icon">📈</span>
+                <div>
+                    <strong>Активность</strong>
+                    <p class="muted">Кто и что прокачал — гир, релики, звёзды, зеты и омикроны по всей гильдии.</p>
+                </div>
+            </div>
+            <div class="landing-feature">
+                <span class="landing-feature-icon">🔮</span>
+                <div>
+                    <strong>Датакроны</strong>
+                    <p class="muted">Требования по датакронам и автоматическая сверка с ростером игроков.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-pricing">
+            <h2>Подключение гильдии</h2>
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <div class="pricing-card-price">500 ₽</div>
+                    <div class="pricing-card-period">в месяц</div>
+                </div>
+                <div class="pricing-card">
+                    <div class="pricing-card-price">5000 ₽</div>
+                    <div class="pricing-card-period">в год</div>
+                </div>
+            </div>
+            <p class="muted landing-cta-note"><span class="badge badge-neutral">скоро</span> самостоятельное подключение и оплата — пока обсудите подключение вашей гильдии напрямую.</p>
+        </section>
+
+        <section class="landing-login">
+            <a class="button" href="/login">Войти через Discord</a>
+            <p class="muted" style="margin-top: 0.5em;">Нет доступа к Discord? <a href="/login/password">Войти по логину и паролю</a>.</p>
+        </section>
+        </div>
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="error">Доступ к веб-дашборду есть только у офицеров/лидеров гильдии (по игровому рангу) — у вас {% if user.tier == "member" %}уровень обычного участника{% else %}пока нет доступа{% endif %}.</p>
