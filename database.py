@@ -374,6 +374,28 @@ def get_guild_config_by_swgoh_id(swgoh_guild_id: str) -> dict | None:
     return _row_to_guild_dict(row, columns) if row else None
 
 
+def get_guild_config_by_discord_id(discord_guild_id: str) -> dict | None:
+    """Резолв по ID самого Discord-сервера (НЕ активных-only, в отличие от
+    get_guild_config_by_swgoh_id) — используется main.py::on_slash_command_error
+    для онбординг-сообщения: нужно различить "сервер вообще не подключали" от
+    "подключали, но подписка сейчас не активна". Один Discord-сервер иногда
+    хостит несколько SWGOH-гильдий (см. CLAUDE.md/память про SNG) — ORDER BY
+    is_active DESC отдаёт активную строку, если хоть одна есть, иначе первую
+    неактивную; caller не пытается угадать, к какой из нескольких гильдий
+    относится конкретный незарегистрированный пользователь."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute(
+        "SELECT * FROM guilds WHERE discord_guild_id = ? ORDER BY is_active DESC LIMIT 1",
+        (str(discord_guild_id),)
+    )
+    columns = [d[0] for d in cursor.description]
+    row = cursor.fetchone()
+    conn.close()
+    return _row_to_guild_dict(row, columns) if row else None
+
+
 def create_guild(**fields) -> int:
     """fields — любое подмножество GUILD_CONFIG_COLUMNS. name/ally_code/discord_guild_id/
     member_role_id/officer_role_id обязательны (NOT NULL в схеме)."""

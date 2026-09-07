@@ -62,7 +62,12 @@ OPENROUTER_DAILY_BUDGET_WARNING_RATIO = 0.9
 # Ключ оставлен в .env на случай смены VPS/сети.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-COMLINK_URL = "http://localhost:3000" 
+COMLINK_URL = "http://localhost:3000"
+
+# Публичный сайт (веб-дашборд + посадочная страница с подключением/оплатой
+# гильдии) — используется только для онбординг-текста в on_slash_command_error,
+# сам дашборд эту константу не читает (у него свой домен через nginx).
+SITE_URL = "https://swgoh-sng.ru"
 
 SNG_GUILD_ID = 931280548402442310    # Discord-сервер AbsoluteChaos — используется для seed_default_guild ниже
 
@@ -307,11 +312,41 @@ async def on_slash_command_completion(inter: disnake.ApplicationCommandInteracti
     # вызова — для статистики "какими командами пользуются" на /admin/command-usage.
     database.log_command_usage(inter.application_command.qualified_name)
 
+def _access_denied_message(inter: disnake.ApplicationCommandInteraction, tier: str | None) -> str:
+    """Короткий онбординг вместо голого "доступа нет" — объясняет конкретно ПОЧЕМУ
+    и что сделать дальше, а не просто отказывает. tier == "member" на команде,
+    требующей officer — это разговор про игровой ранг, не про оплату, поэтому
+    отдельная ветка, а не общий текст про подписку/регистрацию."""
+    if tier == "member":
+        return "🛑 Эта команда доступна только офицерам/лидеру гильдии."
+
+    if inter.guild_id is None:
+        return (
+            "🛑 У вас нет доступа.\n"
+            "Если вы ещё не привязали Discord к игровому аккаунту — выполните "
+            "`/регистрация` на сервере вашей гильдии.\n"
+            f"Если гильдия ещё не подключена к боту — подключить и оплатить может офицер на сайте: {SITE_URL}"
+        )
+
+    guild_cfg = database.get_guild_config_by_discord_id(inter.guild_id)
+    if guild_cfg is None:
+        return (
+            "🛑 Эта гильдия ещё не подключена к боту.\n"
+            f"Подключить и оплатить доступ может офицер — на сайте {SITE_URL} или командой `/гильдия_заявка`."
+        )
+    if not guild_cfg["is_active"]:
+        return (
+            "🛑 Подписка этой гильдии на бота сейчас не активна (не оплачена или истекла).\n"
+            f"Продлить может офицер — на сайте {SITE_URL}."
+        )
+    return "🛑 Вы ещё не зарегистрированы. Выполните `/регистрация <код союзника>`, чтобы бот вас узнал."
+
 @bot.event
 async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, error: Exception):
     if hasattr(error, "original"):
         error = error.original
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole, commands.CheckFailure)):
+        tier = None
         try:
             tier = guild_resolver.resolve_tier(inter.author)
             cmd_name = inter.application_command.qualified_name if inter.application_command else "?"
@@ -319,10 +354,7 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
         except Exception as log_err:
             print(f"🛑 [Доступ] (не удалось залогировать детали: {log_err}): {error}")
         if not inter.response.is_done():
-            await inter.response.send_message(
-                "🛑 **Доступ заблокирован:** У вас нет прав для использования этого бота",
-                ephemeral=True
-            )
+            await inter.response.send_message(_access_denied_message(inter, tier), ephemeral=True)
     else:
         print(f"❌ Непредвиденная ошибка при выполнении команды: {error}")
 
