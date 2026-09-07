@@ -93,6 +93,17 @@ h1, h2 { letter-spacing: -0.01em; }
     position: relative;
 }
 
+.site-footer {
+    padding: 1.25em 1.5em;
+    margin-top: 2em;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg-muted);
+    font-size: 0.85em;
+    text-align: center;
+    line-height: 1.6;
+}
+
 .topbar .brand {
     font-weight: 700;
     text-decoration: none;
