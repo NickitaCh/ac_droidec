@@ -128,4 +128,9 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "widgets": widgets,
         "error": error,
         "bot_invite_url": discord_invite.build_invite_url() if not user else None,
+        # Реквизиты/тарифы/оферта Prodamus нужны только на публичной посадочной
+        # странице для неавторизованных (это она проходит проверку Prodamus) —
+        # на остальных страницах сайта (в т.ч. этой же для авторизованных)
+        # подвал не показываем, см. base.html.
+        "show_footer": not user,
     })
