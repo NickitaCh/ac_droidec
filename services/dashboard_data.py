@@ -11,6 +11,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import database
@@ -37,7 +38,6 @@ class RosterRow:
     ingame_name: str
     registered: bool
     rank_label: str = "—"
-    swgoh_gg_url: str = ""
 
 
 def get_roster(guild_id: int) -> list[RosterRow]:
@@ -49,7 +49,6 @@ def get_roster(guild_id: int) -> list[RosterRow]:
             ingame_name=ingame_name or "?",
             registered=ally_code in registered_codes,
             rank_label=RANK_LABELS.get(member_level, "—"),
-            swgoh_gg_url=f"https://swgoh.gg/p/{ally_code}/",
         )
         for ally_code, ingame_name, member_level in mappings
     ]
@@ -57,6 +56,161 @@ def get_roster(guild_id: int) -> list[RosterRow]:
     # а не отдельная страница с сортировкой по клику, порядок по умолчанию важнее.
     rows.sort(key=lambda r: (-{"ГМ": 2, "Офицер": 1}.get(r.rank_label, 0), r.ingame_name.lower()))
     return rows
+
+
+# ---- Карточка игрока (/player/<ally_code>) — агрегатор ссылок/сводок с уже существующих
+# страниц по одному игроку, а не пересчёт заново (см. Discord-тред "Гайд по АС Боту",
+# 2026-09-04: "надо будет в итоге делать у нас профиль под каждого игрока, где будет
+# отображаться информация чисто по нему из других разделов"). Статы/датакроны/ТБ требуют
+# либо живого Comlink-запроса, либо непрямого ключа (member_id вместо ally_code для ТБ) —
+# вместо дублирования этой логики здесь карточка просто ссылается на готовые страницы с
+# предзаполненным игроком.
+
+TASK_STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger"}
+
+
+def _task_status_label(status: str, in_progress) -> str:
+    # Дублирует web/routes/tasks.py::_status_label / cogs/tasks.py::TasksCog._status_label —
+    # тот же паттерн дублирования мелких pure-функций отображения, что уже принят в этом
+    # файле (см. модульный docstring про "скопировано 1:1") и в web/routes/tasks.py.
+    if status == "COMPLETED":
+        return "Выполнено"
+    if status == "FAILED":
+        return "Провалено"
+    return "В работе" if in_progress else "Назначено"
+
+
+def _task_target_label(target_type: str, target_value: str) -> str:
+    if target_type == "stars":
+        return f"⭐ Звёзды {target_value}"
+    if target_type == "relic":
+        return f"♦️ Реликвия {target_value}"
+    if target_type == "omicron":
+        info = database.get_skill_display_info([target_value]).get(target_value)
+        name = info[0] if info and info[0] else target_value
+        return f"🧬 Омикрон: {name}"
+    return target_value
+
+
+def _task_progress_label(initial_value, current_value) -> str:
+    if initial_value is None or current_value is None:
+        return "—"
+    if initial_value == current_value:
+        return str(current_value)
+    return f"{initial_value} → {current_value}"
+
+
+@dataclass
+class PlayerCardTask:
+    task_id: int
+    unit_name: str
+    target_label: str
+    status_label: str
+    status_badge: str
+    progress: str
+    deadline: str
+
+
+@dataclass
+class PlayerCard:
+    ally_code: str
+    player_name: str
+    rank_label: str
+    swgoh_gg_url: str
+    discord_id: str | None
+    discord_username: str | None
+    birthday_label: str | None
+    current_tasks: list
+    archived_tasks_count: int
+    violations_recent_count: int
+    violations_lifetime_count: int
+    activity_counts: list  # [(label, count, css_class), ...] за последние 30 дней
+    activity_total_30d: int
+    tb_player_url: str
+    omicron_report_url: str
+    datacron_check_url: str
+    stats_check_url: str
+    activity_url: str
+    violations_url: str
+
+
+def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
+    mappings = database.get_all_user_mappings_with_rank(guild_id)  # (ally_code, ingame_name, member_level)
+    hit = next((m for m in mappings if m[0] == ally_code), None)
+    if hit is None:
+        return None
+    _, ingame_name, member_level = hit
+    ingame_name = ingame_name or "?"
+
+    # is_main — намеренно только основной аккаунт для карточки-шапки (Discord/ДР
+    # привязаны к человеку, а не к конкретному альту), тот же принцип, что в
+    # get_all_registrations, вызывающих его местах различающих альт/основной.
+    reg = next(
+        (r for r in database.get_all_registrations(guild_id) if r[1] == ally_code and r[3]), None
+    )
+    discord_id = reg[0] if reg else None
+    discord_username = database.get_username_for_discord_id(discord_id) if discord_id else None
+
+    birthday_label = None
+    if discord_id:
+        bday = database.get_birthday_by_discord_id(discord_id, guild_id=guild_id)
+        if bday:
+            day, month, _year = bday
+            birthday_label = f"{day:02d}.{month:02d}"
+
+    task_rows = database.get_tasks_for_ally(ally_code, guild_id=guild_id)
+    unit_names = database.get_game_unit_names([r[2] for r in task_rows])
+    current_tasks = []
+    archived_tasks_count = 0
+    for (task_id, _ally_code, base_id, target_type, target_value, deadline, status,
+         initial_value, current_value, in_progress, _created_by, resolved_at) in task_rows:
+        if database.is_task_archived(resolved_at):
+            archived_tasks_count += 1
+            continue
+        current_tasks.append(PlayerCardTask(
+            task_id=task_id,
+            unit_name=unit_names.get(base_id) or base_id,
+            target_label=_task_target_label(target_type, target_value),
+            status_label=_task_status_label(status, in_progress),
+            status_badge=TASK_STATUS_BADGE.get(status, "badge-neutral"),
+            progress=_task_progress_label(initial_value, current_value),
+            deadline=deadline,
+        ))
+
+    violations_overview = get_violations_overview(guild_id, include_zero=True)
+    violation_row = next((v for v in violations_overview if v.ally_code == ally_code), None)
+    violations_recent_count = violation_row.recent_total if violation_row else 0
+    violations_lifetime_count = violation_row.lifetime_total if violation_row else 0
+
+    date_from_30d = (datetime.now(MSK).date() - timedelta(days=30)).isoformat()
+    type_counts = database.get_guild_activity_type_counts(guild_id, ally_code=ally_code, date_from=date_from_30d)
+    activity_counts = [
+        (ACTIVITY_ACTION_LABELS.get(action_type, action_type), count, ACTIVITY_ACTION_CLASSES.get(action_type, "neutral"))
+        for action_type, count in sorted(type_counts, key=lambda r: -r[1])
+    ]
+    activity_total_30d = sum(count for _, count in type_counts)
+
+    return PlayerCard(
+        ally_code=ally_code,
+        player_name=ingame_name,
+        rank_label=RANK_LABELS.get(member_level, "—"),
+        swgoh_gg_url=f"https://swgoh.gg/p/{ally_code}/",
+        discord_id=discord_id,
+        discord_username=discord_username,
+        birthday_label=birthday_label,
+        current_tasks=current_tasks,
+        archived_tasks_count=archived_tasks_count,
+        violations_recent_count=violations_recent_count,
+        violations_lifetime_count=violations_lifetime_count,
+        activity_counts=activity_counts,
+        activity_total_30d=activity_total_30d,
+        tb_player_url=f"/tb/player/{quote(ingame_name)}",
+        omicron_report_url=f"/omicrons/report/{quote(ingame_name)}",
+        datacron_check_url=f"/datacrons/check?target={quote(ingame_name)}",
+        stats_check_url=f"/stats-check?ally_code={quote(ally_code)}",
+        activity_url=f"/activity?player={quote(ally_code)}",
+        violations_url=f"/violations/{quote(ally_code)}",
+    )
 
 
 @dataclass

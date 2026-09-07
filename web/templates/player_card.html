@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ card.player_name }} — Карточка игрока — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <p><a href="/">← Состав гильдии</a></p>
+    <h1>
+        {{ card.player_name }}
+        {% if card.rank_label == "ГМ" %}
+            <span class="badge badge-warn">{{ card.rank_label }}</span>
+        {% elif card.rank_label == "Офицер" %}
+            <span class="badge badge-ok">{{ card.rank_label }}</span>
+        {% else %}
+            <span class="badge badge-neutral">{{ card.rank_label }}</span>
+        {% endif %}
+    </h1>
+    <p class="muted">
+        Код союзника: <code>{{ card.ally_code }}</code>
+        · <a href="{{ card.swgoh_gg_url }}" target="_blank" rel="noopener">↗ swgoh.gg</a>
+        {% if card.discord_id %}
+            · Discord: {{ card.discord_username or card.discord_id }}
+        {% else %}
+            · Discord не привязан
+        {% endif %}
+        {% if card.birthday_label %}
+            · 🎂 {{ card.birthday_label }}
+        {% endif %}
+    </p>
+
+    <div class="dashboard-grid">
+        <div class="widget">
+            <div class="widget-header">
+                <h2>📋 Задачи</h2>
+                <span class="muted">{{ card.current_tasks|length }} текущих · {{ card.archived_tasks_count }} в архиве</span>
+            </div>
+            {% if not card.current_tasks %}
+                <p class="widget-empty">Нет текущих задач.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>Персонаж</th>
+                                <th>Цель</th>
+                                <th>Статус</th>
+                                <th>Прогресс</th>
+                                <th>Дедлайн</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in card.current_tasks %}
+                                <tr>
+                                    <td>{{ t.unit_name }}</td>
+                                    <td>{{ t.target_label }}</td>
+                                    <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                                    <td>{{ t.progress }}</td>
+                                    <td>{{ t.deadline }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="widget">
+            <div class="widget-header">
+                <h2>📈 Активность за 30 дней</h2>
+                <span class="muted">{{ card.activity_total_30d }} событий</span>
+            </div>
+            {% if not card.activity_counts %}
+                <p class="widget-empty">За последние 30 дней изменений не зафиксировано.</p>
+            {% else %}
+                <ul style="margin: 0; padding-left: 1.2em;">
+                    {% for label, count, css_class in card.activity_counts %}
+                        <li style="margin-bottom: 0.3em;"><span class="badge badge-{{ css_class }}">{{ label }}</span> — {{ count }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            <p><a href="{{ card.activity_url }}">→ Вся лента активности игрока</a></p>
+        </div>
+
+        <div class="widget">
+            <div class="widget-header">
+                <h2>⚠️ Нарушения</h2>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-tile">
+                    <div class="stat-value">{{ card.violations_lifetime_count }}</div>
+                    <div class="stat-label">Всего</div>
+                </div>
+                <div class="stat-tile {% if card.violations_recent_count >= 3 %}status-danger{% endif %}">
+                    <div class="stat-value">{{ card.violations_recent_count }}</div>
+                    <div class="stat-label">За 90 дней</div>
+                </div>
+            </div>
+            <p><a href="{{ card.violations_url }}">→ Полное досье</a></p>
+        </div>
+
+        <div class="widget">
+            <div class="widget-header">
+                <h2>🔗 Другие разделы</h2>
+            </div>
+            <ul style="margin: 0; padding-left: 1.2em;">
+                <li style="margin-bottom: 0.3em;"><a href="{{ card.tb_player_url }}">→ Участие в ТБ</a></li>
+                <li style="margin-bottom: 0.3em;"><a href="{{ card.stats_check_url }}">→ Проверка статов</a></li>
+                <li style="margin-bottom: 0.3em;"><a href="{{ card.datacron_check_url }}">→ Проверка датакронов</a></li>
+                <li style="margin-bottom: 0.3em;"><a href="{{ card.omicron_report_url }}">→ Недостающие омикроны</a></li>
+            </ul>
+        </div>
+    </div>
+{% endblock %}

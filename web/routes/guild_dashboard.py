@@ -1365,6 +1365,14 @@ async def violation_add(
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
 
 
+@router.get("/player/{ally_code}", response_class=HTMLResponse)
+async def player_card(request: Request, ally_code: str, user: dict = Depends(require_guild_access)):
+    card = dashboard_data.get_player_card(user["guild_id"], ally_code)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
+    return templates.TemplateResponse(request, "player_card.html", {"user": user, "card": card})
+
+
 @router.get("/violations/{ally_code}", response_class=HTMLResponse)
 async def violation_dossier(request: Request, ally_code: str, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]
