@@ -98,14 +98,217 @@
 
         <div class="widget">
             <div class="widget-header">
-                <h2>🔗 Другие разделы</h2>
+                <h2>⚔️ Территориальная битва</h2>
             </div>
-            <ul style="margin: 0; padding-left: 1.2em;">
-                <li style="margin-bottom: 0.3em;"><a href="{{ card.tb_player_url }}">→ Участие в ТБ</a></li>
-                <li style="margin-bottom: 0.3em;"><a href="{{ card.stats_check_url }}">→ Проверка статов</a></li>
-                <li style="margin-bottom: 0.3em;"><a href="{{ card.datacron_check_url }}">→ Проверка датакронов</a></li>
-                <li style="margin-bottom: 0.3em;"><a href="{{ card.omicron_report_url }}">→ Недостающие омикроны</a></li>
-            </ul>
+            {% if not tb_row %}
+                <p class="widget-empty">Нет сохранённых данных ТБ по этому игроку.</p>
+            {% else %}
+                <div class="sparkline-cell" style="margin-bottom: 0.6em;">
+                    <svg class="sparkline {% if tb_row.regressed %}regressed{% endif %}" viewBox="0 0 68 22" preserveAspectRatio="none" style="width: 120px; height: 40px;">
+                        <polyline points="{{ tb_row.sparkline_points }}"></polyline>
+                        {% for x, y, completed_at, value in tb_row.sparkline_hits %}
+                            <circle cx="{{ x }}" cy="{{ y }}" r="{{ '2.4' if loop.last else '5' }}" opacity="{{ '1' if loop.last else '0' }}">
+                                <title>{{ completed_at[:10] }}: {{ value }} очков</title>
+                            </circle>
+                        {% endfor %}
+                    </svg>
+                    <span>{{ tb_row.last_value if tb_row.last_value is not none else "—" }} очков</span>
+                    {% if tb_row.regressed %}
+                        <span class="badge badge-danger">🚨 просадка</span>
+                    {% else %}
+                        <span class="badge badge-ok">стабильно</span>
+                    {% endif %}
+                </div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>ТБ</th><th class="num">Очки</th><th class="num">Юн</th><th class="num">ОЗ</th><th class="num">Волн</th></tr></thead>
+                        <tbody>
+                            {% for event_id, completed_at in tb_report_events %}
+                                {% set s = tb_row.per_event.get(event_id) %}
+                                <tr>
+                                    <td>{{ completed_at[:10] }}</td>
+                                    <td class="num">{{ s.summary if s else "—" }}</td>
+                                    <td class="num">{{ s.unit_donated if s else "—" }}</td>
+                                    <td class="num">{{ s.covert_attempt if s else "—" }}</td>
+                                    <td class="num">{{ s.strike_encounter if s else "—" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+            <p><a href="{{ card.tb_player_url }}">→ Подробно по фазам/планетам</a></p>
+        </div>
+
+        <div class="widget">
+            <div class="widget-header">
+                <h2>🧬 Омикроны</h2>
+            </div>
+            {% if not has_omicron_priority %}
+                <p class="widget-empty">В гильдии ещё не настроен приоритет омикронов (/omicrons/priority).</p>
+            {% elif not omicron_missing %}
+                <p class="widget-empty">✅ Нет готовых, но ещё не поставленных омикронов.</p>
+            {% else %}
+                <ul style="margin: 0; padding-left: 1.2em;">
+                    {% for m in omicron_missing %}
+                        <li style="margin-bottom: 0.3em;">{{ m.unit_name }} — {{ m.skill_name }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            <p><a href="{{ card.omicron_report_url }}">→ Полный отчёт</a></p>
+        </div>
+
+        <div class="widget wc-wide">
+            <div class="widget-header">
+                <h2>📐 Проверка статов</h2>
+            </div>
+            <form method="get" style="display: flex; gap: 0.8em; align-items: end; flex-wrap: wrap; margin-bottom: 0.8em;">
+                <label>
+                    Плейт
+                    <select name="plate">
+                        <option value="" {% if not selected_plate %}selected{% endif %}>— выберите плейт —</option>
+                        {% for p in stats_plates %}
+                            <option value="{{ p }}" {% if selected_plate == p %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.4em;">
+                    <input type="checkbox" name="force_refresh" value="1" {% if force_refresh %}checked{% endif %}>
+                    Обновить данные из игры
+                </label>
+                {% if selected_season %}<input type="hidden" name="season" value="{{ selected_season }}">{% endif %}
+                <button type="submit">Проверить</button>
+            </form>
+
+            {% if stats_result and stats_result.loading %}
+                <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — попробуйте через минуту.</p>
+            {% elif stats_result is not none %}
+                {% if not stats_result.results %}
+                    <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
+                {% else %}
+                    {% for r in stats_result.results %}
+                        <div class="panel">
+                            <div class="panel-title">
+                                <span>{{ r.char_name }}</span>
+                                <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
+                            </div>
+                            <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
+                        </div>
+                    {% endfor %}
+                    <div class="panel">
+                        <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
+                        {% if not stats_result.failed_required %}
+                            <p class="empty-state">✅ Все обязательные статы в норме.</p>
+                        {% else %}
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead><tr><th>Персонаж</th><th>Стат</th><th>Сейчас</th><th>Нужно</th></tr></thead>
+                                    <tbody>
+                                        {% for item in stats_result.failed_required %}
+                                            <tr>
+                                                <td>{{ item.char_name }}</td>
+                                                <td>{{ item.stat }}</td>
+                                                <td>{{ item.current }}</td>
+                                                <td>{{ item.requirement }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        <div class="widget wc-wide">
+            <div class="widget-header">
+                <h2>🔮 Проверка датакронов</h2>
+            </div>
+            <form method="get" style="display: flex; gap: 0.8em; align-items: end; flex-wrap: wrap; margin-bottom: 0.8em;">
+                <label>
+                    Сезон
+                    <select name="season">
+                        <option value="" {% if not selected_season %}selected{% endif %}>— выберите сезон —</option>
+                        {% for s in datacron_seasons %}
+                            <option value="{{ s.set_id }}" {% if selected_season|string == s.set_id|string %}selected{% endif %}>{{ s.display_name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {% if selected_plate %}<input type="hidden" name="plate" value="{{ selected_plate }}">{% endif %}
+                {% if force_refresh %}<input type="hidden" name="force_refresh" value="1">{% endif %}
+                <button type="submit">Проверить</button>
+            </form>
+
+            {% if not datacron_seasons %}
+                <p class="widget-empty">Справочник сезонов датакронов ещё не загрузился либо недоступен Comlink.</p>
+            {% elif selected_season and not datacron_result %}
+                <p class="empty-state">У сезона «{{ selected_season }}» нет сохранённых требований либо не удалось получить данные игрока.</p>
+            {% elif datacron_result %}
+                <div class="stats-grid">
+                    {% for p in datacron_priority_order %}
+                        {% set t = datacron_result.totals[p] %}
+                        {% if t.total > 0 %}
+                            <div class="stat-tile {% if t.matched < t.total %}status-danger{% endif %}">
+                                <div class="stat-value">{{ t.matched }}/{{ t.total }}</div>
+                                <div class="stat-label">{{ datacron_priority_emoji[p] }} {{ datacron_priority_labels[p] }}</div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                {% for p in datacron_priority_order %}
+                    {% set rows = datacron_result.rows_by_priority[p] %}
+                    {% if rows %}
+                        <div class="panel">
+                            <div class="panel-title"><span>{{ datacron_priority_emoji[p] }} {{ datacron_priority_labels[p] }}</span></div>
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead>
+                                        <tr>
+                                            <th></th>
+                                            <th>Отряд / персонаж</th>
+                                            <th>Требуется</th>
+                                            <th>У игрока</th>
+                                            <th>Статы</th>
+                                            <th>Мин. % статов</th>
+                                            <th>Комментарий</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for r in rows %}
+                                            <tr>
+                                                <td>
+                                                    {% if not r.matched %}<span class="badge badge-danger">❌</span>
+                                                    {% elif r.stat_warning %}<span class="badge badge-warn">⚠️</span>
+                                                    {% else %}<span class="badge badge-ok">✅</span>{% endif %}
+                                                </td>
+                                                {% if r.kind == "base" %}
+                                                    <td>{{ r.pack or "—" }}</td>
+                                                    <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}</td>
+                                                    <td>{{ r.closed|join(", ") if r.closed else "—" }}</td>
+                                                {% else %}
+                                                    <td>{{ r.pack or r.character_label }}</td>
+                                                    <td>{{ r.character_label }} — {{ r.required_level }}+</td>
+                                                    <td>уровень {{ r.current_level }}</td>
+                                                {% endif %}
+                                                <td>{{ r.stats or "—" }}</td>
+                                                <td>
+                                                    {% if r.kind == "base" and r.stat_checks %}
+                                                        {% for c in r.stat_checks %}
+                                                            <div>{% if c.ok %}✅{% else %}⚠️{% endif %} {{ c.label }}: {{ "%.2f"|format(c.actual) if c.actual is not none else "нет" }}% (≥{{ c.min_value }}%)</div>
+                                                        {% endfor %}
+                                                    {% else %}—{% endif %}
+                                                </td>
+                                                <td>{{ r.comment or "—" }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
         </div>
     </div>
 {% endblock %}

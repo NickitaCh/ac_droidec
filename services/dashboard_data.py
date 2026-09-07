@@ -128,8 +128,6 @@ class PlayerCard:
     activity_total_30d: int
     tb_player_url: str
     omicron_report_url: str
-    datacron_check_url: str
-    stats_check_url: str
     activity_url: str
     violations_url: str
 
@@ -206,8 +204,6 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
         activity_total_30d=activity_total_30d,
         tb_player_url=f"/tb/player/{quote(ingame_name)}",
         omicron_report_url=f"/omicrons/report/{quote(ingame_name)}",
-        datacron_check_url=f"/datacrons/check?target={quote(ingame_name)}",
-        stats_check_url=f"/stats-check?ally_code={quote(ally_code)}",
         activity_url=f"/activity?player={quote(ally_code)}",
         violations_url=f"/violations/{quote(ally_code)}",
     )

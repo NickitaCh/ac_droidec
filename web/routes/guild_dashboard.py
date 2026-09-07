@@ -22,7 +22,19 @@ import tb_platoon_engine
 import tb_platoon_filters
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, omicron_priority
+import services.stat_forecast as stat_forecast
 from web.deps import require_guild_access
+# Переиспользуем построитель отчёта по датакронам одного игрока и кэш каталога сезонов
+# из web/routes/datacrons.py вместо дублирования — та же логика сопоставления,
+# что уже используется на /datacrons/check (см. модульный docstring того файла
+# про переиспользование чистых функций вместо дублирования).
+from web.routes.datacrons import (
+    PRIORITY_EMOJI as DATACRON_PRIORITY_EMOJI,
+    PRIORITY_LABELS as DATACRON_PRIORITY_LABELS,
+    PRIORITY_ORDER as DATACRON_PRIORITY_ORDER,
+    _build_player_report as _build_datacron_player_report,
+    _safe_catalog as _safe_datacron_catalog,
+)
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -1365,12 +1377,94 @@ async def violation_add(
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
 
 
+async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: str, plate: str, force_refresh: bool) -> dict:
+    # Тот же расчёт, что и /stats-check?action=run с уже выбранным игроком — см.
+    # web/routes/stat_forecast.py::stats_check_form, здесь просто без формы выбора игрока
+    # (он и так один, из карточки) и без варианта "по одному персонажу" (всегда весь плейт).
+    char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
+    try:
+        comlink = _get_comlink()
+        stat_calc = await stat_forecast.get_stat_calc(comlink)
+    except Exception:
+        return {"loading": True, "results": None, "failed_required": []}
+
+    results = []
+    failed_required = []
+    for base_id in char_keys:
+        outcome = await stat_forecast.evaluate_character_player(
+            comlink, stat_calc, plate, base_id, ally_code, force_refresh, player_label, guild_id=guild_id,
+        )
+        if outcome is None:
+            continue
+        char_name, block, matched, total, updated_at, _matched_rf, _total_rf, char_failed_required = outcome
+        results.append({"char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at})
+        for item in char_failed_required:
+            failed_required.append({"char_name": char_name, **item})
+    return {"loading": False, "results": results, "failed_required": failed_required}
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
 async def player_card(request: Request, ally_code: str, user: dict = Depends(require_guild_access)):
-    card = dashboard_data.get_player_card(user["guild_id"], ally_code)
+    guild_id = user["guild_id"]
+    card = dashboard_data.get_player_card(guild_id, ally_code)
     if card is None:
         raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
-    return templates.TemplateResponse(request, "player_card.html", {"user": user, "card": card})
+
+    # ---- Статы: выпадашка из уже сохранённых плейтов, результат "прилипает" через
+    # query-параметр ?plate= (обычный GET-редирект на себя же — тот же паттерн, что
+    # /stats-check), пока не отправлена форма заново (в т.ч. с тем же плейтом, если
+    # нажали "Проверить" повторно за счёт ?force_refresh=1). ----
+    stats_plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
+    selected_plate = request.query_params.get("plate") or ""
+    force_refresh = request.query_params.get("force_refresh") == "1"
+    stats_result = None
+    if selected_plate:
+        stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh)
+
+    # ---- Датакроны: тот же принцип, сезон вместо плейта, "прилипает" через ?season=. ----
+    datacron_seasons = []
+    selected_season = request.query_params.get("season") or ""
+    datacron_result = None
+    catalog = await _safe_datacron_catalog()
+    if catalog:
+        datacron_seasons = [
+            {"set_id": sid, "display_name": data["display_name"]}
+            for sid, data in sorted(catalog["seasons"].items(), key=lambda kv: -kv[0])
+        ]
+        if selected_season.isdigit() and int(selected_season) in catalog["seasons"]:
+            set_id = int(selected_season)
+            requirements = database.get_datacron_requirements_by_set(set_id, guild_id=guild_id)
+            focused_requirements = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
+            if requirements or focused_requirements:
+                datacron_result = await _build_datacron_player_report(
+                    catalog, set_id, ally_code, card.player_name, requirements, focused_requirements, guild_id,
+                )
+
+    # ---- Омикроны: чисто по кэшу (get_player_units), без Comlink — всегда считаем,
+    # даже если приоритет гильдии ещё не настроен (тогда просто пустой список + подсказка). ----
+    omicron_missing = omicron_priority.missing_omicrons_for_player(ally_code, guild_id)
+    has_omicron_priority = bool(database.get_guild_omicron_priority(guild_id))
+
+    # ---- ТБ: прогресс/просадка от ТБ к ТБ — переиспользуем гильдийский расчёт
+    # (get_tb_report уже строит спарклайн/regressed на игрока), просто достаём свою строку. ----
+    tb_report = dashboard_data.get_tb_report(guild_id)
+    tb_row = None
+    if tb_report:
+        name_lower = card.player_name.strip().lower()
+        tb_row = next((r for r in tb_report.history if r.name.strip().lower() == name_lower), None)
+
+    return templates.TemplateResponse(request, "player_card.html", {
+        "user": user, "card": card,
+        "stats_plates": stats_plates, "selected_plate": selected_plate,
+        "force_refresh": force_refresh, "stats_result": stats_result,
+        "datacron_seasons": datacron_seasons, "selected_season": selected_season, "datacron_result": datacron_result,
+        "datacron_priority_order": DATACRON_PRIORITY_ORDER,
+        "datacron_priority_labels": DATACRON_PRIORITY_LABELS,
+        "datacron_priority_emoji": DATACRON_PRIORITY_EMOJI,
+        "omicron_missing": omicron_missing, "has_omicron_priority": has_omicron_priority,
+        "tb_report_events": tb_report.events if tb_report else [],
+        "tb_row": tb_row,
+    })
 
 
 @router.get("/violations/{ally_code}", response_class=HTMLResponse)
