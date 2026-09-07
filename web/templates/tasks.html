@@ -140,6 +140,15 @@
         </details>
     </div>
 
+    <dialog id="bulk-confirm-dialog" class="confirm-dialog">
+        <h3>Подтверждение постановки</h3>
+        <div id="bulk-confirm-body"></div>
+        <div class="dialog-actions">
+            <button type="button" class="button-secondary" id="bulk-confirm-cancel">Отмена</button>
+            <button type="button" id="bulk-confirm-ok">Поставить</button>
+        </div>
+    </dialog>
+
     <div class="panel" style="max-width: 24em;">
         <div class="panel-title"><span>Справочник юнитов</span></div>
         <p class="muted">Обычно обновляется ботом автоматически каждый час — жми только если нужен персонаж/корабль, которого ещё нет в подсказках выше.</p>
@@ -327,6 +336,70 @@ document.addEventListener("DOMContentLoaded", () => {
         if (unitHidden) unitHidden.addEventListener("change", refresh);
         refresh();
     });
+
+    // Модалка подтверждения массовой постановки — перед реальной отправкой формы
+    // спрашивает /tasks/api/bulk-preview, сколько будет создано и сколько пропустится
+    // (дубль/уже выполнено), с именами игроков, вместо того чтобы узнавать это только
+    // из notice-сообщения постфактум (см. Discord-тред "Гайд по АС Боту").
+    const bulkForm = document.getElementById("task-add-bulk-form");
+    const bulkDialog = document.getElementById("bulk-confirm-dialog");
+    const bulkDialogBody = document.getElementById("bulk-confirm-body");
+    const bulkOkBtn = document.getElementById("bulk-confirm-ok");
+    const bulkCancelBtn = document.getElementById("bulk-confirm-cancel");
+    let bulkConfirmed = false;
+
+    const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+    if (bulkForm && bulkDialog) {
+        bulkForm.addEventListener("submit", async (e) => {
+            if (bulkConfirmed) {
+                bulkConfirmed = false;
+                return; // подтверждено в модалке — пропускаем на реальную отправку
+            }
+            e.preventDefault();
+
+            const selected = bulkForm.querySelectorAll('input[name="ally_codes"]:checked');
+            if (selected.length === 0) {
+                alert("Не выбрано ни одного игрока.");
+                return;
+            }
+
+            let preview;
+            try {
+                const resp = await fetch("/tasks/api/bulk-preview", { method: "POST", body: new FormData(bulkForm) });
+                preview = await resp.json();
+                if (!resp.ok) {
+                    alert(preview.error || "Не удалось проверить постановку.");
+                    return;
+                }
+            } catch {
+                // Предпросмотр недоступен — не блокируем постановку, отправляем как есть.
+                bulkConfirmed = true;
+                bulkForm.requestSubmit();
+                return;
+            }
+
+            const { create = [], duplicate = [], done = [] } = preview;
+            const parts = [`<p><strong>Будет поставлено: ${create.length}</strong>${create.length ? " — " + escapeHtml(create.join(", ")) : ""}</p>`];
+            if (duplicate.length) {
+                parts.push(`<p class="muted">Уже назначено, пропущено: ${duplicate.length} — ${escapeHtml(duplicate.join(", "))}</p>`);
+            }
+            if (done.length) {
+                parts.push(`<p class="muted">Цель уже достигнута, пропущено: ${done.length} — ${escapeHtml(done.join(", "))}</p>`);
+            }
+            bulkDialogBody.innerHTML = parts.join("");
+            bulkOkBtn.style.display = create.length ? "" : "none";
+            bulkOkBtn.textContent = `Поставить (${create.length})`;
+            bulkDialog.showModal();
+        });
+
+        bulkOkBtn.addEventListener("click", () => {
+            bulkDialog.close();
+            bulkConfirmed = true;
+            bulkForm.requestSubmit();
+        });
+        bulkCancelBtn.addEventListener("click", () => bulkDialog.close());
+    }
 });
 </script>
 {% endblock %}

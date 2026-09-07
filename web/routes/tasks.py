@@ -349,6 +349,60 @@ async def task_add(
     return RedirectResponse("/tasks", status_code=303)
 
 
+@router.post("/api/bulk-preview", response_class=JSONResponse)
+async def bulk_preview(
+    ally_codes: list = Form(default=[]),
+    base_id: str = Form(...),
+    target_type: str = Form(...),
+    target_value: str = Form(...),
+    user: dict = Depends(require_officer_access),
+):
+    """Предпросмотр массовой постановки — сколько реально будет создано, сколько
+    пропустится (дубль / уже выполнено), с именами игроков — для модалки подтверждения
+    перед /tasks/add-bulk (см. Discord-тред "Гайд по АС Боту", отложенный пункт
+    "сколько человек уже имеют эту задачу"). Не пишет в базу — только считает, по той
+    же логике дублей/completion, что и сам task_add_bulk ниже."""
+    guild_id = user["guild_id"]
+
+    unit_name = database.get_game_unit_name(base_id)
+    if not unit_name:
+        return JSONResponse({"error": f"Юнит {base_id} не найден в справочнике."}, status_code=400)
+
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    valid_codes = [c for c in ally_codes if c in names_by_code]
+    if not valid_codes:
+        return JSONResponse({"error": "Не выбрано ни одного игрока из состава гильдии."}, status_code=400)
+
+    err = _validate_target(base_id, target_type, target_value)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    target_value = target_value.strip()
+    skill_thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
+    try:
+        comlink = _get_comlink()
+    except Exception:
+        comlink = None
+
+    create, duplicate, done = [], [], []
+    for code in valid_codes:
+        name = names_by_code[code]
+        if database.get_active_task_for_unit(guild_id, code, base_id):
+            duplicate.append(name)
+            continue
+        if comlink is not None:
+            try:
+                unit_data = _fetch_unit_data(comlink, code, base_id)
+                if unit_data is not None and _is_target_completed(unit_data, target_type, target_value, skill_thresholds):
+                    done.append(name)
+                    continue
+            except Exception:
+                pass
+        create.append(name)
+
+    return {"create": create, "duplicate": duplicate, "done": done}
+
+
 @router.post("/add-bulk", response_class=HTMLResponse)
 async def task_add_bulk(
     ally_codes: list = Form(default=[]),

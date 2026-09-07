@@ -1033,6 +1033,34 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 }
 .button-danger:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
 
+.button-secondary {
+    background: transparent;
+    color: var(--fg-secondary);
+    border: 1px solid var(--border);
+}
+.button-secondary:hover { background: var(--surface-2); color: var(--fg); }
+
+/* ---- Модалка подтверждения (напр. массовая постановка задач /tasks) ---- */
+dialog.confirm-dialog {
+    max-width: 32em;
+    width: 90%;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 1.25em 1.5em;
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+dialog.confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+dialog.confirm-dialog h3 { margin-top: 0; }
+dialog.confirm-dialog p { margin: 0.5em 0; }
+dialog.confirm-dialog .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6em;
+    margin-top: 1em;
+}
+
 /* ---- Поиск персонажа с выпадающим списком (добавление требования к плейту) ---- */
 .unit-search { position: relative; }
 .unit-search-input {
