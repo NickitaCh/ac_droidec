@@ -123,6 +123,16 @@ class GearFarm(commands.Cog):
     @commands.slash_command(
         name="фарм",
         description="Распознать картинку C3PO с недостающими деталями и подсказать, где их фармить",
+        # Скрывает команду из автокомплита /-списка в гильдии для всех, у кого нет
+        # соответствующего Discord-права — фактический допуск всё равно решает
+        # is_officer_for_resolved_guild ниже (игровой ранг, не Discord-роль); это
+        # только UI-слой видимости. На видимость в ЛС бота не влияет (default_member_permissions
+        # — гильдийное понятие) — там доступ и так закрыт тем же check. По умолчанию команду
+        # не увидит НИКТО в гильдии (кроме серверных админов), пока владелец/админ гильдии
+        # вручную не выдаст её офицерской роли через Настройки сервера → Интеграции → бот →
+        # /фарм → добавить роль — Discord Permissions v2 не даёт делать это через бот-токен,
+        # только через панель сервера (см. память project_disnake_slash_command_sync_bug).
+        default_member_permissions=disnake.Permissions.none(),
     )
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def gear_farm(
