@@ -1,8 +1,15 @@
 {% extends "base.html" %}
 {% block title %}План ТБ — AC Droidec{% endblock %}
 {% block content %}
-    <p><a href="/tb">← Назад к ТБ</a></p>
     <h1>План планет ТБ</h1>
+    <div class="segmented-toggle">
+        <div class="segmented-toggle-options">
+            <a href="/tb">Отчёт</a>
+            <strong>План планет</strong>
+            <a href="/tb/order-plans">Планы ордера</a>
+            <a href="/tb/platoons">Взводы</a>
+        </div>
+    </div>
     <p class="muted">
         Ручная привязка реальной планеты к фазе и ветке — фолбэк на случай, если авто-разбор
         офицерского анонса в Discord (#ac-тб-оповещения) не сработал. Сохраняется как «живой»

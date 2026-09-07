@@ -85,9 +85,20 @@ class TbHistoryRow:
 @dataclass
 class TbReport:
     events: list  # [(event_id, completed_at), ...] старые -> новые
-    latest: list[TbSummaryRow]  # последняя ТБ, отсортирована по очкам убыв.
+    latest: list[TbSummaryRow]  # ВЫБРАННАЯ ТБ (см. selected_event_id), отсортирована по очкам убыв.
+    # ^ имя поля осталось историческим ("последняя") с тех пор, как это была
+    # единственная опция — с добавлением выбора события (2026-09-07, см. ниже)
+    # реально содержит данные selected_event_id, не всегда буквально последнюю ТБ.
     history: list[TbHistoryRow]  # матрица по всем событиям, тоже по убыв. последних очков
     event_totals: list  # [(completed_at, total_summary), ...] — по гильдии, для тренд-графика
+    selected_event_id: int | None = None  # какое событие сейчас показано в latest/детальной таблице
+    is_latest_selected: bool = True  # selected_event_id == events[-1][0]?
+    # Верхние KPI-плитки ("Участников"/"Очков территории всего") намеренно всегда о
+    # ФАКТИЧЕСКИ последней ТБ, даже когда selected_event_id указывает на более раннюю
+    # (см. панель "по очкам территории" ниже) — иначе плитка "Дата последней ТБ" и
+    # соседние с ней плитки показывали бы данные о РАЗНЫХ событиях одновременно.
+    latest_participant_count: int = 0
+    latest_points_total: int = 0
     trend_points: str = ""  # "x,y x,y ..." для <polyline>, viewBox "0 0 100 40"
     trend_area_points: str = ""  # то же + замыкание по низу, для залитой площади под линией
     trend_coords: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — для точек-маркеров
@@ -183,7 +194,14 @@ def _format_axis_ticks(ticks: list[float]) -> list[str]:
     return [f"{int(round(t))}" for t in ticks]
 
 
-def get_tb_report(guild_id: int) -> TbReport | None:
+def get_tb_report(guild_id: int, event_id: int | None = None) -> TbReport | None:
+    """event_id — какое из сохранённых событий показать в блоке "по игрокам за ТБ"
+    (bar-chart + подробная таблица) — по умолчанию последнее. Раньше этого параметра
+    не было вообще: посмотреть прошлую ТБ гильдийским разрезом (а не только через
+    сравнение по конкретному игроку, /tb/compare) было нечем — добавлено 2026-09-07
+    по прямому запросу пользователя. "История по игрокам"/тренд-график ниже всегда
+    показывают ВСЮ сохранённую историю независимо от этого параметра — он влияет
+    только на то, какое событие сейчас "развёрнуто" подробно."""
     events = database.get_recent_tb_events(guild_id=guild_id)  # старые -> новые
     if not events:
         return None
@@ -193,10 +211,15 @@ def get_tb_report(guild_id: int) -> TbReport | None:
 
     by_member = {}
     totals_by_event = {eid: 0 for eid in event_ids}
-    for event_id, member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt in summary_rows:
+    # Имя строчной переменной цикла НЕ event_id — параметр функции с этим именем нужен
+    # ниже нетронутым для selected_event_id (был реальный баг: одноимённая переменная
+    # цикла затирала выбор пользователя значением последнего event_id из summary_rows,
+    # из-за чего ?event_id= в query string тихо игнорировался — поймано офлайн-тестом
+    # рендера шаблона на синтетических данных перед деплоем, 2026-09-07).
+    for row_event_id, member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt in summary_rows:
         row = TbSummaryRow(member_id, name, summary, unit_donated, covert_attempt, strike_encounter, strike_attempt)
-        by_member.setdefault(member_id, {})[event_id] = row
-        totals_by_event[event_id] = totals_by_event.get(event_id, 0) + summary
+        by_member.setdefault(member_id, {})[row_event_id] = row
+        totals_by_event[row_event_id] = totals_by_event.get(row_event_id, 0) + summary
 
     # compute_tb_regressions ждёт голые dict'ы метрик, а не TbSummaryRow —
     # нормализуем только для этого вызова, остальной код ниже работает с dataclass'ами.
@@ -207,8 +230,10 @@ def get_tb_report(guild_id: int) -> TbReport | None:
     regressed = compute_tb_regressions(event_ids, by_member_metrics)
 
     latest_event_id = event_ids[-1]
+    latest_true = [rows[latest_event_id] for rows in by_member.values() if latest_event_id in rows]
+    selected_event_id = event_id if event_id in event_ids else latest_event_id
     latest = sorted(
-        (rows[latest_event_id] for rows in by_member.values() if latest_event_id in rows),
+        (rows[selected_event_id] for rows in by_member.values() if selected_event_id in rows),
         key=lambda r: r.summary,
         reverse=True,
     )
@@ -292,6 +317,8 @@ def get_tb_report(guild_id: int) -> TbReport | None:
 
     return TbReport(
         events=events, latest=latest, history=history, event_totals=event_totals,
+        selected_event_id=selected_event_id, is_latest_selected=selected_event_id == latest_event_id,
+        latest_participant_count=len(latest_true), latest_points_total=sum(r.summary for r in latest_true),
         trend_points=trend_points, trend_area_points=trend_area_points, trend_coords=trend_coords_full,
         chart_bars=chart_bars, has_stars=bool(star_by_event), chart_gridlines=chart_gridlines,
     )
@@ -371,11 +398,19 @@ class TbPlayerReport:
     global_rows: list  # [(action_label, value), ...]
     phases: list  # [TbPlayerPhaseDetail, ...]
     hidden_entries: list  # [(raw_key, value), ...] — недостоверные данные comlink, см. TB_HIDDEN_ZONE_ACTIONS
+    events: list = field(default_factory=list)  # [(event_id, completed_at), ...] — для селектора события
+    selected_event_id: int | None = None
+    no_data: bool = False  # у игрока есть данные ЗА ДРУГИЕ события, но не за выбранное
 
 
-def get_tb_player_report(guild_id: int, name: str) -> TbPlayerReport | None:
+def get_tb_player_report(guild_id: int, name: str, event_id: int | None = None) -> TbPlayerReport | None:
     """Порт cogs/guild_events.py::_format_tb_player_report — читает уже раскодированные
-    и сохранённые данные последней ТБ (не дёргает Comlink живьём, см. решения плана)."""
+    и сохранённые данные ТБ (не дёргает Comlink живьём, см. решения плана). event_id
+    выбирает конкретное сохранённое событие вместо последнего (см. get_tb_report —
+    тот же добавленный 2026-09-07 селектор, чтобы прошлые ТБ были доступны не только
+    через /tb/compare). Возвращает None только если для игрока вообще нет ни одной
+    записи ТБ — если запись есть, но не за выбранное событие, отдаёт report с
+    no_data=True (страница остаётся на месте, с рабочим селектором событий)."""
     events = database.get_recent_tb_events(guild_id=guild_id)
     if not events:
         return None
@@ -383,17 +418,22 @@ def get_tb_player_report(guild_id: int, name: str) -> TbPlayerReport | None:
     if member_id is None:
         return None
 
-    event_id, completed_at = events[-1]
-    detail = database.get_tb_player_detail(event_id, member_id)
+    event_ids = [eid for eid, _ in events]
+    selected_event_id = event_id if event_id in event_ids else event_ids[-1]
+    completed_at = dict(events)[selected_event_id]
+    detail = database.get_tb_player_detail(selected_event_id, member_id)
     if not detail:
-        return None
+        return TbPlayerReport(
+            player_name=name, completed_at=completed_at, global_rows=[], phases=[], hidden_entries=[],
+            events=events, selected_event_id=selected_event_id, no_data=True,
+        )
     zone_data = json.loads(detail[0])
     global_totals = json.loads(detail[1])
     round_totals = json.loads(detail[2])
     raw_keys = json.loads(detail[3])
-    planet_map = database.get_tb_event_planet_names(event_id)
+    planet_map = database.get_tb_event_planet_names(selected_event_id)
 
-    summary_rows = database.get_tb_player_summary_for_events([event_id])
+    summary_rows = database.get_tb_player_summary_for_events([selected_event_id])
     display_name = next((r[2] for r in summary_rows if r[1] == member_id), name)
 
     global_rows = [(TB_ACTION_LABELS.get(a, a), global_totals[a]) for a in TB_GLOBAL_ACTION_ORDER if a in global_totals]
@@ -427,6 +467,7 @@ def get_tb_player_report(guild_id: int, name: str) -> TbPlayerReport | None:
     return TbPlayerReport(
         player_name=display_name, completed_at=completed_at,
         global_rows=global_rows, phases=phases, hidden_entries=hidden_entries,
+        events=events, selected_event_id=selected_event_id,
     )
 
 

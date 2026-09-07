@@ -3,7 +3,14 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Территориальные битвы</h1>
-    <p class="muted"><a href="/tb/plan">План планет →</a> · <a href="/tb/order-plans">Планы ордера →</a> · <a href="/tb/platoons">Взводы →</a></p>
+    <div class="segmented-toggle">
+        <div class="segmented-toggle-options">
+            <strong>Отчёт</strong>
+            <a href="/tb/plan">План планет</a>
+            <a href="/tb/order-plans">Планы ордера</a>
+            <a href="/tb/platoons">Взводы</a>
+        </div>
+    </div>
 
     {% if not report %}
         <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
@@ -15,11 +22,11 @@
                 <div class="stat-label">Дата последней ТБ</div>
             </div>
             <div class="stat-tile">
-                <div class="stat-value">{{ report.latest|length }}</div>
+                <div class="stat-value">{{ report.latest_participant_count }}</div>
                 <div class="stat-label">Участников</div>
             </div>
             <div class="stat-tile">
-                <div class="stat-value">{{ report.latest|sum(attribute="summary") }}</div>
+                <div class="stat-value">{{ report.latest_points_total }}</div>
                 <div class="stat-label">Очков территории всего</div>
             </div>
             <div class="stat-tile {% if report.history|selectattr('regressed')|list|length > 0 %}status-danger{% endif %}">
@@ -55,8 +62,23 @@
 
         <div class="panel">
             <div class="panel-title">
-                <span>Последняя ТБ по очкам территории</span>
-                <span class="panel-hint">{{ latest_event[1][:10] }}</span>
+                <span>{{ "Последняя ТБ" if report.is_latest_selected else "ТБ" }} по очкам территории</span>
+                <span class="panel-hint">
+                    {% if report.events|length > 1 %}
+                        <form method="get" class="tb-event-picker">
+                            <select name="event_id" onchange="this.form.submit()">
+                                {% for event_id, completed_at in report.events|reverse %}
+                                    <option value="{{ event_id }}" {% if event_id == report.selected_event_id %}selected{% endif %}>
+                                        {{ completed_at[:10] }}{% if event_id == report.events[-1][0] %} · последняя{% endif %}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <noscript><button type="submit">Показать</button></noscript>
+                        </form>
+                    {% else %}
+                        {{ latest_event[1][:10] }}
+                    {% endif %}
+                </span>
             </div>
             <div class="bar-chart">
                 {% for p in report.latest %}
@@ -69,10 +91,6 @@
                     </div>
                 {% endfor %}
             </div>
-        </div>
-
-        <h2>Последняя ТБ — подробно</h2>
-        <div class="panel">
             <div class="table-toolbar">
                 <input type="search" placeholder="Поиск по игроку…" data-table-search="latest-tb-table">
             </div>
@@ -91,7 +109,7 @@
                     <tbody>
                         {% for p in report.latest %}
                             <tr data-search="{{ p.name|lower }}">
-                                <td><a href="/tb/player/{{ p.name | urlencode }}">{{ p.name }}</a></td>
+                                <td><a href="/tb/player/{{ p.name | urlencode }}{% if not report.is_latest_selected %}?event_id={{ report.selected_event_id }}{% endif %}">{{ p.name }}</a></td>
                                 <td class="num">{{ p.summary }}</td>
                                 <td class="num">{{ p.unit_donated }}</td>
                                 <td class="num">{{ p.covert_attempt }}</td>
@@ -106,7 +124,7 @@
 
         {% if report.events|length > 1 %}
             <h2>История по игрокам (последние {{ report.events|length }} ТБ)</h2>
-            <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ). Спарклайн — динамика очков территории по сохранённым ТБ.</p>
+            <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ). Спарклайн — динамика очков территории по сохранённым ТБ. Ссылка «подробно» под спарклайном открывает конкретную ТБ по фазам и планетам.</p>
             <div class="panel">
                 <div class="table-toolbar">
                     <input type="search" placeholder="Поиск по игроку…" data-table-search="tb-history-table">
@@ -159,6 +177,7 @@
                                                             <th class="num">ОЗ</th>
                                                             <th class="num">Волн</th>
                                                             <th class="num">Поп</th>
+                                                            <th></th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -171,6 +190,7 @@
                                                                 <td class="num">{{ s.covert_attempt if s else "—" }}</td>
                                                                 <td class="num">{{ s.strike_encounter if s else "—" }}</td>
                                                                 <td class="num">{{ s.strike_attempt if s else "—" }}</td>
+                                                                <td>{% if s %}<a href="/tb/player/{{ row.name | urlencode }}?event_id={{ event_id }}" class="link-btn">подробно</a>{% endif %}</td>
                                                             </tr>
                                                         {% endfor %}
                                                     </tbody>

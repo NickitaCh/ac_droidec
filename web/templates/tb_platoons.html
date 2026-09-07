@@ -2,8 +2,16 @@
 {% block title %}Взводы ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/tb">← Назад к ТБ</a> · <a href="/tb/order-plans">Планы ордера</a> · <a href="/tb/platoons/filters">Фильтры автозаполнения</a></p>
     <h1>Конструктор взводов ТБ</h1>
+    <div class="segmented-toggle">
+        <div class="segmented-toggle-options">
+            <a href="/tb">Отчёт</a>
+            <a href="/tb/plan">План планет</a>
+            <a href="/tb/order-plans">Планы ордера</a>
+            <strong>Взводы</strong>
+        </div>
+    </div>
+    <p class="muted"><a href="/tb/platoons/filters">Фильтры автозаполнения →</a></p>
     <p class="muted">
         Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
         снятия (2026-08-27), не жёсткое игровое требование — можно ставить и других юнитов.

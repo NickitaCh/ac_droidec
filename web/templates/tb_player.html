@@ -5,10 +5,28 @@
     <p><a href="/tb">← Назад к ТБ</a></p>
     <h1>ТБ — {{ report.player_name }}</h1>
     <p class="muted">
-        Данные последней сохранённой ТБ ({{ report.completed_at[:10] }}).
+        {% if report.events|length > 1 %}
+            <form method="get" class="tb-event-picker">
+                <select name="event_id" onchange="this.form.submit()">
+                    {% for event_id, completed_at in report.events|reverse %}
+                        <option value="{{ event_id }}" {% if event_id == report.selected_event_id %}selected{% endif %}>
+                            {{ completed_at[:10] }}{% if event_id == report.events[-1][0] %} · последняя{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+                <noscript><button type="submit">Показать</button></noscript>
+            </form>
+        {% else %}
+            Данные за {{ report.completed_at[:10] }}.
+        {% endif %}
         <a href="/tb/compare/{{ report.player_name | urlencode }}">Сравнить по нескольким ТБ →</a>
     </p>
 
+    {% if report.no_data %}
+        <p class="empty-state">Нет сохранённых данных за эту ТБ — игрок мог не участвовать в гильдии в тот период. Выберите другое событие выше.</p>
+    {% endif %}
+
+    {% if not report.no_data %}
     <div class="panel">
         <div class="panel-title"><span>Итого за событие</span></div>
         <table class="data">
@@ -19,6 +37,7 @@
             </tbody>
         </table>
     </div>
+    {% endif %}
 
     {% for phase in report.phases %}
         <div class="panel">
@@ -50,11 +69,13 @@
         </div>
     {% endfor %}
 
-    {% if not report.phases %}
+    {% if not report.phases and not report.no_data %}
         <p class="empty-state">Нет пофазовых данных для этого события.</p>
     {% endif %}
 
-    <p class="muted">Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт зональной детализации для этого показателя, только итог по фазе.</p>
+    {% if not report.no_data %}
+        <p class="muted">Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт зональной детализации для этого показателя, только итог по фазе.</p>
+    {% endif %}
 
     {% if report.hidden_entries %}
         <div class="panel">

@@ -124,9 +124,14 @@ async def tw_report(request: Request, user: dict = Depends(require_guild_access)
     })
 
 
+def _parse_event_id(request: Request) -> int | None:
+    raw = request.query_params.get("event_id")
+    return int(raw) if raw and raw.isdigit() else None
+
+
 @router.get("/tb", response_class=HTMLResponse)
 async def tb_report(request: Request, user: dict = Depends(require_guild_access)):
-    report = dashboard_data.get_tb_report(user["guild_id"])
+    report = dashboard_data.get_tb_report(user["guild_id"], event_id=_parse_event_id(request))
     max_summary = report.latest[0].summary if report and report.latest else 0
     max_trend_total = max((t for _, t in report.event_totals), default=0) if report else 0
     return templates.TemplateResponse(request, "tb_report.html", {
@@ -139,7 +144,7 @@ async def tb_report(request: Request, user: dict = Depends(require_guild_access)
 
 @router.get("/tb/player/{name}", response_class=HTMLResponse)
 async def tb_player(name: str, request: Request, user: dict = Depends(require_guild_access)):
-    report = dashboard_data.get_tb_player_report(user["guild_id"], name)
+    report = dashboard_data.get_tb_player_report(user["guild_id"], name, event_id=_parse_event_id(request))
     if report is None:
         raise HTTPException(status_code=404, detail=f"Нет сохранённых данных ТБ для игрока «{name}»")
     return templates.TemplateResponse(request, "tb_player.html", {"user": user, "report": report})

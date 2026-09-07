@@ -30,7 +30,15 @@
                 {% if user.tier == "officer" %}
                     <a href="/activity">Активность</a>
                     <a href="/violations">Нарушения</a>
-                    <a href="/tb">ТБ</a>
+                    <details class="nav-dropdown">
+                        <summary>ТБ</summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="/tb">Отчёт</a>
+                            <a href="/tb/plan">План планет</a>
+                            <a href="/tb/order-plans">Планы ордера</a>
+                            <a href="/tb/platoons">Взводы</a>
+                        </div>
+                    </details>
                     <a href="/tw">ВГ</a>
                     <a href="/tasks">Задачи</a>
                     <a href="/datacrons">Датакроны</a>
