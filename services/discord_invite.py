@@ -14,7 +14,13 @@ import os
 
 import disnake
 
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+# Читается ЛЕНИВО (внутри build_invite_url, не как модульная константа) —
+# main.py импортирует этот модуль ДО своего load_dotenv(), так что константа,
+# посчитанная при импорте, навсегда осталась бы None в процессе бота, даже
+# если .env реально содержит значение (реальный баг, найденный 2026-09-07:
+# ошибка "не настроен DISCORD_CLIENT_ID" в личке бота при рабочем .env на
+# VPS). web-процесс это не ловил, потому что web/app.py зовёт load_dotenv()
+# раньше первого импорта роутов.
 
 # view_channel/send_messages/embed_links/attach_files/read_message_history —
 # базовые права на все embed-ответы и загрузку файлов (GuildEvents.send_as_file
@@ -38,10 +44,11 @@ REQUIRED_PERMISSIONS = disnake.Permissions(
 
 
 def build_invite_url() -> str | None:
-    if not DISCORD_CLIENT_ID:
+    client_id = os.getenv("DISCORD_CLIENT_ID")
+    if not client_id:
         return None
     return disnake.utils.oauth_url(
-        DISCORD_CLIENT_ID,
+        client_id,
         permissions=REQUIRED_PERMISSIONS,
         scopes=("bot", "applications.commands"),
     )
