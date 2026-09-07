@@ -1807,6 +1807,21 @@ def get_user_registration(discord_id: str, guild_id: int = 1):
     return row if row else None
 
 
+def discord_id_has_any_registration(discord_id: str) -> bool:
+    """Есть ли у этого discord_id хоть одна привязка в ЛЮБОЙ гильдии, активной или
+    нет — в отличие от get_user_registration(s), не фильтрует по guild_id и не
+    зависит от guild_resolver (который видит только активные гильдии). Нужно,
+    чтобы отличить "никогда не регистрировался" от "регистрировался, но его
+    гильдия сейчас неактивна" — см. services/dashboard_data.py::access_status_message."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute("SELECT 1 FROM user_registration WHERE discord_id = ? LIMIT 1", (str(discord_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
 def get_user_registrations(discord_id: str, guild_id: int = 1):
     """Возвращает все привязанные в этой гильдии аккаунты: [(ally_code, ingame_name, is_main), ...],
     основной — первым."""

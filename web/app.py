@@ -22,7 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 load_dotenv()
 
 from web import auth
-from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, mod_optimizer, omicron, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, tasks
+from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, mod_optimizer, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, tasks
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -40,6 +40,12 @@ async def _redirect_unauthenticated_to_login(request: Request, exc: StarletteHTT
         if request.url.query:
             next_path += f"?{request.url.query}"
         return RedirectResponse(f"/login?next={quote(next_path, safe='')}")
+    if exc.status_code == 403:
+        # Раньше require_officer_access на любой защищённой странице (не только /)
+        # отдавал голый JSON {"detail": "..."} — теперь шлём на главную, она сама
+        # рендерит персонализированный статус через access_status_message
+        # (services/dashboard_data.py), не нужно дублировать текст тут.
+        return RedirectResponse("/")
     return await http_exception_handler(request, exc)
 
 session_secret = os.getenv("WEB_SESSION_SECRET")
@@ -68,3 +74,4 @@ app.include_router(stat_forecast.router, prefix="/stats-check", tags=["stats-che
 app.include_router(stat_builder.router, prefix="/mod-builder", tags=["mod-builder"])
 app.include_router(mod_optimizer.router, prefix="/mod-optimizer", tags=["mod-optimizer"])
 app.include_router(qa_checklist.router, prefix="/qa-checklist", tags=["qa-checklist"])
+app.include_router(payments.router, prefix="/payments", tags=["payments"])

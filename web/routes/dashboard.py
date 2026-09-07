@@ -127,6 +127,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "guild_cfg": guild_cfg,
         "widgets": widgets,
         "error": error,
+        "access_status_message": dashboard_data.access_status_message(user) if user and user.get("tier") != "officer" else None,
         "bot_invite_url": discord_invite.build_invite_url() if not user else None,
         # Реквизиты/тарифы/оферта Prodamus нужны только на публичной посадочной
         # странице для неавторизованных (это она проходит проверку Prodamus) —
