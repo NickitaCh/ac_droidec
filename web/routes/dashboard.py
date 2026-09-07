@@ -1,15 +1,22 @@
-from datetime import date
+import asyncio
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday
-from services import dashboard_data, datacron_catalog, discord_invite
-from web.deps import get_current_user_optional
+from services import activity_diff, dashboard_data, datacron_catalog, discord_invite
+from web.deps import get_current_user_optional, require_guild_access
+# Переиспользуем форматирование "когда был последний синк" из /activity вместо
+# дублирования — та же панель статуса, тот же смысл, см. docstring там.
+from web.routes.guild_dashboard import _sync_status_text
 from web.routes.tasks import _target_label as _task_target_label
+
+MSK = ZoneInfo("Europe/Moscow")
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -119,6 +126,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
             "datacron_seasons": await _active_datacron_seasons(guild_id),
             "birthdays": _next_birthdays(guild_id, limit=10),
             "tasks_summary": _tasks_summary(guild_id),
+            "sync_status": _sync_status_text(dashboard_data.get_activity_sync_status(guild_id)),
         }
 
     error = request.query_params.get("error")
@@ -126,6 +134,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "user": user,
         "guild_cfg": guild_cfg,
         "widgets": widgets,
+        "synced_now": request.query_params.get("synced"),
         "error": error,
         "access_status_message": dashboard_data.access_status_message(user) if user and user.get("tier") != "officer" else None,
         "bot_invite_url": discord_invite.build_invite_url() if not user else None,
@@ -135,3 +144,33 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         # подвал не показываем, см. base.html.
         "show_footer": not user,
     })
+
+
+@router.post("/sync", response_class=HTMLResponse)
+async def home_sync(user: dict = Depends(require_guild_access)):
+    """"Обновить сейчас" на главной — тот же синк активности/статов игроков, что
+    и на /activity (web/routes/guild_dashboard.py::activity_sync), просто
+    редиректит обратно на / вместо /activity. Не трогает ростер (имена/ранги) —
+    тот и так обновляется ботом каждые 15 минут (cogs/violations.py), синкать
+    его вручную незачем; здесь именно то, что реально отстаёт (гир/релики/
+    звёзды/зеты/омикроны, автоцикл которых — часы, не минуты, см.
+    database.PLAYER_STATS_SYNC_HOURS)."""
+    guild_id = user["guild_id"]
+    ally_codes = [code for _, code, _ in database.get_all_user_mappings(guild_id)]
+    comlink = _get_comlink()
+    today = datetime.now(MSK).date().isoformat()
+    semaphore = asyncio.Semaphore(6)
+    skill_tier_map = database.get_all_skill_tier_thresholds()
+
+    async def sync_one(ally_code):
+        async with semaphore:
+            try:
+                guild_ids = database.get_guild_ids_for_ally_code(ally_code) or {guild_id}
+                _, added, _ = await activity_diff.sync_player(comlink, ally_code, guild_ids, today, skill_tier_map)
+                return added
+            except Exception as e:
+                print(f"⚠️ [/sync] Не удалось обновить ростер {ally_code}: {e}")
+                return 0
+
+    results = await asyncio.gather(*(sync_one(ac) for ac in ally_codes))
+    return RedirectResponse(f"/?synced={sum(results)}", status_code=303)

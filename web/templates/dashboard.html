@@ -77,6 +77,33 @@
     {% else %}
         <h1>{{ guild_cfg.name }}</h1>
 
+        <div class="panel">
+            <div class="sync-status">
+                <div>
+                    {% if widgets.sync_status.last_sync_text %}
+                        Обновлено: <strong>{{ widgets.sync_status.last_sync_text }}</strong>
+                    {% else %}
+                        Кэш активности ещё не наполнялся
+                    {% endif %}
+                    {% if widgets.sync_status.next_auto_text %}
+                        &nbsp;·&nbsp;автообновление {{ widgets.sync_status.next_auto_text }}
+                    {% endif %}
+                </div>
+                <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Синкаю…';">
+                    <button type="submit">🔄 Обновить сейчас</button>
+                </form>
+            </div>
+            {% if synced_now is not none %}
+                <p class="empty-state" style="margin-top: 0.75em; padding: 0;">
+                    {% if synced_now|int > 0 %}
+                        Готово — добавлено {{ synced_now }} новых событий.
+                    {% else %}
+                        Готово — новых изменений не найдено.
+                    {% endif %}
+                </p>
+            {% endif %}
+        </div>
+
         <div class="dashboard-grid">
             <div class="widget widget-roster">
                 <div class="widget-header">
