@@ -88,10 +88,14 @@
             {% if player_filter %}
                 <input type="hidden" name="page_size" value="{{ page_size }}">
             {% endif %}
+            {% if show_departed %}
+                <input type="hidden" name="departed" value="1">
+            {% endif %}
             <button type="submit">Применить</button>
             {% if player_filter or action_type_filter or period %}
                 <a href="{{ reset_url }}">Сбросить фильтр</a>
             {% endif %}
+            <a href="{{ toggle_departed_url }}">{% if show_departed %}Скрыть выбывших из гильдии{% else %}Показать выбывших из гильдии{% endif %}</a>
         </form>
 
         {% if player_filter %}

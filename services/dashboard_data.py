@@ -838,11 +838,16 @@ class ActivityEventRow:
 
 def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                         limit: int = 500, offset: int = 0,
-                        date_from: str | None = None, date_to: str | None = None) -> list[ActivityEventRow]:
+                        date_from: str | None = None, date_to: str | None = None,
+                        include_archived: bool = False) -> list[ActivityEventRow]:
+    # names_by_code — не только по текущему составу (get_all_user_mappings уже это и есть),
+    # а именно поэтому для АРХИВНОГО (выбывшего) игрока имя тут может не найтись — см.
+    # ally_code-фолбэк в player_name= ниже, чтобы строка не превращалась в "?".
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
     rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, action_type=action_type,
                                                 limit=limit, offset=offset,
-                                                date_from=date_from, date_to=date_to)
+                                                date_from=date_from, date_to=date_to,
+                                                include_archived=include_archived)
     unit_names = database.get_game_unit_names([r[1] for r in rows])
     # zeta/omicron хранят raw skill_id в new_value (см. services/activity_diff.py) — резолвим
     # в человекочитаемое имя способности + слаг для ссылки на swgoh.gg разом на весь батч.
@@ -874,25 +879,31 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type:
 
 
 def get_guild_activity_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
-                              date_from: str | None = None, date_to: str | None = None) -> int:
+                              date_from: str | None = None, date_to: str | None = None,
+                              include_archived: bool = False) -> int:
     """Общее число событий по текущему фильтру (без учёта limit/offset) — для пагинации."""
     return database.get_guild_activity_events_count(guild_id, ally_code=ally_code, action_type=action_type,
-                                                      date_from=date_from, date_to=date_to)
+                                                      date_from=date_from, date_to=date_to,
+                                                      include_archived=include_archived)
 
 
 def get_guild_activity_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
-                              date_from: str | None = None, date_to: str | None = None) -> list[str]:
+                              date_from: str | None = None, date_to: str | None = None,
+                              include_archived: bool = False) -> list[str]:
     return database.get_guild_activity_distinct_dates(guild_id, ally_code=ally_code, action_type=action_type,
-                                                        date_from=date_from, date_to=date_to)
+                                                        date_from=date_from, date_to=date_to,
+                                                        include_archived=include_archived)
 
 
 def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
-                                  date_from: str | None = None, date_to: str | None = None) -> list:
+                                  date_from: str | None = None, date_to: str | None = None,
+                                  include_archived: bool = False) -> list:
     """[(action_label, count), ...] отсортировано по убыванию — намеренно игнорирует фильтр
     по типу события (см. get_guild_activity_type_counts), иначе выбор одного типа в фильтре
     ленты схлопывал бы эту панель до единственного столбика."""
     counts = database.get_guild_activity_type_counts(guild_id, ally_code=ally_code,
-                                                       date_from=date_from, date_to=date_to)
+                                                       date_from=date_from, date_to=date_to,
+                                                       include_archived=include_archived)
     labeled = Counter()
     for action_type, count in counts:
         labeled[ACTIVITY_ACTION_LABELS.get(action_type, action_type)] += count

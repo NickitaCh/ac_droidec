@@ -1126,11 +1126,16 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     if period not in ACTIVITY_PERIOD_DAYS:
         period = ""
     date_from = _period_to_date_from(period)
+    # Выбывшие из гильдии игроки архивируются автоматически (sync_guild_roster) и по
+    # умолчанию скрыты отовсюду в этом роуте — ?departed=1 временно их возвращает
+    # (тот же паттерн, что show_all у /violations).
+    show_departed = request.query_params.get("departed") == "1"
 
     # "Событий по фильтру/всего" на плашке наверху — суммарно по всему фильтру, не по одному
     # дню, иначе цифра скакала бы при перелистывании страниц.
     total_count = dashboard_data.get_guild_activity_count(
         guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
+        include_archived=show_departed,
     )
 
     page_date_label = None
@@ -1154,6 +1159,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         rows = dashboard_data.get_guild_activity(
             guild_id, ally_code=player_filter, action_type=action_type_filter,
             limit=page_size, offset=(page - 1) * page_size, date_from=date_from,
+            include_archived=show_departed,
         )
     else:
         # Список дат, за которые вообще есть события по фильтру (без учёта страницы) — сама
@@ -1161,6 +1167,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         # показывает все события за N-й по свежести день, а не N-ю полусотню строк.
         activity_dates = dashboard_data.get_guild_activity_dates(
             guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
+            include_archived=show_departed,
         )
         total_pages = max(1, len(activity_dates))
         try:
@@ -1173,6 +1180,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         rows = dashboard_data.get_guild_activity(
             guild_id, ally_code=player_filter, action_type=action_type_filter,
             limit=ACTIVITY_DAY_ROW_LIMIT, date_from=selected_date, date_to=selected_date,
+            include_archived=show_departed,
         ) if selected_date else []
         page_date_label = dashboard_data.friendly_activity_date_label(selected_date)
 
@@ -1183,16 +1191,22 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
 
     # Панель "по типу изменения" — по всему фильтру (игрок/период), не по одной странице,
     # иначе бары скакали бы при перелистывании и не отражали реальную картину.
-    breakdown_rows = dashboard_data.get_guild_activity_breakdown(guild_id, ally_code=player_filter, date_from=date_from)
+    breakdown_rows = dashboard_data.get_guild_activity_breakdown(
+        guild_id, ally_code=player_filter, date_from=date_from, include_archived=show_departed,
+    )
     max_breakdown = breakdown_rows[0][1] if breakdown_rows else 0
 
     base_params = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period}.items() if v}
     if player_filter and page_size != ACTIVITY_DEFAULT_PAGE_SIZE:
         base_params["page_size"] = page_size
+    if show_departed:
+        base_params["departed"] = "1"
 
     page_size_urls = None
     if player_filter:
         filter_params_only = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period}.items() if v}
+        if show_departed:
+            filter_params_only["departed"] = "1"
         page_size_urls = [
             (size, f"/activity?{urlencode({**filter_params_only, 'page_size': size})}")
             for size in ACTIVITY_PAGE_SIZES
@@ -1207,6 +1221,8 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "action_type_filter": action_type_filter,
         "action_types": dashboard_data.ACTIVITY_ACTION_LABELS.items(),
         "period": period,
+        "show_departed": show_departed,
+        "toggle_departed_url": f"/activity?{urlencode({**base_params, 'departed': '0' if show_departed else '1'})}",
         "breakdown_rows": breakdown_rows,
         "max_breakdown": max_breakdown,
         "sync_status": sync_status_text,

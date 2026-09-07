@@ -1612,10 +1612,17 @@ def sync_guild_roster(guild_id: int, roster_rows):
     playerId, хранится отдельно от ally_code, чтобы при следующем синке можно было опознать
     того же игрока и подставить его последние известные имя/код союзника, если Comlink в этот
     раз не отдал allyCode/playerName (см. get_roster_by_player_id). Используется 15-минутным
-    рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии."""
+    рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии.
+
+    Заодно архивирует ленту активности (guild_activity_events) тех, кто пропал из свежего
+    состава по сравнению с предыдущим — сразу, а не по истечении какого-то срока (запрос
+    пользователя: не засорять /activity историей выбывших) — и возвращает из архива тех,
+    кто внезапно снова появился (вернулся в гильдию)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("SELECT DISTINCT ally_code FROM user_mapping WHERE guild_id = ?", (guild_id,))
+    previous_codes = {r[0] for r in cursor.fetchall()}
     cursor.execute("DELETE FROM user_mapping WHERE guild_id = ?", (guild_id,))
     cursor.executemany(
         "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name, member_level, comlink_player_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1624,6 +1631,24 @@ def sync_guild_roster(guild_id: int, roster_rows):
     )
     conn.commit()
     conn.close()
+
+    new_codes = {row[1] for row in roster_rows}
+    departed = previous_codes - new_codes
+    # Защита от глюка Comlink (см. память "Comlink зануленный ростер-участник") — если
+    # разом "выбыла" подозрительно большая доля прежнего состава, это вероятнее сбой
+    # данных, чем реальный массовый уход, — не архивируем в этом проходе (user_mapping
+    # выше уже обновлён как обычно, это влияет только на activity-архивацию), следующий
+    # штатный синк (15 минут) подтвердит уход реальными данными.
+    suspicious = previous_codes and len(departed) / len(previous_codes) > 0.3
+    if departed and not suspicious:
+        archive_activity_for_ally_codes(guild_id, departed)
+    elif suspicious:
+        print(f"⚠️ [Ростер] guild_id={guild_id}: {len(departed)}/{len(previous_codes)} игроков "
+              f"пропали из ростера за один синк — похоже на сбой Comlink, activity НЕ архивируется в этом проходе")
+    if new_codes:
+        # unarchive сам фильтрует WHERE archived_at IS NOT NULL — безопасно передать
+        # весь текущий состав, а не только пересечение с previous_codes.
+        unarchive_activity_for_ally_codes(guild_id, new_codes)
 
 
 def get_roster_by_player_id(guild_id: int) -> dict:
@@ -3979,6 +4004,16 @@ def _ensure_guild_activity_events_table(cursor):
         cursor.execute("ALTER TABLE guild_activity_events ADD COLUMN announced INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass
+    # archived_at: NULL — активная запись (игрок сейчас в ростере), иначе метка времени,
+    # когда игрок выбыл из гильдии — см. archive_activity_for_ally_codes, вызывается из
+    # sync_guild_roster при каждом обновлении состава. Записи не удаляются (история не
+    # теряется), просто по умолчанию скрыты из ленты/сводок (_guild_activity_events_filter_sql,
+    # include_archived=False по умолчанию) — тот же принцип "архив, не удаление", что уже
+    # применяется к задачам (database.TASK_ARCHIVE_AFTER_DAYS).
+    try:
+        cursor.execute("ALTER TABLE guild_activity_events ADD COLUMN archived_at TEXT")
+    except sqlite3.OperationalError:
+        pass
 
 
 def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action_type: str,
@@ -4030,10 +4065,15 @@ def mark_activity_event_announced(event_id: int) -> None:
 
 
 def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, action_type: str | None,
-                                       date_from: str | None, date_to: str | None):
+                                       date_from: str | None, date_to: str | None,
+                                       include_archived: bool = False):
     """Общий WHERE для get_guild_activity_events/get_guild_activity_events_count — чтобы
     подсчёт страниц (COUNT) и сама выборка (SELECT ... LIMIT/OFFSET) всегда фильтровали
-    одинаково, иначе номера страниц разъедутся с реальным числом строк."""
+    одинаково, иначе номера страниц разъедутся с реальным числом строк.
+    include_archived=False (по умолчанию везде) — прячет события игроков, выбывших из
+    гильдии (archived_at проставлен через archive_activity_for_ally_codes при синке
+    ростера), не дожидаясь никакого срока — архивация происходит сразу при обнаружении
+    выбытия, а не по TTL, см. запрос пользователя."""
     clauses = ["guild_id = ?"]
     params = [guild_id]
     if ally_code:
@@ -4048,19 +4088,23 @@ def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, acti
     if date_to:
         clauses.append("event_date <= ?")
         params.append(date_to)
+    if not include_archived:
+        clauses.append("archived_at IS NULL")
     return " AND ".join(clauses), params
 
 
 def get_guild_activity_events(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                                limit: int = 300, offset: int = 0,
-                               date_from: str | None = None, date_to: str | None = None):
+                               date_from: str | None = None, date_to: str | None = None,
+                               include_archived: bool = False):
     """Возвращает [(ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at), ...],
     новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми).
     date_from/date_to — включительно, формат event_date (YYYY-MM-DD)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to,
+                                                            include_archived=include_archived)
     cursor.execute(f"""
         SELECT ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at
         FROM guild_activity_events WHERE {where_sql}
@@ -4072,11 +4116,13 @@ def get_guild_activity_events(guild_id: int, ally_code: str | None = None, actio
 
 
 def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
-                                     date_from: str | None = None, date_to: str | None = None) -> int:
+                                     date_from: str | None = None, date_to: str | None = None,
+                                     include_archived: bool = False) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to,
+                                                            include_archived=include_archived)
     cursor.execute(f"SELECT COUNT(*) FROM guild_activity_events WHERE {where_sql}", params)
     count = cursor.fetchone()[0]
     conn.close()
@@ -4084,14 +4130,16 @@ def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None,
 
 
 def get_guild_activity_distinct_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
-                                       date_from: str | None = None, date_to: str | None = None) -> list[str]:
+                                       date_from: str | None = None, date_to: str | None = None,
+                                       include_archived: bool = False) -> list[str]:
     """Отсортированные по убыванию (свежие первыми) даты, в которые по текущему фильтру
     есть хоть одно событие — основа постраничной навигации на /activity "1 страница = 1 день"
     (см. web/routes/guild_dashboard.py::activity)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, action_type, date_from, date_to,
+                                                            include_archived=include_archived)
     cursor.execute(f"""
         SELECT DISTINCT event_date FROM guild_activity_events WHERE {where_sql}
         ORDER BY event_date DESC
@@ -4102,14 +4150,16 @@ def get_guild_activity_distinct_dates(guild_id: int, ally_code: str | None = Non
 
 
 def get_guild_activity_type_counts(guild_id: int, ally_code: str | None = None,
-                                    date_from: str | None = None, date_to: str | None = None):
+                                    date_from: str | None = None, date_to: str | None = None,
+                                    include_archived: bool = False):
     """[(action_type, count), ...] по игроку/периоду, БЕЗ фильтра по типу события —
     это данные для панели "по типу изменения", которая должна показывать полную картину
     независимо от того, каким типом сейчас отфильтрована сама лента."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, None, date_from, date_to)
+    where_sql, params = _guild_activity_events_filter_sql(guild_id, ally_code, None, date_from, date_to,
+                                                            include_archived=include_archived)
     cursor.execute(f"""
         SELECT action_type, COUNT(*) FROM guild_activity_events WHERE {where_sql}
         GROUP BY action_type
@@ -4138,16 +4188,65 @@ def get_guild_activity_player_type_counts(guild_id: int, date_from: str | None =
 
 
 def get_guild_activity_player_codes(guild_id: int) -> list:
-    """Все ally_code, у которых есть хотя бы одно событие активности в этой гильдии —
-    независимо от лимита/фильтра get_guild_activity_events, чтобы список для фильтра
-    на веб-странице не схлопывался до одного игрока при уже применённом фильтре."""
+    """Все ally_code, у которых есть хотя бы одно НЕархивное событие активности в этой
+    гильдии — независимо от лимита/фильтра get_guild_activity_events, чтобы список для
+    фильтра на веб-странице не схлопывался до одного игрока при уже применённом фильтре.
+    Выбывшие из гильдии игроки (archived_at проставлен) сюда не попадают — тот же принцип,
+    что и в остальных get_guild_activity_*."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
-    cursor.execute("SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ?", (guild_id,))
+    cursor.execute(
+        "SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ? AND archived_at IS NULL",
+        (guild_id,)
+    )
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def archive_activity_for_ally_codes(guild_id: int, ally_codes) -> int:
+    """Помечает все НЕархивные записи активности перечисленных ally_code этой гильдии как
+    архивные (archived_at = сейчас) — вызывается из sync_guild_roster при обнаружении, что
+    игрок пропал из свежего ростера. Не удаляет данные (история остаётся в БД на случай
+    возврата игрока — см. unarchive_activity_for_ally_codes), просто скрывает из
+    get_guild_activity_* по умолчанию. Возвращает число обновлённых строк."""
+    ally_codes = [c for c in ally_codes if c]
+    if not ally_codes:
+        return 0
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    placeholders = ",".join("?" * len(ally_codes))
+    cursor.execute(f"""
+        UPDATE guild_activity_events SET archived_at = datetime('now')
+        WHERE guild_id = ? AND archived_at IS NULL AND ally_code IN ({placeholders})
+    """, [guild_id] + ally_codes)
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def unarchive_activity_for_ally_codes(guild_id: int, ally_codes) -> int:
+    """Обратная операция — снимает archived_at у перечисленных ally_code, вызывается из
+    sync_guild_roster, когда ранее выбывший игрок снова обнаружен в ростере (вернулся в
+    гильдию). Возвращает число обновлённых строк."""
+    ally_codes = [c for c in ally_codes if c]
+    if not ally_codes:
+        return 0
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_activity_events_table(cursor)
+    placeholders = ",".join("?" * len(ally_codes))
+    cursor.execute(f"""
+        UPDATE guild_activity_events SET archived_at = NULL
+        WHERE guild_id = ? AND archived_at IS NOT NULL AND ally_code IN ({placeholders})
+    """, [guild_id] + ally_codes)
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected
 
 
 # =====================================================================
