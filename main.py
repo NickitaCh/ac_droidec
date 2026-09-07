@@ -6,6 +6,7 @@ from disnake.ext import commands
 from dotenv import load_dotenv
 import database
 import guild_resolver
+from services import discord_invite
 from swgoh_comlink import SwgohComlink
 
 # stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
@@ -85,8 +86,10 @@ ALLOWED_USER_IDS = [291656027659698176]
 # qualified_name — "группа сабкоманда" для сабкоманд) дополнительно открыты и
 # уровню "member" (рядовой участник участвующей гильдии). "регистрация" — особый
 # случай: открыта вообще всем, включая tier=None — это единственная "дверь" в
-# систему (см. main.py::_check_access, services/registration.py).
-ALWAYS_ALLOWED_COMMANDS = {"регистрация"}
+# систему (см. main.py::_check_access, services/registration.py). "гильдия_заявка"
+# по той же причине: заявка на платное подключение подаётся ДО того, как у
+# заявителя вообще может быть tier (см. cogs/guild_subscription.py).
+ALWAYS_ALLOWED_COMMANDS = {"регистрация", "гильдия_заявка"}
 MEMBER_ACCESSIBLE_COMMANDS = {
     "дк_требования список",
     "статы_требования список",
@@ -238,6 +241,34 @@ async def on_ready():
         activity=disnake.Activity(type=disnake.ActivityType.watching, name="Следит за игроками AC")
     )
     print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
+
+# Права запрашиваются заранее через сам инвайт-линк (services/discord_invite.py,
+# permissions в ссылке -> Discord сам создаёт роль бота с этими правами при
+# добавлении, доп. код для ЭТОЙ части не нужен). Этот хендлер — подстраховка на
+# случай, если инвайтер срезал какие-то права в диалоге Discord, либо их потом
+# сняли вручную: бот не может выдать себе права сам (Discord это запрещает),
+# поэтому просто явно просит недостающее в первом доступном канале.
+@bot.event
+async def on_guild_join(guild: disnake.Guild):
+    missing = discord_invite.missing_permissions(guild.me.guild_permissions)
+    if not missing:
+        return
+    channel = guild.system_channel or next(
+        (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
+    )
+    if channel is None:
+        return
+    invite_url = discord_invite.build_invite_url()
+    text = (
+        f"👋 Привет! Мне не хватает прав, без которых часть команд не будет работать: "
+        f"**{', '.join(missing)}**.\n"
+        f"Выдайте их роли бота в настройках сервера"
+        + (f", либо переприконнектите бота по той же ссылке: {invite_url}" if invite_url else ".")
+    )
+    try:
+        await channel.send(text)
+    except disnake.Forbidden:
+        pass
 
 def _check_access(author, command_name: str) -> bool:
     """Единая точка входа для гейта: по умолчанию нужен tier="officer"

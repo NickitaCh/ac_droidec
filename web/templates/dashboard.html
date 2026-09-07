@@ -46,6 +46,10 @@
 
         <section class="landing-pricing">
             <h2>Подключение гильдии</h2>
+            {% if bot_invite_url %}
+                <p><a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a></p>
+                <p class="muted landing-cta-note" style="margin-top: -0.5em;">Пригласить можно в любой момент — до оплаты или после, боту нужны стандартные права на приглашении.</p>
+            {% endif %}
             <div class="pricing-grid">
                 <div class="pricing-card">
                     <div class="pricing-card-price">500 ₽</div>

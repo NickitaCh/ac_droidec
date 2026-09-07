@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday
-from services import dashboard_data, datacron_catalog
+from services import dashboard_data, datacron_catalog, discord_invite
 from web.deps import get_current_user_optional
 from web.routes.tasks import _target_label as _task_target_label
 
@@ -127,4 +127,5 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "guild_cfg": guild_cfg,
         "widgets": widgets,
         "error": error,
+        "bot_invite_url": discord_invite.build_invite_url() if not user else None,
     })
