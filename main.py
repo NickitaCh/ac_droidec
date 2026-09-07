@@ -88,8 +88,9 @@ ALLOWED_USER_IDS = [291656027659698176]
 # случай: открыта вообще всем, включая tier=None — это единственная "дверь" в
 # систему (см. main.py::_check_access, services/registration.py). "гильдия_заявка"
 # по той же причине: заявка на платное подключение подаётся ДО того, как у
-# заявителя вообще может быть tier (см. cogs/guild_subscription.py).
-ALWAYS_ALLOWED_COMMANDS = {"регистрация", "гильдия_заявка"}
+# заявителя вообще может быть tier (см. cogs/guild_subscription.py). "пригласить"
+# (cogs/bot_invite.py) — просто отдаёт инвайт-ссылку, ей вообще не нужен tier.
+ALWAYS_ALLOWED_COMMANDS = {"регистрация", "гильдия_заявка", "пригласить"}
 MEMBER_ACCESSIBLE_COMMANDS = {
     "дк_требования список",
     "статы_требования список",
