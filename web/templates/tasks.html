@@ -24,33 +24,6 @@
         <div class="stat-tile"><div class="stat-value">{{ counts.COMPLETED }}</div><div class="stat-label">Выполнено</div></div>
     </div>
 
-    {% if batch_list %}
-        <div class="panel">
-            <div class="panel-title"><span>Активные группы заданий</span><span class="panel-hint">{{ batch_list|length }}</span></div>
-            <div class="table-scroll">
-                <table class="data">
-                    <thead><tr><th>Юнит</th><th>Цель</th><th>Дедлайн</th><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
-                    <tbody>
-                        {% for b in batch_list %}
-                            <tr>
-                                <td>{{ b.unit_name }}</td>
-                                <td>{{ b.target_label }}</td>
-                                <td>{{ b.deadline }}</td>
-                                <td>{{ b.players|join(", ") }}</td>
-                                <td>{{ b.count }}</td>
-                                <td>
-                                    <form method="post" action="/tasks/batch/{{ b.batch_id }}/delete" onsubmit="return confirm('Отменить всю группу ({{ b.count }} заданий)?');">
-                                        <button type="submit" class="button-danger">Отменить группу</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    {% endif %}
-
     <div class="panel" style="max-width: 32em;">
         <div class="panel-title"><span>Новая задача — один игрок</span></div>
         {% if prefill.active %}

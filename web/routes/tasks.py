@@ -238,22 +238,6 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         for t in tasks_ctx if t["target_type"] == "omicron"
     }
 
-    # Активные группы (массовая постановка / из отчёта плейта) — для панели "отменить группу".
-    batch_groups = {}
-    for t in tasks_ctx:
-        if t["batch_id"] and t["status"] == "ACTIVE":
-            # Юнит/цель/дедлайн одинаковы для всех задач одной группы (ставятся разом
-            # через /tasks/add-bulk) — берём из первой встреченной задачи, чтобы панель
-            # показывала, ЧТО за группа, а не только список игроков (Ricardo, Discord-тред
-            # "Гайд по АС Боту", 2026-09-08: "плашка какая-то неинформативная совсем").
-            g = batch_groups.setdefault(t["batch_id"], {
-                "count": 0, "players": [],
-                "unit_name": t["unit_name"], "target_label": t["target_label"], "deadline": t["deadline"],
-            })
-            g["count"] += 1
-            g["players"].append(t["player_name"])
-    batch_list = [{"batch_id": bid, **g} for bid, g in batch_groups.items()]
-
     players_view = []
     if view == "players":
         by_player = {}
@@ -284,7 +268,6 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         "status_filter": status_filter,
         "view": view,
         "counts": counts,
-        "batch_list": batch_list,
         "players_view": players_view,
         "omicron_options_by_unit": omicron_options_by_unit,
         "target_type_options": TARGET_TYPE_OPTIONS,
