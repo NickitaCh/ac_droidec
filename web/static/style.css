@@ -140,8 +140,25 @@ h1, h2 { letter-spacing: -0.01em; }
 }
 .pricing-card-price { font-size: 1.6em; font-weight: 700; color: var(--fg); }
 .pricing-card-period { color: var(--fg-muted); font-size: 0.9em; }
-.landing-cta-note { font-size: 0.9em; }
-.landing-cta-note .badge { margin-right: 0.4em; vertical-align: middle; }
+.landing-cta { margin: 1em 0 0.5em; }
+
+.landing-meta {
+    list-style: none;
+    margin: 1em 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4em 1.4em;
+    color: var(--fg-muted);
+    font-size: 0.85em;
+}
+.landing-meta li { display: flex; align-items: center; gap: 0.35em; white-space: nowrap; }
+.landing-meta a { color: var(--accent); }
+.landing-meta .badge { vertical-align: middle; }
+@media (max-width: 30em) {
+    .landing-meta li { white-space: normal; text-align: center; }
+}
 
 .landing-login { text-align: center; }
 

@@ -46,10 +46,6 @@
 
         <section class="landing-pricing">
             <h2>Подключение гильдии</h2>
-            {% if bot_invite_url %}
-                <p><a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a></p>
-                <p class="muted landing-cta-note" style="margin-top: -0.5em;">Пригласить можно в любой момент — до оплаты или после, боту нужны стандартные права на приглашении.</p>
-            {% endif %}
             <div class="pricing-grid">
                 <div class="pricing-card">
                     <div class="pricing-card-price">500 ₽</div>
@@ -60,10 +56,14 @@
                     <div class="pricing-card-period">в год</div>
                 </div>
             </div>
-            <p class="muted landing-cta-note"><span class="badge badge-neutral">скоро</span> самостоятельное подключение и оплата — пока обсудите подключение вашей гильдии напрямую.</p>
-            <p class="muted landing-cta-note">Услуга цифровая: после оплаты доступ к боту и дашборду открывается
-            автоматически, обычно в течение нескольких минут, и действует до конца
-            оплаченного периода. Подробности — в <a href="/oferta">публичной оферте</a>.</p>
+            {% if bot_invite_url %}
+                <p class="landing-cta"><a class="button" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a></p>
+            {% endif %}
+            <ul class="landing-meta">
+                <li>⚡ Доступ открывается автоматически после оплаты</li>
+                <li><span class="badge badge-neutral">скоро</span> самостоятельная оплата — пока обсудите подключение напрямую</li>
+                <li>📄 <a href="/oferta">Публичная оферта</a></li>
+            </ul>
         </section>
 
         <section class="landing-login">
