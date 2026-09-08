@@ -162,10 +162,10 @@ class TasksCog(commands.Cog):
         return "🔵", "Назначено"
 
     def _progress_label(self, initial_value, current_value) -> str:
+        # Всегда показываем и стартовое, и текущее значение (даже при равенстве) —
+        # см. web/routes/tasks.py::_progress_label за тем же изменением и обоснованием.
         if initial_value is None or current_value is None:
             return "—"
-        if initial_value == current_value:
-            return str(current_value)
         return f"{initial_value} → {current_value}"
 
     async def _fetch_unit_data(self, ally_code: str, base_id: str) -> dict | None:
@@ -270,55 +270,83 @@ class TasksCog(commands.Cog):
     # =====================================================================
     @tasks.loop(hours=1)
     async def tasks_audit_loop(self):
-        """Ежечасная автоматическая проверка ВЫПОЛНЕНИЯ задач через Comlink (сверка
-        ростера) — по каждой зарегистрированной гильдии отдельно (у фонового цикла нет
-        интеракции, чтобы резолвить гильдию через guild_resolver). Просрочка и
-        напоминания о дедлайне вынесены в tasks_notify_loop ниже (фиксированное время,
-        не завязанное на момент рестарта бота) — здесь только "юнит уже прокачан?"."""
+        """Ежечасная автоматическая проверка задач — и просрочку дедлайна (FAILED), и
+        ВЫПОЛНЕНИЕ через Comlink (сверка ростера) — по каждой зарегистрированной гильдии
+        отдельно (у фонового цикла нет интеракции, чтобы резолвить гильдию через
+        guild_resolver).
+
+        Просрочка раньше проверялась в tasks_notify_loop ниже раз в сутки, в фиксированную
+        per-guild минуту — и из-за бага с распаковкой database.get_active_tasks() (там
+        ожидалось 6 полей в кортеже, а функция уже отдавала 9 — initial_value/current_value/
+        in_progress добавились аддитивно) КАЖДЫЙ проход с хотя бы одной активной задачей
+        падал с ValueError ещё до цикла напоминаний. Необработанное исключение в теле
+        disnake tasks.loop тихо ОСТАНАВЛИВАЕТ цикл насовсем (до явного рестарта — и даже
+        тогда цикл падал заново на первом же тике), поэтому просрочка не отслеживалась
+        вообще, с самого добавления initial_value/current_value/in_progress (см. Ricardo,
+        Discord-тред "Гайд по АС Боту", 2026-09-08, п. "Сроки давно уже вышли, задача не
+        получила статус проваленной"). Теперь просрочка проверяется тут же, ежечасно вместе
+        с выполнением — не зависит от точной минуты и не требует доступности Comlink;
+        tasks_notify_loop оставлен только для напоминаний "дедлайн скоро" (см. его докстринг)."""
         print("🔍 Запуск ежечасного аудита заданий на прокачку...")
         # Per-skill индекс омикрон-ступени — единого порога вроде tier>=8 не существует
         # (см. services/activity_diff.py), грузим один раз на весь проход, не на задачу.
         skill_thresholds = database.get_all_skill_tier_thresholds()
+        today_msk = datetime.now(MSK).date()
 
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
-            active_tasks = database.get_active_tasks(gid)
-            if not active_tasks:
-                continue
-            cache = self.bot.guild_roster_caches.get(gid, {})
-            print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
-
-            for task in active_tasks:
-                task_id, ally_code, base_id, target_type, target_value, deadline_str, initial_value, _current_value, _in_progress = task
-                player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
-
-                unit_data = await self._fetch_unit_data(ally_code, base_id)
-                if unit_data is None:
+            try:
+                active_tasks = database.get_active_tasks(gid)
+                if not active_tasks:
                     continue
+                cache = self.bot.guild_roster_caches.get(gid, {})
+                print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
 
-                if self._is_target_completed(unit_data, target_type, target_value, skill_thresholds):
-                    database.update_task_status(task_id, "COMPLETED")
-                    print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
-                    await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "COMPLETED", player_name)
-                    continue
+                for task in active_tasks:
+                    task_id, ally_code, base_id, target_type, target_value, deadline_str, initial_value, _current_value, _in_progress = task
+                    player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
 
-                current_value = self._current_progress_value(unit_data, target_type, target_value)
-                in_progress = initial_value is not None and current_value != initial_value
-                database.update_task_progress(task_id, current_value, in_progress)
+                    try:
+                        deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d").date()
+                    except ValueError:
+                        deadline_date = None
+                    if deadline_date is not None and today_msk > deadline_date:
+                        database.update_task_status(task_id, "FAILED")
+                        print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
+                        await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "FAILED", player_name)
+                        continue
+
+                    unit_data = await self._fetch_unit_data(ally_code, base_id)
+                    if unit_data is None:
+                        continue
+
+                    if self._is_target_completed(unit_data, target_type, target_value, skill_thresholds):
+                        database.update_task_status(task_id, "COMPLETED")
+                        print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
+                        await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "COMPLETED", player_name)
+                        continue
+
+                    current_value = self._current_progress_value(unit_data, target_type, target_value)
+                    in_progress = initial_value is not None and current_value != initial_value
+                    database.update_task_progress(task_id, current_value, in_progress)
+            except Exception as e:
+                # Один сбой (гильдия/задача/сеть) не должен останавливать весь цикл до
+                # рестарта бота, как это уже произошло однажды из-за бага выше.
+                print(f"⚠️ [Задачи] Аудит гильдии {gname} упал: {e}")
 
     @tasks_audit_loop.before_loop
     async def before_tasks_audit(self):
         await self.bot.wait_until_ready()
 
     # =====================================================================
-    # УВЕДОМЛЕНИЯ ПО ДЕДЛАЙНУ (просрочка + "скоро дедлайн") — раз в сутки, в
-    # фиксированное per-guild время (guilds.tasks_notify_time, задаётся только в
-    # вебе /settings, по умолчанию bot.TASKS_DEFAULT_NOTIFY_TIME = "10:00" МСК).
-    # Раньше оба уведомления шли на каждом часовом Comlink-проходе аудита выше —
-    # время рассылки плавало в зависимости от момента последнего рестарта бота.
-    # Поминутный опрос + per-guild "уже отправляли сегодня" guard — тот же
-    # паттерн, что rotation_ping.py/birthday.py (см. CLAUDE.md).
+    # НАПОМИНАНИЯ "ДЕДЛАЙН СКОРО" — раз в сутки, в фиксированное per-guild время
+    # (guilds.tasks_notify_time, задаётся только в вебе /settings, по умолчанию
+    # bot.TASKS_DEFAULT_NOTIFY_TIME = "10:00" МСК) — рассылать их ежечасно вместе с
+    # tasks_audit_loop было бы спамом. Просрочка (FAILED) больше НЕ здесь — см.
+    # докстринг tasks_audit_loop за причиной переноса. Поминутный опрос + per-guild
+    # "уже отправляли сегодня" guard — тот же паттерн, что rotation_ping.py/birthday.py
+    # (см. CLAUDE.md).
     # =====================================================================
     @tasks.loop(seconds=30)
     async def tasks_notify_loop(self):
@@ -339,29 +367,15 @@ class TasksCog(commands.Cog):
                 continue
             self._last_notify_day[gid] = today_key
 
-            active_tasks = database.get_active_tasks(gid)
-            if not active_tasks:
-                continue
-            gname = guild_cfg["name"]
-            cache = self.bot.guild_roster_caches.get(gid, {})
-            today_date = now_msk.date()
-
-            for task_id, ally_code, base_id, target_type, target_value, deadline_str in active_tasks:
-                try:
-                    deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d").date()
-                except ValueError:
-                    continue
-                if today_date > deadline_date:
+            try:
+                cache = self.bot.guild_roster_caches.get(gid, {})
+                reminder_rows = database.get_tasks_needing_reminder(gid, self.bot.TASK_REMINDER_DAYS_BEFORE)
+                for task_id, ally_code, base_id, target_type, target_value, deadline_str in reminder_rows:
                     player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
-                    database.update_task_status(task_id, "FAILED")
-                    print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
-                    await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "FAILED", player_name)
-
-            reminder_rows = database.get_tasks_needing_reminder(gid, self.bot.TASK_REMINDER_DAYS_BEFORE)
-            for task_id, ally_code, base_id, target_type, target_value, deadline_str in reminder_rows:
-                player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
-                await self._send_reminder(guild_cfg, base_id, target_type, target_value, deadline_str, player_name)
-                database.mark_task_reminder_sent(task_id)
+                    await self._send_reminder(guild_cfg, base_id, target_type, target_value, deadline_str, player_name)
+                    database.mark_task_reminder_sent(task_id)
+            except Exception as e:
+                print(f"⚠️ [Задачи] Напоминания для гильдии {gid} упали: {e}")
 
     @tasks_notify_loop.before_loop
     async def before_tasks_notify(self):

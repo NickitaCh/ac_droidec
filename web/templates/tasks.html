@@ -11,6 +11,9 @@
     {% if notice %}
         <p class="badge badge-ok">✅ {{ notice }}</p>
     {% endif %}
+    {% if warn %}
+        <p class="badge badge-danger">🛑 {{ warn }}</p>
+    {% endif %}
     {% if synced %}
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
@@ -26,10 +29,13 @@
             <div class="panel-title"><span>Активные группы заданий</span><span class="panel-hint">{{ batch_list|length }}</span></div>
             <div class="table-scroll">
                 <table class="data">
-                    <thead><tr><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
+                    <thead><tr><th>Юнит</th><th>Цель</th><th>Дедлайн</th><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
                     <tbody>
                         {% for b in batch_list %}
                             <tr>
+                                <td>{{ b.unit_name }}</td>
+                                <td>{{ b.target_label }}</td>
+                                <td>{{ b.deadline }}</td>
                                 <td>{{ b.players|join(", ") }}</td>
                                 <td>{{ b.count }}</td>
                                 <td>
@@ -135,7 +141,7 @@
                     Дедлайн
                     <input type="date" name="deadline" required>
                 </label>
-                <button type="submit">Поставить всем выбранным</button>
+                <button type="submit" id="bulk-submit-btn">Поставить всем выбранным</button>
             </form>
         </details>
     </div>
@@ -218,7 +224,7 @@
                                 <th data-sort="text">Прогресс</th>
                                 <th data-sort="text">Дедлайн</th>
                                 <th data-sort="text">Статус</th>
-                                <th data-sort="text">Кем</th>
+                                <th data-sort="text">Назначил</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -230,7 +236,7 @@
                                     <td>{{ t.target_label }}</td>
                                     <td>{{ t.progress }}</td>
                                     <td>{{ t.deadline }}</td>
-                                    <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                                    <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span></td>
                                     <td>{{ t.created_by_name }}</td>
                                     <td class="row-actions">
                                         <details>
@@ -346,6 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const bulkDialogBody = document.getElementById("bulk-confirm-body");
     const bulkOkBtn = document.getElementById("bulk-confirm-ok");
     const bulkCancelBtn = document.getElementById("bulk-confirm-cancel");
+    const bulkSubmitBtn = document.getElementById("bulk-submit-btn");
     let bulkConfirmed = false;
 
     const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -364,20 +371,33 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
+            // Статус-индикатор на время проверки — раньше при большом числе игроков
+            // страница просто "висла" без обратной связи (Ricardo, Discord-тред "Гайд
+            // по АС Боту", 2026-09-08: "сайт виснет, и непонятно, что происходит").
+            const originalSubmitText = bulkSubmitBtn.textContent;
+            bulkSubmitBtn.disabled = true;
+            bulkSubmitBtn.textContent = "⏳ Проверяю...";
+
             let preview;
             try {
                 const resp = await fetch("/tasks/api/bulk-preview", { method: "POST", body: new FormData(bulkForm) });
                 preview = await resp.json();
                 if (!resp.ok) {
+                    bulkSubmitBtn.disabled = false;
+                    bulkSubmitBtn.textContent = originalSubmitText;
                     alert(preview.error || "Не удалось проверить постановку.");
                     return;
                 }
             } catch {
                 // Предпросмотр недоступен — не блокируем постановку, отправляем как есть.
+                // Кнопку намеренно НЕ восстанавливаем — идёт реальная отправка/переход страницы.
+                bulkSubmitBtn.textContent = "⏳ Ставлю задачи...";
                 bulkConfirmed = true;
                 bulkForm.requestSubmit();
                 return;
             }
+            bulkSubmitBtn.disabled = false;
+            bulkSubmitBtn.textContent = originalSubmitText;
 
             const { create = [], duplicate = [], done = [] } = preview;
             const parts = [`<p><strong>Будет поставлено: ${create.length}</strong>${create.length ? " — " + escapeHtml(create.join(", ")) : ""}</p>`];
@@ -395,6 +415,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         bulkOkBtn.addEventListener("click", () => {
             bulkDialog.close();
+            bulkOkBtn.disabled = true;
+            bulkCancelBtn.disabled = true;
+            bulkSubmitBtn.disabled = true;
+            bulkSubmitBtn.textContent = "⏳ Ставлю задачи...";
             bulkConfirmed = true;
             bulkForm.requestSubmit();
         });

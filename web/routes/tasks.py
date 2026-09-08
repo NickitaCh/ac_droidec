@@ -7,9 +7,10 @@
 статус и настраивает время рассылки (guilds.tasks_notify_time, см. /settings)."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -21,6 +22,7 @@ from web.deps import require_officer_access
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+MSK = ZoneInfo("Europe/Moscow")
 
 TARGET_TYPE_OPTIONS = [
     ("stars", "⭐ Звёзды (1-7)"),
@@ -45,11 +47,27 @@ def _status_label(status: str, in_progress) -> str:
 
 
 def _progress_label(initial_value, current_value) -> str:
+    # Всегда показываем и стартовое, и текущее значение (даже когда они совпадают) —
+    # раньше при равенстве показывался один голый current_value, из-за чего пропадала
+    # видимая информация о состоянии юнита на момент постановки задачи (Ricardo,
+    # Discord-тред "Гайд по АС Боту", 2026-09-08).
     if initial_value is None or current_value is None:
         return "—"
-    if initial_value == current_value:
-        return str(current_value)
     return f"{initial_value} → {current_value}"
+
+
+def _format_resolved_at(resolved_at: str | None) -> str | None:
+    """resolved_at хранится как datetime('now') (UTC) — конвертируем в МСК для показа
+    времени завершения/провала задачи (Ricardo, тот же тред: "добавить информацию о
+    времени, когда задача была выполнена"). Тот же паттерн конвертации, что
+    services/dashboard_data.py::_sync_status (last_sync)."""
+    if not resolved_at:
+        return None
+    try:
+        dt = datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(MSK)
+    except ValueError:
+        return None
+    return dt.strftime("%d.%m.%Y %H:%M (МСК)")
 
 
 def _get_comlink():
@@ -190,6 +208,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
             "created_by_name": creator_names.get(created_by, "—"),
             "batch_id": batch_id,
             "archived": database.is_task_archived(resolved_at),
+            "resolved_at_text": _format_resolved_at(resolved_at),
         }
         for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
              initial_value, current_value, in_progress, created_by, resolved_at) in rows
@@ -220,7 +239,14 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
     batch_groups = {}
     for t in tasks_ctx:
         if t["batch_id"] and t["status"] == "ACTIVE":
-            g = batch_groups.setdefault(t["batch_id"], {"count": 0, "players": []})
+            # Юнит/цель/дедлайн одинаковы для всех задач одной группы (ставятся разом
+            # через /tasks/add-bulk) — берём из первой встреченной задачи, чтобы панель
+            # показывала, ЧТО за группа, а не только список игроков (Ricardo, Discord-тред
+            # "Гайд по АС Боту", 2026-09-08: "плашка какая-то неинформативная совсем").
+            g = batch_groups.setdefault(t["batch_id"], {
+                "count": 0, "players": [],
+                "unit_name": t["unit_name"], "target_label": t["target_label"], "deadline": t["deadline"],
+            })
             g["count"] += 1
             g["players"].append(t["player_name"])
     batch_list = [{"batch_id": bid, **g} for bid, g in batch_groups.items()]
@@ -231,6 +257,10 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         for t in tasks_ctx:
             if t["status"] in ("ACTIVE", "FAILED"):
                 by_player.setdefault(t["ally_code"], {"name": t["player_name"], "tasks": []})["tasks"].append(t)
+        # Внутри игрока — по дедлайну (ближе срок = выше в списке), см. Ricardo,
+        # Discord-тред "Гайд по АС Боту", 2026-09-08.
+        for p in by_player.values():
+            p["tasks"].sort(key=lambda t: t["deadline"])
         players_view = sorted(by_player.values(), key=lambda p: (-len(p["tasks"]), p["name"].lower()))
 
     roster = sorted(names_by_code.items(), key=lambda kv: kv[1].lower())
@@ -259,6 +289,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         "prefill": prefill,
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
+        "warn": request.query_params.get("warn"),
         "synced": request.query_params.get("synced"),
         "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
     })
@@ -336,8 +367,11 @@ async def task_add(
         if unit_data is not None:
             skill_thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
             if _is_target_completed(unit_data, target_type, target_value, skill_thresholds):
+                # Раньше шло через 'notice' (зелёный ✅) — вводило в заблуждение, задача
+                # ведь НЕ создана, а не "успех" (Ricardo, Discord-тред "Гайд по АС Боту",
+                # 2026-09-08). 'warn' рендерится в шаблоне бледно-красным.
                 return RedirectResponse(
-                    f"/tasks?{urlencode({'notice': f'{names_by_code[ally_code]}: цель уже выполнена, задача не создана.'})}",
+                    f"/tasks?{urlencode({'warn': f'{names_by_code[ally_code]}: цель уже выполнена, задача не создана.'})}",
                     status_code=303,
                 )
             initial_value = _current_progress_value(unit_data, target_type, target_value)
