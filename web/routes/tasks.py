@@ -238,6 +238,21 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         for t in tasks_ctx if t["target_type"] == "omicron"
     }
 
+    # Групповые задания (массовая постановка / из отчёта плейта) — для скрытой ссылки
+    # "отменить группу" внизу страницы. Раньше жило в отдельной плашке над формами
+    # (убрана — Nick, 2026-09-08: "неинформативная совсем"), теперь просто данные
+    # для незаметного, но доступного блока в самом низу (см. tasks.html).
+    batch_groups = {}
+    for t in tasks_ctx:
+        if t["batch_id"] and t["status"] == "ACTIVE":
+            g = batch_groups.setdefault(t["batch_id"], {
+                "count": 0, "players": [],
+                "unit_name": t["unit_name"], "target_label": t["target_label"], "deadline": t["deadline"],
+            })
+            g["count"] += 1
+            g["players"].append(t["player_name"])
+    batch_list = [{"batch_id": bid, **g} for bid, g in batch_groups.items()]
+
     players_view = []
     if view == "players":
         by_player = {}
@@ -268,6 +283,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         "status_filter": status_filter,
         "view": view,
         "counts": counts,
+        "batch_list": batch_list,
         "players_view": players_view,
         "omicron_options_by_unit": omicron_options_by_unit,
         "target_type_options": TARGET_TYPE_OPTIONS,

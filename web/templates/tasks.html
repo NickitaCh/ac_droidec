@@ -241,6 +241,33 @@
         {% endif %}
     </div>
 
+    {% if batch_list %}
+        <details class="muted" style="margin-top: 2em; font-size: 0.9em;">
+            <summary class="link-btn">Отменить групповое задание…</summary>
+            <div class="table-scroll" style="margin-top: 0.5em;">
+                <table class="data">
+                    <thead><tr><th>Юнит</th><th>Цель</th><th>Дедлайн</th><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
+                    <tbody>
+                        {% for b in batch_list %}
+                            <tr>
+                                <td>{{ b.unit_name }}</td>
+                                <td>{{ b.target_label }}</td>
+                                <td>{{ b.deadline }}</td>
+                                <td>{{ b.players|join(", ") }}</td>
+                                <td>{{ b.count }}</td>
+                                <td>
+                                    <form method="post" action="/tasks/batch/{{ b.batch_id }}/delete" onsubmit="return confirm('Отменить всю группу ({{ b.count }} заданий)?');">
+                                        <button type="submit" class="button-danger">Отменить группу</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    {% endif %}
+
     <script>
 document.addEventListener("DOMContentLoaded", () => {
     // "Выбрать всех" в массовой постановке — отмечает все чекбоксы ростера разом.
