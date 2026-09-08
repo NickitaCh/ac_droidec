@@ -192,7 +192,16 @@ class TasksCog(commands.Cog):
         if target_type == 'stars':
             return str(unit_data.get('currentRarity', 0))
         if target_type == 'relic':
-            return str(unit_data.get('relic', {}).get('currentTier', 0))
+            # Comlink хранит "сырой" currentTier со смещением +2 от отображаемого игроку
+            # номера реликвии (см. _is_target_completed: required_tier = target+2) — R7
+            # это raw currentTier=9. Раньше здесь возвращался raw currentTier напрямую,
+            # без обратного пересчёта, поэтому initial_value/current_value сравнивались
+            # с target_value в разных единицах — игрок на R7 (raw 9) при цели Р9
+            # (target_value="9") видел прогресс "9 → 9", как будто цель уже достигнута
+            # (Ricardo, Discord-тред "Гайд по АС Боту", 2026-09-08). Приводим к тем же
+            # человекочитаемым единицам, что и target_value.
+            raw_tier = unit_data.get('relic', {}).get('currentTier', 0)
+            return str(raw_tier - 2) if raw_tier > 2 else "0"
         if target_type == 'omicron':
             for skill in unit_data.get('skill', []):
                 if skill.get('id') == target_value:

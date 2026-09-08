@@ -99,7 +99,10 @@ def _current_progress_value(unit_data: dict, target_type: str, target_value: str
     if target_type == 'stars':
         return str(unit_data.get('currentRarity', 0))
     if target_type == 'relic':
-        return str(unit_data.get('relic', {}).get('currentTier', 0))
+        # См. cogs/tasks.py::_current_progress_value за объяснением смещения +2 —
+        # тот же баг дублирован здесь (файл намеренно не импортирует cogs/tasks.py).
+        raw_tier = unit_data.get('relic', {}).get('currentTier', 0)
+        return str(raw_tier - 2) if raw_tier > 2 else "0"
     if target_type == 'omicron':
         for skill in unit_data.get('skill', []):
             if skill.get('id') == target_value:
