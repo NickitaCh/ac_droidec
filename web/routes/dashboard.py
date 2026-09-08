@@ -101,6 +101,15 @@ def _tasks_summary(guild_id: int, limit: int = 8):
     return {"counts": counts, "rows": open_rows[:limit], "open_total": len(open_rows)}
 
 
+@router.get("/oferta", response_class=HTMLResponse)
+async def oferta(request: Request, user: dict | None = Depends(get_current_user_optional)):
+    # Публичная оферта нужна отдельной страницей (не PDF стороннего сервиса) —
+    # см. project_paid_guild_subscription_feature: сначала ссылались на PDF
+    # Продамуса, теперь текст свой и не завязан на конкретного платёжного
+    # агрегатора, чтобы не переписывать при смене ЮKassa/Robokassa/др.
+    return templates.TemplateResponse(request, "oferta.html", {"user": user, "show_footer": True})
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request, user: dict | None = Depends(get_current_user_optional)):
     guild_cfg = None
