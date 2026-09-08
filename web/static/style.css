@@ -143,22 +143,16 @@ h1, h2 { letter-spacing: -0.01em; }
 .landing-cta { margin: 1em 0 0.5em; }
 
 .landing-meta {
-    list-style: none;
-    margin: 1em 0 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.4em 1.4em;
+    max-width: 26em;
+    margin: 1em auto 0;
+    padding-left: 1.2em;
     color: var(--fg-muted);
     font-size: 0.85em;
+    text-align: left;
 }
-.landing-meta li { display: flex; align-items: center; gap: 0.35em; white-space: nowrap; }
+.landing-meta li { margin: 0.35em 0; }
 .landing-meta a { color: var(--accent); }
-.landing-meta .badge { vertical-align: middle; }
-@media (max-width: 30em) {
-    .landing-meta li { white-space: normal; text-align: center; }
-}
+.landing-meta .badge { vertical-align: middle; margin-right: 0.3em; }
 
 .landing-login { text-align: center; }
 
