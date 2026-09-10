@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Документация — AC Droidec{% endblock %}
+{% block main_class %}docs-page{% endblock %}
 {% block content %}
-<div class="landing-page docs-page">
     <h1>Документация по командам</h1>
     <p class="muted">
         Все команды бота (<code>/</code> в Discord), сгруппированные по разделам. Новичкам — сначала
@@ -27,5 +27,4 @@
             {% endfor %}
         </ul>
     {% endfor %}
-</div>
 {% endblock %}

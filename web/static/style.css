@@ -103,6 +103,13 @@ h1, h2 { letter-spacing: -0.01em; }
 .landing-hero { text-align: center; margin-bottom: 1.5em; }
 .landing-hero h1 { margin-bottom: 0.2em; }
 
+/* main.docs-page (не просто .docs-page) — специфичность 0,0,1,1, та же, что у
+   базового `main { max-width: 40em; }`, поэтому явно нужен именно составной
+   селектор на элементе main, иначе базовое правило main не переопределяется
+   (класс сам по себе, без main, слабее). Раньше /start и /commands сидели
+   внутри .landing-page (max-width: 46em) — но main вокруг неё и так был
+   зажат в 40em, отсюда "сжато в центре". */
+main.docs-page { max-width: 62em; }
 .docs-page code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
 .docs-page h2 { margin-top: 1.6em; }
 .docs-legend { display: flex; flex-wrap: wrap; gap: 0.5em; margin: 0.75em 0 1.5em; }
