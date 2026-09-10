@@ -123,17 +123,19 @@ def decode_mod(mod: dict) -> dict | None:
     }
 
 
-def mod_matches(decoded: dict, set_id=None, slot_key=None, primary_stat_id=None, conditions=None) -> bool:
-    """Все переданные условия объединяются через И (по решению 2026-09-10 — одна группа
-    условий, без ИЛИ-групп). conditions — [(stat_id, operator_str, value), ...]; каждое
-    условие ищет СВОЮ вторичку среди до 4 на моде (одно и то же условие не может быть
-    закрыто одной и той же вторичкой дважды, но одна и та же вторичка может закрыть только
-    одно условие за раз — на практике с ≤4 вторичек и обычно 1-3 условиями это не проблема)."""
-    if set_id is not None and decoded["set_id"] != set_id:
+def mod_matches(decoded: dict, set_ids=None, slot_keys=None, primary_stat_ids=None, conditions=None) -> bool:
+    """set_ids/slot_keys/primary_stat_ids — списки (по фидбеку 2026-09-11: несколько
+    значений в каждой категории, ИЛИ внутри категории — "сет 2 или сет 3"), пустой/None
+    список категории значит "любой". Категории между собой и с conditions — через И.
+    conditions — [(stat_id, operator_str, value), ...]; каждое условие ищет СВОЮ вторичку
+    среди до 4 на моде (одно и то же условие не может быть закрыто одной и той же
+    вторичкой дважды, но одна и та же вторичка может закрыть только одно условие за раз —
+    на практике с ≤4 вторичек и обычно 1-3 условиями это не проблема)."""
+    if set_ids and decoded["set_id"] not in set_ids:
         return False
-    if slot_key and decoded["slot_key"] != slot_key:
+    if slot_keys and decoded["slot_key"] not in slot_keys:
         return False
-    if primary_stat_id is not None and (not decoded["primary"] or decoded["primary"]["stat_id"] != primary_stat_id):
+    if primary_stat_ids and (not decoded["primary"] or decoded["primary"]["stat_id"] not in primary_stat_ids):
         return False
     for stat_id, op, value in (conditions or []):
         op_fn = OPERATORS.get(op)

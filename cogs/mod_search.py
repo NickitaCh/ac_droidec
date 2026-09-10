@@ -73,7 +73,15 @@ class ModSearchCog(commands.Cog):
             await inter.edit_original_response("❌ Укажите хотя бы одно условие поиска (сет / слот / primary / вторичка).")
             return
 
-        filt = {"set_id": сет, "slot_key": слот, "primary_stat_id": primary, "conditions": conditions}
+        # Discord-команда без динамического конструктора всё ещё выбирает по одному
+        # значению на категорию (см. docstring модуля) — движок теперь принимает списки
+        # (веб умеет несколько сразу, фидбек 2026-09-11), оборачиваем.
+        filt = {
+            "set_ids": [сет] if сет is not None else None,
+            "slot_keys": [слот] if слот is not None else None,
+            "primary_stat_ids": [primary] if primary is not None else None,
+            "conditions": conditions,
+        }
 
         if гильдия:
             if игрок is not None:
@@ -91,33 +99,34 @@ class ModSearchCog(commands.Cog):
             ally_codes = [ally_code for _, ally_code, _ in roster]
             units_by_ally = database.get_player_units_bulk(ally_codes)
 
+            # По фидбеку 2026-09-11: сводка показывает КАЖДОГО игрока ростера, включая
+            # 0 совпадений — раньше молча пропускали, было непонятно, кого вообще
+            # проверили. "Детали" ниже по-прежнему только для тех, у кого есть находки.
             rows = []
             for _discord_id, ally_code, name in roster:
                 matches = mod_search.search_units(units_by_ally.get(ally_code, {}), **filt)
-                if matches:
-                    rows.append((name, matches))
+                rows.append((name, matches))
             rows.sort(key=lambda r: len(r[1]), reverse=True)
+            matched_rows = [(name, matches) for name, matches in rows if matches]
 
-            all_base_ids = {m["base_id"] for _name, matches in rows for m in matches}
+            all_base_ids = {m["base_id"] for _name, matches in matched_rows for m in matches}
             names = database.get_game_unit_names(list(all_base_ids))
 
             total_matches = sum(len(m) for _, m in rows)
-            lines = [f"Игроков с совпадениями: {len(rows)}/{len(roster)} · всего модов: {total_matches}", ""]
-            if not rows:
-                lines.append("Совпадений не найдено.")
-            else:
-                lines.append("## Сводка")
-                for name, matches in rows:
-                    lines.append(f"**{name}** — {len(matches)}")
+            lines = [f"Игроков с совпадениями: {len(matched_rows)}/{len(roster)} · всего модов: {total_matches}", ""]
+            lines.append("## Сводка")
+            for name, matches in rows:
+                lines.append(f"**{name}** — {len(matches)}")
+            if matched_rows:
                 lines.append("")
                 lines.append("## Детали")
-                for name, matches in rows:
+                for name, matches in matched_rows:
                     for m in matches:
                         char_name = names.get(m["base_id"], m["base_id"])
                         lines.append(f"{name} — " + mod_search.describe_mod(m["base_id"], m["mod"], char_name))
 
             title = f"🔍 Поиск модов — гильдия"
-            color = DATACRON_CHECK_COLOR_FULL if rows else DATACRON_CHECK_COLOR_NONE
+            color = DATACRON_CHECK_COLOR_FULL if matched_rows else DATACRON_CHECK_COLOR_NONE
             embeds = _lines_to_embeds(title, color, lines)
             await inter.edit_original_response(embed=embeds[0])
             for e in embeds[1:]:

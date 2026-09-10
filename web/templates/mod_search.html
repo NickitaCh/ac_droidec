@@ -5,43 +5,45 @@
 {% block content %}
     <h1>Поиск модов</h1>
     <p class="muted">
-        Гибкий фильтр по НАДЕТЫМ модам гильдии — сет, слот, primary-стат и любое число
-        условий по вторичкам (все условия проверяются одновременно, через И). Данные — из
-        последней синхронизации ростера, без обращения к игре напрямую.
+        Гибкий фильтр по НАДЕТЫМ модам гильдии — сет, слот, primary-стат (можно отметить
+        несколько в каждой категории — тогда внутри категории через ИЛИ) и любое число
+        условий по вторичкам (условия между собой и с категориями — все через И). Данные —
+        из последней синхронизации ростера, без обращения к игре напрямую.
     </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
 
     <div class="panel" style="max-width: 54em;">
         <div class="panel-title"><span>Фильтр</span></div>
         <form method="get" action="/mod-search" class="builder-form">
-            <label>
-                Сет
-                <select name="set_id">
-                    <option value="">— любой —</option>
+            <div class="form-block">
+                <span>Сет — не отмечено ни одного = любой</span>
+                <div class="checkbox-grid">
                     {% for set_id, name in set_choices %}
-                        <option value="{{ set_id }}" {% if selected_set_id == set_id|string %}selected{% endif %}>{{ name }}</option>
+                        <label class="checkbox"><input type="checkbox" name="set_id" value="{{ set_id }}" {% if set_id in selected_set_ids %}checked{% endif %}> {{ name }}</label>
                     {% endfor %}
-                </select>
-            </label>
+                </div>
+            </div>
 
-            <label>
-                Слот
-                <select name="slot_key">
-                    <option value="">— любой —</option>
+            <div class="form-block">
+                <span>Слот — не отмечено ни одного = любой</span>
+                <div class="checkbox-grid">
                     {% for key, label in slot_choices %}
-                        <option value="{{ key }}" {% if selected_slot_key == key %}selected{% endif %}>{{ label }}</option>
+                        <label class="checkbox"><input type="checkbox" name="slot_key" value="{{ key }}" {% if key in selected_slot_keys %}checked{% endif %}> {{ label }}</label>
                     {% endfor %}
-                </select>
-            </label>
+                </div>
+            </div>
 
-            <label>
-                Primary-стат
-                <select name="primary_stat_id">
-                    <option value="">— любой —</option>
+            <div class="form-block">
+                <span>Primary-стат — не отмечено ни одного = любой</span>
+                <div class="checkbox-grid">
                     {% for stat_id, name, is_percent in stat_choices %}
-                        <option value="{{ stat_id }}" {% if selected_primary == stat_id|string %}selected{% endif %}>{{ name }}</option>
+                        <label class="checkbox"><input type="checkbox" name="primary_stat_id" value="{{ stat_id }}" {% if stat_id in selected_primary_ids %}checked{% endif %}> {{ name }}</label>
                     {% endfor %}
-                </select>
-            </label>
+                </div>
+            </div>
 
             <div class="form-block" data-row-group>
                 <span>Условия по вторичкам — можно добавить сколько угодно, все через И</span>
@@ -137,50 +139,123 @@
         <div class="panel">
             <div class="panel-title">
                 <span>Результаты по гильдии</span>
-                <span class="panel-hint">{{ table_result.matched_players }}/{{ table_result.total_players }} игроков · {{ table_result.total_mods }} модов</span>
+                <span class="panel-hint">{{ table_result.matched_players }}/{{ table_result.total_players }} игроков с совпадениями · {{ table_result.total_mods }} модов</span>
             </div>
-            {% if not table_result.players %}
-                <p class="empty-state">Совпадений не найдено.</p>
-            {% else %}
-                <div class="table-scroll">
-                    <table class="data">
-                        <thead>
-                            <tr><th>Игрок</th><th>Совпадений</th></tr>
-                        </thead>
-                        <tbody>
-                            {% for p in table_result.players %}
-                                <tr><td>{{ p.name }}</td><td>{{ p.count }}</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Игрок</th><th>Совпадений</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for p in table_result.players %}
+                            <tr><td>{{ p.name }}</td><td>{{ p.count }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
 
-                {% for p in table_result.players %}
-                    <details>
-                        <summary class="link-btn">{{ p.name }} — детали ({{ p.count }})</summary>
-                        <div class="table-scroll">
-                            <table class="data">
-                                <thead>
-                                    <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
-                                </thead>
-                                <tbody>
-                                    {% for row in p.rows %}
-                                        <tr>
-                                            <td>{{ row.char_name }}</td>
-                                            <td>{{ row.slot_label }}</td>
-                                            <td>{{ row.set_name }}</td>
-                                            <td>{{ row.primary }}</td>
-                                            <td>{{ row.secondaries }}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </details>
-                {% endfor %}
-            {% endif %}
+            {% for p in table_result.players if p.count > 0 %}
+                <details>
+                    <summary class="link-btn">{{ p.name }} — детали ({{ p.count }})</summary>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead>
+                                <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for row in p.rows %}
+                                    <tr>
+                                        <td>{{ row.char_name }}</td>
+                                        <td>{{ row.slot_label }}</td>
+                                        <td>{{ row.set_name }}</td>
+                                        <td>{{ row.primary }}</td>
+                                        <td>{{ row.secondaries }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            {% endfor %}
         </div>
     {% endif %}
+
+    {% if result_mode %}
+        <div class="panel" style="max-width: 30em;">
+            <div class="panel-title"><span>Сохранить как пресет</span></div>
+            <form method="post" action="/mod-search/presets/save" class="inline-form">
+                {% for set_id in selected_set_ids %}<input type="hidden" name="set_id" value="{{ set_id }}">{% endfor %}
+                {% for key in selected_slot_keys %}<input type="hidden" name="slot_key" value="{{ key }}">{% endfor %}
+                {% for stat_id in selected_primary_ids %}<input type="hidden" name="primary_stat_id" value="{{ stat_id }}">{% endfor %}
+                {% for stat, op, value in condition_rows %}
+                    {% if stat and op and value %}
+                        <input type="hidden" name="cond_stat" value="{{ stat }}">
+                        <input type="hidden" name="cond_op" value="{{ op }}">
+                        <input type="hidden" name="cond_value" value="{{ value }}">
+                    {% endif %}
+                {% endfor %}
+                {% if guild_wide %}<input type="hidden" name="guild_wide" value="on">{% endif %}
+                {% for code in selected_codes %}<input type="hidden" name="ally_codes" value="{{ code }}">{% endfor %}
+                <input type="text" name="name" placeholder="Название пресета" required>
+                <button type="submit">Сохранить</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">критерии фильтра, без привязки к игрокам</span></div>
+        {% if not presets %}
+            <p class="empty-state">Пока нет сохранённых пресетов — задайте фильтр выше, найдите что-нибудь и сохраните.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Название</th><th>Критерии</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for p in presets %}
+                            <tr>
+                                <td>{{ p.name }}</td>
+                                <td>{{ p.summary }}</td>
+                                <td class="row-actions">
+                                    <a class="link-btn" href="/mod-search?preset_id={{ p.id }}">применить</a>
+                                    <form method="post" action="/mod-search/presets/{{ p.id }}/delete"
+                                          onsubmit="return confirm('Удалить пресет «{{ p.name }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} запусков гильдии</span></div>
+        {% if not history %}
+            <p class="empty-state">Пока нет запусков — найдите что-нибудь выше.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Критерии</th><th>Кого проверяли</th><th>Когда</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for h in history %}
+                            <tr>
+                                <td>{{ h.summary }}</td>
+                                <td>{{ h.target }}</td>
+                                <td>{{ h.created_at }}</td>
+                                <td><a class="link-btn" href="/mod-search?history_id={{ h.id }}">открыть</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
 
     <script>
 document.addEventListener("DOMContentLoaded", () => {

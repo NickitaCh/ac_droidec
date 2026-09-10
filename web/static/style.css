@@ -364,6 +364,13 @@ form {
 }
 form label { display: flex; flex-direction: column; gap: 0.25em; }
 form label.checkbox { flex-direction: row; align-items: center; gap: 0.5em; }
+/* Группа чекбоксов одной категории (/mod-search: сет/слот/primary — несколько значений,
+   ИЛИ внутри категории) — построчный wrap вместо стекания каждого чекбокса на свою строку. */
+.checkbox-grid { display: flex; flex-wrap: wrap; gap: 0.4em 1.4em; max-width: none; }
+/* .checkbox-grid label.checkbox — специфичность (0,2,1), выше чем .builder-form label
+   (0,1,1) из блока /mod-builder ниже по каскаду, поэтому не зажимается тем max-width:20em
+   независимо от порядка правил в файле. */
+.checkbox-grid label.checkbox { max-width: none; }
 input[type="text"], input[type="number"], input[type="search"], select {
     padding: 0.5em;
     border: 1px solid var(--border);
