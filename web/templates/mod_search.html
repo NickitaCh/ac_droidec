@@ -81,13 +81,13 @@
 
             <div class="form-block">
                 <span>Игроки</span>
-                <label class="checkbox-label">
+                <label class="checkbox">
                     <input type="checkbox" name="guild_wide" id="mod-search-guild-wide" {% if guild_wide %}checked{% endif %}> Вся гильдия
                 </label>
                 <label>
                     <input type="search" placeholder="Фильтр по имени…" data-table-search="mod-search-player-table">
                 </label>
-                <label class="checkbox-label">
+                <label class="checkbox">
                     <input type="checkbox" id="mod-search-select-all"> Выбрать всех
                 </label>
                 <div class="table-scroll" style="max-height: 16em;">
@@ -95,7 +95,7 @@
                         <tbody>
                             {% for ally_code, name in roster %}
                                 <tr data-search="{{ name|lower }}">
-                                    <td><label class="checkbox-label"><input type="checkbox" name="ally_codes" value="{{ ally_code }}" {% if ally_code in selected_codes %}checked{% endif %}> {{ name }}</label></td>
+                                    <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ ally_code }}" {% if ally_code in selected_codes %}checked{% endif %}> {{ name }}</label></td>
                                 </tr>
                             {% endfor %}
                         </tbody>
