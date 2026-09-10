@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Документация — AC Droidec{% endblock %}
+{% block content %}
+<div class="landing-page docs-page">
+    <h1>Документация по командам</h1>
+    <p class="muted">
+        Все команды бота (<code>/</code> в Discord), сгруппированные по разделам. Новичкам — сначала
+        <a href="/start">Начало работы</a>.
+    </p>
+
+    <p class="docs-legend">
+        {% for key, (label, css_class) in access_labels.items() %}
+            <span class="badge {{ css_class }}">{{ label }}</span>
+        {% endfor %}
+    </p>
+
+    {% for section in sections %}
+        <h2>{{ section.title }}</h2>
+        {% if section.intro %}<p class="muted">{{ section.intro }}</p>{% endif %}
+        <ul class="docs-command-list">
+            {% for cmd in section.commands %}
+                <li>
+                    <code>{{ cmd.name }}</code>
+                    <span class="badge {{ access_labels[cmd.access][1] }}">{{ access_labels[cmd.access][0] }}</span>
+                    <span class="docs-command-desc">{{ cmd.desc }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endfor %}
+</div>
+{% endblock %}

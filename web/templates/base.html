@@ -31,6 +31,8 @@
         <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
         <label for="nav-toggle" class="nav-toggle-btn" aria-label="Меню">☰</label>
         <nav>
+            <a href="/start">Начало работы</a>
+            <a href="/commands">Документация</a>
             {% if user %}
                 {% if user.tier == "officer" %}
                     <a href="/activity">Активность</a>

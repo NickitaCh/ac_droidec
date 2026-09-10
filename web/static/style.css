@@ -102,6 +102,14 @@ h1, h2 { letter-spacing: -0.01em; }
 }
 .landing-hero { text-align: center; margin-bottom: 1.5em; }
 .landing-hero h1 { margin-bottom: 0.2em; }
+
+.docs-page code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
+.docs-page h2 { margin-top: 1.6em; }
+.docs-legend { display: flex; flex-wrap: wrap; gap: 0.5em; margin: 0.75em 0 1.5em; }
+.docs-command-list { list-style: none; padding: 0; margin: 0 0 1em; }
+.docs-command-list li { padding: 0.5em 0; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5em; }
+.docs-command-list li:last-child { border-bottom: none; }
+.docs-command-desc { display: block; flex-basis: 100%; color: var(--fg-secondary); font-size: 0.95em; }
 .landing-tagline { color: var(--fg-secondary); font-size: 1.1em; margin: 0; }
 
 .landing-features {

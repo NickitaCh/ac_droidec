@@ -110,6 +110,26 @@ async def oferta(request: Request, user: dict | None = Depends(get_current_user_
     return templates.TemplateResponse(request, "oferta.html", {"user": user, "show_footer": True})
 
 
+@router.get("/start", response_class=HTMLResponse)
+async def start_guide(request: Request, user: dict | None = Depends(get_current_user_optional)):
+    # Публичная (не officer-only) страница-онбординг — её главная аудитория как
+    # раз те, у кого ещё нет доступа к веб-дашборду (обычный участник, или
+    # офицер, который ещё не зарегистрировался/не логинился ни разу).
+    return templates.TemplateResponse(request, "start.html", {"user": user})
+
+
+@router.get("/commands", response_class=HTMLResponse)
+async def command_docs(request: Request, user: dict | None = Depends(get_current_user_optional)):
+    # ВАЖНО: не "/docs" — этот путь занят встроенным Swagger UI FastAPI
+    # (docs_url по умолчанию), маршрут с тем же именем молча проигрывает ему.
+    from services.command_docs import ACCESS_LABELS, COMMAND_DOCS
+    return templates.TemplateResponse(request, "docs.html", {
+        "user": user,
+        "sections": COMMAND_DOCS,
+        "access_labels": ACCESS_LABELS,
+    })
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request, user: dict | None = Depends(get_current_user_optional)):
     guild_cfg = None
