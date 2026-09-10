@@ -12,15 +12,22 @@ get_player_units_bulk) сырые rosterUnit-объекты игроков (то
 Формат сырого мода — Comlink equippedStatMod (см. swgoh_comlink.StatCalc.calculator.
 _calculate_mod_stats, установленный пакет): definitionId — строка из 3 цифр, [0]=id сета,
 [1]=редкость (пипсы) — ОБА уже используются существующим кодом бота для расчёта статов
-через тот же definitionId, так что достоверно верны. Цифра слота — [2], диапазон 2-7
-(Square=2 .. Cross=7, см. SLOT_ID_TO_KEY) — общеизвестная игровая конвенция, совпадающая
-с swgoh_comlink.helpers.MOD_SLOTS и с порядком stat_engine.MOD_SLOT_DEFS, но, в отличие от
-[0]/[1], нигде в этом коде раньше не проверялась на живых данных гильдии (сама библиотека
-её тоже нигде не использует для расчёта — decode_mod ниже читает её "на свой страх и
-риск"). Чтобы ошибка в этом не была тихой: decode_mod при первом расхождении декодированного
-слота с известным списком допустимых primary-статов для этого слота (stat_engine.
-MOD_PRIMARY_OPTIONS — список, эмпирически подтверждённый сканом реальных модов гильдии)
-пишет warning в лог, а не падает и не выдаёт молча неверный ответ.
+через тот же definitionId, так что достоверно верны. Цифра слота — [2] — ИЗНАЧАЛЬНО (до
+2026-09-11) была взята "общеизвестная" конвенция 2-7 (Square=2..Cross=7, как у
+swgoh_comlink.helpers.MOD_SLOTS) БЕЗ проверки на живых данных — и она оказалась НЕВЕРНОЙ:
+после жалобы пользователя "показывает 0 модов на всё подряд" (при фильтре по слоту)
+прогнали реальные 91349 модов гильдии через эмпирическую сверку (см. чат-сессию
+2026-09-11) — для каждого мода с ОДНОЗНАЧНО-слото-специфичным primary-статом (Speed/
+Accuracy%/CritAvoidance% бывают только на Arrow, CritDamage%/CritChance% только на
+Triangle, Potency%/Tenacity% только на Cross — см. stat_engine.MOD_PRIMARY_OPTIONS)
+проверили, какое значение definitionId[2] у него ФАКТИЧЕСКИ стоит: оказалось 100%-но
+детерминированно 1=Square, 2=Arrow, 3=Diamond, 4=Triangle, 5=Circle, 6=Cross (Square/
+Diamond/Circle довыведены через исключение — единственный оставшийся возможный слот для
+Offense%/Defense%/Health%+Protection% соответственно). Простая последовательная нумерация
+1-6 в порядке MOD_SLOT_DEFS — никакой связи с swgoh_comlink.helpers.MOD_SLOTS (та таблица,
+судя по всему, про другое поле/контекст, не про equippedStatMod.definitionId). Самопроверка
+decode_mod ниже (сверка декодированного слота со списком допустимых primary для него)
+осталась как страховка на случай, если Comlink когда-нибудь поменяет формат.
 
 primaryStat/secondaryStat.stat.unscaledDecimalValue — то же кодирование, что уже
 задокументировано в stat_engine.MOD_PRIMARY_OPTIONS: разделить на 1e8, а для %-статов
@@ -42,7 +49,7 @@ SLOT_CHOICES = [
     ("square", "Квадрат"), ("arrow", "Стрела"), ("diamond", "Ромб"),
     ("triangle", "Треугольник"), ("circle", "Круг"), ("cross", "Крест"),
 ]
-SLOT_ID_TO_KEY = {2: "square", 3: "arrow", 4: "diamond", 5: "triangle", 6: "circle", 7: "cross"}
+SLOT_ID_TO_KEY = {1: "square", 2: "arrow", 3: "diamond", 4: "triangle", 5: "circle", 6: "cross"}
 SLOT_KEY_TO_LABEL = dict(SLOT_CHOICES)
 
 # unit_stat_id (первичный или вторичный стат мода) -> (отображаемое имя, это %-вариант или нет).
