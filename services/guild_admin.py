@@ -115,6 +115,36 @@ def remove_grant(discord_id: str) -> bool:
     return database.remove_manual_grant(str(discord_id))
 
 
+# ---- Версии add_grant/remove_grant для офицеров/лидеров, а не только супер-админа
+# (см. cogs/guild_grants.py и web/routes/guild_dashboard.py::guild_access) —
+# та же механика, но guild_id жёстко берётся из резолва вызывающего (никогда не
+# выбирается им самим), и обе операции отказывают, если задетый discord_id уже
+# привязан ГРАНТОМ к ЧУЖОЙ гильдии: add_manual_grant в database.py делает upsert
+# по одному только discord_id (без guild_id в ключе конфликта), так что без этой
+# проверки офицер одной гильдии мог бы молча перехватить/снять грант, выданный
+# другой гильдией, просто угадав/зная чужой discord_id.
+
+async def add_guild_scoped_grant(comlink, discord_id: str, ally_code: str, tier: str, guild_id: int, granted_by: str) -> GrantResult:
+    existing = database.get_manual_grant(discord_id)
+    if existing and existing["guild_id"] != guild_id:
+        return GrantResult(ok=False, error="У этого Discord-пользователя уже есть ручной грант в другой гильдии — изменить его может только супер-админ.")
+    return await add_grant(comlink, discord_id, ally_code, guild_id, tier, granted_by)
+
+
+def remove_guild_scoped_grant(discord_id: str, guild_id: int) -> GrantResult:
+    existing = database.get_manual_grant(discord_id)
+    if not existing:
+        return GrantResult(ok=False, error="У этого участника нет ручного гранта.")
+    if existing["guild_id"] != guild_id:
+        return GrantResult(ok=False, error="Этот грант принадлежит другой гильдии — снять его может только супер-админ.")
+    database.remove_manual_grant(discord_id)
+    return GrantResult(ok=True, ingame_name=existing.get("ingame_name"))
+
+
+def list_grants_for_guild(guild_id: int) -> list:
+    return [g for g in database.get_all_manual_grants() if g["guild_id"] == guild_id]
+
+
 def list_admins() -> dict:
     """{"super_admins": [...], "grants": [...]} — сводный список для /админы список."""
     return {

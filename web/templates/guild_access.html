@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Ручной доступ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Ручной доступ к боту</h1>
+    <p class="muted">
+        Для участников вашей гильдии, которых бот не резолвит по игровому рангу (например живут в другом
+        Discord-аккаунте, не в основном ростере) — доступ действует только в рамках вашей гильдии.
+        В Discord то же самое делает <code>/грант</code>.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not grants %}
+        <p class="empty-state">— никого —</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th data-sort="text">Код союзника</th>
+                            <th data-sort="text">Уровень</th>
+                            <th data-sort="text">Выдал</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for g in grants %}
+                            <tr>
+                                <td>
+                                    {{ g.ingame_name or g.discord_id }}
+                                    {% if g.ingame_name %}<code class="cell-sub">{{ g.discord_id }}</code>{% endif %}
+                                </td>
+                                <td><code>{{ g.ally_code }}</code></td>
+                                <td>
+                                    {% if g.tier == "officer" %}
+                                        <span class="badge badge-ok">Офицер</span>
+                                    {% else %}
+                                        <span class="badge badge-neutral">Игрок</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ g.granted_by_name or g.granted_by }}
+                                    {% if g.granted_by_name %}<code class="cell-sub">{{ g.granted_by }}</code>{% endif %}
+                                </td>
+                                <td class="row-actions">
+                                    <form method="post" action="/access/{{ g.discord_id }}/remove"
+                                          onsubmit="return confirm('Снять доступ для {{ g.ingame_name or g.discord_id }}?');">
+                                        <button type="submit" class="button-danger">Снять</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel" style="max-width: 28em;">
+        <div class="panel-title"><span>Выдать доступ</span></div>
+        <form method="post" action="/access/add">
+            <label>
+                Discord ID
+                <input type="text" name="discord_id" required>
+            </label>
+            <label>
+                Код союзника (9 цифр)
+                <input type="text" name="ally_code" pattern="[0-9]{9}" maxlength="9" required>
+            </label>
+            <label>
+                Уровень
+                <select name="tier" required>
+                    <option value="member">Игрок</option>
+                    <option value="officer">Офицер</option>
+                </select>
+            </label>
+            <button type="submit">Выдать доступ</button>
+        </form>
+    </div>
+{% endblock %}

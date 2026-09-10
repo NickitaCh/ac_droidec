@@ -22,6 +22,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, omicron_priority
+from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
 from web.deps import require_guild_access
 # Переиспользуем построитель отчёта по датакронам одного игрока и кэш каталога сезонов
@@ -1660,3 +1661,44 @@ async def guild_settings_save(
 
     database.update_guild_config(user["guild_id"], **cleaned)
     return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+# ---- Ручной доступ (офицерская версия /admin/access — только для своей гильдии) ----
+# Дубликат блока "Ручные гранты доступа" с /admin/access (web/routes/admin.py),
+# но guild_id жёстко из user["guild_id"] (не выбирается формой) и список отфильтрован
+# по своей гильдии — см. services/guild_admin.py::add_guild_scoped_grant/
+# remove_guild_scoped_grant/list_grants_for_guild за проверкой границы гильдии.
+
+@router.get("/access", response_class=HTMLResponse)
+async def guild_access(request: Request, user: dict = Depends(require_guild_access)):
+    grants = [
+        {**g, "granted_by_name": database.get_username_for_discord_id(g["granted_by"])}
+        for g in list_grants_for_guild(user["guild_id"])
+    ]
+    return templates.TemplateResponse(request, "guild_access.html", {
+        "user": user,
+        "grants": grants,
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/access/add", response_class=HTMLResponse)
+async def guild_access_add(
+    discord_id: str = Form(...),
+    ally_code: str = Form(...),
+    tier: str = Form(...),
+    user: dict = Depends(require_guild_access),
+):
+    comlink = _get_comlink()
+    result = await add_guild_scoped_grant(comlink, discord_id, ally_code, tier, user["guild_id"], user["discord_id"])
+    if not result.ok:
+        return RedirectResponse(f"/access?{urlencode({'error': result.error})}", status_code=303)
+    return RedirectResponse("/access", status_code=303)
+
+
+@router.post("/access/{discord_id}/remove", response_class=HTMLResponse)
+async def guild_access_remove(discord_id: str, user: dict = Depends(require_guild_access)):
+    result = remove_guild_scoped_grant(discord_id, user["guild_id"])
+    if not result.ok:
+        return RedirectResponse(f"/access?{urlencode({'error': result.error})}", status_code=303)
+    return RedirectResponse("/access", status_code=303)
