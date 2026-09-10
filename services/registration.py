@@ -75,3 +75,54 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
 
     accounts = database.get_user_registrations(discord_id, guild_id=guild_id)
     return RegistrationResult(ok=True, ally_code=clean_code, ingame_name=ingame_name, is_main=is_main, accounts=accounts)
+
+
+@dataclass
+class UnregisterResult:
+    ok: bool
+    error: str = None
+    ally_code: str = None
+    ingame_name: str = None
+    remaining_accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
+
+
+async def unregister_player(discord_id: str, guild_id: int, ally_code: str | None = None) -> UnregisterResult:
+    """Отвязывает один аккаунт (основной или альт) от discord_id в этой гильдии.
+    Не трогает Comlink — это чисто отмена локальной привязки, в отличие от
+    register_player, который живым запросом проверяет игру.
+
+    Если у discord_id несколько привязанных аккаунтов, ally_code обязателен —
+    иначе непонятно, какой из них отвязывать. Если отвязывается основной, а
+    альт остаётся — альт становится новым основным (не оставляем discord_id
+    без единого is_main=1, см. set_user_registration)."""
+    discord_id = str(discord_id)
+    accounts = database.get_user_registrations(discord_id, guild_id=guild_id)
+    if not accounts:
+        return UnregisterResult(ok=False, error="У вас нет ни одной привязки в этой гильдии.")
+
+    if ally_code:
+        clean_code = "".join(filter(str.isdigit, ally_code))
+        match = next((a for a in accounts if a[0] == clean_code), None)
+        if not match:
+            return UnregisterResult(ok=False, error=f"Код союзника {clean_code} не привязан к вам в этой гильдии.")
+    elif len(accounts) > 1:
+        listed = ", ".join(f"`{code}` ({name})" for code, name, _ in accounts)
+        return UnregisterResult(
+            ok=False,
+            error=f"У вас привязано несколько аккаунтов: {listed}. Укажите параметр ally_code — какой из них отвязать.",
+        )
+    else:
+        match = accounts[0]
+
+    target_ally_code, ingame_name, was_main = match
+    database.delete_user_registration(discord_id, target_ally_code, guild_id=guild_id)
+
+    remaining = database.get_user_registrations(discord_id, guild_id=guild_id)
+    if was_main and remaining:
+        # Отвязали основной, но остался альт — назначаем его новым основным,
+        # иначе у discord_id не останется ни одной is_main=1 записи.
+        promoted_code, promoted_name, _ = remaining[0]
+        database.set_user_registration(discord_id, promoted_code, promoted_name, is_main=True, guild_id=guild_id)
+        remaining = database.get_user_registrations(discord_id, guild_id=guild_id)
+
+    return UnregisterResult(ok=True, ally_code=target_ally_code, ingame_name=ingame_name, remaining_accounts=remaining)

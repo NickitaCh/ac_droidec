@@ -5,7 +5,25 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
-from services.registration import register_player
+from services.registration import register_player, unregister_player
+
+
+async def autocomplete_own_registrations(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Свои же привязанные аккаунты (для /регистрация_отмена) — не чужие: у
+    officer-вызова "участник" автокомплит ally_code всё равно не знает, за кого
+    сейчас выбирают (Discord не отдаёт filled_options для User-параметров),
+    так что показываем аккаунты автора команды — для self-service (основной
+    сценарий) этого достаточно."""
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    accounts = database.get_user_registrations(str(inter.author.id), guild_id=guild_id)
+    string = string.lower()
+    return [
+        f"{code} — {name}{' ⭐' if is_main else ''}"
+        for code, name, is_main in accounts
+        if string in code or string in (name or "").lower()
+    ][:25]
 
 
 class SelfRegistrationCog(commands.Cog):
@@ -79,6 +97,56 @@ class SelfRegistrationCog(commands.Cog):
         # Офицер, явно указавший участника, может перевесить код союзника с чужого
         # Discord-аккаунта на нужный — самостоятельная регистрация так не может.
         await self._do_registration(inter, target_user, ally_code, альт, allow_reassign=is_officer_action)
+
+    @commands.slash_command(
+        name="регистрация_отмена",
+        description="🔓 Отвязать код союзника от себя (или, для офицеров, от другого участника)"
+    )
+    async def registration_cancel(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        ally_code: str = commands.Param(
+            default=None,
+            description="Какой аккаунт отвязать — обязательно, если у вас привязано больше одного",
+            autocomplete=autocomplete_own_registrations,
+        ),
+        участник: disnake.User = commands.Param(
+            default=None,
+            description="[Офицер] Отвязать аккаунт другого участника вместо себя"
+        ),
+    ):
+        await inter.response.defer(ephemeral=True)
+
+        is_officer_action = участник is not None and участник.id != inter.author.id
+        if is_officer_action:
+            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+                await inter.edit_original_response(
+                    content="❌ Отвязывать аккаунты других участников могут только офицеры."
+                )
+                return
+            target_user = участник
+        else:
+            target_user = inter.author
+
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+
+        result = await unregister_player(str(target_user.id), guild_id, ally_code)
+        if not result.ok:
+            await inter.edit_original_response(content=f"❌ {result.error}")
+            return
+
+        lines = [f"🔓 Код союзника `{result.ally_code}` ({result.ingame_name}) отвязан от {target_user.mention}."]
+        if result.remaining_accounts:
+            acc_lines = [
+                f"{'⭐' if row_is_main else '•'} {name} (`{code}`)"
+                for code, name, row_is_main in result.remaining_accounts
+            ]
+            lines.append("Остались привязаны:\n" + "\n".join(acc_lines))
+        else:
+            lines.append("Больше никаких аккаунтов не привязано — при необходимости зарегистрируйтесь заново через `/регистрация`.")
+        await inter.edit_original_response(content="\n".join(lines))
 
     @commands.slash_command(
         name="регистрация_отчёт",
