@@ -62,7 +62,10 @@ async def submit_registration(
     target_discord_id = target_discord_id or user["discord_id"]
 
     comlink = _get_comlink()
-    result = await register_player(comlink, target_discord_id, ally_code, is_alt=is_alt)
+    # Страница целиком officer-only (require_guild_access), поэтому перенос кода
+    # с чужого discord_id разрешён без дополнительной проверки — см. коммент в
+    # services/registration.py::register_player про allow_reassign.
+    result = await register_player(comlink, target_discord_id, ally_code, is_alt=is_alt, allow_reassign=True)
     if not result.ok:
         return RedirectResponse(f"/registration?{urlencode({'error': result.error})}", status_code=303)
     params = {"registered_name": result.ingame_name} if target_discord_id != user["discord_id"] else {}

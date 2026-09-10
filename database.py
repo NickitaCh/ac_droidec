@@ -1862,6 +1862,36 @@ def get_all_registrations(guild_id: int = 1):
     return rows
 
 
+def find_ally_code_owner(ally_code: str, guild_id: int = 1):
+    """Возвращает discord_id, уже привязанный к этому ally_code в этой гильдии
+    (любой, основной или альт), либо None. Используется register_player'ом, чтобы
+    не дать один и тот же код союзника привязать сразу к нескольким Discord-аккаунтам."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT discord_id FROM user_registration WHERE guild_id = ? AND ally_code = ? LIMIT 1",
+        (guild_id, ally_code),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def delete_user_registration(discord_id: str, ally_code: str, guild_id: int = 1):
+    """Снимает привязку конкретного ally_code с конкретного discord_id в этой гильдии
+    — используется при переносе кода союзника на другого участника (officer override)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "DELETE FROM user_registration WHERE guild_id = ? AND discord_id = ? AND ally_code = ?",
+        (guild_id, discord_id, ally_code),
+    )
+    conn.commit()
+    conn.close()
+
+
 # =====================================================================
 # ПРОИЗВОЛЬНОЕ СОСТОЯНИЕ БОТА (переживает рестарты, key-value)
 # =====================================================================

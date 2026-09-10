@@ -23,7 +23,8 @@ class RegistrationResult:
     accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
 
 
-async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False) -> RegistrationResult:
+async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False) -> RegistrationResult:
+    discord_id = str(discord_id)
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
         return RegistrationResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
@@ -43,6 +44,24 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     if not guild_cfg:
         return RegistrationResult(ok=False, error="Эта SWGOH-гильдия не входит в число обслуживаемых ботом. Обратитесь к супер-админу за ручным доступом.")
     guild_id = guild_cfg["id"]
+
+    # Один и тот же ally_code нельзя привязать сразу к нескольким Discord-аккаунтам
+    # в пределах гильдии — иначе статы/задания одного игрока будет видеть и
+    # редактировать чужой Discord-пользователь. allow_reassign=True (officer-путь:
+    # /регистрация участник:@X в боте, либо весь веб-дашборд — он и так officer-only)
+    # снимает старую привязку и переносит код на нового владельца.
+    existing_owner = database.find_ally_code_owner(clean_code, guild_id=guild_id)
+    if existing_owner and existing_owner != discord_id:
+        if not allow_reassign:
+            return RegistrationResult(
+                ok=False,
+                error=(
+                    f"Этот код союзника уже привязан к другому участнику Discord (<@{existing_owner}>). "
+                    "Если это ошибка, попросите офицера перерегистрировать его через "
+                    "`/регистрация участник:@нужный_пользователь`."
+                ),
+            )
+        database.delete_user_registration(existing_owner, clean_code, guild_id=guild_id)
 
     # Первая регистрация в этой гильдии всегда основная, даже если попросили
     # альт — иначе получится аккаунт без единого основного.
