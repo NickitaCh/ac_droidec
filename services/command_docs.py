@@ -18,6 +18,23 @@ ACCESS_LABELS = {
     "super_admin": ("Супер-админ", "badge-danger"),
 }
 
+
+def public_command_docs():
+    """/commands — публичная страница без авторизации, поэтому супер-админские
+    команды (владелец бота: /гильдия, /админы, антиспам-настройки в /настройки)
+    из неё нужно полностью убрать, а не просто визуально спрятать — само их
+    существование/сигнатура не для посторонних глаз. Возвращает (sections,
+    access_labels) — секции без единой публичной команды выбрасываются целиком,
+    а не остаются пустым заголовком; access_labels — без бейджа "Супер-админ"
+    (иначе легенда наверху всё равно намекала бы на скрытый уровень)."""
+    sections = []
+    for section in COMMAND_DOCS:
+        commands = [c for c in section["commands"] if c["access"] != "super_admin"]
+        if commands:
+            sections.append({**section, "commands": commands})
+    labels = {k: v for k, v in ACCESS_LABELS.items() if k != "super_admin"}
+    return sections, labels
+
 COMMAND_DOCS = [
     {
         "title": "Регистрация",

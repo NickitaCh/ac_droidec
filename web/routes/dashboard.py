@@ -122,11 +122,12 @@ async def start_guide(request: Request, user: dict | None = Depends(get_current_
 async def command_docs(request: Request, user: dict | None = Depends(get_current_user_optional)):
     # ВАЖНО: не "/docs" — этот путь занят встроенным Swagger UI FastAPI
     # (docs_url по умолчанию), маршрут с тем же именем молча проигрывает ему.
-    from services.command_docs import ACCESS_LABELS, COMMAND_DOCS
+    from services.command_docs import public_command_docs
+    sections, access_labels = public_command_docs()
     return templates.TemplateResponse(request, "docs.html", {
         "user": user,
-        "sections": COMMAND_DOCS,
-        "access_labels": ACCESS_LABELS,
+        "sections": sections,
+        "access_labels": access_labels,
     })
 
 
