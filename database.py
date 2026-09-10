@@ -3650,6 +3650,29 @@ def get_player_units(ally_code: str) -> dict:
     return {base_id: json.loads(unit_json) for base_id, unit_json in rows}
 
 
+def get_player_units_bulk(ally_codes: list) -> dict:
+    """Как get_player_units, но сразу на много ally_code одним запросом — для гильдийского
+    поиска по модам (services/mod_search.py), где иначе было бы N SQL-запросов подряд на
+    ~50-90 игроков. Возвращает {ally_code: {base_id: unit_dict}}; ally_code без закэшированных
+    юнитов просто отсутствует в результате (не пустой список)."""
+    if not ally_codes:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    placeholders = ",".join("?" for _ in ally_codes)
+    cursor.execute(
+        f"SELECT ally_code, base_id, unit_json FROM player_unit_cache WHERE ally_code IN ({placeholders})",
+        ally_codes,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for ally_code, base_id, unit_json in rows:
+        result.setdefault(ally_code, {})[base_id] = json.loads(unit_json)
+    return result
+
+
 def get_player_units_last_sync(ally_codes: list) -> str | None:
     """MAX(updated_at) по кэшу для набора ally_code — "когда последний раз обновлялся
     ростер этой гильдии" для панели статуса на /activity. Не разделяет ручной/авто-синк —

@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}Поиск модов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <h1>Поиск модов</h1>
+    <p class="muted">
+        Гибкий фильтр по НАДЕТЫМ модам гильдии — сет, слот, primary-стат и любое число
+        условий по вторичкам (все условия проверяются одновременно, через И). Данные — из
+        последней синхронизации ростера, без обращения к игре напрямую.
+    </p>
+
+    <div class="panel" style="max-width: 54em;">
+        <div class="panel-title"><span>Фильтр</span></div>
+        <form method="get" action="/mod-search" class="builder-form">
+            <label>
+                Сет
+                <select name="set_id">
+                    <option value="">— любой —</option>
+                    {% for set_id, name in set_choices %}
+                        <option value="{{ set_id }}" {% if selected_set_id == set_id|string %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>
+                Слот
+                <select name="slot_key">
+                    <option value="">— любой —</option>
+                    {% for key, label in slot_choices %}
+                        <option value="{{ key }}" {% if selected_slot_key == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>
+                Primary-стат
+                <select name="primary_stat_id">
+                    <option value="">— любой —</option>
+                    {% for stat_id, name, is_percent in stat_choices %}
+                        <option value="{{ stat_id }}" {% if selected_primary == stat_id|string %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <div class="form-block" data-row-group>
+                <span>Условия по вторичкам — можно добавить сколько угодно, все через И</span>
+                <table class="stat-rows-table">
+                    <thead>
+                        <tr><th>Стат</th><th>Оператор</th><th>Значение</th><th></th></tr>
+                    </thead>
+                    <tbody class="row-group-rows">
+                        {% for stat, op, value in condition_rows %}
+                            <tr class="row-group-row">
+                                <td>
+                                    <select name="cond_stat">
+                                        <option value="">— стат —</option>
+                                        {% for stat_id, name, is_percent in stat_choices %}
+                                            <option value="{{ stat_id }}" {% if stat == stat_id|string %}selected{% endif %}>{{ name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <select name="cond_op">
+                                        <option value="">—</option>
+                                        {% for op_choice in operator_choices %}
+                                            <option value="{{ op_choice }}" {% if op == op_choice %}selected{% endif %}>{{ op_choice }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td class="stat-value-cell">
+                                    <input type="number" name="cond_value" step="any" placeholder="0" value="{{ value }}">
+                                </td>
+                                <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <button type="button" class="row-group-add">+ добавить условие</button>
+            </div>
+
+            <div class="form-block">
+                <span>Игроки</span>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="guild_wide" id="mod-search-guild-wide" {% if guild_wide %}checked{% endif %}> Вся гильдия
+                </label>
+                <label>
+                    <input type="search" placeholder="Фильтр по имени…" data-table-search="mod-search-player-table">
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="mod-search-select-all"> Выбрать всех
+                </label>
+                <div class="table-scroll" style="max-height: 16em;">
+                    <table class="data" id="mod-search-player-table">
+                        <tbody>
+                            {% for ally_code, name in roster %}
+                                <tr data-search="{{ name|lower }}">
+                                    <td><label class="checkbox-label"><input type="checkbox" name="ally_codes" value="{{ ally_code }}" {% if ally_code in selected_codes %}checked{% endif %}> {{ name }}</label></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <button type="submit">Искать</button>
+        </form>
+    </div>
+
+    {% if result_mode == "list" %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ list_result.name }}</span><span class="panel-hint">{{ list_result.rows|length }} совпадений</span></div>
+            {% if not list_result.rows %}
+                <p class="empty-state">Совпадений не найдено.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for row in list_result.rows %}
+                                <tr>
+                                    <td>{{ row.char_name }}</td>
+                                    <td>{{ row.slot_label }}</td>
+                                    <td>{{ row.set_name }}</td>
+                                    <td>{{ row.primary }}</td>
+                                    <td>{{ row.secondaries }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+    {% elif result_mode == "table" %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Результаты по гильдии</span>
+                <span class="panel-hint">{{ table_result.matched_players }}/{{ table_result.total_players }} игроков · {{ table_result.total_mods }} модов</span>
+            </div>
+            {% if not table_result.players %}
+                <p class="empty-state">Совпадений не найдено.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr><th>Игрок</th><th>Совпадений</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for p in table_result.players %}
+                                <tr><td>{{ p.name }}</td><td>{{ p.count }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% for p in table_result.players %}
+                    <details>
+                        <summary class="link-btn">{{ p.name }} — детали ({{ p.count }})</summary>
+                        <div class="table-scroll">
+                            <table class="data">
+                                <thead>
+                                    <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in p.rows %}
+                                        <tr>
+                                            <td>{{ row.char_name }}</td>
+                                            <td>{{ row.slot_label }}</td>
+                                            <td>{{ row.set_name }}</td>
+                                            <td>{{ row.primary }}</td>
+                                            <td>{{ row.secondaries }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                {% endfor %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <script>
+document.addEventListener("DOMContentLoaded", () => {
+    // "Выбрать всех" — отмечает все чекбоксы игроков разом (см. аналогичный приём на /tasks).
+    const selectAll = document.getElementById("mod-search-select-all");
+    if (selectAll) {
+        selectAll.addEventListener("change", () => {
+            document.querySelectorAll('#mod-search-player-table input[name="ally_codes"]').forEach((cb) => {
+                cb.checked = selectAll.checked;
+            });
+        });
+    }
+
+    // "Вся гильдия" перекрывает индивидуальный выбор на бэкенде — гасим (но не сбрасываем)
+    // чекбоксы игроков визуально, чтобы не выглядело, будто оба выбора учитываются разом.
+    const guildWide = document.getElementById("mod-search-guild-wide");
+    const playerTable = document.getElementById("mod-search-player-table");
+    const syncGuildWide = () => {
+        if (!guildWide || !playerTable) return;
+        playerTable.querySelectorAll('input[name="ally_codes"]').forEach((cb) => { cb.disabled = guildWide.checked; });
+        if (selectAll) selectAll.disabled = guildWide.checked;
+    };
+    if (guildWide) {
+        guildWide.addEventListener("change", syncGuildWide);
+        syncGuildWide();
+    }
+});
+    </script>
+{% endblock %}
