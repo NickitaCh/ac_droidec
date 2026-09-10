@@ -1595,11 +1595,18 @@ GUILD_SETTINGS_GROUPS = [
         ],
     },
     {
-        "name": "Задачи — уведомления",
-        "hint": "Канал для уведомлений о задачах (выполнена/провалена/скоро дедлайн) задаётся командой "
-                "/настройки задачи_канал в Discord. Здесь — только время (МСК), в которое раз в сутки "
-                "бот шлёт напоминания о скором дедлайне и отмечает просроченные задачи. По умолчанию 10:00.",
+        "name": "Территориальная Война (ВГ)",
+        "hint": "Форум-канал с гайдами по контрам, откуда бот забирает данные для /вг_ордер.",
         "fields": [
+            ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ", "channel"),
+        ],
+    },
+    {
+        "name": "Задачи — уведомления",
+        "hint": "Канал, куда бот пишет о выполнении/провале задачи и напоминания о дедлайне, и время (МСК), "
+                "в которое раз в сутки бот проверяет дедлайны и шлёт напоминания. По умолчанию 10:00.",
+        "fields": [
+            ("tasks_log_channel_id", "Канал уведомлений по задачам", "channel"),
             ("tasks_notify_time", "Время уведомлений (МСК)", "time"),
         ],
     },
@@ -1639,6 +1646,8 @@ async def guild_settings_save(
     tb_order_source_channel_id: str = Form(""),
     tb_order_role_id: str = Form(""),
     omicron_channel_id: str = Form(""),
+    tw_guide_forum_channel_id: str = Form(""),
+    tasks_log_channel_id: str = Form(""),
     tasks_notify_time: str = Form(""),
     user: dict = Depends(require_guild_access),
 ):
@@ -1652,6 +1661,8 @@ async def guild_settings_save(
         "tb_order_source_channel_id": tb_order_source_channel_id,
         "tb_order_role_id": tb_order_role_id,
         "omicron_channel_id": omicron_channel_id,
+        "tw_guide_forum_channel_id": tw_guide_forum_channel_id,
+        "tasks_log_channel_id": tasks_log_channel_id,
     }
     cleaned = {}
     for field, raw in values.items():
