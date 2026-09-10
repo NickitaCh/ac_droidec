@@ -1588,6 +1588,13 @@ GUILD_SETTINGS_GROUPS = [
         ],
     },
     {
+        "name": "Омикроны",
+        "hint": "Канал, куда бот пишет автообъявления о выдаче омикронов (то же самое, что /омикрон_текст канал в Discord).",
+        "fields": [
+            ("omicron_channel_id", "Канал для автообъявлений об омикронах", "channel"),
+        ],
+    },
+    {
         "name": "Задачи — уведомления",
         "hint": "Канал для уведомлений о задачах (выполнена/провалена/скоро дедлайн) задаётся командой "
                 "/настройки задачи_канал в Discord. Здесь — только время (МСК), в которое раз в сутки "
@@ -1631,6 +1638,7 @@ async def guild_settings_save(
     tb_plan_channel_id: str = Form(""),
     tb_order_source_channel_id: str = Form(""),
     tb_order_role_id: str = Form(""),
+    omicron_channel_id: str = Form(""),
     tasks_notify_time: str = Form(""),
     user: dict = Depends(require_guild_access),
 ):
@@ -1643,6 +1651,7 @@ async def guild_settings_save(
         "tb_plan_channel_id": tb_plan_channel_id,
         "tb_order_source_channel_id": tb_order_source_channel_id,
         "tb_order_role_id": tb_order_role_id,
+        "omicron_channel_id": omicron_channel_id,
     }
     cleaned = {}
     for field, raw in values.items():
