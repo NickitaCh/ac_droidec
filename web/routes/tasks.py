@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+from services.config_status import config_warning_html
 from services.units_sync import sync_units
 from web.deps import require_officer_access
 
@@ -294,6 +295,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
         "warn": request.query_params.get("warn"),
         "synced": request.query_params.get("synced"),
         "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
+        "config_warning": config_warning_html(database.get_guild_config(guild_id), "tasks"),
     })
 
 

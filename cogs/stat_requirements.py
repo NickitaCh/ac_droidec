@@ -11,6 +11,7 @@ import database
 import guild_resolver
 import stat_engine
 from services import activity_diff
+from services.config_status import config_warning_text
 from cogs.violations import autocomplete_players
 from cogs.tasks import units_autocomplete
 
@@ -778,7 +779,12 @@ class StatRequirementsCog(commands.Cog):
         char_name = _unit_display_name(base_id)
         текст = текст.strip()
         database.set_omicron_phrase(base_id, текст, str(inter.author.id))
-        await inter.response.send_message(f"✅ Фраза для омикрона «{char_name}» сохранена: {текст}", ephemeral=True)
+        reply = f"✅ Фраза для омикрона «{char_name}» сохранена: {текст}"
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        warning = config_warning_text(database.get_guild_config(guild_id) if guild_id else None, "omicron")
+        if warning:
+            reply += f"\n{warning}"
+        await inter.response.send_message(reply, ephemeral=True)
 
     @omicron_group.sub_command(name="удалить_фразу", description="Убрать фразу-приписку для омикрона персонажа")
     async def omicron_phrase_delete(

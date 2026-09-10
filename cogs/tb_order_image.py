@@ -66,6 +66,7 @@ import database
 import guild_resolver
 import tb_platoon_autofill
 from cogs.guild_events import TB_PLAN_HEADER_RE
+from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
 
@@ -436,11 +437,14 @@ class TBOrderImage(commands.Cog):
             await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
             return
         database.update_guild_config(guild_id, tb_active_plan_id=plan["id"])
-        await inter.response.send_message(
+        reply = (
             f"✅ Активный план ордера ТБ: «{plan['name']}» ({plan['total_stars']} ★, <#{plan['thread_id']}>). "
-            "Ежедневная публикация будет брать текст этапов из этой ветки.",
-            ephemeral=True,
+            "Ежедневная публикация будет брать текст этапов из этой ветки."
         )
+        warning = config_warning_text(database.get_guild_config(guild_id), "tb_plan_order")
+        if warning:
+            reply += f"\n{warning}"
+        await inter.response.send_message(reply, ephemeral=True)
 
     @tb_plan_group.sub_command(
         name="сохранить",

@@ -16,6 +16,7 @@ from disnake.ext import commands, tasks
 
 import database
 import guild_resolver
+from services.config_status import config_warning_text
 
 # Фиксированные 10 локаций карты ВГ (зоны 1/2 делятся только на верх/низ, зоны
 # 3/4 — на флот/центр/низ) — сверено со скриншотом карты, одинаково для всех
@@ -469,6 +470,10 @@ class TWCounters(commands.Cog):
         role_id = guild_cfg.get("tb_order_role_id") if guild_cfg else None
         if role_id:
             full_text += f"\n\n<@&{role_id}>"
+
+        cfg_warning = config_warning_text(guild_cfg, "tw_guide")
+        if cfg_warning:
+            full_text += f"\n\n{cfg_warning}"
 
         chunks = _chunk_message(full_text)
         await inter.response.send_message(chunks[0], ephemeral=True)

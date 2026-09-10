@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import database
 import guild_resolver
+from services.config_status import config_warning_text
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -209,9 +210,11 @@ class Birthday(commands.Cog):
         date_str = f"{day:02d}-{month:02d}"
         if year is not None:
             date_str += f"-{year}"
-        await inter.response.send_message(
-            f"✅ День рождения {user.mention} сохранён: {date_str}", ephemeral=True
-        )
+        reply = f"✅ День рождения {user.mention} сохранён: {date_str}"
+        warning = config_warning_text(database.get_guild_config(guild_id), "birthday")
+        if warning:
+            reply += f"\n{warning}"
+        await inter.response.send_message(reply, ephemeral=True)
 
     @birthday_group.sub_command(name="удалить", description="Удалить день рождения")
     async def remove_birthday(

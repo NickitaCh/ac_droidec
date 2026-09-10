@@ -22,6 +22,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, omicron_priority
+from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
 from web.deps import require_guild_access
@@ -230,6 +231,7 @@ async def tb_order_plans(request: Request, user: dict = Depends(require_guild_ac
         "rows": rows,
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
+        "config_warning": config_warning_html(guild_cfg, "tb_plan_order"),
     })
 
 

@@ -5,6 +5,10 @@
     <h1>Задачи на прокачку</h1>
     <p class="muted">Статус задачи (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница создаёт, редактирует и удаляет задачи, дедлайны и уведомления сама не проверяет (см. /настройки задачи_канал в Discord и время рассылки на /settings).</p>
 
+    {% if config_warning %}
+        <p class="config-warning">{{ config_warning|safe }}</p>
+    {% endif %}
+
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}

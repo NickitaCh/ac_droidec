@@ -5,6 +5,10 @@
     <h1>Дни рождения</h1>
     <p class="muted">Ежедневное поздравление и выдача роли именинника (06:00 МСК) со снятием в полночь по-прежнему делает бот автоматически — здесь только редактируется сам список дат.</p>
 
+    {% if config_warning %}
+        <p class="config-warning">{{ config_warning|safe }}</p>
+    {% endif %}
+
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}

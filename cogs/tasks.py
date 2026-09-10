@@ -8,6 +8,7 @@ import database
 import guild_resolver
 from services.units_sync import sync_units
 from services.equipment_sync import sync_equipment
+from services.config_status import config_warning_text
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
 from cogs.datacron_requirements import DATACRON_LIST_COLOR, _lines_to_embeds
@@ -493,6 +494,9 @@ class TasksCog(commands.Cog):
                         f"⏱ **Срок:** до {deadline_date}",
             color=disnake.Color.blue()
         )
+        warning = config_warning_text(database.get_guild_config(guild_id), "tasks")
+        if warning:
+            embed.add_field(name="Внимание", value=warning, inline=False)
         await inter.edit_original_response(embed=embed)
 
     @tasks_group.sub_command(name="отчёт", description="Прогресс по задачам — свой открыт всем, чужой и по всей гильдии — только офицерам")

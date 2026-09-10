@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+from services.config_status import config_warning_html
 from services.units_sync import sync_units
 from web.deps import require_officer_access
 
@@ -123,6 +124,7 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_of
         "modes": _sort_modes(all_modes),
         "error": request.query_params.get("error"),
         "synced": request.query_params.get("synced"),
+        "config_warning": config_warning_html(database.get_guild_config(user["guild_id"]), "omicron"),
     })
 
 

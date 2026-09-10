@@ -18,6 +18,10 @@
         удалить или вручную зарегистрировать уже готовую ветку.
     </p>
 
+    {% if config_warning %}
+        <p class="config-warning">{{ config_warning|safe }}</p>
+    {% endif %}
+
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}

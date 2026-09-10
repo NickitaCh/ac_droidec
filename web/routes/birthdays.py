@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday, parse_birthday
+from services.config_status import config_warning_html
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -52,6 +53,7 @@ async def birthdays_list(request: Request, user: dict = Depends(require_officer_
         "user": user,
         "rows": rows,
         "error": request.query_params.get("error"),
+        "config_warning": config_warning_html(database.get_guild_config(guild_id), "birthday"),
     })
 
 
