@@ -197,6 +197,16 @@ def _parse_manual_stats(mapping) -> dict:
     return totals
 
 
+def _parse_target_pairs(mapping) -> list:
+    """target_stat/target_value — тоже повторяющиеся поля (см. data-row-group), но, в
+    отличие от _parse_manual_stats, НЕ суммируются в dict по стату: каждая строка — это
+    независимая проверка "сколько нужно набрать для этого целевого значения", и один и тот
+    же стат с разными целями — валидный кейс (например Speed 200 и Speed 220 для сравнения)."""
+    stats = mapping.getlist("target_stat")
+    values = mapping.getlist("target_value")
+    return [(stat, value) for stat, value in zip(stats, values) if stat and value]
+
+
 def _redirect_qs(mapping) -> str:
     """Пересобирает querystring из текущего запроса (character/relic/звёздность/сеты/
     primary-статы/вторички) — чтобы после сохранения пресета редирект вернул пользователя
@@ -211,11 +221,10 @@ def _redirect_qs(mapping) -> str:
     rarity = mapping.get("rarity")
     if rarity:
         pairs.append(("rarity", rarity))
-    target_stat = mapping.get("target_stat")
-    target_value = mapping.get("target_value")
-    if target_stat and target_value:
-        pairs.append(("target_stat", target_stat))
-        pairs.append(("target_value", target_value))
+    for target_stat, target_value in zip(mapping.getlist("target_stat"), mapping.getlist("target_value")):
+        if target_stat and target_value:
+            pairs.append(("target_stat", target_stat))
+            pairs.append(("target_value", target_value))
     for set_id, _ in MOD_SET_CHOICES:
         val = mapping.get(f"set_{set_id}")
         if val:
@@ -239,8 +248,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
     character = qp.get("character", "")
     relic_raw = qp.get("relic", "")
     rarity_raw = qp.get("rarity", "7")
-    target_stat = qp.get("target_stat", "")
-    target_value_raw = qp.get("target_value", "")
+    target_pairs = _parse_target_pairs(qp)
     set_counts = _parse_set_counts(qp)
     primaries = _parse_primary_picks(qp)
     manual_stats = _parse_manual_stats(qp)
@@ -277,15 +285,14 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         "selected_character_label": _char_label(character) if character else "",
         "selected_relic": relic_raw,
         "selected_rarity": rarity_raw,
-        "selected_target_stat": target_stat,
-        "selected_target_value": target_value_raw,
+        "target_rows": target_pairs if target_pairs else [("", "")],
         "set_counts": set_counts,
         "primaries": primaries,
         "manual_stat_rows": [(name, _fmt_value(value)) for name, value in manual_stats.items()] if manual_stats else [("", "")],
         "presets": _preset_rows(guild_id),
         "history": _history_rows(guild_id),
         "result": None,
-        "target": None,
+        "targets": [],
         "loading": False,
         "error": qp.get("error"),
     }
@@ -329,38 +336,43 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
         "rows": [(label, _fmt_value(final_stats.get(value, 0))) for label, value in STAT_NAME_CHOICES],
     }
 
-    if target_stat and target_value_raw:
+    # Несколько независимых целевых значений (по запросу пользователя 2026-09-10 — по
+    # аналогии с блоком вторичек, но БЕЗ суммирования: каждая строка target_stat/
+    # target_value проверяется отдельно и выводится отдельной карточкой).
+    targets = []
+    stat_label_by_value = dict((v, l) for l, v in STAT_NAME_CHOICES)
+    for target_stat, target_value_raw in target_pairs:
         try:
             target_value = float(target_value_raw)
         except ValueError:
-            target_value = None
-        if target_value is not None:
-            # Считаем ОТ base_final_stats (сеты+primary+relic+звёздность, без ручных
-            # вторичек) — "сколько ещё нужно набрать в допах", а не "сколько ещё сверху
-            # уже введённого" (см. запрос пользователя 2026-08-24).
-            base_value = base_final_stats.get(target_stat, 0)
-            raw_base = raw_base_stats.get(target_stat, 0)
-            needed = stat_engine.required_manual_contribution(base_value, target_value, target_stat, raw_base)
-            # ВАЖНО: две разные единицы, не путать. target_value/base_value — это САМ стат
-            # в его родном виде (Health/Physical Damage и т.п. — всегда число, даже когда их
-            # вторичка вводится в %; см. stat_engine.PERCENT_STATS, а не более широкий
-            # _STAT_UNIT_IS_PERCENT). needed — это то, что реально набирается во вторичках,
-            # там единица всегда % (кроме Speed). Armor/Resistance — особый случай: needed
-            # там в % Defense (см. stat_engine.NONLINEAR_DEFENSE_STATS), не в % самой Брони/
-            # Сопротивления, поэтому подпись результата называет это явно.
-            value_unit = "%" if target_stat in stat_engine.PERCENT_STATS else ""
-            needed_unit = "%" if target_stat in _STAT_UNIT_IS_PERCENT else ""
-            needed_label = "Defense" if target_stat in stat_engine.NONLINEAR_DEFENSE_STATS else dict((v, l) for l, v in STAT_NAME_CHOICES).get(target_stat, target_stat)
-            context["target"] = {
-                "stat_label": dict((v, l) for l, v in STAT_NAME_CHOICES).get(target_stat, target_stat),
-                "needed_label": needed_label,
-                "base_value_fmt": _fmt_value(base_value),
-                "target_value_fmt": _fmt_value(target_value),
-                "needed_fmt": _fmt_value(needed),
-                "unit": value_unit,
-                "needed_unit": needed_unit,
-                "already_reached": needed <= 0,
-            }
+            continue
+        # Считаем ОТ base_final_stats (сеты+primary+relic+звёздность, без ручных
+        # вторичек) — "сколько ещё нужно набрать в допах", а не "сколько ещё сверху
+        # уже введённого" (см. запрос пользователя 2026-08-24).
+        base_value = base_final_stats.get(target_stat, 0)
+        raw_base = raw_base_stats.get(target_stat, 0)
+        needed = stat_engine.required_manual_contribution(base_value, target_value, target_stat, raw_base)
+        # ВАЖНО: две разные единицы, не путать. target_value/base_value — это САМ стат
+        # в его родном виде (Health/Physical Damage и т.п. — всегда число, даже когда их
+        # вторичка вводится в %; см. stat_engine.PERCENT_STATS, а не более широкий
+        # _STAT_UNIT_IS_PERCENT). needed — это то, что реально набирается во вторичках,
+        # там единица всегда % (кроме Speed). Armor/Resistance — особый случай: needed
+        # там в % Defense (см. stat_engine.NONLINEAR_DEFENSE_STATS), не в % самой Брони/
+        # Сопротивления, поэтому подпись результата называет это явно.
+        value_unit = "%" if target_stat in stat_engine.PERCENT_STATS else ""
+        needed_unit = "%" if target_stat in _STAT_UNIT_IS_PERCENT else ""
+        needed_label = "Defense" if target_stat in stat_engine.NONLINEAR_DEFENSE_STATS else stat_label_by_value.get(target_stat, target_stat)
+        targets.append({
+            "stat_label": stat_label_by_value.get(target_stat, target_stat),
+            "needed_label": needed_label,
+            "base_value_fmt": _fmt_value(base_value),
+            "target_value_fmt": _fmt_value(target_value),
+            "needed_fmt": _fmt_value(needed),
+            "unit": value_unit,
+            "needed_unit": needed_unit,
+            "already_reached": needed <= 0,
+        })
+    context["targets"] = targets
 
     if not reopened_from_history:
         database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id, rarity=rarity)

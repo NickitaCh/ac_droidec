@@ -112,17 +112,32 @@
                 <button type="button" class="row-group-add">+ добавить стат</button>
             </div>
 
-            <div class="form-block">
-                <span>Целевое значение (необязательно) — сколько ещё нужно набрать в допах сверху сетов+основ, чтобы достичь этого числа</span>
-                <div class="mod-set-row">
-                    <select name="target_stat">
-                        <option value="">— стат —</option>
-                        {% for label, val, is_percent in target_stat_choices %}
-                            <option value="{{ val }}" {% if val == selected_target_stat %}selected{% endif %}>{{ label }}</option>
+            <div class="form-block" data-row-group>
+                <span>Целевые значения (необязательно) — сколько ещё нужно набрать в допах сверху сетов+основ, чтобы достичь каждого из этих чисел; можно добавить несколько статов сразу</span>
+                <table class="stat-rows-table">
+                    <thead>
+                        <tr><th>Стат</th><th>Желаемое значение</th><th></th></tr>
+                    </thead>
+                    <tbody class="row-group-rows">
+                        {% for stat, value in target_rows %}
+                            <tr class="row-group-row">
+                                <td>
+                                    <select name="target_stat">
+                                        <option value="">— стат —</option>
+                                        {% for label, val, is_percent in target_stat_choices %}
+                                            <option value="{{ val }}" {% if val == stat %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td class="stat-value-cell">
+                                    <input type="number" name="target_value" step="any" placeholder="желаемое значение" value="{{ value }}">
+                                </td>
+                                <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
+                            </tr>
                         {% endfor %}
-                    </select>
-                    <input type="number" name="target_value" step="any" placeholder="желаемое значение" value="{{ selected_target_value }}">
-                </div>
+                    </tbody>
+                </table>
+                <button type="button" class="row-group-add">+ добавить цель</button>
             </div>
 
             <button type="submit">Посчитать</button>
@@ -148,14 +163,16 @@
             </div>
         </div>
 
-        {% if target %}
+        {% if targets %}
             <div class="panel" style="max-width: 30em;">
                 <div class="panel-title"><span>Требуется во вторичках</span></div>
-                {% if target.already_reached %}
-                    <p>{{ target.stat_label }}: цель {{ target.target_value_fmt }}{{ target.unit }} уже достигнута без вторичек (сеты+основы дают {{ target.base_value_fmt }}{{ target.unit }}).</p>
-                {% else %}
-                    <p>Чтобы получить <strong>{{ target.target_value_fmt }}{{ target.unit }} {{ target.stat_label }}</strong> (сейчас без вторичек: {{ target.base_value_fmt }}{{ target.unit }}), нужно набрать во вторичках модов суммарно <strong>+{{ target.needed_fmt }}{{ target.needed_unit }} {{ target.needed_label }}</strong>.</p>
-                {% endif %}
+                {% for target in targets %}
+                    {% if target.already_reached %}
+                        <p>{{ target.stat_label }}: цель {{ target.target_value_fmt }}{{ target.unit }} уже достигнута без вторичек (сеты+основы дают {{ target.base_value_fmt }}{{ target.unit }}).</p>
+                    {% else %}
+                        <p>Чтобы получить <strong>{{ target.target_value_fmt }}{{ target.unit }} {{ target.stat_label }}</strong> (сейчас без вторичек: {{ target.base_value_fmt }}{{ target.unit }}), нужно набрать во вторичках модов суммарно <strong>+{{ target.needed_fmt }}{{ target.needed_unit }} {{ target.needed_label }}</strong>.</p>
+                    {% endif %}
+                {% endfor %}
             </div>
         {% endif %}
 
@@ -177,10 +194,12 @@
                 <input type="hidden" name="character" value="{{ selected_character }}">
                 <input type="hidden" name="relic" value="{{ selected_relic }}">
                 <input type="hidden" name="rarity" value="{{ selected_rarity }}">
-                {% if selected_target_stat %}
-                    <input type="hidden" name="target_stat" value="{{ selected_target_stat }}">
-                    <input type="hidden" name="target_value" value="{{ selected_target_value }}">
-                {% endif %}
+                {% for stat, value in target_rows %}
+                    {% if stat and value %}
+                        <input type="hidden" name="target_stat" value="{{ stat }}">
+                        <input type="hidden" name="target_value" value="{{ value }}">
+                    {% endif %}
+                {% endfor %}
                 <input type="text" name="name" placeholder="Название пресета" required>
                 <button type="submit">Сохранить</button>
             </form>
