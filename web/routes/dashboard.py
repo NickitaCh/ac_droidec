@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from cogs.birthday import next_birthday
 from services import activity_diff, dashboard_data, datacron_catalog, discord_invite
+from services.config_status import missing_summary
 from web.deps import get_current_user_optional, require_guild_access
 # Переиспользуем форматирование "когда был последний синк" из /activity вместо
 # дублирования — та же панель статуса, тот же смысл, см. docstring там.
@@ -164,6 +165,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "user": user,
         "guild_cfg": guild_cfg,
         "widgets": widgets,
+        "config_missing": missing_summary(guild_cfg) if widgets else None,
         "synced_now": request.query_params.get("synced"),
         "error": error,
         "access_status_message": dashboard_data.access_status_message(user) if user and user.get("tier") != "officer" else None,

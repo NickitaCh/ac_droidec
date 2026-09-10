@@ -32,6 +32,18 @@ FEATURE_FIELDS = {
     "omicron": ["omicron_channel_id"],
 }
 
+# Человекочитаемое название фичи — для сводки на дашборде (missing_summary), где
+# перечисляются все недонастроенные фичи разом, а не одна конкретная.
+FEATURE_LABELS = {
+    "tb_rotation": "Тег на ротацию/взводы перед ТБ",
+    "tb_plan_order": "План и автоордер ТБ",
+    "tb_report": "Автоотчёт по итогам ТБ",
+    "birthday": "Дни рождения",
+    "tw_guide": "Контры по ВГ",
+    "tasks": "Уведомления по задачам",
+    "omicron": "Автообъявления об омикронах",
+}
+
 
 def missing_config_labels(guild_cfg: dict, feature: str) -> list[str]:
     """Подписи полей из FEATURE_FIELDS[feature], которые в guild_cfg пустые/NULL."""
@@ -56,3 +68,20 @@ def config_warning_text(guild_cfg: dict, feature: str) -> str | None:
         return None
     items = "; ".join(missing)
     return f"⚠️ Не настроено: {items}. Настройте через `/настройки` (или `/омикрон_текст канал`) — до этого функция не будет работать."
+
+
+def missing_summary(guild_cfg: dict) -> list[dict]:
+    """Сводка по ВСЕМ фичам сразу — [{"feature": ключ, "label": название фичи,
+    "missing": [подписи полей]}, ...] только для тех, у кого чего-то не хватает.
+
+    Нужна для фич без отдельной страницы/команды-триггера (tb_rotation, tb_report —
+    их запускают только фоновые циклы бота, не разовое действие офицера), поэтому
+    единственное разумное место предупредить — общая сводка на главной /, которую
+    офицер видит при каждом заходе, а не point-in-time предупреждение конкретной
+    команды/страницы."""
+    result = []
+    for feature, label in FEATURE_LABELS.items():
+        missing = missing_config_labels(guild_cfg, feature)
+        if missing:
+            result.append({"feature": feature, "label": label, "missing": missing})
+    return result

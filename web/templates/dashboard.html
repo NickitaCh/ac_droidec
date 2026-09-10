@@ -81,6 +81,16 @@
     {% else %}
         <h1>{{ guild_cfg.name }}</h1>
 
+        {% if config_missing %}
+            <p class="config-warning">
+                ⚠️ Не настроено ({{ config_missing|length }}):
+                {% for item in config_missing %}
+                    <strong>{{ item.label }}</strong> ({{ item.missing|join(", ") }}){% if not loop.last %}; {% endif %}
+                {% endfor %}
+                — настройте в <a href="/settings">Настройках</a>, до этого соответствующие функции не будут работать.
+            </p>
+        {% endif %}
+
         <div class="panel">
             <div class="sync-status">
                 <div>
