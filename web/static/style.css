@@ -226,8 +226,40 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     font-weight: 700;
     text-decoration: none;
     color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.sidebar-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4em;
     padding: 0 0.2em 0.5em;
 }
+.brand-short { display: none; }
+
+/* ---- Кнопка сворачивания бокового меню в иконки (десктоп) — сама раскладка
+   свёрнутого состояния описана ниже, в блоке @media (min-width: 56.01em) с
+   html[data-sidebar="collapsed"]; на мобиле кнопка скрыта (там своя off-canvas
+   раскладка, см. @media (max-width: 56em) ниже). ---- */
+.sidebar-collapse-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.8em;
+    height: 1.8em;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg-secondary);
+    font-size: 1.1em;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+.sidebar-collapse-toggle:hover { background: var(--surface-2); color: var(--fg); }
 
 /* ---- Бургер-меню (моб. адаптация 2026-08-26, переехало в mobile-topbar
    2026-09-11) — чек-бокс-хак в духе уже существующих <details>-выпадашек
@@ -246,6 +278,9 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 
 .sidebar nav { display: flex; flex-direction: column; gap: 0.15em; flex: 1; }
 .sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
     padding: 0.5em 0.7em;
     border-radius: 6px;
     color: var(--fg-secondary);
@@ -254,12 +289,17 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     font-weight: 500;
 }
 .sidebar nav a:hover { background: var(--surface-2); color: var(--fg); }
+.nav-icon { flex: 0 0 auto; width: 1.2em; text-align: center; font-size: 1.05em; line-height: 1; }
+.nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Выпадашки (ТБ/Моды/Омикроны/Админ меню) в боковом меню разворачиваются на
    месте вниз, а не всплывают поверх контента — там для них и так есть место
    по вертикали, в отличие от узкой горизонтальной строки шапки. */
 .nav-dropdown { position: relative; }
 .nav-dropdown summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
     padding: 0.5em 0.7em;
     border-radius: 6px;
     color: var(--fg-secondary);
@@ -268,8 +308,9 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     cursor: pointer;
     list-style: none;
 }
+.nav-dropdown summary .nav-label { flex: 1; }
 .nav-dropdown summary::-webkit-details-marker { display: none; }
-.nav-dropdown summary::after { content: " ▾"; font-size: 0.8em; }
+.nav-dropdown summary::after { content: "▾"; font-size: 0.8em; }
 .nav-dropdown summary:hover { background: var(--surface-2); color: var(--fg); }
 .nav-dropdown[open] summary { background: var(--surface-2); color: var(--fg); }
 .nav-dropdown-menu {
@@ -278,6 +319,9 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     padding: 0.2em 0 0.2em 0.9em;
 }
 .nav-dropdown-menu a {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
     padding: 0.45em 0.6em;
     border-radius: 6px;
     color: var(--fg-secondary);
@@ -298,7 +342,18 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     padding-top: 0.75em;
     border-top: 1px solid var(--border);
 }
-.sidebar-footer a, .sidebar-footer .theme-toggle {
+.sidebar-footer a {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    padding: 0.5em 0.7em;
+    border-radius: 6px;
+    color: var(--fg-secondary);
+    text-decoration: none;
+    font-size: 0.95em;
+    font-weight: 500;
+}
+.sidebar-footer .theme-toggle {
     padding: 0.5em 0.7em;
     border-radius: 6px;
     color: var(--fg-secondary);
@@ -362,6 +417,78 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 .tb-event-picker { display: inline-flex; max-width: none; margin: 0; }
 .tb-event-picker select { padding: 0.3em 0.5em; font-size: 0.85em; border-radius: 6px; }
 .tb-event-picker noscript button { padding: 0.3em 0.6em; font-size: 0.85em; margin-left: 0.4em; }
+
+/* ---- Сворачивание бокового меню в узкую "иконочную" колонку (десктоп,
+   2026-09-11) — переключается кнопкой .sidebar-collapse-toggle (dashboard.js),
+   состояние живёт в data-sidebar="collapsed" на <html> (не на .sidebar — нужно
+   читать/выставлять его синхронно в <head> ДО отрисовки, как data-theme, иначе
+   при перезагрузке страницы будет вспышка развёрнутого меню) + localStorage.
+   Скобка min-width подобрана как зеркало брейкпоинта off-canvas-меню ниже
+   (max-width: 56em) — на мобиле/планшете сворачивание неактуально, там и так
+   всё бокового меню целиком уезжает за экран, поэтому весь блок живёт только
+   по эту сторону брейкпоинта и не пересекается с off-canvas-раскладкой. ---- */
+@media (min-width: 56.01em) {
+    .sidebar-collapse-toggle { display: inline-flex; }
+    html[data-sidebar="collapsed"] .sidebar-collapse-toggle { transform: rotate(180deg); }
+
+    html[data-sidebar="collapsed"] .sidebar {
+        width: 4.25em;
+        padding-left: 0.5em;
+        padding-right: 0.5em;
+    }
+    html[data-sidebar="collapsed"] .sidebar-top { flex-direction: column; gap: 0.5em; padding: 0 0 0.5em; }
+    html[data-sidebar="collapsed"] .sidebar .brand-full { display: none; }
+    html[data-sidebar="collapsed"] .sidebar .brand-short { display: inline; }
+
+    /* Прячем подписи у пунктов ВЕРХНЕГО уровня (сам <nav> и заголовки выпадашек),
+       иконка остаётся и центрируется. Пункты ВНУТРИ выпадашки (.nav-dropdown-menu)
+       подписи не теряют — они уезжают во всплывающую панель чуть ниже, там место
+       под текст снова есть. */
+    html[data-sidebar="collapsed"] .sidebar nav > a,
+    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary {
+        justify-content: center;
+        padding: 0.55em;
+    }
+    html[data-sidebar="collapsed"] .sidebar nav > a .nav-label,
+    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary .nav-label,
+    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary::after {
+        display: none;
+    }
+
+    /* Раскрытая выпадашка (ТБ/Модули/Омикроны/Админ меню) в свёрнутом виде всплывает
+       справа от сайдбара поверх контента — внутри узкой иконочной колонки для текста
+       подпунктов места нет. position: fixed, а не absolute — .sidebar сам скроллится
+       (overflow-y: auto), из-за чего браузер по спеке overflow форсит overflow-x тоже
+       в auto, обрезая любой absolute-потомок, выходящий за правый край; fixed выходит
+       из скролл-контейнера, а точные left/top (в координатах вьюпорта) выставляет
+       dashboard.js при открытии — CSS left/top ниже только страховка до первого JS. */
+    html[data-sidebar="collapsed"] .nav-dropdown-menu {
+        position: fixed;
+        left: 0;
+        top: 0;
+        min-width: 13em;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        padding: 0.35em;
+        z-index: 40;
+    }
+
+    /* Подвал: логин/выход остаются иконками с тултипом (title=), а переключатель
+       гильдии и имя пользователя без иконки-эквивалента просто прячем — некуда. */
+    html[data-sidebar="collapsed"] .sidebar-footer {
+        align-items: center;
+    }
+    html[data-sidebar="collapsed"] .sidebar-footer a {
+        justify-content: center;
+    }
+    html[data-sidebar="collapsed"] .sidebar-footer a .nav-label,
+    html[data-sidebar="collapsed"] .sidebar-footer .user,
+    html[data-sidebar="collapsed"] .guild-switch-form {
+        display: none;
+    }
+}
 
 /* ---- Боковое меню на мобиле/планшете — уезжает off-canvas (translateX),
    выезжает поверх контента поверх затемняющей подложки (.nav-backdrop, тот же

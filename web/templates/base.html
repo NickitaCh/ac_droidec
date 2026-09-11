@@ -20,6 +20,9 @@
                 if (saved === "light" || saved === "dark") {
                     document.documentElement.setAttribute("data-theme", saved);
                 }
+                if (localStorage.getItem("sidebarCollapsed") === "1") {
+                    document.documentElement.setAttribute("data-sidebar", "collapsed");
+                }
             } catch (e) {}
         })();
     </script>
@@ -29,57 +32,63 @@
     <div class="app-shell">
     <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
     <aside class="sidebar">
-        <a class="brand" href="/">AC Droidec</a>
+        <div class="sidebar-top">
+            <a class="brand" href="/">
+                <span class="brand-full">AC Droidec</span>
+                <span class="brand-short">AC</span>
+            </a>
+            <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Свернуть меню" title="Свернуть меню">‹</button>
+        </div>
         <nav>
-            <a href="/start">Начало работы</a>
-            <a href="/commands">Документация</a>
+            <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
+            <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
             {% if user %}
                 {% if user.tier == "officer" %}
-                    <a href="/activity">Активность</a>
-                    <a href="/violations">Нарушения</a>
+                    <a href="/activity" title="Активность"><span class="nav-icon">📈</span><span class="nav-label">Активность</span></a>
+                    <a href="/violations" title="Нарушения"><span class="nav-icon">⚠️</span><span class="nav-label">Нарушения</span></a>
                     <details class="nav-dropdown">
-                        <summary>ТБ</summary>
+                        <summary title="ТБ"><span class="nav-icon">🗺️</span><span class="nav-label">ТБ</span></summary>
                         <div class="nav-dropdown-menu">
-                            <a href="/tb">Отчёт</a>
-                            <a href="/tb/plan">План планет</a>
-                            <a href="/tb/order-plans">Планы ордера</a>
-                            <a href="/tb/platoons">Взводы</a>
+                            <a href="/tb"><span class="nav-icon">📄</span><span class="nav-label">Отчёт</span></a>
+                            <a href="/tb/plan"><span class="nav-icon">🪐</span><span class="nav-label">План планет</span></a>
+                            <a href="/tb/order-plans"><span class="nav-icon">📝</span><span class="nav-label">Планы ордера</span></a>
+                            <a href="/tb/platoons"><span class="nav-icon">👥</span><span class="nav-label">Взводы</span></a>
                         </div>
                     </details>
-                    <a href="/tw">ВГ</a>
-                    <a href="/tasks">Задачи</a>
-                    <a href="/datacrons">Датакроны</a>
+                    <a href="/tw" title="ВГ"><span class="nav-icon">⚔️</span><span class="nav-label">ВГ</span></a>
+                    <a href="/tasks" title="Задачи"><span class="nav-icon">✅</span><span class="nav-label">Задачи</span></a>
+                    <a href="/datacrons" title="Датакроны"><span class="nav-icon">🔮</span><span class="nav-label">Датакроны</span></a>
                     <details class="nav-dropdown">
-                        <summary>Модули</summary>
+                        <summary title="Модули"><span class="nav-icon">🧩</span><span class="nav-label">Модули</span></summary>
                         <div class="nav-dropdown-menu">
-                            <a href="/plates">Плейты</a>
-                            <a href="/stats-check">Статы</a>
-                            <a href="/mod-builder">Конструктор</a>
-                            <a href="/mod-search">Поиск модов</a>
+                            <a href="/plates"><span class="nav-icon">🎛️</span><span class="nav-label">Плейты</span></a>
+                            <a href="/stats-check"><span class="nav-icon">📊</span><span class="nav-label">Статы</span></a>
+                            <a href="/mod-builder"><span class="nav-icon">🛠️</span><span class="nav-label">Конструктор</span></a>
+                            <a href="/mod-search"><span class="nav-icon">🔍</span><span class="nav-label">Поиск модов</span></a>
                         </div>
                     </details>
                     <details class="nav-dropdown">
-                        <summary>Омикроны</summary>
+                        <summary title="Омикроны"><span class="nav-icon">Ω</span><span class="nav-label">Омикроны</span></summary>
                         <div class="nav-dropdown-menu">
-                            <a href="/omicron/phrases">Фразы для омикронов</a>
-                            <a href="/omicrons/priority">Приоритет для ВГ</a>
-                            <a href="/omicrons/report">Отчёт по игрокам</a>
+                            <a href="/omicron/phrases"><span class="nav-icon">💬</span><span class="nav-label">Фразы для омикронов</span></a>
+                            <a href="/omicrons/priority"><span class="nav-icon">🎯</span><span class="nav-label">Приоритет для ВГ</span></a>
+                            <a href="/omicrons/report"><span class="nav-icon">📋</span><span class="nav-label">Отчёт по игрокам</span></a>
                         </div>
                     </details>
-                    <a href="/birthdays">Дни рождения</a>
+                    <a href="/birthdays" title="Дни рождения"><span class="nav-icon">🎂</span><span class="nav-label">Дни рождения</span></a>
                     <details class="nav-dropdown">
-                        <summary>Админ меню</summary>
+                        <summary title="Админ меню"><span class="nav-icon">🛡️</span><span class="nav-label">Админ меню</span></summary>
                         <div class="nav-dropdown-menu">
-                            <a href="/registration">Регистрация</a>
-                            <a href="/access">Ручной доступ</a>
-                            <a href="/settings">Настройки</a>
+                            <a href="/registration"><span class="nav-icon">📝</span><span class="nav-label">Регистрация</span></a>
+                            <a href="/access"><span class="nav-icon">🔑</span><span class="nav-label">Ручной доступ</span></a>
+                            <a href="/settings"><span class="nav-icon">⚙️</span><span class="nav-label">Настройки</span></a>
                             {% if user.is_super_admin %}
-                                <a href="/admin/guilds">Гильдии</a>
-                                <a href="/admin/access">Админы</a>
-                                <a href="/admin/web-accounts">Логин/пароль</a>
-                                <a href="/admin/access-log">Лог входов</a>
-                                <a href="/admin/command-usage">Команды</a>
-                                <a href="/mod-optimizer">Оптимизатор модов</a>
+                                <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии</span></a>
+                                <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
+                                <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
+                                <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
+                                <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
+                                <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модов</span></a>
                             {% endif %}
                         </div>
                     </details>
@@ -100,10 +109,10 @@
                     </form>
                 {% endif %}
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
-                <a href="/logout">Выйти</a>
+                <a href="/logout" title="Выйти"><span class="nav-icon">🚪</span><span class="nav-label">Выйти</span></a>
             {% else %}
-                <a href="/login?next={{ request.url.path | urlencode }}">Войти через Discord</a>
-                <a href="/login/password?next={{ request.url.path | urlencode }}">По логину и паролю</a>
+                <a href="/login?next={{ request.url.path | urlencode }}" title="Войти через Discord"><span class="nav-icon">🎮</span><span class="nav-label">Войти через Discord</span></a>
+                <a href="/login/password?next={{ request.url.path | urlencode }}" title="По логину и паролю"><span class="nav-icon">🔑</span><span class="nav-label">По логину и паролю</span></a>
             {% endif %}
             <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Переключить тему" title="Переключить тему">
                 <span class="theme-icon-light">☀️</span>

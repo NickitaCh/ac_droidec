@@ -17,6 +17,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // Сворачивание бокового меню до иконок (десктоп) — кнопка в .sidebar-top;
+    // состояние сохраняется в localStorage и (как и тема) читается до первой отрисовки
+    // инлайн-скриптом в <head>, чтобы не было вспышки развёрнутого меню при загрузке.
+    // Открытые выпадашки (ТБ/Модули/…) закрываются при сворачивании — во всплывающем
+    // виде поверх контента незачем сохранять состояние, оставшееся от развёрнутого меню.
+    const sidebarToggle = document.getElementById("sidebar-collapse-toggle");
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener("click", () => {
+            const root = document.documentElement;
+            const collapsing = root.getAttribute("data-sidebar") !== "collapsed";
+            if (collapsing) {
+                document.querySelectorAll(".sidebar .nav-dropdown[open]").forEach((d) => { d.open = false; });
+                root.setAttribute("data-sidebar", "collapsed");
+            } else {
+                root.removeAttribute("data-sidebar");
+            }
+            try { localStorage.setItem("sidebarCollapsed", collapsing ? "1" : "0"); } catch (e) {}
+        });
+    }
+
     // data-table-search — текстовый поиск по строке (row.dataset.search); необязательный
     // соседний select[data-table-filter] с тем же id таблицы — точный фильтр по значению
     // (row.dataset.mode для /admin/omicron-phrases: ТБ/ВГ/ВА/рейд/…, может быть несколько
@@ -614,11 +634,28 @@ document.addEventListener("DOMContentLoaded", () => {
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.
     document.querySelectorAll(".row-actions details, .nav-dropdown").forEach((d) => {
         const group = d.classList.contains("nav-dropdown") ? ".nav-dropdown" : ".row-actions details";
+        const isNavDropdown = d.classList.contains("nav-dropdown");
+        const menu = isNavDropdown ? d.querySelector(".nav-dropdown-menu") : null;
         d.addEventListener("toggle", () => {
             if (!d.open) return;
             document.querySelectorAll(`${group}[open]`).forEach((other) => {
                 if (other !== d) other.open = false;
             });
+            // Свёрнутое боковое меню (иконки, см. .sidebar-collapse-toggle) — .sidebar сам
+            // является скролл-контейнером (overflow-y: auto на десктопе), из-за чего браузер
+            // по спеке overflow форсит и overflow-x в auto (нельзя сделать одну ось visible,
+            // если другая auto/scroll) — CSS position:absolute для .nav-dropdown-menu в таком
+            // сайдбаре обрезался бы вместо того, чтобы всплыть вправо поверх контента. fixed
+            // выходит за пределы скролл-контейнера, но тогда его base — вьюпорт, а не
+            // сайдбар, поэтому координаты считаем вручную от текущего summary.
+            if (menu && document.documentElement.getAttribute("data-sidebar") === "collapsed") {
+                const rect = d.querySelector("summary").getBoundingClientRect();
+                menu.style.left = `${rect.right + 6}px`;
+                menu.style.top = `${rect.top}px`;
+            } else if (menu) {
+                menu.style.left = "";
+                menu.style.top = "";
+            }
         });
     });
     document.addEventListener("click", (e) => {
