@@ -1670,7 +1670,7 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
         # имя (через живой запрос к Discord), а не голый ID.
         if current_value and current_value not in known_channel_ids:
             resolved_name = await _resolve_unregistered_channel_name(current_value)
-            label = f"{resolved_name} (не зарегистрирован через /канал)" if resolved_name else f"Канал не найден (`{current_value}`)"
+            label = resolved_name or f"Канал не найден (`{current_value}`)"
             options.append({"id": current_value, "label": label})
         return options
 
