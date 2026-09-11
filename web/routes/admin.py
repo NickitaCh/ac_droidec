@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
+from services import fun_features
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -239,3 +240,30 @@ async def command_usage_page(request: Request, user: dict = Depends(require_supe
         "groups": groups,
         "total_calls": sum(r["count"] for g in groups for r in g["rows"]),
     })
+
+
+# =====================================================================
+# Шуточные фичи бота (services/fun_features.py) — вкл/выкл, зеркало /фан.
+# Сознательно НЕ добавлено в command_catalog.py/публичный /commands (в отличие
+# от остальных команд) — та страница отдаётся вообще без авторизации (см.
+# память проекта), а это розыгрыш конкретного человека, не стоит его спойлерить
+# там же, где он сам может увидеть список.
+# =====================================================================
+@router.get("/fun", response_class=HTMLResponse)
+async def fun_page(request: Request, user: dict = Depends(require_super_admin)):
+    return templates.TemplateResponse(request, "admin_fun.html", {
+        "user": user,
+        "actions": fun_features.all_actions_with_status(),
+    })
+
+
+@router.post("/fun/{action_key}/enable", response_class=HTMLResponse)
+async def fun_enable(action_key: str, user: dict = Depends(require_super_admin)):
+    fun_features.set_enabled(action_key, True, user["discord_id"])
+    return RedirectResponse("/admin/fun", status_code=303)
+
+
+@router.post("/fun/{action_key}/disable", response_class=HTMLResponse)
+async def fun_disable(action_key: str, user: dict = Depends(require_super_admin)):
+    fun_features.set_enabled(action_key, False, user["discord_id"])
+    return RedirectResponse("/admin/fun", status_code=303)

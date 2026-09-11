@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Фан — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Шуточные фичи</h1>
+    <p class="muted">Включаются/выключаются только супер-админом. Список пока небольшой — новые приколы появляются здесь же и в /фан без правок этой страницы.</p>
+
+    {% if not actions %}
+        <p class="empty-state">— пока ничего нет —</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Фича</th>
+                            <th data-sort="text">Описание</th>
+                            <th>Статус</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in actions %}
+                            <tr>
+                                <td>{{ a.label }}</td>
+                                <td class="muted">{{ a.description }}</td>
+                                <td>
+                                    {% if a.enabled %}
+                                        <span class="badge badge-ok">Включено</span>
+                                    {% else %}
+                                        <span class="badge badge-neutral">Выключено</span>
+                                    {% endif %}
+                                </td>
+                                <td class="row-actions">
+                                    {% if a.enabled %}
+                                        <form method="post" action="/admin/fun/{{ a.key }}/disable">
+                                            <button type="submit" class="button-danger">Выключить</button>
+                                        </form>
+                                    {% else %}
+                                        <form method="post" action="/admin/fun/{{ a.key }}/enable">
+                                            <button type="submit">Включить</button>
+                                        </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

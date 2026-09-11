@@ -6,7 +6,7 @@ from disnake.ext import commands
 from dotenv import load_dotenv
 import database
 import guild_resolver
-from services import discord_invite
+from services import discord_invite, fun_features
 from swgoh_comlink import SwgohComlink
 
 # stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
@@ -95,6 +95,11 @@ ALLOWED_USER_IDS = [291656027659698176]
 # по той же причине: заявка на платное подключение подаётся ДО того, как у
 # заявителя вообще может быть tier (см. cogs/guild_subscription.py). "пригласить"
 # (cogs/bot_invite.py) — просто отдаёт инвайт-ссылку, ей вообще не нужен tier.
+# Команды, которые НИКОГДА не перехватываются шуточными фичами (services/fun_features.py,
+# GuildManagerBot.process_application_commands ниже) — сейчас только сама "фан", чтобы
+# супер-админ всегда мог выключить прикол, даже если случайно окажется его же мишенью.
+FUN_EXEMPT_COMMANDS = {"фан"}
+
 ALWAYS_ALLOWED_COMMANDS = {"регистрация", "гильдия_заявка", "пригласить"}
 MEMBER_ACCESSIBLE_COMMANDS = {
     "дк_требования список",
@@ -208,6 +213,34 @@ class GuildManagerBot(commands.Bot):
         self.openrouter_api_key = OPENROUTER_API_KEY
         self.openrouter_daily_warning_ratio = OPENROUTER_DAILY_BUDGET_WARNING_RATIO
         self.groq_api_key = GROQ_API_KEY
+
+    # Единственное место, откуда МОЖНО показать шуточное confirm-окно ПЕРЕД
+    # выполнением произвольной команды, не трогая при этом саму interaction —
+    # переопределяем именно этот disnake-метод (а не bot.slash_command_check,
+    # как обычный доступ ниже), потому что check обязан вернуть True/False
+    # синхронно в рамках одного "раунда" и не может сам отправить сообщение с
+    # кнопками, дождаться клика по ним, а ПОТОМ пропустить interaction дальше
+    # нетронутой для ответа самой командой — Discord разрешает единственный
+    # "первый ответ" на interaction, и если бы confirm-окно уходило как ответ
+    # на неё, обработчик реальной команды свалился бы на попытке ответить
+    # второй раз. process_application_commands вызывается для ЛЮБОЙ команды
+    # (слэш/юзер/месседж) РАНЬШЕ, чем disnake вообще трогает interaction.response —
+    # поэтому мы можем сходить в отдельное публичное сообщение в канале
+    # (fun_features.run_confirm_gate), дождаться Да/Нет, и либо пропустить
+    # interaction дальше как есть (await super()...), либо самим ответить на
+    # неё отказом и не звать super() вовсе. Обычный гейт доступа
+    # (check_guild_roles_slash ниже) всё равно срабатывает после — это чисто
+    # ДОПОЛНИТЕЛЬНЫЙ шаг перед ним, прав не даёт и не отбирает.
+    async def process_application_commands(self, interaction: disnake.ApplicationCommandInteraction) -> None:
+        cmd_name = interaction.data.name if interaction.data else None
+        if (
+            cmd_name
+            and cmd_name not in FUN_EXEMPT_COMMANDS
+            and fun_features.should_trigger("tp_confirm", interaction.author.id)
+        ):
+            if not await fun_features.run_confirm_gate(interaction, "tp_confirm"):
+                return
+        await super().process_application_commands(interaction)
 
 bot = GuildManagerBot()
 

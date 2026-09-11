@@ -1997,6 +1997,24 @@ def set_bot_state(key: str, value: str, guild_id: int = 1):
 
 
 # =====================================================================
+# ШУТОЧНЫЕ ФИЧИ (вкл/выкл через /фан или веб /admin/fun) — бот-вайд, живёт в
+# bot_state (guild_id=1 бакет, тот же приём, что и MISTRAL_USAGE ниже) под
+# ключом "fun_toggle:<action_key>". Реестр самих действий (кто, что, при каких
+# условиях) — в services/fun_features.py (FUN_ACTIONS), здесь только хранилище
+# вкл/выкл-флага, без знания о конкретных действиях.
+# =====================================================================
+def get_fun_toggle(action_key: str) -> bool:
+    return get_bot_state(f"fun_toggle:{action_key}") == "1"
+
+def set_fun_toggle(action_key: str, enabled: bool, updated_by: str):
+    set_bot_state(f"fun_toggle:{action_key}", "1" if enabled else "0")
+    set_bot_state(f"fun_toggle_updated_by:{action_key}", updated_by)
+
+def get_fun_toggle_updated_by(action_key: str) -> str | None:
+    return get_bot_state(f"fun_toggle_updated_by:{action_key}")
+
+
+# =====================================================================
 # УЧЁТ РАСХОДА MISTRAL (для /фарм, /тб_ордер_из_картинки — см. services/mistral_vision.py)
 # =====================================================================
 def _mistral_usage_key() -> str:
