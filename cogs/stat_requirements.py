@@ -377,24 +377,35 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
         matched_total = 0
         rows_total = 0
         char_problems = []
+        has_failed_required = False
         for base_id in char_keys:
             result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id)
             if result is None:
                 continue
-            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf, _failed_required = result
+            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf, failed_required = result
             matched, total = (matched_cur, total_cur) if account_for_relic else (matched_rf, total_rf)
             matched_total += matched
             rows_total += total
+            if failed_required:
+                has_failed_required = True
             if total > 0 and matched < total:
                 char_problems.append({
                     "char_name": char_name, "base_id": base_id, "matched": matched, "total": total,
                     "required_relic": required_relic_by_char.get(base_id),
                 })
 
+        # "Полностью соответствуют" — только по ОБЯЗАТЕЛЬНЫМ статам (failed_required,
+        # см. _evaluate_character_player), а не по matched_total == rows_total: та сумма
+        # включает и "по желанию"/"полезные" строки, из-за чего один невыполненный
+        # опциональный стат топил игрока целиком (реальный баг, найденный пользователем
+        # на тестовом плейте, где ВСЕ строки были опциональными — гильдия показывала
+        # 0/49 соответствуют, хотя обязательных требований не было вовсе). Тот же
+        # принцип, что уже используется guild-репортом по датакронам (_match_counts —
+        # там тоже "missing_required" считается только по priority=="required").
         entry = {"name": name, "ally_code": ally_code, "matched": matched_total, "total": rows_total, "chars": char_problems}
         if rows_total == 0:
             no_data.append(entry)
-        elif matched_total == rows_total:
+        elif not has_failed_required:
             compliant.append(entry)
         else:
             problem.append(entry)
@@ -1169,7 +1180,11 @@ class StatRequirementsCog(commands.Cog):
         else:
             lines.append("✅ Все обязательные статы в норме.")
 
-        if rows_total and matched_total == rows_total:
+        # Цвет по тому же признаку, что и текст "Итог" выше — обязательным статам
+        # (failed_required_by_char), а не matched_total == rows_total: иначе цвет мог
+        # уйти в "частично" из-за невыполненного стата с приоритетом "по желанию"/
+        # "полезно", хотя текст тут же говорит "все обязательные статы в норме".
+        if not failed_required_by_char:
             color = DATACRON_CHECK_COLOR_FULL
         elif matched_total == 0:
             color = DATACRON_CHECK_COLOR_NONE
