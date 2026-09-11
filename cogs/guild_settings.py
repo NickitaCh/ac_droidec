@@ -97,20 +97,35 @@ class GuildSettings(commands.Cog):
 
     async def _set_channel_field(self, inter: disnake.ApplicationCommandInteraction, field: str, channel_id: str, human_label: str):
         """Канал приходит строкой (id) из автодополнения guild_channels, а не
-        нативным disnake-типом — валидируем, что это действительно уже
-        зарегистрированный через /канал канал этой гильдии: подсказку можно
-        обойти, вписав произвольный текст руками, Discord это не проверяет."""
+        нативным disnake-типом — подсказку можно обойти, вписав произвольный
+        текст руками, Discord это не проверяет. Если ID не из подсказки, но
+        это реальный канал, который бот видит (тот же сервер, есть доступ) —
+        не отказываем, а регистрируем его сами (как будто там выполнили
+        /канал) и сохраняем: голый ID остаётся рабочим способом для тех, кому
+        так удобнее, просто без обязательного шага "сначала зайти и /канал"."""
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
-        if channel_id not in known_ids:
+        channel_id = channel_id.strip()
+        if not channel_id.isdigit():
             await inter.response.send_message(
-                "❌ Такой канал не зарегистрирован для гильдии. Зайдите в нужный канал или ветку и выполните там "
-                "`/канал`, затем выберите его здесь из подсказки автодополнения.",
+                "❌ Это не похоже на канал: выберите вариант из подсказки автодополнения, либо впишите числовой ID канала.",
                 ephemeral=True,
             )
             return
+        known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
+        if channel_id not in known_ids:
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is None:
+                await inter.response.send_message(
+                    "❌ Бот не видит канал с таким ID (не на этом сервере или нет доступа). Выберите канал из "
+                    "подсказки автодополнения, либо зайдите в нужный канал/ветку и выполните там `/канал`.",
+                    ephemeral=True,
+                )
+                return
+            name = getattr(channel, "name", None) or channel_id
+            channel_type = channel.type.name if hasattr(channel, "type") else None
+            database.register_guild_channel(guild_id, channel_id, name, channel_type=channel_type, registered_by=inter.author.id)
         database.update_guild_config(guild_id, **{field: channel_id})
         channel = self.bot.get_channel(int(channel_id))
         shown = channel.mention if channel else f"`{channel_id}`"
@@ -227,14 +242,29 @@ class GuildSettings(commands.Cog):
             return
         updates = {}
         if канал is not None:
-            known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
-            if канал not in known_ids:
+            канал = канал.strip()
+            if not канал.isdigit():
                 await inter.response.send_message(
-                    "❌ Такой канал не зарегистрирован для гильдии. Зайдите в нужный канал и выполните там `/канал`, "
-                    "затем выберите его здесь из подсказки автодополнения.",
+                    "❌ Это не похоже на канал: выберите вариант из подсказки автодополнения, либо впишите числовой ID канала.",
                     ephemeral=True,
                 )
                 return
+            known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
+            if канал not in known_ids:
+                # ID не из подсказки — если бот всё равно видит такой канал,
+                # регистрируем его сами (как /канал) вместо отказа, см.
+                # _set_channel_field выше за тем же паттерном.
+                channel_obj = self.bot.get_channel(int(канал))
+                if channel_obj is None:
+                    await inter.response.send_message(
+                        "❌ Бот не видит канал с таким ID (не на этом сервере или нет доступа). Выберите канал из "
+                        "подсказки автодополнения, либо зайдите в нужный канал и выполните там `/канал`.",
+                        ephemeral=True,
+                    )
+                    return
+                name = getattr(channel_obj, "name", None) or канал
+                channel_type = channel_obj.type.name if hasattr(channel_obj, "type") else None
+                database.register_guild_channel(guild_id, канал, name, channel_type=channel_type, registered_by=inter.author.id)
             updates["antispam_alert_channel_id"] = канал
         if роль is not None:
             updates["antispam_alert_role_id"] = str(роль.id)

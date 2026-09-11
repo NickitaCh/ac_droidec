@@ -1634,12 +1634,25 @@ GUILD_SETTINGS_GROUPS = [
 ]
 
 
-async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
-    """Разовый резолв имени канала, который ещё не зарегистрирован в guild_channels
-    (легаси-значение, заданное до появления /канал — при сидировании гильдии
-    напрямую в БД, или через старый нативный disnake-пикер). Веб-процесс не держит
-    живого соединения с гейтвеем — тот же паттерн прямого REST-запроса с токеном
-    бота, что уже используется в tb_plan_reader.py, а не отдельный канал связи."""
+# Числовые ID типов каналов Discord (те же значения, что в REST-ответе
+# GET /channels/{id} и в disnake.ChannelType) — нужны только чтобы записать
+# channel_type в guild_channels в том же формате, что и cogs/channel_registry.py
+# (channel.type.name), когда канал авто-регистрируется из голого ID (см.
+# guild_settings_save ниже), а не через живой disnake-объект.
+_DISCORD_CHANNEL_TYPE_NAMES = {
+    0: "text", 2: "voice", 4: "category", 5: "news",
+    10: "news_thread", 11: "public_thread", 12: "private_thread",
+    13: "stage_voice", 15: "forum",
+}
+
+
+async def _fetch_discord_channel(channel_id: str) -> dict | None:
+    """Живой GET /channels/{id} через Discord REST токеном бота — тот же паттерн,
+    что уже используется в tb_plan_reader.py (веб-процесс не держит соединения с
+    гейтвеем, но токен бота у него есть через .env). Используется и для показа
+    имени уже сохранённого, но не зарегистрированного через /канал канала (GET
+    /settings), и для авто-регистрации канала, когда его ID вписали вручную
+    вместо выбора из списка (POST /settings, см. ниже)."""
     token = os.environ.get("DISCORD_TOKEN")
     if not token:
         return None
@@ -1651,9 +1664,14 @@ async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
             )
             if resp.status_code != 200:
                 return None
-            return resp.json().get("name")
+            return resp.json()
     except httpx.HTTPError:
         return None
+
+
+async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
+    data = await _fetch_discord_channel(channel_id)
+    return data.get("name") if data else None
 
 
 @router.get("/settings", response_class=HTMLResponse)
@@ -1693,44 +1711,59 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
 
 
 @router.post("/settings", response_class=HTMLResponse)
-async def guild_settings_save(
-    ping_channel_id: str = Form(""),
-    ping_role_id: str = Form(""),
-    birthday_channel_id: str = Form(""),
-    birthday_role_id: str = Form(""),
-    officer_channel_id: str = Form(""),
-    tb_plan_channel_id: str = Form(""),
-    tb_order_source_channel_id: str = Form(""),
-    tb_order_role_id: str = Form(""),
-    omicron_channel_id: str = Form(""),
-    tw_guide_forum_channel_id: str = Form(""),
-    tasks_log_channel_id: str = Form(""),
-    tasks_notify_time: str = Form(""),
-    user: dict = Depends(require_guild_access),
-):
-    values = {
-        "ping_channel_id": ping_channel_id,
-        "ping_role_id": ping_role_id,
-        "birthday_channel_id": birthday_channel_id,
-        "birthday_role_id": birthday_role_id,
-        "officer_channel_id": officer_channel_id,
-        "tb_plan_channel_id": tb_plan_channel_id,
-        "tb_order_source_channel_id": tb_order_source_channel_id,
-        "tb_order_role_id": tb_order_role_id,
-        "omicron_channel_id": omicron_channel_id,
-        "tw_guide_forum_channel_id": tw_guide_forum_channel_id,
-        "tasks_log_channel_id": tasks_log_channel_id,
-    }
+async def guild_settings_save(request: Request, user: dict = Depends(require_guild_access)):
+    # request.form() напрямую (а не одноимённые Form(...)-параметры на каждое
+    # поле) — поля живут в одном месте (GUILD_SETTINGS_GROUPS), не дублируются
+    # в сигнатуре; заодно позволяет читать доп. "<field>_manual" для ручного
+    # ввода ID канала (см. ниже и guild_settings.html), не объявляя их все тоже.
+    form = await request.form()
+    guild_id = user["guild_id"]
     cleaned = {}
-    for field, raw in values.items():
-        raw = raw.strip()
-        if raw and not raw.isdigit():
-            return RedirectResponse(
-                f"/settings?{urlencode({'error': f'ID должен состоять только из цифр ({field})'})}", status_code=303
-            )
-        cleaned[field] = raw or None
 
-    tasks_notify_time = tasks_notify_time.strip()
+    for group in GUILD_SETTINGS_GROUPS:
+        for field, _label, kind in group["fields"]:
+            if kind == "time":
+                continue  # tasks_notify_time — отдельно, ниже
+
+            if kind == "role":
+                raw = (form.get(field) or "").strip()
+                if raw and not raw.isdigit():
+                    return RedirectResponse(
+                        f"/settings?{urlencode({'error': f'ID должен состоять только из цифр ({field})'})}", status_code=303
+                    )
+                cleaned[field] = raw or None
+                continue
+
+            # kind == "channel": можно выбрать из списка (select, значение = ID
+            # уже зарегистрированного через /канал канала) ИЛИ вписать ID вручную
+            # в соседнее поле "<field>_manual" — тогда ручной ввод побеждает.
+            selected = (form.get(field) or "").strip()
+            manual = (form.get(f"{field}_manual") or "").strip()
+            value = manual or selected
+            if value and not value.isdigit():
+                return RedirectResponse(
+                    f"/settings?{urlencode({'error': f'ID канала должен состоять только из цифр ({field})'})}", status_code=303
+                )
+            if value:
+                known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
+                if value not in known_ids:
+                    # Канал не из списка (ID вписан вручную мимо /канал) —
+                    # регистрируем его сами по данным живого запроса к Discord,
+                    # как будто офицер сам выполнил /канал в этом канале: дальше
+                    # он ведёт себя как обычный зарегистрированный канал и
+                    # появится в выпадающем списке при следующем открытии страницы.
+                    data = await _fetch_discord_channel(value)
+                    if data is None:
+                        return RedirectResponse(
+                            f"/settings?{urlencode({'error': f'Бот не видит канал с ID {value} (не на этом сервере или нет доступа) — {field}'})}",
+                            status_code=303,
+                        )
+                    name = data.get("name") or value
+                    channel_type = _DISCORD_CHANNEL_TYPE_NAMES.get(data.get("type"))
+                    database.register_guild_channel(guild_id, value, name, channel_type=channel_type, registered_by=user["discord_id"])
+            cleaned[field] = value or None
+
+    tasks_notify_time = (form.get("tasks_notify_time") or "").strip()
     if tasks_notify_time and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", tasks_notify_time):
         return RedirectResponse(
             f"/settings?{urlencode({'error': 'Время уведомлений должно быть в формате ЧЧ:ММ (00:00–23:59)'})}",
@@ -1738,7 +1771,7 @@ async def guild_settings_save(
         )
     cleaned["tasks_notify_time"] = tasks_notify_time or None
 
-    database.update_guild_config(user["guild_id"], **cleaned)
+    database.update_guild_config(guild_id, **cleaned)
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
