@@ -121,7 +121,7 @@ TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+
 TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪🟤"
 
 # Общий (не завязанный на конкретную формулировку/название ТБ) паттерн "это сообщение —
-# план на этап N", используется автопостом ордера (_extract_tb_order_block ниже) и
+# план на этап N", используется автопостом ордера (extract_tb_order_block ниже) и
 # ручным сохранением плана (cogs/tb_order_image.py::_find_posted_phases_any_author) —
 # в отличие от TB_PLAN_HEADER_RE выше, который узкий к нашему заголовку "Восход
 # Империи — N этап" и нужен только для разбора планет из офицерских анонсов (см.
@@ -137,6 +137,71 @@ TB_ORDER_STAGE_RE = re.compile(
 
 def _tb_order_stage_number(match) -> str:
     return str(int(match.group("num_before") or match.group("num_after")))
+
+
+async def fetch_tb_order_source_messages(bot, source_channel_id: int) -> list:
+    """Модульная функция (не метод кога) — переиспользуется и tb_order_loop ниже,
+    и /тб_план предпросмотр (cogs/tb_order_image.py), которой не нужен весь
+    GuildEvents, а только сами сообщения ветки-плана."""
+    channel = bot.get_channel(source_channel_id)
+    if channel is None:
+        channel = await bot.fetch_channel(source_channel_id)
+    parts = []
+    async for message in channel.history(limit=None, oldest_first=True):
+        if message.content:
+            parts.append(message.content)
+    return parts
+
+
+def extract_tb_order_block(messages: list, phase: str):
+    """Ищет сообщение с ордером на конкретный этап среди сообщений ветки-плана,
+    где офицеры выкладывают план на все 6 этапов разом (один этап = одно
+    сообщение). Матчим по TB_ORDER_STAGE_RE — общему паттерну "N этап"/"этап N",
+    а не по нашему конкретному заголовку "Восход Империи — N этап": у других
+    гильдий на этом же боте свой шаблон ордера, и парсер не должен требовать
+    именно наш текст. Возвращаем сообщение ЦЕЛИКОМ, как есть, без попыток
+    вырезать хвостовые артефакты форматирования — раз шаблон не наш, самовольно
+    чистить чужой текст нельзя (в отличие от старой версии, которая резала
+    строго под наш формат с построчной цитатой "> "). Если план на этот этап
+    публиковали несколько раз (план от прошлой ТБ не удалили, а добавили новый
+    отдельным сообщением) — берём ПОСЛЕДНЕЕ по времени сообщение, чтобы не
+    нужно было вручную чистить историю канала между ТБ. Плата за отказ от
+    привязки к конкретному заголовку: постороннее сообщение офицеров, где
+    просто ОБСУЖДАЕТСЯ этап N (а не публикуется сам ордер), тоже матчит паттерн
+    и, если оно окажется последним по времени, перекроет настоящий ордер — это
+    сознательный компромисс по прямому запросу пользователя, ветка-план
+    по-прежнему должна оставаться "чистой" (одно сообщение на этап).
+
+    Модульная функция, не метод кога — переиспользуется /тб_план предпросмотр
+    (cogs/tb_order_image.py) и веб-версией того же предпросмотра
+    (tb_plan_reader.py), которым не нужен живой GuildEvents-инстанс."""
+    result = None
+    for content in messages:
+        match = TB_ORDER_STAGE_RE.search(content)
+        if not match or _tb_order_stage_number(match) != phase:
+            continue
+        result = content.strip()
+    return result
+
+
+def chunk_tb_order_message(text: str, limit: int = 2000):
+    """На случай, если блок этапа однажды перерастёт лимит Discord в 2000
+    символов — режем по строкам, а не обрезаем текст молча."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            if current:
+                chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 TB_PLANET_CONFLICT = {
@@ -279,62 +344,6 @@ class GuildEvents(commands.Cog):
             return None
         return str(days.index(weekday) + 1)
 
-    async def _fetch_tb_order_source_messages(self, source_channel_id: int) -> list:
-        channel = self.bot.get_channel(source_channel_id)
-        if channel is None:
-            channel = await self.bot.fetch_channel(source_channel_id)
-        parts = []
-        async for message in channel.history(limit=None, oldest_first=True):
-            if message.content:
-                parts.append(message.content)
-        return parts
-
-    def _extract_tb_order_block(self, messages: list, phase: str):
-        """Ищет сообщение с ордером на конкретный этап среди сообщений ветки-плана,
-        где офицеры выкладывают план на все 6 этапов разом (один этап = одно
-        сообщение). Матчим по TB_ORDER_STAGE_RE — общему паттерну "N этап"/"этап N",
-        а не по нашему конкретному заголовку "Восход Империи — N этап": у других
-        гильдий на этом же боте свой шаблон ордера, и парсер не должен требовать
-        именно наш текст. Возвращаем сообщение ЦЕЛИКОМ, как есть, без попыток
-        вырезать хвостовые артефакты форматирования — раз шаблон не наш, самовольно
-        чистить чужой текст нельзя (в отличие от старой версии, которая резала
-        строго под наш формат с построчной цитатой "> "). Если план на этот этап
-        публиковали несколько раз (план от прошлой ТБ не удалили, а добавили новый
-        отдельным сообщением) — берём ПОСЛЕДНЕЕ по времени сообщение, чтобы не
-        нужно было вручную чистить историю канала между ТБ. Плата за отказ от
-        привязки к конкретному заголовку: постороннее сообщение офицеров, где
-        просто ОБСУЖДАЕТСЯ этап N (а не публикуется сам ордер), тоже матчит паттерн
-        и, если оно окажется последним по времени, перекроет настоящий ордер — это
-        сознательный компромисс по прямому запросу пользователя, ветка-план
-        по-прежнему должна оставаться "чистой" (одно сообщение на этап)."""
-        result = None
-        for content in messages:
-            match = TB_ORDER_STAGE_RE.search(content)
-            if not match or _tb_order_stage_number(match) != phase:
-                continue
-            result = content.strip()
-        return result
-
-    @staticmethod
-    def _chunk_message(text: str, limit: int = 2000):
-        """На случай, если блок этапа однажды перерастёт лимит Discord в 2000
-        символов — режем по строкам, а не обрезаем текст молча."""
-        if len(text) <= limit:
-            return [text]
-        chunks = []
-        current = ""
-        for line in text.split("\n"):
-            candidate = f"{current}\n{line}" if current else line
-            if len(candidate) > limit:
-                if current:
-                    chunks.append(current)
-                current = line
-            else:
-                current = candidate
-        if current:
-            chunks.append(current)
-        return chunks
-
     @tasks.loop(seconds=30)
     async def tb_order_loop(self):
         now_msk = datetime.now(MSK)
@@ -379,17 +388,17 @@ class GuildEvents(commands.Cog):
                 continue
 
             try:
-                messages = await self._fetch_tb_order_source_messages(source_channel_id)
-                block = self._extract_tb_order_block(messages, phase)
+                messages = await fetch_tb_order_source_messages(self.bot, source_channel_id)
+                block = extract_tb_order_block(messages, phase)
                 if not block:
                     print(f"❌ [TBOrder] [{gname}] Не нашёл блок {phase} этапа в ветке-плане")
                     continue
                 # Блок публикуется как есть — с сохранением исходного форматирования
-                # сообщения (см. _extract_tb_order_block); никакой "## " больше не
+                # сообщения (см. extract_tb_order_block); никакой "## " больше не
                 # добавляем сами, т.к. это было завязано на старую логику, резавшую
                 # текст строго от нашего заголовка (см. историю этой строки).
                 message_text = f"{block}\n\n\n{role.mention}"
-                for chunk in self._chunk_message(message_text):
+                for chunk in chunk_tb_order_message(message_text):
                     await channel.send(chunk)
                 self._tb_order_sent_key[gid] = current_key
                 print(f"✅ [TBOrder] [{gname}] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")

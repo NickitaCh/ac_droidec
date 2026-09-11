@@ -226,12 +226,31 @@ async def tb_order_plans(request: Request, user: dict = Depends(require_guild_ac
             "active": p["id"] == active_id,
             "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
         })
+
+    preview = None
+    preview_plan = None
+    preview_error = None
+    preview_plan_id = request.query_params.get("preview_plan_id")
+    if preview_plan_id:
+        try:
+            preview_plan = database.get_tb_saved_plan(int(preview_plan_id))
+        except ValueError:
+            preview_plan = None
+        if preview_plan is None or preview_plan["guild_id"] != guild_id:
+            preview_error = "План не найден."
+            preview_plan = None
+        else:
+            preview, preview_error = await tb_plan_reader.fetch_order_preview(preview_plan)
+
     return templates.TemplateResponse(request, "tb_order_plans.html", {
         "user": user,
         "rows": rows,
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
         "config_warning": config_warning_html(guild_cfg, "tb_plan_order"),
+        "preview": preview,
+        "preview_plan": preview_plan,
+        "preview_error": preview_error,
     })
 
 

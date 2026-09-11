@@ -66,7 +66,13 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import tb_platoon_autofill
-from cogs.guild_events import TB_ORDER_STAGE_RE, _tb_order_stage_number
+from cogs.guild_events import (
+    TB_ORDER_STAGE_RE,
+    _tb_order_stage_number,
+    chunk_tb_order_message,
+    extract_tb_order_block,
+    fetch_tb_order_source_messages,
+)
 from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
@@ -425,6 +431,69 @@ class TBOrderImage(commands.Cog):
             mark = " — 🟢 активен" if p["id"] == active_id else ""
             lines.append(f"**{p['name']}** — {p['total_stars']} ★, <#{p['thread_id']}>{mark}")
         await inter.response.send_message("\n".join(lines), ephemeral=True)
+
+    @tb_plan_group.sub_command(
+        name="предпросмотр",
+        description="Показать, что сейчас распознаётся для всех 6 этапов плана — без публикации в канал",
+    )
+    async def tb_plan_preview(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        название: str = commands.Param(default=None, description="План — по умолчанию текущий активный", autocomplete=autocomplete_tb_plans),
+    ):
+        await inter.response.defer(ephemeral=True)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить гильдию.")
+            return
+
+        if название:
+            plan = database.get_tb_saved_plan_by_name(guild_id, название)
+            if plan is None:
+                await inter.edit_original_response(f"❌ План «{название}» не найден.")
+                return
+        else:
+            guild_cfg = database.get_guild_config(guild_id) or {}
+            if not guild_cfg.get("tb_active_plan_id"):
+                await inter.edit_original_response(
+                    "❌ Нет активного плана — укажите название или выберите его через `/тб_план выбрать`."
+                )
+                return
+            plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
+            if plan is None:
+                await inter.edit_original_response("❌ Активный план не найден (возможно, удалён) — укажите название явно.")
+                return
+
+        thread_id = int(plan["thread_id"])
+        try:
+            thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+        except disnake.NotFound:
+            await inter.edit_original_response("❌ Ветка плана не найдена — возможно, удалена.")
+            return
+        except disnake.Forbidden:
+            await inter.edit_original_response("❌ Нет доступа к ветке плана.")
+            return
+
+        messages = await fetch_tb_order_source_messages(self.bot, thread_id)
+        blocks = []
+        missing = []
+        for phase in range(1, 7):
+            block = extract_tb_order_block(messages, str(phase))
+            if block:
+                blocks.append(f"**— Этап {phase} —**\n{block}")
+            else:
+                missing.append(phase)
+                blocks.append(f"**— Этап {phase} —**\n⚠️ не нашёл в ветке")
+
+        status = f"⚠️ Не хватает этапов: {', '.join(map(str, missing))}" if missing else "✅ Все 6 этапов найдены."
+        header = (
+            f"🔍 Предпросмотр плана «{plan['name']}» (<#{thread.id}>) — так уйдёт в канал ежедневным "
+            f"автоордером, публикации в канал не было.\n{status}\n\n"
+        )
+        chunks = chunk_tb_order_message(header + "\n\n".join(blocks))
+        await inter.edit_original_response(chunks[0])
+        for c in chunks[1:]:
+            await inter.followup.send(c, ephemeral=True)
 
     @tb_plan_group.sub_command(
         name="выбрать", description="Выбрать план, из которого будет постится ежедневный ордер ТБ"

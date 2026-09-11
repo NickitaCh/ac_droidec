@@ -16,6 +16,8 @@ import re
 
 import httpx
 
+from cogs.guild_events import extract_tb_order_block
+
 _TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+)\s*этап", re.IGNORECASE)
 _TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪"
 
@@ -150,3 +152,35 @@ async def fetch_plan_planets(plan: dict) -> tuple:
                 "no_platoons": bool(vzvod) and vzvod.strip().lower().rstrip(".") == "нет",
             })
     return entries, None
+
+
+async def fetch_order_preview(plan: dict) -> tuple:
+    """Веб-версия /тб_план предпросмотр (cogs/tb_order_image.py): что сейчас
+    распознаётся для каждого из 6 этапов в ветке плана, без публикации в канал —
+    переиспользует ровно ту же логику поиска (guild_events.extract_tb_order_block/
+    TB_ORDER_STAGE_RE), читая сообщения через тот же REST-путь, что и
+    fetch_plan_planets выше, вместо живого бота. Возвращает (список из 6
+    {"phase": N, "block": текст|None}, текст_ошибки|None)."""
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return [], "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
+                headers={"Authorization": f"Bot {token}"},
+                params={"limit": 100},
+            )
+            resp.raise_for_status()
+            messages = resp.json()
+    except httpx.HTTPError as e:
+        return [], f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
+
+    # Discord отдаёт сообщения от новых к старым — extract_tb_order_block ожидает
+    # порядок "от старых к новым" (как bot.history(oldest_first=True)) и сам берёт
+    # ПОСЛЕДНЕЕ совпадение при повторной публикации, поэтому список разворачиваем.
+    contents = [m.get("content") or "" for m in reversed(messages)]
+
+    result = [{"phase": phase, "block": extract_tb_order_block(contents, str(phase))} for phase in range(1, 7)]
+    return result, None

@@ -51,6 +51,7 @@
                                 {% endif %}
                             </td>
                             <td class="row-actions">
+                                <a href="/tb/order-plans?preview_plan_id={{ row.id }}#preview">Предпросмотр →</a>
                                 <a href="/tb/platoons?plan_id={{ row.id }}">Взводы →</a>
                                 {% if not row.active %}
                                     <form method="post" action="/tb/order-plans/select">
@@ -71,6 +72,33 @@
             </div>
         {% endif %}
     </div>
+
+    {% if preview_plan or preview_error %}
+        <div class="panel" id="preview">
+            <div class="panel-title"><span>Предпросмотр{% if preview_plan %}: «{{ preview_plan.name }}»{% endif %}</span></div>
+            <p class="muted">Что сейчас распознаётся для каждого из 6 этапов в ветке плана — именно это уйдёт в канал ежедневным автоордером. Публикации не происходит.</p>
+            {% if preview_error %}
+                <p class="error">{{ preview_error }}</p>
+            {% elif preview %}
+                {% set missing = preview|selectattr("block", "none")|list %}
+                {% if missing %}
+                    <p class="config-warning">⚠️ Не хватает этапов: {{ missing|map(attribute="phase")|join(", ") }}</p>
+                {% else %}
+                    <p><span class="badge badge-ok">Все 6 этапов найдены</span></p>
+                {% endif %}
+                {% for p in preview %}
+                    <div class="panel" style="margin-top: 0.75em;">
+                        <div class="panel-title"><span>Этап {{ p.phase }}</span></div>
+                        {% if p.block %}
+                            <pre style="white-space: pre-wrap; overflow-x: auto; font-family: monospace; margin: 0;">{{ p.block }}</pre>
+                        {% else %}
+                            <p class="empty-state">⚠️ не нашёл в ветке</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+    {% endif %}
 
     <div class="panel" style="max-width: 32em;">
         <div class="panel-title"><span>Зарегистрировать готовую ветку</span></div>
