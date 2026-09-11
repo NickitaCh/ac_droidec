@@ -1049,7 +1049,7 @@ class StatRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
         игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии (например при скауте рекрута), вместо параметра «игрок»"),
+        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии, вместо параметра «игрок»"),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
