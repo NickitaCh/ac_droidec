@@ -83,15 +83,40 @@ h1 { font-size: 1.6em; margin: 0 0 0.6em; }
 h2 { font-size: 1.15em; margin: 1.75em 0 0.6em; color: var(--fg); }
 h1, h2 { letter-spacing: -0.01em; }
 
-.topbar {
+/* ---- Раскладка "боковое меню слева" (2026-09-11, заменила верхнюю шапку) ----
+   .app-shell — горизонтальный флекс на всю высоту вьюпорта: .sidebar (липкая,
+   собственный скролл) + .main-area (контент + футер), см. base.html. На мобиле
+   .sidebar уезжает в off-canvas (см. media-запрос ниже), появляется поверх
+   контента по чекбокс-хаку (.nav-toggle-checkbox), тот же паттерн, что раньше
+   разворачивал бургер-меню в шапке. */
+.app-shell {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75em 1.5em;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    position: relative;
+    align-items: flex-start;
+    min-height: 100vh;
 }
+.sidebar {
+    flex: 0 0 auto;
+    width: 15em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+    padding: 1.25em 1em;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+.main-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+.mobile-topbar { display: none; }
+.nav-backdrop { display: none; }
 
 .landing-page { max-width: 46em; margin: 0 auto; }
 /* main.wide убирает свой горизонтальный padding только от 60em (см. main.wide
@@ -197,18 +222,19 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 }
 .site-footer a { color: var(--accent); }
 
-.topbar .brand {
+.sidebar .brand, .mobile-topbar .brand {
     font-weight: 700;
     text-decoration: none;
     color: var(--fg);
+    padding: 0 0.2em 0.5em;
 }
 
-/* ---- Бургер-меню (моб. адаптация 2026-08-26) — чек-бокс-хак в духе уже
-   существующих <details>-выпадашек (Моды/Админ меню), без JS. На десктопе
-   чекбокс/кнопка скрыты, .topbar nav остаётся обычной строкой. ---- */
+/* ---- Бургер-меню (моб. адаптация 2026-08-26, переехало в mobile-topbar
+   2026-09-11) — чек-бокс-хак в духе уже существующих <details>-выпадашек
+   (Моды/Админ меню), без JS. На десктопе чекбокс/кнопка/mobile-topbar скрыты,
+   .sidebar всегда видима слева. ---- */
 .nav-toggle-checkbox { display: none; }
 .nav-toggle-btn {
-    display: none;
     font-size: 1.3em;
     line-height: 1;
     padding: 0.25em 0.4em;
@@ -218,20 +244,23 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 }
 .nav-toggle-btn:hover { background: var(--surface-2); }
 
-.topbar nav { display: flex; align-items: center; gap: 0.35em; }
-.topbar nav a {
-    padding: 0.4em 0.7em;
+.sidebar nav { display: flex; flex-direction: column; gap: 0.15em; flex: 1; }
+.sidebar nav a {
+    padding: 0.5em 0.7em;
     border-radius: 6px;
     color: var(--fg-secondary);
     text-decoration: none;
     font-size: 0.95em;
     font-weight: 500;
 }
-.topbar nav a:hover { background: var(--surface-2); color: var(--fg); }
+.sidebar nav a:hover { background: var(--surface-2); color: var(--fg); }
 
+/* Выпадашки (ТБ/Моды/Омикроны/Админ меню) в боковом меню разворачиваются на
+   месте вниз, а не всплывают поверх контента — там для них и так есть место
+   по вертикали, в отличие от узкой горизонтальной строки шапки. */
 .nav-dropdown { position: relative; }
 .nav-dropdown summary {
-    padding: 0.4em 0.7em;
+    padding: 0.5em 0.7em;
     border-radius: 6px;
     color: var(--fg-secondary);
     font-size: 0.95em;
@@ -244,34 +273,42 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 .nav-dropdown summary:hover { background: var(--surface-2); color: var(--fg); }
 .nav-dropdown[open] summary { background: var(--surface-2); color: var(--fg); }
 .nav-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 0.35em);
-    right: 0;
     display: flex;
     flex-direction: column;
-    min-width: 10em;
-    padding: 0.35em;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    z-index: 10;
+    padding: 0.2em 0 0.2em 0.9em;
 }
 .nav-dropdown-menu a {
     padding: 0.45em 0.6em;
     border-radius: 6px;
     color: var(--fg-secondary);
     text-decoration: none;
-    font-size: 0.95em;
+    font-size: 0.9em;
     font-weight: 500;
-    white-space: nowrap;
 }
 .nav-dropdown-menu a:hover { background: var(--surface-2); color: var(--fg); }
 
-.topbar nav .user {
-    margin-left: 0.5em;
-    padding-left: 0.9em;
-    border-left: 1px solid var(--border);
+/* ---- Низ бокового меню (переключатель гильдии/пользователь/логин/тема) —
+   раньше был правым краем горизонтальной шапки, теперь прижат к низу
+   .sidebar (flex-direction: column, .sidebar nav занимает flex:1 выше). ---- */
+.sidebar-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5em;
+    padding-top: 0.75em;
+    border-top: 1px solid var(--border);
+}
+.sidebar-footer a, .sidebar-footer .theme-toggle {
+    padding: 0.5em 0.7em;
+    border-radius: 6px;
+    color: var(--fg-secondary);
+    text-decoration: none;
+    font-size: 0.95em;
+    font-weight: 500;
+}
+.sidebar-footer a:hover { background: var(--surface-2); color: var(--fg); }
+.sidebar-footer .user {
+    padding: 0 0.7em;
     color: var(--fg-muted);
     font-size: 0.9em;
 }
@@ -302,49 +339,68 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     :root:not([data-theme="light"]) .theme-toggle .theme-icon-dark { display: inline; }
 }
 
-/* ---- Переключатель гильдии в шапке (супер-админы, см. base.html) — form
-   по умолчанию flex-column/max-width:20em (см. правило form{} ниже), тут нужен
-   узкий инлайн-элемент внутри строки nav. ---- */
+/* ---- Переключатель гильдии в подвале бокового меню (супер-админы, см.
+   base.html) — form по умолчанию flex-column/max-width:20em (см. правило
+   form{} ниже), тут нужен полноширинный блочный элемент внутри узкой колонки
+   сайдбара, не инлайн-строка (это было нужно только в горизонтальной шапке). ---- */
 .guild-switch-form {
-    display: inline-flex;
+    display: flex;
     max-width: none;
     margin: 0;
+    width: 100%;
 }
 .guild-switch-form select {
+    width: 100%;
     padding: 0.4em 0.6em;
     font-size: 0.9em;
     border-radius: 6px;
 }
 
 /* ---- Селектор конкретной ТБ (/tb, /tb/player) — тот же узкий инлайн-паттерн,
-   что .guild-switch-form выше, отдельным классом ради смыслового разделения. ---- */
+   раньше нужный и для .guild-switch-form, отдельным классом ради смыслового
+   разделения (этот остаётся инлайн-строкой внутри контента страницы). ---- */
 .tb-event-picker { display: inline-flex; max-width: none; margin: 0; }
 .tb-event-picker select { padding: 0.3em 0.5em; font-size: 0.85em; border-radius: 6px; }
 .tb-event-picker noscript button { padding: 0.3em 0.6em; font-size: 0.85em; margin-left: 0.4em; }
 
+/* ---- Боковое меню на мобиле/планшете — уезжает off-canvas (translateX),
+   выезжает поверх контента поверх затемняющей подложки (.nav-backdrop, тот же
+   чекбокс-хак: label-подложка кликом снимает чекбокс и закрывает меню). Верхняя
+   мини-шапка (.mobile-topbar) с бургером и логотипом показывается только тут —
+   на десктопе весь этот блок неактуален, .sidebar видна и так. ---- */
 @media (max-width: 56em) {
-    .topbar { flex-wrap: wrap; padding: 0.6em 1em; }
-    .nav-toggle-btn { display: block; }
-    .topbar nav {
+    .mobile-topbar {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.6em 1em;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        position: sticky;
+        top: 0;
+        z-index: 30;
+    }
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 80vw;
+        max-width: 18em;
+        z-index: 50;
+        box-shadow: 2px 0 16px rgba(0, 0, 0, 0.2);
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+    }
+    .nav-toggle-checkbox:checked ~ .sidebar { transform: translateX(0); }
+    .nav-backdrop {
         display: none;
-        flex-direction: column;
-        align-items: stretch;
-        width: 100%;
-        gap: 0.15em;
-        margin-top: 0.6em;
-        padding-top: 0.6em;
-        border-top: 1px solid var(--border);
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 40;
     }
-    .nav-toggle-checkbox:checked ~ nav { display: flex; }
-    .topbar nav a { padding: 0.6em 0.7em; }
-    .nav-dropdown-menu { position: static; box-shadow: none; border: none; padding: 0 0 0 1em; }
-    .topbar nav .user {
-        margin-left: 0; padding-left: 0; border-left: none;
-        border-top: 1px solid var(--border);
-        padding-top: 0.6em; margin-top: 0.3em;
-    }
-    .guild-switch-form { width: 100%; }
-    .guild-switch-form select { width: 100%; }
+    .nav-toggle-checkbox:checked ~ .nav-backdrop { display: block; }
 }
 
 main {

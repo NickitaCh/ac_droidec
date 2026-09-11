@@ -516,6 +516,60 @@ def get_antispam_log(guild_id: int, limit: int = 20) -> list:
     ]
 
 # =====================================================================
+# РЕЕСТР КАНАЛОВ ГИЛЬДИИ (cogs/channel_registry.py, /канал) — участник гильдии
+# вызывает /канал в нужном канале/ветке, бот запоминает его id+имя здесь.
+# Настройки (/настройки в Discord неявно уже имеют нативный выбор канала через
+# типизированный disnake.TextChannel-параметр — этот реестр решает другую боль:
+# веб-дашборд (/settings), где раньше канал задавался вводом голого ID вручную,
+# теперь предлагает <select> из уже зарегистрированных каналов этой гильдии.
+# =====================================================================
+def _ensure_guild_channels_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_channels (
+            guild_id INTEGER NOT NULL,
+            channel_id TEXT NOT NULL,
+            channel_name TEXT NOT NULL,
+            channel_type TEXT,
+            registered_by TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, channel_id)
+        )
+    """)
+
+
+def register_guild_channel(guild_id: int, channel_id, channel_name: str, channel_type: str | None = None, registered_by=None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_channels_table(cursor)
+    cursor.execute("""
+        INSERT INTO guild_channels (guild_id, channel_id, channel_name, channel_type, registered_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+            channel_name = excluded.channel_name,
+            channel_type = excluded.channel_type,
+            registered_by = excluded.registered_by,
+            updated_at = excluded.updated_at
+    """, (guild_id, str(channel_id), channel_name, channel_type, str(registered_by) if registered_by is not None else None))
+    conn.commit()
+    conn.close()
+
+
+def get_guild_channels(guild_id: int) -> list:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guild_channels_table(cursor)
+    cursor.execute("""
+        SELECT channel_id, channel_name, channel_type
+        FROM guild_channels
+        WHERE guild_id = ?
+        ORDER BY channel_name COLLATE NOCASE
+    """, (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"channel_id": r[0], "channel_name": r[1], "channel_type": r[2]} for r in rows]
+
+
+# =====================================================================
 # СУПЕР-АДМИНЫ БОТА: полный доступ ко всем гильдиям + управление гильдиями/
 # грантами (см. guild_resolver.resolve_access, cogs/admin_management.py).
 # Засеивается текущим владельцем бота (main.py::ALLOWED_USER_IDS[0]) при

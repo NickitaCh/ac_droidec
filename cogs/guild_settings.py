@@ -4,16 +4,45 @@
 гильдия оставалась с этими полями NULL без ручного вмешательства в БД. Один
 общий /настройки со отдельными сабкомандами на каждое поле (по образцу уже
 существующего /омикрон_текст канал в stat_requirements.py) — не единая
-generic-команда с выбором типа настройки, это отдельная задача на будущее."""
+generic-команда с выбором типа настройки, это отдельная задача на будущее.
+
+Каналы задаются НЕ нативным disnake.TextChannel/Thread/ForumChannel-параметром
+(это позволяло выбрать любой канал сервера мимо ведома бота) — а строкой с
+автодополнением из guild_channels (database.py, см. cogs/channel_registry.py:
+/канал, только офицер/лидер). Выбор ограничен уже зарегистрированными каналами:
+серверная валидация в _set_channel_field отклоняет ID, которого нет в
+guild_channels, даже если его вписали руками мимо подсказки автодополнения."""
 
 from datetime import datetime, timezone
-from typing import Union
 
 import disnake
 from disnake.ext import commands
 
 import database
 import guild_resolver
+
+
+def _make_channel_autocomplete(allowed_types: set[str] | None = None):
+    """Фабрика автодополнения канала из guild_channels конкретной гильдии.
+    allowed_types сужает подсказку под ожидаемый тип канала для поля (напр.
+    только "forum" для форума гайдов ВГ) — сам guild_channels типы не
+    разграничивает при регистрации, /канал пишет туда что угодно."""
+    async def _autocomplete(inter: disnake.ApplicationCommandInteraction, user_input: str):
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            return {}
+        channels = database.get_guild_channels(guild_id)
+        if allowed_types is not None:
+            channels = [c for c in channels if c["channel_type"] in allowed_types]
+        needle = user_input.lower()
+        matches = [c for c in channels if needle in c["channel_name"].lower()]
+        return {c["channel_name"]: c["channel_id"] for c in matches[:25]}
+    return _autocomplete
+
+
+autocomplete_text_channel = _make_channel_autocomplete({"text", "news"})
+autocomplete_thread_or_text_channel = _make_channel_autocomplete({"text", "news", "public_thread", "private_thread", "news_thread"})
+autocomplete_forum_channel = _make_channel_autocomplete({"forum"})
 
 # (поле в guilds, человекочитаемое название) — для /настройки список
 SETTINGS_FIELDS = [
@@ -66,6 +95,27 @@ class GuildSettings(commands.Cog):
         database.update_guild_config(guild_id, **{field: str(value.id)})
         await inter.response.send_message(f"✅ {human_label} теперь: {value.mention}", ephemeral=True)
 
+    async def _set_channel_field(self, inter: disnake.ApplicationCommandInteraction, field: str, channel_id: str, human_label: str):
+        """Канал приходит строкой (id) из автодополнения guild_channels, а не
+        нативным disnake-типом — валидируем, что это действительно уже
+        зарегистрированный через /канал канал этой гильдии: подсказку можно
+        обойти, вписав произвольный текст руками, Discord это не проверяет."""
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
+        if channel_id not in known_ids:
+            await inter.response.send_message(
+                "❌ Такой канал не зарегистрирован для гильдии. Зайдите в нужный канал или ветку и выполните там "
+                "`/канал`, затем выберите его здесь из подсказки автодополнения.",
+                ephemeral=True,
+            )
+            return
+        database.update_guild_config(guild_id, **{field: channel_id})
+        channel = self.bot.get_channel(int(channel_id))
+        shown = channel.mention if channel else f"`{channel_id}`"
+        await inter.response.send_message(f"✅ {human_label} теперь: {shown}", ephemeral=True)
+
     @commands.slash_command(name="настройки", description="Каналы и роли гильдии для авто-уведомлений бота (только офицеры)")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def settings_group(self, inter: disnake.ApplicationCommandInteraction):
@@ -74,9 +124,9 @@ class GuildSettings(commands.Cog):
     @settings_group.sub_command(name="тб_ротация_канал", description="Канал, куда бот шлёт тег на ротацию/взводы перед ТБ")
     async def set_ping_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для тега на ротацию перед ТБ"),
+        канал: str = commands.Param(description="Канал для тега на ротацию перед ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
     ):
-        await self._set_field(inter, "ping_channel_id", канал, "Канал для тега на ротацию/взводы перед ТБ")
+        await self._set_channel_field(inter, "ping_channel_id", канал, "Канал для тега на ротацию/взводы перед ТБ")
 
     @settings_group.sub_command(name="тб_ротация_роль", description="Роль, которую бот тегает на ротацию/взводы перед ТБ")
     async def set_ping_role(
@@ -88,9 +138,9 @@ class GuildSettings(commands.Cog):
     @settings_group.sub_command(name="др_канал", description="Канал, куда бот пишет поздравления с днём рождения")
     async def set_birthday_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для поздравлений"),
+        канал: str = commands.Param(description="Канал для поздравлений (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
     ):
-        await self._set_field(inter, "birthday_channel_id", канал, "Канал для поздравлений с ДР")
+        await self._set_channel_field(inter, "birthday_channel_id", канал, "Канал для поздравлений с ДР")
 
     @settings_group.sub_command(name="др_роль", description="Роль, которую бот выдаёт имениннику на день рождения")
     async def set_birthday_role(
@@ -102,23 +152,23 @@ class GuildSettings(commands.Cog):
     @settings_group.sub_command(name="тб_отчет_канал", description="Канал, куда бот публикует автоотчёт по итогам ТБ и уведомления офицерам о ТБ")
     async def set_officer_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для автоотчёта и уведомлений по ТБ"),
+        канал: str = commands.Param(description="Канал для автоотчёта и уведомлений по ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
     ):
-        await self._set_field(inter, "officer_channel_id", канал, "Канал для автоотчёта и уведомлений по ТБ")
+        await self._set_channel_field(inter, "officer_channel_id", канал, "Канал для автоотчёта и уведомлений по ТБ")
 
     @settings_group.sub_command(name="тб_план_канал", description="Канал анонсов плана ТБ — планеты по фазам и автоордера")
     async def set_tb_plan_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал анонсов плана ТБ"),
+        канал: str = commands.Param(description="Канал анонсов плана ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
     ):
-        await self._set_field(inter, "tb_plan_channel_id", канал, "Канал анонсов плана ТБ")
+        await self._set_channel_field(inter, "tb_plan_channel_id", канал, "Канал анонсов плана ТБ")
 
     @settings_group.sub_command(name="тб_ордер_источник", description="Канал или ветка, откуда бот берёт стратегию по этапам ТБ")
     async def set_tb_order_source(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: Union[disnake.TextChannel, disnake.Thread] = commands.Param(description="Канал или ветка со стратегией"),
+        канал: str = commands.Param(description="Канал или ветка со стратегией (сначала зарегистрируйте /канал)", autocomplete=autocomplete_thread_or_text_channel),
     ):
-        await self._set_field(inter, "tb_order_source_channel_id", канал, "Канал/ветка-источник стратегии ТБ")
+        await self._set_channel_field(inter, "tb_order_source_channel_id", канал, "Канал/ветка-источник стратегии ТБ")
 
     @settings_group.sub_command(name="тб_ордер_роль", description="Роль, которую бот тегает в автоматическом ордере на этап ТБ")
     async def set_tb_order_role(
@@ -130,16 +180,16 @@ class GuildSettings(commands.Cog):
     @settings_group.sub_command(name="вг_гайды_канал", description="Форум-канал с гайдами по контрам ВГ, откуда бот берёт данные для /вг_ордер")
     async def set_tw_guide_forum_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.ForumChannel = commands.Param(description="Форум-канал гайдов по контрам ВГ"),
+        канал: str = commands.Param(description="Форум-канал гайдов по контрам ВГ (сначала зарегистрируйте /канал в нём)", autocomplete=autocomplete_forum_channel),
     ):
-        await self._set_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
+        await self._set_channel_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
 
     @settings_group.sub_command(name="задачи_канал", description="Канал, куда бот пишет о выполнении/провале задачи и напоминания о дедлайне")
     async def set_tasks_log_channel(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для уведомлений по задачам"),
+        канал: str = commands.Param(description="Канал для уведомлений по задачам (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
     ):
-        await self._set_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о задачах на прокачку")
+        await self._set_channel_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о задачах на прокачку")
 
     @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (только супер-админ)")
     @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
@@ -164,7 +214,7 @@ class GuildSettings(commands.Cog):
     @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
     async def set_antispam(
         self, inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(default=None, description="Канал для алертов антиспама"),
+        канал: str = commands.Param(default=None, description="Канал для алертов антиспама (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
         роль: disnake.Role = commands.Param(default=None, description="Роль, тегаемая в алерте"),
         таймаут: int = commands.Param(default=None, description="Длительность тайм-аута в минутах, 1–40320", min_value=1, max_value=40320),
         текст: str = commands.Param(
@@ -177,7 +227,15 @@ class GuildSettings(commands.Cog):
             return
         updates = {}
         if канал is not None:
-            updates["antispam_alert_channel_id"] = str(канал.id)
+            known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
+            if канал not in known_ids:
+                await inter.response.send_message(
+                    "❌ Такой канал не зарегистрирован для гильдии. Зайдите в нужный канал и выполните там `/канал`, "
+                    "затем выберите его здесь из подсказки автодополнения.",
+                    ephemeral=True,
+                )
+                return
+            updates["antispam_alert_channel_id"] = канал
         if роль is not None:
             updates["antispam_alert_role_id"] = str(роль.id)
         if таймаут is not None:

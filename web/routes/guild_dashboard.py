@@ -1635,12 +1635,28 @@ GUILD_SETTINGS_GROUPS = [
 @router.get("/settings", response_class=HTMLResponse)
 async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
     guild_cfg = database.get_guild_config(user["guild_id"])
+    known_channels = database.get_guild_channels(user["guild_id"])
+    known_channel_ids = {c["channel_id"] for c in known_channels}
+
+    def _channel_options(current_value: str):
+        options = [{"id": c["channel_id"], "label": c["channel_name"]} for c in known_channels]
+        # Уже сохранённое значение может ссылаться на канал, который никто ещё не
+        # зарегистрировал через /канал (старые гильдии, засеянные напрямую в БД,
+        # или канал переименовали/удалили) — не терять его молча, показать как есть.
+        if current_value and current_value not in known_channel_ids:
+            options.append({"id": current_value, "label": f"(незарегистрирован) {current_value}"})
+        return options
+
     groups = [
         {
             "name": group["name"],
             "hint": group["hint"],
             "rows": [
-                {"field": field, "label": label, "kind": kind, "value": guild_cfg.get(field) or ""}
+                {
+                    "field": field, "label": label, "kind": kind,
+                    "value": guild_cfg.get(field) or "",
+                    "channel_options": _channel_options(guild_cfg.get(field) or "") if kind == "channel" else None,
+                }
                 for field, label, kind in group["fields"]
             ],
         }
