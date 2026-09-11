@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 import re
 import zipfile
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -1632,36 +1634,56 @@ GUILD_SETTINGS_GROUPS = [
 ]
 
 
+async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
+    """Разовый резолв имени канала, который ещё не зарегистрирован в guild_channels
+    (легаси-значение, заданное до появления /канал — при сидировании гильдии
+    напрямую в БД, или через старый нативный disnake-пикер). Веб-процесс не держит
+    живого соединения с гейтвеем — тот же паттерн прямого REST-запроса с токеном
+    бота, что уже используется в tb_plan_reader.py, а не отдельный канал связи."""
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://discord.com/api/v10/channels/{channel_id}",
+                headers={"Authorization": f"Bot {token}"},
+            )
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("name")
+    except httpx.HTTPError:
+        return None
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
     guild_cfg = database.get_guild_config(user["guild_id"])
     known_channels = database.get_guild_channels(user["guild_id"])
     known_channel_ids = {c["channel_id"] for c in known_channels}
 
-    def _channel_options(current_value: str):
+    async def _channel_options(current_value: str):
         options = [{"id": c["channel_id"], "label": c["channel_name"]} for c in known_channels]
         # Уже сохранённое значение может ссылаться на канал, который никто ещё не
         # зарегистрировал через /канал (старые гильдии, засеянные напрямую в БД,
-        # или канал переименовали/удалили) — не терять его молча, показать как есть.
+        # или канал переименовали/удалили) — не терять его молча, показать реальное
+        # имя (через живой запрос к Discord), а не голый ID.
         if current_value and current_value not in known_channel_ids:
-            options.append({"id": current_value, "label": f"(незарегистрирован) {current_value}"})
+            resolved_name = await _resolve_unregistered_channel_name(current_value)
+            label = f"{resolved_name} (не зарегистрирован через /канал)" if resolved_name else f"Канал не найден (`{current_value}`)"
+            options.append({"id": current_value, "label": label})
         return options
 
-    groups = [
-        {
-            "name": group["name"],
-            "hint": group["hint"],
-            "rows": [
-                {
-                    "field": field, "label": label, "kind": kind,
-                    "value": guild_cfg.get(field) or "",
-                    "channel_options": _channel_options(guild_cfg.get(field) or "") if kind == "channel" else None,
-                }
-                for field, label, kind in group["fields"]
-            ],
-        }
-        for group in GUILD_SETTINGS_GROUPS
-    ]
+    groups = []
+    for group in GUILD_SETTINGS_GROUPS:
+        rows = []
+        for field, label, kind in group["fields"]:
+            value = guild_cfg.get(field) or ""
+            rows.append({
+                "field": field, "label": label, "kind": kind, "value": value,
+                "channel_options": await _channel_options(value) if kind == "channel" else None,
+            })
+        groups.append({"name": group["name"], "hint": group["hint"], "rows": rows})
     return templates.TemplateResponse(request, "guild_settings.html", {
         "user": user,
         "groups": groups,
