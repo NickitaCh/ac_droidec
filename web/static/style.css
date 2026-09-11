@@ -117,6 +117,8 @@ main.docs-page { max-width: 62em; }
 .docs-command-list li { padding: 0.5em 0; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5em; }
 .docs-command-list li:last-child { border-bottom: none; }
 .docs-command-desc { display: block; flex-basis: 100%; color: var(--fg-secondary); font-size: 0.95em; }
+.docs-command-example { display: block; flex-basis: 100%; margin-top: 0.4em; }
+.docs-command-example img { max-width: 100%; width: 32em; border: 1px solid var(--border); border-radius: 6px; }
 .landing-tagline { color: var(--fg-secondary); font-size: 1.1em; margin: 0; }
 
 .landing-features {

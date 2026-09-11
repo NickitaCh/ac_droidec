@@ -23,6 +23,11 @@
                     <code>{{ cmd.name }}</code>
                     <span class="badge {{ access_labels[cmd.access][1] }}">{{ access_labels[cmd.access][0] }}</span>
                     <span class="docs-command-desc">{{ cmd.desc }}</span>
+                    {% if cmd.image %}
+                        <a href="{{ cmd.image }}" target="_blank" class="docs-command-example">
+                            <img src="{{ cmd.image }}" alt="{{ cmd.image_alt or 'Пример' }}" loading="lazy">
+                        </a>
+                    {% endif %}
                 </li>
             {% endfor %}
         </ul>
