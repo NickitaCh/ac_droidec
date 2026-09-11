@@ -14,7 +14,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import stat_engine
-from services import mod_search
+from services import activity_diff, mod_search
 from cogs.violations import autocomplete_players
 from cogs.stat_requirements import OPERATOR_CHOICES
 from cogs.datacron_requirements import (
@@ -40,6 +40,7 @@ class ModSearchCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         игрок: str = commands.Param(default=None, description="Игрок — без гильдия=True и без указания берётся ваша регистрация", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии, вместо параметра «игрок»"),
         гильдия: bool = commands.Param(default=False, description="Таблица по всей гильдии вместо одного игрока — только для офицеров"),
         сет: int = commands.Param(default=None, description="Сет мода", choices=SET_CHOICES),
         слот: str = commands.Param(default=None, description="Форма/слот мода", choices=SLOT_CHOICES),
@@ -84,8 +85,8 @@ class ModSearchCog(commands.Cog):
         }
 
         if гильдия:
-            if игрок is not None:
-                await inter.edit_original_response("❌ Укажите либо игрока, либо `гильдия: True`, не оба сразу.")
+            if игрок is not None or аликод is not None:
+                await inter.edit_original_response("❌ Укажите либо игрока (или код союзника), либо `гильдия: True`, не оба сразу.")
                 return
             if not guild_resolver.is_officer_for_resolved_guild(inter.author):
                 await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
@@ -133,10 +134,22 @@ class ModSearchCog(commands.Cog):
                 await inter.followup.send(embed=e)
             return
 
-        if игрок is None:
+        fetch_live = False
+        if аликод is not None:
+            if игрок is not None:
+                await inter.edit_original_response("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
+                return
+            ally_code = guild_resolver.normalize_ally_code(аликод)
+            if ally_code is None:
+                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
+                return
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            игрок = cache.get(ally_code, ally_code)
+            fetch_live = True
+        elif игрок is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
-                await inter.edit_original_response("❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно.")
+                await inter.edit_original_response("❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно или код союзника.")
                 return
             ally_code, игрок = registration
         else:
@@ -147,8 +160,20 @@ class ModSearchCog(commands.Cog):
                 return
 
         units = database.get_player_units(ally_code)
+        if not units and fetch_live:
+            # Игрок не из нашей гильдии — на него не распространяется часовая
+            # синхронизация ростера (services/activity_diff.py), поэтому кэша ещё
+            # может не быть вообще; тянем один раз напрямую из Comlink и кэшируем,
+            # как это уже делает /статы (_get_unit_for_player) для того же случая.
+            try:
+                units = await activity_diff.fetch_player_units(self.bot.comlink, ally_code)
+            except Exception as e:
+                await inter.edit_original_response(f"❌ Ошибка получения данных игрока: {e}")
+                return
+            if units:
+                database.upsert_player_units(ally_code, units)
         if not units:
-            await inter.edit_original_response(f"⚠️ Нет закэшированных данных по игроку {игрок} — подождите следующей синхронизации ростера.")
+            await inter.edit_original_response(f"⚠️ Нет данных по игроку {игрок} — подождите следующей синхронизации ростера.")
             return
 
         matches = mod_search.search_units(units, **filt)

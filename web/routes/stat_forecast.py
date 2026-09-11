@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+import guild_resolver
 import services.stat_forecast as stat_forecast
 from web.deps import require_officer_access
 
@@ -38,6 +39,7 @@ async def stats_check_form(
     request: Request,
     plate: str = "",
     ally_code: str = "",
+    ally_code_manual: str = "",
     character: str = "",
     force_refresh: bool = False,
     action: str = "",
@@ -54,6 +56,7 @@ async def stats_check_form(
         "roster": roster,
         "selected_plate": plate,
         "selected_ally_code": ally_code,
+        "selected_ally_code_manual": ally_code_manual,
         "selected_character": character,
         "force_refresh": force_refresh,
         "ignore_relic": ignore_relic,
@@ -85,7 +88,18 @@ async def stats_check_form(
         context["loading"] = True
         return templates.TemplateResponse(request, "stats_check.html", context)
 
-    target_ally_code = ally_code.strip()
+    if ally_code.strip() and ally_code_manual.strip():
+        context["error"] = "Укажите либо игрока из списка, либо код союзника — не оба сразу."
+        return templates.TemplateResponse(request, "stats_check.html", context)
+
+    if ally_code_manual.strip():
+        target_ally_code = guild_resolver.normalize_ally_code(ally_code_manual)
+        if target_ally_code is None:
+            context["error"] = "Код союзника должен состоять из 9 цифр."
+            return templates.TemplateResponse(request, "stats_check.html", context)
+    else:
+        target_ally_code = ally_code.strip()
+
     if not target_ally_code:
         # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
         context["guild_report"] = await stat_forecast.build_guild_report(

@@ -24,6 +24,18 @@ def _discord_id(author_or_id) -> str:
     return str(getattr(author_or_id, "id", author_or_id))
 
 
+def normalize_ally_code(raw: str | None) -> str | None:
+    """Приводит ввод пользователя ("123-456-789", "123 456 789" и т.п.) к чистому
+    9-значному коду союзника, либо возвращает None, если это не похоже на код —
+    используется командами/веб-роутами, которые вдобавок к выбору игрока из
+    ростера гильдии принимают код союзника напрямую (для игроков не из нашей
+    гильдии, например при скауте рекрута или проверке недавно вышедшего)."""
+    if not raw:
+        return None
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return digits if len(digits) == 9 else None
+
+
 def _tier_for_level(level: int | None) -> str | None:
     if level is None:
         return None

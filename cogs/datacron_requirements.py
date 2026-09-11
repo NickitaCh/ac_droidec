@@ -1483,6 +1483,7 @@ class DatacronRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         сезон: str = commands.Param(description="Сезон для проверки", autocomplete=autocomplete_datacron_season),
         игрок: str = commands.Param(default=None, description="Не указан → вы (/регистрация); либо гильдия=True для отчёта по всей гильдии", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии (например при скауте рекрута), вместо параметра «игрок»"),
         гильдия: bool = commands.Param(default=False, description="Отчёт по всей гильдии вместо одного игрока (работает только без указания игрока)"),
     ):
         await inter.response.defer(ephemeral=True)
@@ -1503,7 +1504,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.")
             return
 
-        if игрок is None and гильдия:
+        if игрок is None and аликод is None and гильдия:
             await inter.edit_original_message(f"⏳ Собираю данные по всей гильдии ({season_label})...")
             embeds = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements, guild_id=guild_id)
             if embeds is None:
@@ -1515,12 +1516,21 @@ class DatacronRequirementsCog(commands.Cog):
                 await inter.followup.send(embed=e, ephemeral=True)
             return
 
-        if игрок is None:
+        if аликод is not None:
+            if игрок is not None:
+                await inter.edit_original_message("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
+                return
+            allycode = guild_resolver.normalize_ally_code(аликод)
+            if allycode is None:
+                await inter.edit_original_message("❌ Код союзника должен состоять из 9 цифр.")
+                return
+            игрок = allycode
+        elif игрок is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_message(
                     "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно, "
-                    "или передайте гильдия=True для отчёта по всей гильдии."
+                    "код союзника, или передайте гильдия=True для отчёта по всей гильдии."
                 )
                 return
             allycode, игрок = registration
@@ -1542,6 +1552,12 @@ class DatacronRequirementsCog(commands.Cog):
         except Exception as e:
             await inter.edit_original_message(f"Ошибка получения данных игрока: {e}")
             return
+
+        if аликод is not None and player.get("name"):
+            # Игрока не было в ростере гильдии, поэтому вместо имени показывали
+            # сырой код союзника — раз данные уже получены, подставляем реальное
+            # игровое имя из ответа Comlink.
+            игрок = player["name"]
 
         season_data = self.bot.datacron_cache["seasons"].get(set_id) if self.bot.datacron_cache else None
 

@@ -1049,6 +1049,7 @@ class StatRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
         игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии (например при скауте рекрута), вместо параметра «игрок»"),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
@@ -1105,11 +1106,22 @@ class StatRequirementsCog(commands.Cog):
                 await inter.followup.send(embed=e)
             return
 
-        if игрок is None:
+        if аликод is not None:
+            if игрок is not None:
+                await inter.edit_original_response("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
+                return
+            ally_code = guild_resolver.normalize_ally_code(аликод)
+            if ally_code is None:
+                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
+                return
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            игрок = cache.get(ally_code, ally_code)
+        elif игрок is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_response(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."
+                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно "
+                    "или код союзника."
                 )
                 return
             ally_code, игрок = registration

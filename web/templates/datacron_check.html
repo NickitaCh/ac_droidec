@@ -31,6 +31,10 @@
                     {% endfor %}
                 </select>
             </label>
+            <label>
+                …или код союзника (игрок не из нашей гильдии)
+                <input type="text" name="ally_code" value="{{ ally_code_param or '' }}" placeholder="123456789">
+            </label>
             <button type="submit">Проверить</button>
         </form>
     </div>

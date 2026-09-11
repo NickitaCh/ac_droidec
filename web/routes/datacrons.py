@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+import guild_resolver
 from cogs.datacron_requirements import (
     DATACRON_ANY,
     DATACRON_ANY_LABEL,
@@ -151,6 +152,7 @@ async def check_form(request: Request, user: dict = Depends(require_officer_acce
 
     season_param = request.query_params.get("season")
     target_param = request.query_params.get("target") or ""
+    ally_code_param = (request.query_params.get("ally_code") or "").strip()
     guild_mode = target_param == "__guild__"
     player_param = target_param if target_param and not guild_mode else None
 
@@ -170,15 +172,25 @@ async def check_form(request: Request, user: dict = Depends(require_officer_acce
                 error = "У этого сезона нет сохранённых требований."
             elif guild_mode:
                 result = await _build_guild_report(set_id, requirements, focused_requirements, guild_id)
+            elif ally_code_param and player_param:
+                error = "Укажите либо игрока из списка, либо код союзника — не оба сразу."
             else:
                 ally_code = None
                 player_name = player_param
-                if not player_name:
+                if ally_code_param:
+                    # Код союзника — для игрока не из нашей гильдии (например при
+                    # скауте рекрута); имя подставится после ответа Comlink
+                    # в _build_player_report ниже, по ростеру не проверяется.
+                    ally_code = guild_resolver.normalize_ally_code(ally_code_param)
+                    if ally_code is None:
+                        error = "Код союзника должен состоять из 9 цифр."
+                    player_name = None
+                elif not player_name:
                     reg = database.get_user_registration(user["discord_id"], guild_id=guild_id)
                     if reg:
                         ally_code, player_name = reg
                     else:
-                        error = "Вы не зарегистрированы и не выбрали игрока — выберите игрока из списка либо зарегистрируйтесь на /registration."
+                        error = "Вы не зарегистрированы и не выбрали игрока — выберите игрока из списка, укажите код союзника, либо зарегистрируйтесь на /registration."
                 else:
                     for _discord_id, code, name in database.get_all_user_mappings(guild_id):
                         if name == player_name:
@@ -198,6 +210,7 @@ async def check_form(request: Request, user: dict = Depends(require_officer_acce
         "players": players,
         "season_param": season_param,
         "player_param": player_param,
+        "ally_code_param": ally_code_param,
         "guild_mode": guild_mode,
         "result": result,
         "error": error,
@@ -490,6 +503,8 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
         return {"error": "Запрос к Comlink занял слишком много времени."}
     except Exception as e:
         return {"error": f"Ошибка получения данных игрока: {e}"}
+
+    player_name = player_name or player.get("name") or ally_code
 
     season_data = catalog["seasons"].get(set_id) if catalog else None
 

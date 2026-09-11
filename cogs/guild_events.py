@@ -950,7 +950,8 @@ class GuildEvents(commands.Cog):
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(default=None, description="Игрок — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players)
+        name: str = commands.Param(default=None, description="Игрок — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника — например для недавно вышедшего из гильдии игрока, вместо параметра «name»"),
     ):
         await inter.response.defer()
 
@@ -960,11 +961,22 @@ class GuildEvents(commands.Cog):
             return
         guild_id = guild_cfg["id"]
 
-        if name is None:
+        if аликод is not None:
+            if name is not None:
+                await inter.edit_original_message("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
+                return
+            allycode = guild_resolver.normalize_ally_code(аликод)
+            if allycode is None:
+                await inter.edit_original_message("❌ Код союзника должен состоять из 9 цифр.")
+                return
+            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            name = cache.get(allycode, allycode)
+        elif name is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_message(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно."
+                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно "
+                    "или код союзника."
                 )
                 return
             allycode, name = registration
@@ -981,6 +993,8 @@ class GuildEvents(commands.Cog):
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
                 return
+            if аликод is not None and player.get("name"):
+                name = player["name"]
 
             guild = await asyncio.wait_for(
                 asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"], include_recent_guild_activity_info=True),
@@ -1039,7 +1053,8 @@ class GuildEvents(commands.Cog):
     async def tb_player_compare(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(description="Выберите игрока", autocomplete=autocomplete_players)
+        name: str = commands.Param(default=None, description="Выберите игрока (или укажите код союзника ниже)", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника — например для недавно вышедшего из гильдии игрока, вместо параметра «name»"),
     ):
         await inter.response.defer()
 
@@ -1048,10 +1063,23 @@ class GuildEvents(commands.Cog):
             return
 
         cache = self.bot.guild_roster_caches.get(guild_id, {})
-        if not cache or name not in cache:
-            await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
+        if аликод is not None:
+            if name is not None:
+                await inter.edit_original_message("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
+                return
+            allycode = guild_resolver.normalize_ally_code(аликод)
+            if allycode is None:
+                await inter.edit_original_message("❌ Код союзника должен состоять из 9 цифр.")
+                return
+            name = cache.get(allycode, allycode)
+        elif name is None:
+            await inter.edit_original_message("❌ Укажите игрока из списка либо код союзника.")
             return
-        allycode = cache[name]
+        else:
+            if not cache or name not in cache:
+                await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
+                return
+            allycode = cache[name]
 
         try:
             player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
@@ -1059,6 +1087,8 @@ class GuildEvents(commands.Cog):
             if not player_id:
                 await inter.edit_original_message("Не удалось определить игровой ID.")
                 return
+            if аликод is not None and player.get("name"):
+                name = player["name"]
         except Exception as e:
             await inter.edit_original_message(f"Ошибка: {e}")
             return
