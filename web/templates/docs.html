@@ -24,12 +24,36 @@
                     <span class="badge {{ access_labels[cmd.access][1] }}">{{ access_labels[cmd.access][0] }}</span>
                     <span class="docs-command-desc">{{ cmd.desc }}</span>
                     {% if cmd.image %}
-                        <a href="{{ cmd.image }}" target="_blank" class="docs-command-example">
+                        <button type="button" class="docs-command-example" data-lightbox-src="{{ cmd.image }}" data-lightbox-alt="{{ cmd.image_alt or 'Пример' }}">
                             <img src="{{ cmd.image }}" alt="{{ cmd.image_alt or 'Пример' }}">
-                        </a>
+                        </button>
                     {% endif %}
                 </li>
             {% endfor %}
         </ul>
     {% endfor %}
+
+    <dialog id="docs-image-lightbox" class="docs-image-lightbox">
+        <img id="docs-image-lightbox-img" src="" alt="">
+    </dialog>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const dialog = document.getElementById("docs-image-lightbox");
+            const dialogImg = document.getElementById("docs-image-lightbox-img");
+            if (!dialog || !dialogImg) return;
+
+            document.querySelectorAll(".docs-command-example").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    dialogImg.src = btn.dataset.lightboxSrc;
+                    dialogImg.alt = btn.dataset.lightboxAlt || "";
+                    dialog.showModal();
+                });
+            });
+
+            // Клик по фону (::backdrop) — событие приходит с target === сам dialog.
+            dialog.addEventListener("click", (e) => {
+                if (e.target === dialog) dialog.close();
+            });
+        });
+    </script>
 {% endblock %}
