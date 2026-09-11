@@ -18,9 +18,10 @@ channel_id. Так на одну ТБ можно держать нескольк
 "/тб_план сохранить" — то же самое сохранение в tb_saved_plans, но без картинки/
 Mistral: для ветки, где ордер на все 6 этапов уже есть (написан вручную офицером
 или собран этой же командой раньше) — просто регистрирует её под названием и
-звёздами. Проверка на "появился ли ордер" здесь ищет заголовки этапов по тому же
-паттерну, что и tb_order_loop (guild_events.TB_PLAN_HEADER_RE), а не только среди
-сообщений бота — офицерский текст тоже считается.
+звёздами. Проверка на "появился ли ордер" здесь ищет номер этапа по тому же общему
+паттерну, что и tb_order_loop (guild_events.TB_ORDER_STAGE_RE — "1 этап"/
+"этап 1"/вариации, не завязан на наш конкретный текст заголовка), а не только
+среди сообщений бота — офицерский текст в любом формате тоже считается.
 
 Изначально был реализован на Gemini (google-genai, GOOGLE_API_KEY), но бесплатный
 тариф Google блокирует запросы с датацентр-IP VPS (проверено 2026-08-21 — тот же
@@ -65,7 +66,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import tb_platoon_autofill
-from cogs.guild_events import TB_PLAN_HEADER_RE
+from cogs.guild_events import TB_ORDER_STAGE_RE, _tb_order_stage_number
 from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
@@ -212,14 +213,16 @@ def _build_order_blocks(data: dict):
 
 
 async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
-    """Как _find_existing_order_phases, но не привязано к автору-боту — использует тот
-    же паттерн заголовка, что и tb_order_loop (guild_events.TB_PLAN_HEADER_RE), чтобы
-    можно было вручную сохранить план, где текст ордера писали офицеры, а не бот."""
+    """Как _find_existing_order_phases, но не привязано к автору-боту и не к конкретному
+    тексту заголовка — использует тот же общий паттерн номера этапа, что и tb_order_loop
+    (guild_events.TB_ORDER_STAGE_RE: "1 этап"/"этап 1"/вариации), чтобы можно было
+    вручную сохранить план, где текст ордера писали офицеры в своём формате (не все
+    гильдии на этом боте используют наш "Восход Империи — N этап"), а не только бот."""
     phases = set()
     async for msg in thread.history(limit=None):
-        match = TB_PLAN_HEADER_RE.search(msg.content or "")
+        match = TB_ORDER_STAGE_RE.search(msg.content or "")
         if match:
-            phases.add(int(match.group(1)))
+            phases.add(int(_tb_order_stage_number(match)))
     return sorted(phases)
 
 
@@ -480,7 +483,7 @@ class TBOrderImage(commands.Cog):
             await inter.edit_original_response(
                 f"⚠️ В треде нашлись заголовки этапов: {found}. Не хватает: {', '.join(map(str, missing))}. "
                 "План не сохранён — в треде должен быть текст ордера на все 6 этапов "
-                "(заголовки вида «Восход Империи — N этап»)."
+                "(в каждом сообщении должен быть виден номер этапа, например «1 этап» или «этап 1»)."
             )
             return
 
