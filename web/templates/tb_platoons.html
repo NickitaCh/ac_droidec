@@ -280,33 +280,13 @@
                                                                         <button type="submit" class="button-danger">Снять {{ slot.assigned_name }}</button>
                                                                     </form>
                                                                 {% endif %}
-                                                                {% if slot.owners %}
-                                                                    <ul class="platoon-candidate-list">
-                                                                        {% for owner in slot.owners %}
-                                                                            <li>
-                                                                                <form method="post" action="/tb/platoons/assign">
-                                                                                    <input type="hidden" name="plan_id" value="{{ plan.id }}">
-                                                                                    <input type="hidden" name="round_num" value="{{ selected_round_num }}">
-                                                                                    <input type="hidden" name="planet" value="{{ p.name }}">
-                                                                                    <input type="hidden" name="operation" value="{{ op.number }}">
-                                                                                    <input type="hidden" name="slot_index" value="{{ slot.index }}">
-                                                                                    <input type="hidden" name="ally_code" value="{{ owner.ally_code }}">
-                                                                                    <input type="hidden" name="anchor" value="{{ slot.anchor }}">
-                                                                                    <button type="submit"
-                                                                                        {% if owner.ally_code == slot.assigned_ally_code or owner.used_elsewhere or owner.excluded_by_filter or owner.at_cap %}disabled{% endif %}>
-                                                                                        {{ "✅" if owner.meets_min else "⚠️" }} {% if owner.is_priority %}⭐ {% endif %}{{ owner.name }} — {% if owner.is_ship %}{{ owner.stars }}★{% else %}релик {{ owner.relic }}{% endif %}
-                                                                                        {% if owner.is_priority %} (приоритет){% endif %}
-                                                                                        {% if owner.used_elsewhere %} (уже занят на этом этапе{% if owner.used_at_label %}: {{ owner.used_at_label }}{% endif %}){% endif %}
-                                                                                        {% if owner.excluded_by_filter %} (исключён фильтром){% endif %}
-                                                                                        {% if owner.at_cap %} (лимит 10/этап на планету исчерпан){% endif %}
-                                                                                    </button>
-                                                                                </form>
-                                                                            </li>
-                                                                        {% endfor %}
-                                                                    </ul>
-                                                                {% else %}
-                                                                    <p class="empty-state">В гильдии не нашлось владельцев этого юнита (или не удалось определить base_id).</p>
-                                                                {% endif %}
+                                                                <button type="button" class="button platoon-pick-btn"
+                                                                        data-plan-id="{{ plan.id }}" data-round="{{ selected_round_num }}"
+                                                                        data-planet="{{ p.name }}" data-operation="{{ op.number }}"
+                                                                        data-slot-index="{{ slot.index }}" data-anchor="{{ slot.anchor }}"
+                                                                        data-unit="{{ slot.unit }}">
+                                                                    {% if slot.assigned_ally_code %}Сменить игрока{% else %}Выбрать игрока{% endif %}
+                                                                </button>
                                                             </div>
                                                         </details>
                                                     </li>
@@ -324,4 +304,31 @@
             {% endfor %}
         </div>
     {% endif %}
+
+    <dialog id="platoon-picker-dialog" class="platoon-picker-dialog">
+        <div class="platoon-picker-header">
+            <h3 id="platoon-picker-title">Выбор игрока</h3>
+            <button type="button" class="button-secondary" id="platoon-picker-close">✕ Закрыть</button>
+        </div>
+        <div class="platoon-picker-toolbar">
+            <input type="search" id="platoon-picker-search" placeholder="Поиск по имени...">
+            <select id="platoon-picker-sort">
+                <option value="status">Сначала можно поставить</option>
+                <option value="relic">По релику / ★</option>
+                <option value="name">По имени</option>
+            </select>
+        </div>
+        <p id="platoon-picker-loading" class="muted">Загрузка...</p>
+        <p id="platoon-picker-error" class="error" hidden></p>
+        <ul id="platoon-picker-list" class="platoon-picker-list"></ul>
+    </dialog>
+    <form method="post" action="/tb/platoons/assign" id="platoon-assign-form" hidden>
+        <input type="hidden" name="plan_id">
+        <input type="hidden" name="round_num">
+        <input type="hidden" name="planet">
+        <input type="hidden" name="operation">
+        <input type="hidden" name="slot_index">
+        <input type="hidden" name="ally_code">
+        <input type="hidden" name="anchor">
+    </form>
 {% endblock %}

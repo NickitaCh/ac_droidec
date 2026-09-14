@@ -663,4 +663,134 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!d.contains(e.target)) d.open = false;
         });
     });
+
+    // ---- Попап выбора игрока на слот взвода ТБ (/tb/platoons) — по прямому запросу
+    // пользователя 2026-09-14: список кандидатов раньше открывался инлайн в узкой
+    // колонке .platoon-op-card (топ-20 по релику от get_player_unit_owners_bulk) — теперь
+    // полноразмерный попап, куда /tb/platoons/api/slot отдаёт ПОЛНЫЙ список игроков гильдии
+    // (включая тех, кто юнитом не владеет вообще — owns_unit:false), с поиском по имени и
+    // сортировкой. Один общий <dialog> на странице, переиспользуется для любого слота.
+    (() => {
+        const dialog = document.getElementById("platoon-picker-dialog");
+        if (!dialog) return;
+        const listEl = document.getElementById("platoon-picker-list");
+        const loadingEl = document.getElementById("platoon-picker-loading");
+        const errorEl = document.getElementById("platoon-picker-error");
+        const titleEl = document.getElementById("platoon-picker-title");
+        const searchEl = document.getElementById("platoon-picker-search");
+        const sortEl = document.getElementById("platoon-picker-sort");
+        const closeBtn = document.getElementById("platoon-picker-close");
+        const assignForm = document.getElementById("platoon-assign-form");
+
+        let currentCandidates = [];
+        let currentCtx = null;
+        const STATUS_ORDER = { assigned: 0, eligible: 1, ineligible: 2 };
+
+        function reasonText(c) {
+            const reasons = [];
+            if (!c.owns_unit) reasons.push("не владеет юнитом");
+            else if (!c.meets_min) reasons.push(c.is_ship ? "не хватает ★" : "не хватает релика");
+            if (c.used_elsewhere) reasons.push(`уже занят на этом этапе${c.used_at_label ? ": " + c.used_at_label : ""}`);
+            if (c.excluded_by_filter) reasons.push("исключён фильтром");
+            if (c.at_cap) reasons.push("лимит 10/этап на планету исчерпан");
+            return reasons.join(", ");
+        }
+
+        function render() {
+            const q = searchEl.value.trim().toLowerCase();
+            let items = currentCandidates.filter((c) => c.name.toLowerCase().includes(q));
+            const sortBy = sortEl.value;
+            items.sort((a, b) => {
+                if (sortBy === "name") return a.name.localeCompare(b.name, "ru");
+                if (sortBy === "relic") {
+                    const av = a.is_ship ? a.stars : a.relic;
+                    const bv = b.is_ship ? b.stars : b.relic;
+                    return bv - av;
+                }
+                const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+                return so !== 0 ? so : a.name.localeCompare(b.name, "ru");
+            });
+            listEl.innerHTML = "";
+            if (!items.length) {
+                listEl.innerHTML = '<li class="empty-state">Никого не найдено.</li>';
+                return;
+            }
+            for (const c of items) {
+                // used_elsewhere/excluded_by_filter/at_cap — жёсткие причины (кнопка
+                // недоступна, как и раньше в инлайн-списке); просто "не хватает релика/★"
+                // или "не владеет юнитом" — мягкая причина, кнопка активна (офицер может
+                // назначить вручную всё равно, это уже было так в прежнем UI).
+                const hardBlocked = c.used_elsewhere || c.excluded_by_filter || c.at_cap;
+                const isAssigned = c.status === "assigned";
+                const icon = isAssigned ? "🔒" : hardBlocked ? "🚫" : c.meets_min ? "✅" : "⚠️";
+                const statValue = c.is_ship ? `${c.stars}★` : `релик ${c.relic}`;
+                const reason = reasonText(c);
+
+                const li = document.createElement("li");
+                li.className = `platoon-picker-row platoon-picker-row-${isAssigned ? "assigned" : hardBlocked ? "ineligible" : "eligible"}`;
+                li.innerHTML = `
+                    <span class="platoon-picker-icon">${icon}</span>
+                    <span class="platoon-picker-name">${c.is_priority ? "⭐ " : ""}${c.name}</span>
+                    <span class="platoon-picker-stat">${statValue}</span>
+                    ${reason ? `<span class="platoon-picker-reason">${reason}</span>` : ""}
+                `;
+                if (!isAssigned) {
+                    const btn = document.createElement("button");
+                    btn.type = "button";
+                    btn.className = "button";
+                    btn.textContent = "Назначить";
+                    btn.disabled = hardBlocked;
+                    btn.addEventListener("click", () => {
+                        assignForm.plan_id.value = currentCtx.planId;
+                        assignForm.round_num.value = currentCtx.round;
+                        assignForm.planet.value = currentCtx.planet;
+                        assignForm.operation.value = currentCtx.operation;
+                        assignForm.slot_index.value = currentCtx.slotIndex;
+                        assignForm.ally_code.value = c.ally_code;
+                        assignForm.anchor.value = currentCtx.anchor;
+                        assignForm.requestSubmit();
+                    });
+                    li.appendChild(btn);
+                }
+                listEl.appendChild(li);
+            }
+        }
+
+        document.querySelectorAll(".platoon-pick-btn").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                currentCtx = {
+                    planId: btn.dataset.planId, round: btn.dataset.round, planet: btn.dataset.planet,
+                    operation: btn.dataset.operation, slotIndex: btn.dataset.slotIndex, anchor: btn.dataset.anchor,
+                };
+                titleEl.textContent = `${btn.dataset.unit} — ${btn.dataset.planet}, операция ${btn.dataset.operation}`;
+                searchEl.value = "";
+                sortEl.value = "status";
+                listEl.innerHTML = "";
+                errorEl.hidden = true;
+                loadingEl.hidden = false;
+                dialog.showModal();
+                try {
+                    const params = new URLSearchParams({
+                        plan_id: currentCtx.planId, round: currentCtx.round, planet: currentCtx.planet,
+                        operation: currentCtx.operation, slot_index: currentCtx.slotIndex,
+                    });
+                    const resp = await fetch(`/tb/platoons/api/slot?${params}`);
+                    if (!resp.ok) throw new Error(await resp.text());
+                    const data = await resp.json();
+                    currentCandidates = data.candidates;
+                    loadingEl.hidden = true;
+                    render();
+                } catch (e) {
+                    loadingEl.hidden = true;
+                    errorEl.hidden = false;
+                    errorEl.textContent = "Не удалось загрузить список кандидатов.";
+                }
+            });
+        });
+
+        searchEl.addEventListener("input", render);
+        sortEl.addEventListener("change", render);
+        closeBtn.addEventListener("click", () => dialog.close());
+        dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+    })();
 });

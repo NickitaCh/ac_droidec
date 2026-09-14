@@ -1129,6 +1129,30 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .platoon-candidate-list button:hover { background: var(--surface-2); }
 .platoon-candidate-list button:disabled { opacity: 0.6; cursor: default; }
 
+/* ---- Список получателей на /tb/platoons/notify — раньше это была узкая колонка
+   в один столбик на всю страницу (жалоба пользователя 2026-09-14 "надо на всю ширину,
+   блоками, более явно"); теперь адаптивная сетка карточек на всю ширину контейнера. ---- */
+.notify-recipients-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15em, 1fr));
+    gap: 0.7em;
+}
+.notify-recipient-card {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--page);
+    padding: 0.7em 0.9em;
+    cursor: pointer;
+}
+.notify-recipient-card:hover { background: var(--surface-2); }
+.notify-recipient-card-disabled { opacity: 0.65; cursor: default; }
+.notify-recipient-card input[type="checkbox"] { flex-shrink: 0; }
+.notify-recipient-name { flex: 1; min-width: 0; font-weight: 500; }
+
 /* ---- Автодополнение в текстовом поле /tb/platoons/filters (по прямому запросу
    пользователя 2026-08-31 "интерактивный ввод, как в IDE/Discord") — см.
    web/static/dashboard.js. position:fixed, не absolute внутри обёртки — координаты уже
@@ -1381,6 +1405,48 @@ dialog.confirm-dialog .dialog-actions {
     gap: 0.6em;
     margin-top: 1em;
 }
+
+/* ---- Попап выбора игрока на слот взвода ТБ (/tb/platoons) — по прямому запросу
+   пользователя 2026-09-14: список кандидатов раньше открывался инлайн в узкой колонке
+   .platoon-op-card (топ-20 по релику) — теперь полноразмерный попап с полным списком
+   гильдии, поиском и сортировкой, см. platoon-pick-btn/#platoon-picker-dialog в
+   web/static/dashboard.js. ---- */
+dialog.platoon-picker-dialog {
+    max-width: 40em;
+    width: 92vw;
+    max-height: 85vh;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 1.25em 1.5em;
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+}
+dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.platoon-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 0.6em; }
+.platoon-picker-header h3 { margin: 0; font-size: 1.05em; }
+.platoon-picker-toolbar { display: flex; gap: 0.6em; flex-wrap: wrap; margin-bottom: 0.8em; }
+.platoon-picker-toolbar input[type="search"] { flex: 1; min-width: 10em; padding: 0.45em 0.6em; border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--fg); }
+.platoon-picker-toolbar select { padding: 0.45em 0.6em; border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--fg); }
+.platoon-picker-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 0.35em; }
+.platoon-picker-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    padding: 0.5em 0.7em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.platoon-picker-row-assigned { background: color-mix(in srgb, var(--status-good) 10%, transparent); }
+.platoon-picker-row-ineligible { opacity: 0.75; }
+.platoon-picker-icon { flex-shrink: 0; }
+.platoon-picker-name { font-weight: 500; }
+.platoon-picker-stat { color: var(--fg-secondary); font-size: 0.9em; }
+.platoon-picker-reason { color: var(--status-warning); font-size: 0.85em; flex-basis: 100%; }
+.platoon-picker-row button { margin-left: auto; }
 
 /* ---- Поиск персонажа с выпадающим списком (добавление требования к плейту) ---- */
 .unit-search { position: relative; }

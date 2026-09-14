@@ -830,6 +830,139 @@ async def tb_platoons_units_search(q: str = "", user: dict = Depends(require_gui
     return [{"base_id": base_id, "name": name} for base_id, name in rows]
 
 
+@router.get("/tb/platoons/api/slot", response_class=JSONResponse)
+async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends(require_guild_access)):
+    """Полный список кандидатов на один слот взвода (планета/операция/индекс), без
+    урезания до PLATOON_CANDIDATES_LIMIT и включая игроков, которые юнитом вообще не
+    владеют — для попапа выбора игрока на /tb/platoons (по прямому запросу пользователя
+    2026-09-14: "видеть ВСЕХ игроков, с явной отметкой, кто уже поставил/может/не может").
+    Раньше этот же список рендерился инлайн прямо в узкой колонке .platoon-op-card, топ-20
+    по релику — здесь лимита нет: гильдия небольшая (~50 игроков), полный список безопасен
+    для одного JSON-ответа по требованию, в отличие от рендера сразу всех слотов страницы."""
+    guild_id = user["guild_id"]
+    try:
+        plan_id = int(request.query_params.get("plan_id", ""))
+        round_num = int(request.query_params.get("round", ""))
+        operation = int(request.query_params.get("operation", ""))
+        slot_index = int(request.query_params.get("slot_index", ""))
+    except ValueError:
+        raise HTTPException(400, "Некорректные параметры слота.")
+    planet = request.query_params.get("planet", "")
+    if not planet:
+        raise HTTPException(400, "Не указана планета.")
+
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        raise HTTPException(404, "План не найден.")
+
+    entries, fetch_error = await _fetch_plan_planets(plan)
+    if fetch_error:
+        raise HTTPException(400, fetch_error)
+
+    seen = set()
+    round_entries = []
+    for e in entries:
+        if e["round"] != round_num:
+            continue
+        key = e["planet"] or f"raw:{e['raw']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        round_entries.append(e)
+
+    unit_names_this_round = {
+        name
+        for e in round_entries
+        if e["planet"] and not e.get("no_platoons")
+        for op in range(1, 7)
+        for name in (tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], op)) or [])
+    }
+    name_to_base_id = database.resolve_unit_display_names(list(unit_names_this_round)) if unit_names_this_round else {}
+
+    unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, operation)) or []
+    if not (0 <= slot_index < len(unit_names)):
+        raise HTTPException(404, "Слот не найден.")
+    unit_name = unit_names[slot_index]
+    base_id = name_to_base_id.get(unit_name)
+
+    mappings = database.get_all_user_mappings(guild_id)
+    ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
+    player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
+
+    unit_types = database.get_unit_types([base_id]) if base_id else {}
+    is_ship = unit_types.get(base_id) == "ship"
+
+    owners = []
+    if base_id:
+        owners_raw = database.get_player_unit_owners_bulk(ally_codes, [base_id])
+        for row in owners_raw:
+            owners.append({
+                "ally_code": row["ally_code"],
+                "name": player_name_by_ally.get(row["ally_code"], row["ally_code"]),
+                "relic": stat_engine.get_current_relic_level(row["unit"]),
+                "stars": row["unit"].get("currentRarity", 0),
+            })
+    # Без .sort()+del[:LIMIT], как на основной странице — тут нужен полный список.
+
+    assignments = database.get_tb_platoon_assignments(guild_id, plan["id"])
+    filter_rules, _errs = tb_platoon_filters.parse_rules(database.get_tb_platoon_filter_rules(guild_id), guild_id)
+    planets_this_round = {e["planet"] for e in round_entries if e["planet"] and not e.get("no_platoons")}
+    used_pairs_this_round = tb_platoon_engine.compute_used_pairs(assignments, planets_this_round, name_to_base_id, round_num)
+    round_counts = tb_platoon_engine.compute_round_counts(assignments, round_num)
+    min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(planet)
+    here = (planet, operation, slot_index)
+
+    candidates = tb_platoon_engine.slot_candidates(
+        owners=owners, base_id=base_id, here=here, used_pairs=used_pairs_this_round,
+        min_relic=min_relic, round_num=round_num, planet=planet,
+        filter_rules=filter_rules, round_counts=round_counts, is_ship=is_ship,
+    )
+    for c in candidates:
+        c["owns_unit"] = True
+
+    have_ally_codes = {c["ally_code"] for c in candidates}
+    for ally_code in ally_codes:
+        if ally_code in have_ally_codes:
+            continue
+        count_here = round_counts.get((ally_code, planet), 0)
+        candidates.append({
+            "ally_code": ally_code, "name": player_name_by_ally.get(ally_code, ally_code),
+            "relic": 0, "stars": 0, "owns_unit": False,
+            "meets_min": False, "used_elsewhere": False, "used_at_label": None,
+            "excluded_by_filter": bool(base_id) and (
+                filter_rules.is_unit_excluded(base_id)
+                or filter_rules.is_category_excluded("ship" if is_ship else "character")
+                or filter_rules.is_player_excluded(ally_code)
+                or filter_rules.is_player_unit_excluded(ally_code, base_id, round_num)
+            ),
+            "at_cap": count_here >= tb_platoon_engine.MAX_UNITS_PER_PLANET_PER_ROUND,
+            "count_here": count_here,
+            "is_ship": is_ship,
+            "is_priority": filter_rules.is_player_priority(ally_code),
+        })
+
+    assignment = tb_platoon_engine.visible_assignment(assignments.get((planet, operation, slot_index)), round_num)
+    assigned_ally_code = assignment["ally_code"] if assignment else None
+
+    for c in candidates:
+        if c["ally_code"] == assigned_ally_code:
+            c["status"] = "assigned"
+        elif tb_platoon_engine.is_eligible(c):
+            c["status"] = "eligible"
+        else:
+            c["status"] = "ineligible"
+
+    candidates.sort(key=lambda c: c["name"])
+
+    return {
+        "unit": unit_name,
+        "min_relic": min_relic,
+        "is_ship": is_ship,
+        "assigned_ally_code": assigned_ally_code,
+        "candidates": candidates,
+    }
+
+
 @router.get("/tb/platoons/filters", response_class=HTMLResponse)
 async def tb_platoons_filters_page(request: Request, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]

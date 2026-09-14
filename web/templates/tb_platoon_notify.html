@@ -56,22 +56,20 @@
                             <span>Кому отправить</span>
                             <span class="panel-hint">игроков с назначениями: {{ rows|length }}</span>
                         </div>
-                        <ul class="platoon-slot-list">
+                        <div class="notify-recipients-grid">
                             {% for row in rows %}
-                                <li class="platoon-slot">
-                                    <label>
-                                        <input type="checkbox" class="checkbox notify-check" name="ally_codes"
-                                               value="{{ row.ally_code }}"
-                                               {% if row.discord_id %}checked{% else %}disabled{% endif %}>
-                                        {{ row.name }}
-                                        <span class="badge badge-neutral">{{ row.entries|length }} слот(ов)</span>
-                                        {% if not row.discord_id %}
-                                            <span class="badge badge-danger" title="Нет привязки Discord (/регистрация)">нет привязки Discord</span>
-                                        {% endif %}
-                                    </label>
-                                </li>
+                                <label class="notify-recipient-card{% if not row.discord_id %} notify-recipient-card-disabled{% endif %}">
+                                    <input type="checkbox" class="checkbox notify-check" name="ally_codes"
+                                           value="{{ row.ally_code }}"
+                                           {% if row.discord_id %}checked{% else %}disabled{% endif %}>
+                                    <span class="notify-recipient-name">{{ row.name }}</span>
+                                    <span class="badge badge-neutral">{{ row.entries|length }} слот(ов)</span>
+                                    {% if not row.discord_id %}
+                                        <span class="badge badge-danger" title="Нет привязки Discord (/регистрация)">нет привязки Discord</span>
+                                    {% endif %}
+                                </label>
                             {% endfor %}
-                        </ul>
+                        </div>
                     </div>
                     <p><button type="submit" class="button">📨 Отправить в личку отмеченным</button></p>
                 {% endif %}
