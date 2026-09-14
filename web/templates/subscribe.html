@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Подписка — AC Droidec{% endblock %}
+{% block content %}
+    <h1>Подписка на бота</h1>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if result %}
+        <div class="panel" style="max-width: 34em;">
+            <div class="panel-title"><span>💳 Ссылка на оплату готова</span></div>
+            <p><strong>Гильдия:</strong> {{ result.guild_name }}</p>
+            <p><strong>Период:</strong> {{ result.period_label }}</p>
+            <p><strong>Сумма:</strong> {{ result.price }} ₽</p>
+            <p><a href="{{ result.url }}" class="button" style="display:inline-block; margin-top: .5em;">Перейти к оплате →</a></p>
+            <p class="muted">Доступ откроется автоматически в течение минуты после оплаты.</p>
+        </div>
+    {% else %}
+        {% if renewal_guild %}
+            <div class="panel" style="max-width: 34em;">
+                <div class="panel-title"><span>Продлить подписку</span></div>
+                <p class="muted">
+                    Ваша гильдия «{{ renewal_guild.name }}» уже подключена.
+                    {% if renewal_guild.expires_at %}
+                        Подписка активна до <code>{{ renewal_guild.expires_at[:10] }}</code>.
+                    {% else %}
+                        Подписка сейчас бессрочная (подключена вручную).
+                    {% endif %}
+                </p>
+                <form method="post" action="/subscribe" class="inline-form">
+                    <input type="hidden" name="renew_guild_id" value="{{ renewal_guild.id }}">
+                    <select name="period" required>
+                        {% for days, label, price in period_options %}
+                            <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit">Получить ссылку на оплату</button>
+                </form>
+            </div>
+        {% endif %}
+
+        <div class="panel" style="max-width: 34em;">
+            <div class="panel-title"><span>Подключить новую гильдию</span></div>
+            <p class="muted">
+                Код союзника любого участника гильдии — по нему бот сам определит саму
+                гильдию SWGOH. Плюс ID Discord-сервера, на котором вы хотите пользоваться
+                ботом (ПКМ по иконке сервера → «Копировать ID сервера»; для этого в Discord
+                должен быть включён режим разработчика: Настройки → Расширенные).
+            </p>
+            <form method="post" action="/subscribe" class="requirement-form">
+                <label>
+                    Код союзника
+                    <input type="text" name="ally_code" placeholder="123456789" pattern="[0-9]{9}" maxlength="9" required>
+                </label>
+                <label>
+                    ID Discord-сервера
+                    <input type="text" name="discord_guild_id" placeholder="123456789012345678" required>
+                </label>
+                <label>
+                    Период
+                    <select name="period" required>
+                        {% for days, label, price in period_options %}
+                            <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit">Получить ссылку на оплату</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <p class="muted">Условия — на странице <a href="/oferta">оферты</a>.</p>
+{% endblock %}

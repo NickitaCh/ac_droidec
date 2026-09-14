@@ -43,6 +43,9 @@
             <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
             <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
             {% if user %}
+                <a href="/subscribe" title="Подписка"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
+            {% endif %}
+            {% if user %}
                 {% if user.tier == "officer" %}
                     <a href="/activity" title="Активность"><span class="nav-icon">📈</span><span class="nav-label">Активность</span></a>
                     <a href="/violations" title="Нарушения"><span class="nav-icon">⚠️</span><span class="nav-label">Нарушения</span></a>
