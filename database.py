@@ -4045,6 +4045,150 @@ def get_mod_search_history_entry(history_id: int, guild_id: int = 1):
 
 
 # =====================================================================
+# "СПИЗДИТЬ БИЛД" (веб /steal-build, services/steal_build.py) — сохранённые чужие гильдии
+# (по запросу пользователя, чат 2026-09-14: "часто обращаться к одной гильдии") и история
+# запросов. Тот же паттерн, что mod_search_presets/mod_search_history — один JSON-блоб
+# {"ally_code", "character", "relic", "guild_name"} на запрос целиком; guild_name —
+# резолвленное на момент сохранения имя, только для отображения (не переиспользуется при
+# повторном запуске — гильдия всегда резолвится заново по ally_code, вдруг сменилась).
+# =====================================================================
+def _ensure_steal_build_presets_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS steal_build_presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            filter_json TEXT NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE (guild_id, name)
+        )
+    """)
+
+
+def create_steal_build_preset(name: str, filt: dict, created_by: str, guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_presets_table(cursor)
+    try:
+        cursor.execute(
+            "INSERT INTO steal_build_presets (guild_id, name, filter_json, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+            (guild_id, name, json.dumps(filt), created_by),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def get_all_steal_build_presets(guild_id: int = 1):
+    """Возвращает [(id, name, filter_dict, created_by, created_at), ...] по имени."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_presets_table(cursor)
+    cursor.execute(
+        "SELECT id, name, filter_json, created_by, created_at FROM steal_build_presets WHERE guild_id = ? ORDER BY name",
+        (guild_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [(pid, name, json.loads(filter_json), created_by, created_at) for pid, name, filter_json, created_by, created_at in rows]
+
+
+def get_steal_build_preset(preset_id: int, guild_id: int = 1):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_presets_table(cursor)
+    cursor.execute(
+        "SELECT id, name, filter_json, created_by, created_at FROM steal_build_presets WHERE id = ? AND guild_id = ?",
+        (preset_id, guild_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    pid, name, filter_json, created_by, created_at = row
+    return pid, name, json.loads(filter_json), created_by, created_at
+
+
+def delete_steal_build_preset(preset_id: int, guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_presets_table(cursor)
+    cursor.execute("DELETE FROM steal_build_presets WHERE id = ? AND guild_id = ?", (preset_id, guild_id))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+STEAL_BUILD_HISTORY_KEEP = 20
+
+
+def _ensure_steal_build_history_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS steal_build_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            filter_json TEXT NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def add_steal_build_history(filt: dict, created_by: str, guild_id: int = 1, keep: int = STEAL_BUILD_HISTORY_KEEP):
+    """Пишет запись и сразу обрезает историю гильдии до последних `keep` (тот же приём,
+    что add_mod_search_history)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_history_table(cursor)
+    cursor.execute(
+        "INSERT INTO steal_build_history (guild_id, filter_json, created_by, created_at) VALUES (?, ?, ?, datetime('now'))",
+        (guild_id, json.dumps(filt), created_by),
+    )
+    cursor.execute("SELECT id FROM steal_build_history WHERE guild_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?", (guild_id, keep))
+    old_ids = [r[0] for r in cursor.fetchall()]
+    if old_ids:
+        placeholders = ",".join("?" * len(old_ids))
+        cursor.execute(f"DELETE FROM steal_build_history WHERE id IN ({placeholders})", old_ids)
+    conn.commit()
+    conn.close()
+
+
+def get_steal_build_history(guild_id: int = 1, limit: int = STEAL_BUILD_HISTORY_KEEP):
+    """Возвращает [(id, filter_dict, created_by, created_at), ...] от новых к старым."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_history_table(cursor)
+    cursor.execute(
+        "SELECT id, filter_json, created_by, created_at FROM steal_build_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+        (guild_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [(hid, json.loads(filter_json), created_by, created_at) for hid, filter_json, created_by, created_at in rows]
+
+
+def get_steal_build_history_entry(history_id: int, guild_id: int = 1):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_steal_build_history_table(cursor)
+    cursor.execute(
+        "SELECT id, filter_json, created_by, created_at FROM steal_build_history WHERE id = ? AND guild_id = ?",
+        (history_id, guild_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    hid, filter_json, created_by, created_at = row
+    return hid, json.loads(filter_json), created_by, created_at
+
+
+# =====================================================================
 # КЭШ ЮНИТОВ ИГРОКОВ: сырой rosterUnit из comlink.get_player (для локального
 # расчёта статов через StatCalc — хранится как есть, без разбора по колонкам,
 # т.к. StatCalc.calc_char_stats принимает этот формат напрямую, см. cogs/stat_engine.py).

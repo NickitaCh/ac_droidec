@@ -71,4 +71,77 @@
             </div>
         </div>
     {% endif %}
+
+    {% if lookup_guild_name %}
+        <div class="panel" style="max-width: 30em;">
+            <div class="panel-title"><span>Сохранить эту гильдию</span></div>
+            <p class="muted">{{ lookup_guild_name }} <span class="muted">(ID {{ lookup_swgoh_guild_id }})</span></p>
+            <form method="post" action="/steal-build/presets/save" class="inline-form">
+                <input type="hidden" name="ally_code" value="{{ ally_code }}">
+                <input type="hidden" name="character" value="{{ selected_character }}">
+                <input type="hidden" name="relic" value="{{ selected_relic }}">
+                <input type="hidden" name="guild_name" value="{{ lookup_guild_name }}">
+                <input type="text" name="name" placeholder="Название" value="{{ lookup_guild_name }}" required>
+                <button type="submit">Сохранить</button>
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>Сохранённые гильдии</span><span class="panel-hint">быстрый повтор — код союзника не нужно искать заново</span></div>
+        {% if not presets %}
+            <p class="empty-state">Пока нет сохранённых гильдий — посчитайте что-нибудь выше и сохраните.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Название</th><th>Гильдия</th><th>Персонаж</th><th>Релик</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for p in presets %}
+                            <tr>
+                                <td>{{ p.name }}</td>
+                                <td>{{ p.guild_name }}</td>
+                                <td>{{ p.character_label }}</td>
+                                <td>{{ p.relic }}</td>
+                                <td class="row-actions">
+                                    <a class="link-btn" href="/steal-build?preset_id={{ p.id }}">применить</a>
+                                    <form method="post" action="/steal-build/presets/{{ p.id }}/delete"
+                                          onsubmit="return confirm('Удалить «{{ p.name }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} запусков</span></div>
+        {% if not history %}
+            <p class="empty-state">Пока нет запусков — посчитайте что-нибудь выше.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Гильдия</th><th>Персонаж</th><th>Релик</th><th>Когда</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for h in history %}
+                            <tr>
+                                <td>{{ h.guild_name }}</td>
+                                <td>{{ h.character_label }}</td>
+                                <td>{{ h.relic }}</td>
+                                <td>{{ h.created_at }}</td>
+                                <td><a class="link-btn" href="/steal-build?history_id={{ h.id }}">открыть</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
