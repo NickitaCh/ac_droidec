@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Спиздить билд — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <h1>Спиздить билд</h1>
+    <p class="muted">
+        Введите код союзника любого игрока чужой гильдии — бот определит саму гильдию и
+        посчитает, как в среднем она модит выбранного персонажа: статы каждого участника,
+        у кого персонаж открыт, проецируются на выбранный релик и усредняются, а рядом в
+        скобках — насколько в среднем это больше "голой" базы персонажа без единого мода на
+        том же релике.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="get" action="/steal-build" class="builder-form">
+            <label>
+                Код союзника (любой игрок чужой гильдии)
+                <input type="text" name="ally_code" placeholder="123456789" pattern="[0-9]{9}" maxlength="9" value="{{ ally_code }}" required>
+            </label>
+
+            <label>
+                Персонаж
+                <div class="unit-search" data-unit-search>
+                    <input type="text" class="unit-search-input" placeholder="Имя персонажа — можно на русском или английском…" autocomplete="off" required value="{{ selected_character_label }}">
+                    <input type="hidden" name="character" class="unit-search-value" required value="{{ selected_character }}">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+
+            <label>
+                Уровень реликвии
+                <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
+            </label>
+
+            <button type="submit">Посчитать</button>
+            <p class="muted" style="margin-top: .5em;">
+                Каждого участника чужой гильдии приходится опрашивать живьём — на крупной
+                гильдии расчёт может занять до минуты.
+            </p>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif result %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>{{ selected_character_label }} — {{ result.guild_name }} <span class="muted">(ID {{ result.swgoh_guild_id }})</span></span>
+                <span class="panel-hint">релик {{ result.target_relic }} · открыт у {{ result.contributors }}/{{ result.total_members }}</span>
+            </div>
+            {% if result.fetch_errors %}
+                <p class="muted">⚠️ Не удалось опросить {{ result.fetch_errors }} участников (сбой сети) — среднее посчитано по остальным.</p>
+            {% endif %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Стат</th><th>Среднее по гильдии</th><th>Прирост от модов</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in result.rows %}
+                            <tr><td>{{ row.label }}</td><td>{{ row.avg_fmt }}</td><td>({{ row.pct_fmt }})</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}
