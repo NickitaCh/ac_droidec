@@ -256,6 +256,7 @@ GUILD_CONFIG_COLUMNS = [
     "antispam_alert_message", "antispam_timeout_minutes",
     "tasks_log_channel_id", "tasks_notify_time",
     "is_active",
+    "subscription_expires_at", "subscription_source", "payment_customer_id",
 ]
 
 
@@ -325,6 +326,23 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tasks_notify_time TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # NULL = бессрочно (ручное /гильдия добавить, друзья) — только платные
+        # self-service гильдии (services/guild_subscription.py) получают реальную
+        # дату, см. extend_guild_subscription ниже.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN subscription_expires_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN subscription_source TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Задел на рекуррентные платежи (сохранённый способ оплаты ЮKassa) — пока
+        # не используется, см. план C:\Users\Nick\.claude\plans\melodic-crunching-dream.md.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN payment_customer_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -446,6 +464,155 @@ def seed_default_guild(**fields) -> int | None:
     if count > 0:
         return None
     return create_guild(**fields)
+
+
+def extend_guild_subscription(guild_id: int, days: int, source: str) -> None:
+    """Продлевает платную подписку гильдии от max(сейчас, текущий
+    subscription_expires_at) — если подписка ещё не истекла, новый период
+    докладывается СВЕРХУ остатка, а не поверх "сейчас" (иначе продление за
+    день до истечения обнуляло бы уже оплаченный остаток). Всегда включает
+    is_active=1 (продление/ручной override должны отпирать доступ сразу же,
+    не дожидаясь отдельной команды). source — 'paid' (вебхук ЮKassa) или
+    'manual' (супер-админ, /гильдия подписка) — только для отображения в
+    /гильдия список и на /admin/guilds."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute(
+        """
+        UPDATE guilds SET
+            subscription_expires_at = datetime(
+                MAX(COALESCE(subscription_expires_at, datetime('now')), datetime('now')),
+                '+' || ? || ' days'
+            ),
+            subscription_source = ?,
+            is_active = 1
+        WHERE id = ?
+        """,
+        (int(days), source, guild_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_expired_active_guilds() -> list:
+    """Активные гильдии с реально истёкшей платной подпиской (subscription_expires_at
+    IS NOT NULL и в прошлом) — бессрочные ручные гильдии (NULL) сюда никогда не
+    попадают. Используется суточным автоотзывом (cogs/admin_management.py)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_guilds_table(cursor)
+    cursor.execute(
+        "SELECT * FROM guilds WHERE is_active = 1 AND subscription_expires_at IS NOT NULL "
+        "AND subscription_expires_at <= datetime('now')"
+    )
+    columns = [d[0] for d in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_guild_dict(r, columns) for r in rows]
+
+
+# =====================================================================
+# ПЛАТЕЖИ (self-service подписка гильдии, services/guild_subscription.py +
+# services/payments.py) — лог для идемпотентности вебхука (order_id — id
+# платежа у провайдера, UNIQUE — повторный вебхук с тем же id не должен
+# продлевать подписку дважды) и для сверки доходов самозанятого. provider
+# сейчас всегда 'yookassa' (см. services/payments.py), колонка оставлена не
+# захардкоженной на случай смены/добавления провайдера позже.
+# =====================================================================
+def _ensure_payments_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            order_id TEXT NOT NULL UNIQUE,
+            provider TEXT NOT NULL,
+            amount TEXT,
+            currency TEXT,
+            period_days INTEGER,
+            status TEXT NOT NULL,
+            raw_payload TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def record_payment(guild_id: int, order_id: str, provider: str, amount: str, currency: str,
+                    period_days: int, status: str, raw_payload: str = None) -> bool:
+    """Создаёт запись о платеже (обычно сразу при генерации ссылки на оплату, со
+    status='pending' — см. services/payments.py::build_payment_link, ЮKassa сама
+    генерирует order_id, до вебхука это единственное место, где guild_id
+    привязывается к нему). INSERT OR IGNORE — order_id уникален, повторный вызов
+    с тем же order_id молча не перезаписывает существующую строку. Возвращает
+    True, если строка реально создана (False — order_id уже был)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_payments_table(cursor)
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO payments
+            (guild_id, order_id, provider, amount, currency, period_days, status, raw_payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """,
+        (guild_id, order_id, provider, amount, currency, period_days, status, raw_payload),
+    )
+    conn.commit()
+    inserted = cursor.rowcount > 0
+    conn.close()
+    return inserted
+
+
+def mark_payment_succeeded(order_id: str, raw_payload: str = None) -> bool:
+    """Идемпотентный переход pending -> succeeded по вебхуку (services.payments.
+    handle_webhook) — переводит статус, ТОЛЬКО если он ещё не 'succeeded', и
+    возвращает True в этом случае (вызывающий код должен продлевать подписку
+    только на True — повторный вебхук с тем же order_id иначе продлил бы
+    подписку второй раз). Возвращает False и если order_id вообще не найден
+    (запись должна была появиться в build_payment_link до вебхука)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_payments_table(cursor)
+    cursor.execute(
+        "UPDATE payments SET status = 'succeeded', raw_payload = ? "
+        "WHERE order_id = ? AND status != 'succeeded'",
+        (raw_payload, order_id),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def get_payment_by_order_id(order_id: str) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_payments_table(cursor)
+    cursor.execute(
+        "SELECT id, guild_id, order_id, provider, amount, currency, period_days, status, raw_payload, created_at "
+        "FROM payments WHERE order_id = ?",
+        (order_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    keys = ["id", "guild_id", "order_id", "provider", "amount", "currency", "period_days", "status", "raw_payload", "created_at"]
+    return dict(zip(keys, row))
+
+
+def has_paid_payment(guild_id: int) -> bool:
+    """Хоть один когда-либо УСПЕШНО завершённый платёж этой гильдии — используется
+    services/guild_admin.py::add_guild, чтобы отличить "висящую неоплаченную
+    заявку" (можно переиспользовать id) от гильдии, которая платила и потом
+    истекла (обычный конфликт, новую заявку заводить нельзя)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_payments_table(cursor)
+    cursor.execute("SELECT 1 FROM payments WHERE guild_id = ? AND status = 'succeeded' LIMIT 1", (guild_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
 
 # =====================================================================
 # ЖУРНАЛ СРАБАТЫВАНИЙ АНТИСПАМ-ДЕТЕКТОРА (cogs/antispam.py) — переживший

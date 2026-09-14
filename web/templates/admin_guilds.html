@@ -35,6 +35,7 @@
                             <th data-sort="text">Comlink guild ID</th>
                             <th data-sort="text">Discord-сервер</th>
                             <th data-sort="text">Статус</th>
+                            <th data-sort="text">Подписка</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -50,6 +51,14 @@
                                         <span class="badge badge-ok">активна</span>
                                     {% else %}
                                         <span class="badge badge-neutral">деактивирована</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if g.subscription_expires_at %}
+                                        <code>{{ g.subscription_expires_at[:10] }}</code>
+                                        {% if g.subscription_source %}<span class="badge badge-neutral">{{ g.subscription_source }}</span>{% endif %}
+                                    {% else %}
+                                        бессрочно
                                     {% endif %}
                                 </td>
                                 <td class="row-actions">

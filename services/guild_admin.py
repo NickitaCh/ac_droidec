@@ -26,9 +26,19 @@ class GrantResult:
     ingame_name: str = None
 
 
-async def add_guild(comlink, ally_code: str, discord_guild_id: str) -> GuildAddResult:
+async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: bool = True) -> GuildAddResult:
     """Заводит новую участвующую SWGOH-гильдию по аллай-коду ЛЮБОГО её участника —
-    имя и игровой ID гильдии подтягиваются из Comlink, вручную вводить не нужно."""
+    имя и игровой ID гильдии подтягиваются из Comlink, вручную вводить не нужно.
+
+    is_active=True (дефолт) — прежнее поведение, ручное `/гильдия добавить`
+    супер-админом: доступ сразу, бессрочно. is_active=False — самообслуживание
+    (см. cogs/guild_subscription.py) заводит гильдию как неактивную «заявку»,
+    её включает вебхук об оплате (services/payments.py) после платежа.
+
+    Если по этому swgoh_guild_id уже есть неактивная гильдия БЕЗ единого
+    успешного платежа (database.has_paid_payment) — это висящая неоплаченная
+    заявка, переиспользуем её id вместо отказа (не плодим дубликаты, если
+    гильдия просто ещё не заплатила или пробует снова)."""
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
         return GuildAddResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
@@ -44,8 +54,24 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str) -> GuildAddR
     if not swgoh_guild_id:
         return GuildAddResult(ok=False, error="Этот игрок не состоит ни в одной гильдии SWGOH.")
 
-    if database.get_guild_config_by_swgoh_id(str(swgoh_guild_id)):
-        return GuildAddResult(ok=False, error="Эта гильдия уже добавлена в список обслуживаемых.")
+    existing = database.get_guild_config_by_swgoh_id(str(swgoh_guild_id))
+    if existing is None:
+        # get_guild_config_by_swgoh_id фильтрует по is_active=1 — проверяем
+        # неактивные отдельно, чтобы найти висящую неоплаченную заявку.
+        existing = next(
+            (g for g in database.get_all_guild_configs(active_only=False)
+             if g["swgoh_guild_id"] == str(swgoh_guild_id) and not g["is_active"]),
+            None,
+        )
+        if existing is not None and database.has_paid_payment(existing["id"]):
+            existing = None  # была оплачена и потом истекла — не заявка, обычный конфликт
+    if existing is not None:
+        if existing["is_active"]:
+            return GuildAddResult(ok=False, error="Эта гильдия уже добавлена в список обслуживаемых.")
+        return GuildAddResult(
+            ok=True, guild_id=existing["id"], name=existing["name"],
+            swgoh_guild_id=str(swgoh_guild_id), member_count=None,
+        )
 
     try:
         guild = await asyncio.to_thread(comlink.get_guild, swgoh_guild_id)
@@ -63,6 +89,8 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str) -> GuildAddR
         discord_guild_id=str(discord_guild_id),
         member_role_id="",
         officer_role_id="",
+        is_active=1 if is_active else 0,
+        subscription_source="manual" if is_active else "paid",
     )
     return GuildAddResult(
         ok=True, guild_id=new_id, name=name,

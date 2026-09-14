@@ -3,8 +3,9 @@
 services/guild_admin.py (общая с веб-дашбордом), здесь только Discord-обвязка."""
 
 import disnake
-from disnake.ext import commands
+from disnake.ext import commands, tasks
 
+import database
 import guild_resolver
 from services.guild_admin import (
     add_grant,
@@ -30,6 +31,25 @@ def _super_admin_only(inter: disnake.ApplicationCommandInteraction) -> bool:
 class AdminManagementCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.subscription_expiry_loop.start()
+
+    def cog_unload(self):
+        self.subscription_expiry_loop.cancel()
+
+    # Раз в сутки гасит is_active у гильдий с истёкшей платной подпиской
+    # (database.get_expired_active_guilds — только subscription_expires_at
+    # IS NOT NULL, бессрочные ручные гильдии сюда не попадают). Доступ у их
+    # участников отваливается сразу же на следующем вызове команды —
+    # guild_resolver.resolve_access читает БД каждый раз, без кэша.
+    @tasks.loop(hours=24)
+    async def subscription_expiry_loop(self):
+        for g in database.get_expired_active_guilds():
+            database.update_guild_config(g["id"], is_active=0)
+            print(f"⏳ Подписка гильдии «{g['name']}» (id={g['id']}) истекла — доступ отключён.")
+
+    @subscription_expiry_loop.before_loop
+    async def before_subscription_expiry_loop(self):
+        await self.bot.wait_until_ready()
 
     # ------------------ /гильдия ------------------
     @commands.slash_command(name="гильдия", description="Управление списком обслуживаемых гильдий (только супер-админ)")
@@ -69,8 +89,10 @@ class AdminManagementCog(commands.Cog):
         lines = []
         for g in guilds:
             status = "✅" if g["is_active"] else "🚫"
+            expires = g.get("subscription_expires_at")
+            subscription = f"до `{expires[:10]}`" if expires else "бессрочно"
             lines.append(
-                f"{status} `{g['id']}` — **{g['name']}** "
+                f"{status} `{g['id']}` — **{g['name']}** ({subscription}) "
                 f"(Comlink: `{g['swgoh_guild_id'] or '—'}`, Discord-сервер: `{g['discord_guild_id']}`)"
             )
         embed = disnake.Embed(title="📋 Обслуживаемые гильдии", description="\n".join(lines), color=disnake.Color.blurple())
@@ -85,6 +107,20 @@ class AdminManagementCog(commands.Cog):
         await inter.response.defer(ephemeral=True)
         ok = deactivate_guild(гильдия_id)
         await inter.edit_original_response(content="✅ Гильдия деактивирована." if ok else "❌ Гильдия с таким ID не найдена.")
+
+    @guild_group.sub_command(name="подписка", description="Вручную продлить/выставить подписку гильдии (в обход оплаты)")
+    async def guild_subscription_extend(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        гильдия_id: int = commands.Param(description="Внутренний ID гильдии (см. /гильдия список)"),
+        дней: int = commands.Param(description="На сколько дней продлить (от текущего остатка, если он ещё не истёк)"),
+    ):
+        await inter.response.defer(ephemeral=True)
+        if database.get_guild_config(гильдия_id) is None:
+            await inter.edit_original_response(content="❌ Гильдия с таким ID не найдена.")
+            return
+        database.extend_guild_subscription(гильдия_id, дней, source="manual")
+        await inter.edit_original_response(content=f"✅ Подписка гильдии `{гильдия_id}` продлена на {дней} дн.")
 
     # ------------------ /админы ------------------
     @commands.slash_command(name="админы", description="Супер-админы и ручные гранты доступа (только супер-админ)")
