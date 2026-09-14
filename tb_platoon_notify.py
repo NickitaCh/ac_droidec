@@ -55,10 +55,17 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
     # Discord при попытке открыть DM с 9-значным "ID" (это был ally_code, не snowflake),
     # см. database.py::get_discord_id_for_ally — тот же паттерн уже используется в
     # tasks.py для личных уведомлений о задачах.
+    #
+    # get_all_registrations (ВСЕ регистрации, не только is_main) — намеренно, не
+    # get_all_main_registrations: у игрока может быть альт с собственными донат-слотами
+    # на ТБ, зарегистрированный на тот же Discord-аккаунт, что и мейн — прямой репорт
+    # пользователя 2026-09-15 ("Monstr... нет привязки Discord, но у него вроде 2
+    # аккаунта, один Monstr, другой Kozikgad") — альт, привязанный НЕ как основной,
+    # у get_all_main_registrations просто не находился и выглядел непривязанным.
     mappings = database.get_all_user_mappings(guild_id)
     name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
     discord_id_by_ally = {
-        ally_code: discord_id for discord_id, ally_code, _name in database.get_all_main_registrations(guild_id)
+        ally_code: discord_id for discord_id, ally_code, _name, _is_main in database.get_all_registrations(guild_id)
     }
 
     rows: dict[str, dict] = {}
@@ -85,14 +92,19 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
     return sorted(rows.values(), key=lambda r: r["name"])
 
 
-def format_dm_text(guild_name: str, plan_name: str, round_num: int, entries: list[dict]) -> str:
-    lines = [
-        f"📋 Твои взводы на ТБ «{guild_name}» — этап {round_num} (план «{plan_name}»):",
-        "",
-    ]
-    for entry in entries:
-        lines.append(f"• {entry['planet']}, взвод {entry['operation']} — {entry['unit']}")
-    lines.append("")
+def format_dm_text(guild_name: str, plan_name: str, round_num: int, player_rows: list[dict]) -> str:
+    """player_rows — 1+ строк build_player_rows на ОДИН discord_id (мейн + альт(ы) с
+    донат-слотами на этом этапе, см. send_broadcast) — при 2+ строках подписываем
+    каждый блок именем персонажа, чтобы было понятно, где какой аккаунт (прямой запрос
+    пользователя 2026-09-15), при одной строке — как раньше, без лишней подписи."""
+    lines = [f"📋 Твои взводы на ТБ «{guild_name}» — этап {round_num} (план «{plan_name}»):", ""]
+    multi = len(player_rows) > 1
+    for player_row in player_rows:
+        if multi:
+            lines.append(f"— {player_row['name']} —")
+        for entry in player_row["entries"]:
+            lines.append(f"• {entry['planet']}, взвод {entry['operation']} — {entry['unit']}")
+        lines.append("")
     lines.append("Если уже задонатил(а) — просто игнорируй это сообщение.")
     return "\n".join(lines)
 
@@ -118,27 +130,34 @@ async def send_broadcast(
     token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str],
 ) -> list[dict]:
     """Отправляет DM только тем ally_code из ally_codes, у кого есть назначение на этом
-    этапе И привязанный discord_id. Возвращает отчёт по каждому затронутому игроку:
+    этапе И привязанный discord_id. Мейн и альт(ы) одного Discord-аккаунта — ОДНО общее
+    DM с разбивкой по персонажу, а не по одному DM на каждого (прямой запрос пользователя
+    2026-09-15), поэтому группируем по discord_id перед отправкой. Возвращает отчёт по
+    каждому затронутому игроку (персонажу, не Discord-аккаунту):
     [{"ally_code", "name", "status": "sent"|"failed"|"skipped_no_discord", "detail"}, ...]."""
     guild_cfg = database.get_guild_config(guild_id) or {}
     guild_name = guild_cfg.get("name") or "гильдия"
     rows = await build_player_rows(guild_id, plan, round_num)
+    selected = [row for row in rows if row["ally_code"] in ally_codes]
 
+    by_discord: dict[str, list[dict]] = {}
     report = []
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        for row in rows:
-            if row["ally_code"] not in ally_codes:
-                continue
-            if not row["discord_id"]:
-                report.append({
-                    "ally_code": row["ally_code"], "name": row["name"],
-                    "status": "skipped_no_discord", "detail": "нет привязки Discord",
-                })
-                continue
-            text = format_dm_text(guild_name, plan["name"], round_num, row["entries"])
-            ok, detail = await _send_dm(client, token, row["discord_id"], text)
+    for row in selected:
+        if not row["discord_id"]:
             report.append({
                 "ally_code": row["ally_code"], "name": row["name"],
-                "status": "sent" if ok else "failed", "detail": detail,
+                "status": "skipped_no_discord", "detail": "нет привязки Discord",
             })
+            continue
+        by_discord.setdefault(row["discord_id"], []).append(row)
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for discord_id, player_rows in by_discord.items():
+            text = format_dm_text(guild_name, plan["name"], round_num, player_rows)
+            ok, detail = await _send_dm(client, token, discord_id, text)
+            for row in player_rows:
+                report.append({
+                    "ally_code": row["ally_code"], "name": row["name"],
+                    "status": "sent" if ok else "failed", "detail": detail,
+                })
     return report
