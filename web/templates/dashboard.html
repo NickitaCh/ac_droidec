@@ -56,12 +56,15 @@
                     <div class="pricing-card-period">в год</div>
                 </div>
             </div>
-            {% if bot_invite_url %}
-                <p class="landing-cta"><a class="button" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a></p>
-            {% endif %}
+            <p class="landing-cta">
+                <a class="button" href="/subscribe">💳 Подключить и оплатить</a>
+                {% if bot_invite_url %}
+                    <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a>
+                {% endif %}
+            </p>
             <ul class="landing-meta">
-                <li>Доступ открывается автоматически после оплаты</li>
-                <li><span class="badge badge-neutral">скоро</span> самостоятельная оплата — пока обсудите подключение напрямую</li>
+                <li>Доступ открывается автоматически в течение минуты после оплаты</li>
+                <li>Оплата — самостоятельно, картой, без переписки с кем-либо: код союзника + ID сервера на странице <a href="/subscribe">Подписка</a> (нужен вход через Discord)</li>
                 <li><a href="/oferta">Публичная оферта</a></li>
                 <li>Гильдии уже подключили бота? Смотрите <a href="/start">Начало работы</a> и <a href="/commands">Документацию</a></li>
             </ul>

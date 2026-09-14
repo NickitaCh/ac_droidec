@@ -194,7 +194,7 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 }
 .pricing-card-price { font-size: 1.6em; font-weight: 700; color: var(--fg); }
 .pricing-card-period { color: var(--fg-muted); font-size: 0.9em; }
-.landing-cta { margin: 1em 0 0.5em; }
+.landing-cta { margin: 1em 0 0.5em; display: flex; gap: 0.6em; flex-wrap: wrap; justify-content: center; }
 
 .landing-meta {
     max-width: 26em;
