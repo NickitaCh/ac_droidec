@@ -621,12 +621,16 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
             for slot in op["slots"]:
                 if not slot["assigned_ally_code"]:
                     continue
+                # "entries", не "items" — коллизия с dict.items() ловится в Jinja
+                # молча: {{ pl.items }} резолвится в getattr(pl, "items") (bound-метод
+                # словаря), а не в ключ "items", и падает TypeError при len() только в
+                # рантайме шаблона (найдено 2026-09-14 прямо на проде, см. трейсбек).
                 row = player_rows.setdefault(slot["assigned_ally_code"], {
                     "name": slot["assigned_name"],
                     "ally_code": slot["assigned_ally_code"],
-                    "items": [],
+                    "entries": [],
                 })
-                row["items"].append({
+                row["entries"].append({
                     "planet": pblock["name"],
                     "operation": op["number"],
                     "unit": slot["unit"],
@@ -636,7 +640,7 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
                 })
     player_blocks = sorted(player_rows.values(), key=lambda p: p["name"])
     for p in player_blocks:
-        p["items"].sort(key=lambda i: (i["planet"], i["operation"]))
+        p["entries"].sort(key=lambda i: (i["planet"], i["operation"]))
 
     view = request.query_params.get("view", "planet")
     if view not in ("planet", "player"):

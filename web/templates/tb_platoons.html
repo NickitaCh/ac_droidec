@@ -144,10 +144,10 @@
                 <details class="platoon-planet-block" open>
                     <summary class="platoon-planet-name">
                         {{ pl.name }}
-                        <span class="badge badge-neutral">{{ pl.items|length }}</span>
+                        <span class="badge badge-neutral">{{ pl.entries|length }}</span>
                     </summary>
                     <ul class="platoon-slot-list">
-                        {% for item in pl.items %}
+                        {% for item in pl.entries %}
                             <li class="platoon-slot{% if item.carried_over %} platoon-slot-carried{% endif %}">
                                 <a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ selected_round_num }}#{{ item.anchor }}">
                                     <strong>{{ item.planet }}</strong> — операция {{ item.operation }} — {{ item.unit }}
