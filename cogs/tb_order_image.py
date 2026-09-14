@@ -58,6 +58,7 @@ Dark=🔴, Mixed=🟡 (жёлтый, не оранжевый), Light=🔵, Bonus
 """
 
 import asyncio
+import os
 import re
 
 import disnake
@@ -66,6 +67,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import tb_platoon_autofill
+import tb_platoon_notify
 from cogs.guild_events import (
     TB_ORDER_STAGE_RE,
     _tb_order_stage_number,
@@ -563,6 +565,61 @@ class TBOrderImage(commands.Cog):
             f"публикации: `/тб_план выбрать`."
         )
 
+    @tb_plan_group.sub_command(
+        name="разослать_взводы",
+        description="Разослать назначенным игрокам их взводы на этап в личку Discord",
+    )
+    async def tb_plan_notify(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        этап: int = commands.Param(min_value=1, max_value=6, description="Номер этапа (1-6)"),
+        название: str = commands.Param(default=None, description="План — по умолчанию текущий активный", autocomplete=autocomplete_tb_plans),
+    ):
+        await inter.response.defer(ephemeral=True)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить гильдию.")
+            return
+
+        if название:
+            plan = database.get_tb_saved_plan_by_name(guild_id, название)
+            if plan is None:
+                await inter.edit_original_response(f"❌ План «{название}» не найден.")
+                return
+        else:
+            guild_cfg = database.get_guild_config(guild_id) or {}
+            if not guild_cfg.get("tb_active_plan_id"):
+                await inter.edit_original_response(
+                    "❌ Нет активного плана — укажите название или выберите его через `/тб_план выбрать`."
+                )
+                return
+            plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
+            if plan is None:
+                await inter.edit_original_response("❌ Активный план не найден (возможно, удалён) — укажите название явно.")
+                return
+
+        rows = await tb_platoon_notify.build_player_rows(guild_id, plan, этап)
+        if not rows:
+            await inter.edit_original_response(f"На этапе {этап} плана «{plan['name']}» никому не назначено ни одного слота.")
+            return
+
+        eligible = [r for r in rows if r["discord_id"]]
+        skipped = [r for r in rows if not r["discord_id"]]
+        if not eligible:
+            await inter.edit_original_response(
+                f"На этапе {этап} назначено {len(rows)} игрок(ов), но ни у кого из них нет привязки Discord "
+                f"(`/регистрация`) — рассылка невозможна."
+            )
+            return
+
+        summary = f"Этап {этап}, план «{plan['name']}» — получат сообщение: {len(eligible)} игрок(ов)."
+        if skipped:
+            summary += f" Без привязки Discord (пропущены всегда): {len(skipped)}."
+        summary += "\nМожно исключить конкретных игроков из выпадающих списков ниже — например тех, кто уже задонатил."
+
+        view = PlatoonNotifyView(guild_id, plan, этап, rows)
+        await inter.edit_original_response(content=summary, view=view)
+
     @tb_plan_group.sub_command(name="удалить", description="Удалить сохранённый план ордера ТБ")
     async def tb_plan_delete(
         self,
@@ -575,6 +632,79 @@ class TBOrderImage(commands.Cog):
             await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
             return
         await inter.response.send_message(f"🗑️ План «{название}» удалён.", ephemeral=True)
+
+
+# =====================================================================
+# Окно выбора получателей перед рассылкой взводов в личку (/тб_план разослать_взводы) —
+# по прямому запросу пользователя 2026-09-14: "окно, где можно указать, кому отправить
+# или кому НЕ отправлять, например при повторной отправке не тем, кто уже задонатил".
+# Бот не знает, кто реально уже задонатил в игре (Comlink это не отдаёт надёжно) —
+# исключение конкретных игроков офицер делает вручную через выпадающие списки.
+# Сообщение всегда ephemeral, поэтому проверка "кто нажал кнопку" не нужна — кроме
+# автора команды его вообще никто не видит.
+# =====================================================================
+class PlatoonNotifyView(disnake.ui.View):
+    # 4 select'а по 25 — оставляем 5-й ряд под кнопки (Discord: максимум 5 рядов
+    # компонентов на сообщение, один select занимает ряд целиком).
+    MAX_SELECTABLE = 100
+
+    def __init__(self, guild_id: int, plan: dict, round_num: int, rows: list[dict]):
+        super().__init__(timeout=600)
+        self.guild_id = guild_id
+        self.plan = plan
+        self.round_num = round_num
+        self.eligible = [r for r in rows if r["discord_id"]]
+        self.skipped_no_discord = [r for r in rows if not r["discord_id"]]
+        self._selects: list[disnake.ui.Select] = []
+
+        selectable = self.eligible[: self.MAX_SELECTABLE]
+        for start in range(0, len(selectable), 25):
+            chunk = selectable[start:start + 25]
+            select = disnake.ui.Select(
+                placeholder=f"Исключить из рассылки ({start + 1}-{start + len(chunk)})",
+                min_values=0, max_values=len(chunk),
+                options=[
+                    disnake.SelectOption(
+                        label=r["name"][:100], value=r["ally_code"],
+                        description=f"{len(r['entries'])} слот(ов)"[:100],
+                    )
+                    for r in chunk
+                ],
+            )
+            select.callback = self._on_select
+            self._selects.append(select)
+            self.add_item(select)
+
+    async def _on_select(self, interaction: disnake.MessageInteraction):
+        await interaction.response.defer()
+
+    @disnake.ui.button(label="Отправить", style=disnake.ButtonStyle.success, row=4)
+    async def send(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        excluded = {v for select in self._selects for v in (select.values or [])}
+        send_to = {r["ally_code"] for r in self.eligible} - excluded
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="⏳ Рассылаю...", view=self)
+
+        token = os.environ.get("DISCORD_TOKEN")
+        report = await tb_platoon_notify.send_broadcast(token, self.guild_id, self.plan, self.round_num, send_to)
+        sent = sum(1 for r in report if r["status"] == "sent")
+        failed = [r for r in report if r["status"] == "failed"]
+
+        lines = [f"✅ Отправлено: {sent} из {len(report)}."]
+        if excluded:
+            lines.append(f"⏭ Исключено вручную: {len(excluded)}.")
+        if self.skipped_no_discord:
+            lines.append(f"⚠️ Без привязки Discord (пропущены всегда): {len(self.skipped_no_discord)}.")
+        if failed:
+            lines.append("❌ Ошибки:\n" + "\n".join(f"— {r['name']}: {r['detail']}" for r in failed[:10]))
+        await interaction.edit_original_response(content="\n".join(lines), view=None)
+
+    @disnake.ui.button(label="Отмена", style=disnake.ButtonStyle.secondary, row=4)
+    async def cancel(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Рассылка отменена.", view=None)
 
 
 def setup(bot: commands.Bot):

@@ -94,6 +94,7 @@
             </form>
             <a class="button" href="/tb/platoons/export?plan_id={{ plan.id }}&round={{ selected_round_num }}">⬇ Скачать этап {{ selected_round_num }} (JSON для HotUtils)</a>
             <a class="button" href="/tb/platoons/export/all?plan_id={{ plan.id }}">⬇ Скачать все этапы (ZIP, по файлу на этап)</a>
+            <a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать взводы в личку</a>
         </p>
         <p class="muted platoon-export-hint">
             Формат — EchoBase Platoon Assigner, тот же, что импортирует HotUtils. Экспортируются

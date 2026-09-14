@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Рассылка взводов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Рассылка взводов в личку</h1>
+    <p class="muted"><a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ round_num }}">← Назад к конструктору взводов</a></p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if plan and not error %}
+        <p>
+            План: <strong>{{ plan.name }}</strong>, этап <strong>{{ round_num }}</strong>.
+            Каждому отмеченному игроку в личку Discord уйдёт текстовое сообщение со списком
+            его слотов (планета, взвод, юнит) на этом этапе.
+        </p>
+
+        {% if report %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>Результат рассылки</span>
+                    <span class="panel-hint">отправлено: {{ report|selectattr("status", "equalto", "sent")|list|length }} из {{ report|length }}</span>
+                </div>
+                <ul class="platoon-slot-list">
+                    {% for r in report %}
+                        <li class="platoon-slot">
+                            {% if r.status == "sent" %}
+                                <span class="badge badge-ok">✅ отправлено</span>
+                            {% elif r.status == "skipped_no_discord" %}
+                                <span class="badge badge-neutral">⏭ пропущен</span>
+                            {% else %}
+                                <span class="badge badge-danger">❌ ошибка</span>
+                            {% endif %}
+                            {{ r.name }}
+                            {% if r.status != "sent" %}<span class="muted">— {{ r.detail }}</span>{% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <p><a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ round_num }}">↻ Отправить ещё раз (например, тем, кто не получил)</a></p>
+        {% else %}
+            <form method="post" action="/tb/platoons/notify">
+                <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                <input type="hidden" name="round_num" value="{{ round_num }}">
+
+                {% if not rows %}
+                    <p class="empty-state">На этом этапе никому не назначено ни одного слота.</p>
+                {% else %}
+                    <p class="platoon-export-actions">
+                        <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = !c.disabled)">Отметить всех</button>
+                        <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = false)">Снять все отметки</button>
+                    </p>
+                    <div class="panel platoon-planet-panel">
+                        <div class="panel-title">
+                            <span>Кому отправить</span>
+                            <span class="panel-hint">игроков с назначениями: {{ rows|length }}</span>
+                        </div>
+                        <ul class="platoon-slot-list">
+                            {% for row in rows %}
+                                <li class="platoon-slot">
+                                    <label>
+                                        <input type="checkbox" class="checkbox notify-check" name="ally_codes"
+                                               value="{{ row.ally_code }}"
+                                               {% if row.discord_id %}checked{% else %}disabled{% endif %}>
+                                        {{ row.name }}
+                                        <span class="badge badge-neutral">{{ row.entries|length }} слот(ов)</span>
+                                        {% if not row.discord_id %}
+                                            <span class="badge badge-danger" title="Нет привязки Discord (/регистрация)">нет привязки Discord</span>
+                                        {% endif %}
+                                    </label>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <p><button type="submit" class="button">📨 Отправить в личку отмеченным</button></p>
+                {% endif %}
+            </form>
+        {% endif %}
+    {% endif %}
+{% endblock %}

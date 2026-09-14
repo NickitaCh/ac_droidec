@@ -22,6 +22,7 @@ import tb_platoon_autofill
 import tb_platoon_data
 import tb_platoon_engine
 import tb_platoon_filters
+import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, omicron_priority
 from services.config_status import config_warning_html
@@ -1156,6 +1157,56 @@ async def tb_platoons_export_all(request: Request, user: dict = Depends(require_
     safe_plan_name = re.sub(r'[\\/:*?"<>|]+', "_", plan["name"]).strip() or "plan"
     zip_name = f"echobase-assignments-ROTE-{safe_plan_name}.zip"
     return Response(content=buffer.getvalue(), media_type="application/zip", headers=_attachment_headers(zip_name))
+
+
+@router.get("/tb/platoons/notify", response_class=HTMLResponse)
+async def tb_platoons_notify_page(request: Request, user: dict = Depends(require_guild_access)):
+    """Страница выбора получателей перед рассылкой взводов в личку — по прямому запросу
+    пользователя 2026-09-14 ("окно, где можно указать, кому отправить или кому НЕ
+    отправлять", например при повторной отправке не всем, кто уже задонатил). Кто уже
+    реально задонатил в игре бот не знает (Comlink это не отдаёт) — исключение получателей
+    при повторной отправке офицер делает вручную, просто снимая галочки."""
+    guild_id = user["guild_id"]
+    plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
+    try:
+        round_num = int(request.query_params.get("round", ""))
+    except ValueError:
+        round_num = None
+    if plan is not None and round_num is None:
+        error = "Не выбран этап — вернитесь в конструктор взводов и выберите этап."
+
+    rows = await tb_platoon_notify.build_player_rows(guild_id, plan, round_num) if plan and round_num else []
+    return templates.TemplateResponse(request, "tb_platoon_notify.html", {
+        "user": user, "plan": plan, "round_num": round_num, "rows": rows, "error": error, "report": None,
+    })
+
+
+@router.post("/tb/platoons/notify", response_class=HTMLResponse)
+async def tb_platoons_notify_send(
+    request: Request,
+    plan_id: int = Form(...),
+    round_num: int = Form(...),
+    ally_codes: list[str] = Form([]),
+    user: dict = Depends(require_guild_access),
+):
+    guild_id = user["guild_id"]
+    plan = database.get_tb_saved_plan(plan_id)
+    if not plan or plan["guild_id"] != guild_id:
+        return templates.TemplateResponse(request, "tb_platoon_notify.html", {
+            "user": user, "plan": None, "round_num": round_num, "rows": [], "error": "План не найден.", "report": None,
+        })
+
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return templates.TemplateResponse(request, "tb_platoon_notify.html", {
+            "user": user, "plan": plan, "round_num": round_num, "rows": [],
+            "error": "DISCORD_TOKEN не настроен на сервере — рассылка недоступна.", "report": None,
+        })
+
+    report = await tb_platoon_notify.send_broadcast(token, guild_id, plan, round_num, set(ally_codes))
+    return templates.TemplateResponse(request, "tb_platoon_notify.html", {
+        "user": user, "plan": plan, "round_num": round_num, "rows": [], "error": None, "report": report,
+    })
 
 
 # Пагинация "1 страница = 1 календарный день" (а не фиксированное число строк) — так
