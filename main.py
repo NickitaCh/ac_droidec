@@ -344,7 +344,13 @@ async def check_guild_roles_slash(inter):
 async def on_slash_command_completion(inter: disnake.ApplicationCommandInteraction):
     # Считаем по "чистому" qualified_name (группа+сабкоманда), без параметров
     # вызова — для статистики "какими командами пользуются" на /admin/command-usage.
-    database.log_command_usage(inter.application_command.qualified_name)
+    # guild_id — тот же резолв по игровому рангу, что и в правах доступа (не
+    # inter.guild_id — тот привязан к Discord-серверу, а не к SWGOH-гильдии, и None
+    # в ЛС), чтобы статистику можно было посмотреть по гильдии отдельно.
+    database.log_command_usage(
+        inter.application_command.qualified_name,
+        guild_id=guild_resolver.resolve_guild_id(inter.author),
+    )
 
 def _access_denied_message(inter: disnake.ApplicationCommandInteraction, tier: str | None) -> str:
     """Короткий онбординг вместо голого "доступа нет" — объясняет конкретно ПОЧЕМУ

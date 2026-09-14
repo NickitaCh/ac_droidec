@@ -39,6 +39,7 @@
         {% if round_options %}
             <form method="get" class="platoon-plan-switch">
                 {% if plan %}<input type="hidden" name="plan_id" value="{{ plan.id }}">{% endif %}
+                {% if view != "planet" %}<input type="hidden" name="view" value="{{ view }}">{% endif %}
                 <label for="round-select">Этап</label>
                 <select id="round-select" name="round" onchange="this.form.submit()">
                     {% for r in round_options %}
@@ -47,6 +48,24 @@
                 </select>
                 <noscript><button type="submit">Показать</button></noscript>
             </form>
+        {% endif %}
+
+        {% if planets %}
+            {% set base_qs = ("plan_id=" ~ plan.id if plan else "") ~ ("&round=" ~ selected_round_num if selected_round_num else "") %}
+            <div class="segmented-toggle">
+                <div class="segmented-toggle-options">
+                    {% if view == "planet" %}
+                        <strong>По планетам</strong>
+                    {% else %}
+                        <a href="/tb/platoons?{{ base_qs }}">По планетам</a>
+                    {% endif %}
+                    {% if view == "player" %}
+                        <strong>По игрокам</strong>
+                    {% else %}
+                        <a href="/tb/platoons?{{ base_qs }}&view=player">По игрокам</a>
+                    {% endif %}
+                </div>
+            </div>
         {% endif %}
     </div>
 
@@ -112,7 +131,39 @@
         <p class="empty-state">В плане не нашлось ни одной планеты.</p>
     {% endif %}
 
-    {% if planets %}
+    {% if planets and view == "player" %}
+        <div class="panel platoon-planet-panel">
+            <div class="panel-title">
+                <span>Этап {{ selected_round_num }} — по игрокам</span>
+                <span class="panel-hint">игроков с назначениями: {{ players|length }}</span>
+            </div>
+            {% if not players %}
+                <p class="empty-state">На этом этапе пока никому не назначен слот.</p>
+            {% endif %}
+            {% for pl in players %}
+                <details class="platoon-planet-block" open>
+                    <summary class="platoon-planet-name">
+                        {{ pl.name }}
+                        <span class="badge badge-neutral">{{ pl.items|length }}</span>
+                    </summary>
+                    <ul class="platoon-slot-list">
+                        {% for item in pl.items %}
+                            <li class="platoon-slot{% if item.carried_over %} platoon-slot-carried{% endif %}">
+                                <a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ selected_round_num }}#{{ item.anchor }}">
+                                    <strong>{{ item.planet }}</strong> — операция {{ item.operation }} — {{ item.unit }}
+                                </a>
+                                {% if item.carried_over %}
+                                    <span class="badge badge-neutral" title="Назначено на этапе {{ item.assigned_round_num }}">🔒 этап {{ item.assigned_round_num }}</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if planets and view == "planet" %}
         <div class="panel platoon-planet-panel">
             <div class="panel-title">
                 <span>Этап {{ selected_round_num }}</span>

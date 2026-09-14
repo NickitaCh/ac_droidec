@@ -609,11 +609,46 @@ async def tb_platoons(request: Request, user: dict = Depends(require_guild_acces
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_plan_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
 
+    # Вид "по игрокам" — та же построенная planet_blocks, просто перегруппированная
+    # по assigned_ally_code вместо планеты/операции — по прямому запросу пользователя
+    # 2026-09-14 ("кто какого персонажа и куда ставит"), только для выбранного этапа.
+    # Переключатель вида не трогает БД и не пересчитывает slot_candidates.
+    player_rows: dict[str, dict] = {}
+    for pblock in planet_blocks:
+        if pblock["unresolved"] or pblock["no_platoons"]:
+            continue
+        for op in pblock["operations"]:
+            for slot in op["slots"]:
+                if not slot["assigned_ally_code"]:
+                    continue
+                row = player_rows.setdefault(slot["assigned_ally_code"], {
+                    "name": slot["assigned_name"],
+                    "ally_code": slot["assigned_ally_code"],
+                    "items": [],
+                })
+                row["items"].append({
+                    "planet": pblock["name"],
+                    "operation": op["number"],
+                    "unit": slot["unit"],
+                    "carried_over": slot["carried_over"],
+                    "assigned_round_num": slot["assigned_round_num"],
+                    "anchor": slot["anchor"],
+                })
+    player_blocks = sorted(player_rows.values(), key=lambda p: p["name"])
+    for p in player_blocks:
+        p["items"].sort(key=lambda i: (i["planet"], i["operation"]))
+
+    view = request.query_params.get("view", "planet")
+    if view not in ("planet", "player"):
+        view = "planet"
+
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
         "round_options": round_options,
         "selected_round_num": selected_round_num,
         "planets": planet_blocks,
+        "players": player_blocks,
+        "view": view,
         "error": error,
         "plan": plan,
         "saved_plans": saved_plans,

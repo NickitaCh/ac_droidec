@@ -208,7 +208,24 @@ async def access_log_page(request: Request, user: dict = Depends(require_super_a
 
 @router.get("/command-usage", response_class=HTMLResponse)
 async def command_usage_page(request: Request, user: dict = Depends(require_super_admin)):
-    usage = database.get_command_usage_counts()
+    # По умолчанию — сумма по всем гильдиям (как было исходно). ?guild_id=<id> —
+    # только эта гильдия, ?guild_id=0 — sentinel-бакет "гильдия не определена"
+    # (см. database.py::_ensure_command_usage_table) — по прямому запросу
+    # пользователя 2026-09-14, супер-админам нужна не только общая статистика, но
+    # и разбивка по гильдии.
+    guild_id_param = request.query_params.get("guild_id")
+    selected_guild_id: int | None = None
+    if guild_id_param not in (None, "", "all"):
+        try:
+            selected_guild_id = int(guild_id_param)
+        except ValueError:
+            selected_guild_id = None
+
+    if selected_guild_id is None:
+        usage = database.get_command_usage_counts()
+    else:
+        usage = database.get_command_usage_counts_by_guild(selected_guild_id)
+
     known_names = {name for _, cmds in COMMAND_GROUPS for name, _ in cmds}
     groups = [
         {
@@ -235,10 +252,22 @@ async def command_usage_page(request: Request, user: dict = Depends(require_supe
     ]
     if unknown_rows:
         groups.append({"title": "Не в каталоге (проверьте command_catalog.py)", "rows": unknown_rows})
+
+    logged_guild_ids = set(database.get_command_usage_guild_ids())
+    guild_options = [
+        {"id": g["id"], "name": g["name"]}
+        for g in database.get_all_guild_configs(active_only=False)
+        if g["id"] in logged_guild_ids
+    ]
+    if database.get_command_usage_counts_by_guild(0):
+        guild_options.append({"id": 0, "name": "Гильдия не определена (ЛС и т.п.)"})
+
     return templates.TemplateResponse(request, "admin_command_usage.html", {
         "user": user,
         "groups": groups,
         "total_calls": sum(r["count"] for g in groups for r in g["rows"]),
+        "guild_options": guild_options,
+        "selected_guild_id": selected_guild_id,
     })
 
 

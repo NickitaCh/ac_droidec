@@ -813,9 +813,26 @@ def _ensure_command_usage_table(cursor):
             last_used_at TEXT
         )
     """)
+    # Разбивка по гильдиям добавлена 2026-09-14 — по прямому запросу пользователя
+    # ("не только в целом, но и по гильдии"). Отдельная таблица, не колонка в
+    # command_usage: один command_name должен допускать много строк — по одной на
+    # гильдию, плюс sentinel-строка guild_id=0 на вызовы, для которых гильдию не
+    # удалось определить (main.py::on_slash_command_completion, например в ЛС без
+    # регистрации) — NULL здесь не годится: NULL в составном PRIMARY KEY в SQLite не
+    # считается равным другому NULL, ON CONFLICT-upsert перестал бы дедуплицировать
+    # такие строки.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS command_usage_by_guild (
+            command_name TEXT NOT NULL,
+            guild_id INTEGER NOT NULL,
+            usage_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at TEXT,
+            PRIMARY KEY (command_name, guild_id)
+        )
+    """)
 
 
-def log_command_usage(command_name: str) -> None:
+def log_command_usage(command_name: str, guild_id: int | None = None) -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_command_usage_table(cursor)
@@ -826,12 +843,20 @@ def log_command_usage(command_name: str) -> None:
             usage_count = usage_count + 1,
             last_used_at = excluded.last_used_at
     """, (command_name,))
+    cursor.execute("""
+        INSERT INTO command_usage_by_guild (command_name, guild_id, usage_count, last_used_at)
+        VALUES (?, ?, 1, datetime('now'))
+        ON CONFLICT(command_name, guild_id) DO UPDATE SET
+            usage_count = usage_count + 1,
+            last_used_at = excluded.last_used_at
+    """, (command_name, guild_id or 0))
     conn.commit()
     conn.close()
 
 
 def get_command_usage_counts() -> dict:
-    """{command_name: {"count": int, "last_used_at": str}} — только когда-либо вызывавшиеся команды."""
+    """{command_name: {"count": int, "last_used_at": str}} — только когда-либо вызывавшиеся команды,
+    по всем гильдиям сразу (как было исходно)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_command_usage_table(cursor)
@@ -839,6 +864,35 @@ def get_command_usage_counts() -> dict:
     rows = cursor.fetchall()
     conn.close()
     return {r[0]: {"count": r[1], "last_used_at": r[2]} for r in rows}
+
+
+def get_command_usage_counts_by_guild(guild_id: int | None) -> dict:
+    """То же самое, но только по одной гильдии — guild_id=None (или 0) отдаёт
+    sentinel-бакет "гильдия не определена" (ЛС без регистрации и т.п.), см.
+    _ensure_command_usage_table."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_command_usage_table(cursor)
+    cursor.execute(
+        "SELECT command_name, usage_count, last_used_at FROM command_usage_by_guild WHERE guild_id = ?",
+        (guild_id or 0,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {r[0]: {"count": r[1], "last_used_at": r[2]} for r in rows}
+
+
+def get_command_usage_guild_ids() -> list[int]:
+    """Гильдии (id), для которых хоть раз была залогирована команда — не включает
+    sentinel guild_id=0 ("гильдия не определена"). Для выпадашки на
+    /admin/command-usage."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_command_usage_table(cursor)
+    cursor.execute("SELECT DISTINCT guild_id FROM command_usage_by_guild WHERE guild_id != 0 ORDER BY guild_id")
+    rows = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in rows]
 
 
 def get_username_for_discord_id(discord_id: str) -> str | None:

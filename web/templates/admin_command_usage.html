@@ -3,7 +3,20 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <h1>Использование команд</h1>
-    <p class="muted">Счётчик вызовов слэш-команд по имени команды (сабкоманды считаются отдельно), без учёта параметров. Копится с момента добавления этой страницы — история до неё не восстановима. Всего вызовов: {{ total_calls }}.</p>
+    <p class="muted">Счётчик вызовов слэш-команд по имени команды (сабкоманды считаются отдельно), без учёта параметров. Копится с момента добавления этой страницы — история до неё не восстановима. Разбивка по гильдии копится с 2026-09-14 — старые вызовы туда не попали, только в общий счётчик. Всего вызовов{% if selected_guild_id is not none %} (выбранная гильдия){% endif %}: {{ total_calls }}.</p>
+
+    {% if guild_options %}
+        <form method="get" class="platoon-plan-switch">
+            <label for="guild-select">Гильдия</label>
+            <select id="guild-select" name="guild_id" onchange="this.form.submit()">
+                <option value="all" {% if selected_guild_id is none %}selected{% endif %}>Все гильдии</option>
+                {% for g in guild_options %}
+                    <option value="{{ g.id }}" {% if selected_guild_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                {% endfor %}
+            </select>
+            <noscript><button type="submit">Показать</button></noscript>
+        </form>
+    {% endif %}
 
     {% for group in groups %}
         <div class="panel">

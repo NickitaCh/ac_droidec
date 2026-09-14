@@ -119,6 +119,11 @@
             </div>
 
             <div class="panel">
+                <div class="panel-title"><span>✅ Полностью соответствуют</span><span class="panel-hint">{{ guild_report.compliant|length }}</span></div>
+                <p>{{ guild_report.compliant|map(attribute="name")|join(", ") if guild_report.compliant else "—" }}</p>
+            </div>
+
+            <div class="panel">
                 <div class="panel-title"><span>❌ Есть проблемы</span><span class="panel-hint">{{ guild_report.problem|length }}</span></div>
                 {% if not guild_report.problem %}
                     <p class="empty-state">Все закрыли все требования! 🎉</p>
@@ -146,11 +151,6 @@
                         </table>
                     </div>
                 {% endif %}
-            </div>
-
-            <div class="panel">
-                <div class="panel-title"><span>✅ Полностью соответствуют</span><span class="panel-hint">{{ guild_report.compliant|length }}</span></div>
-                <p>{{ guild_report.compliant|map(attribute="name")|join(", ") if guild_report.compliant else "—" }}</p>
             </div>
 
             {% if guild_report.no_data %}

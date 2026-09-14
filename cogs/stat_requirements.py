@@ -1097,6 +1097,9 @@ class StatRequirementsCog(commands.Cog):
             if report["no_data"]:
                 lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
             lines.append("")
+            if report["compliant"]:
+                lines.append("✅ " + ", ".join(r["name"] for r in report["compliant"]))
+                lines.append("")
             if report["problem"]:
                 for r in report["problem"]:
                     lines.append(f"❌ {r['name']} — {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
