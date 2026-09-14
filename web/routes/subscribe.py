@@ -23,13 +23,16 @@ main.py::_access_denied_message) годами обещали "подключит
 что и у самой Discord-команды (там вообще нет проверки роли/ранга, только
 ALWAYS_ALLOWED_COMMANDS + inter.guild_id is not None)."""
 
+import os
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+from services import discord_invite
 from services.guild_admin import add_guild
 from services.payments import PERIOD_CHOICES, build_payment_link
 from web.deps import get_current_user
@@ -45,6 +48,36 @@ def _get_comlink():
     # строит свой поверх того же comlink-сайдкара.
     from swgoh_comlink import SwgohComlink
     return SwgohComlink(url="http://localhost:3000")
+
+
+async def _verify_bot_in_guild(discord_guild_id: str) -> tuple[bool, str | None]:
+    """Проверяет, что бот реально состоит на введённом вручную Discord-сервере
+    (GET /guilds/{id} токеном бота — тот же паттерн, что и
+    guild_dashboard.py::_fetch_discord_channel). В отличие от /гильдия_заявка
+    в самом Discord (discord_guild_id там = inter.guild_id, всегда настоящий),
+    здесь это единственное место в проекте, где ID Discord-сервера вводится
+    руками — без этой проверки форма раньше принимала любые цифры и заводила
+    неактивную гильдию-заявку с мёртвым discord_guild_id, которая потом
+    молча ничего не могла настроить (каналы/роли резолвятся по нему).
+    Возвращает (True, None) если бот на сервере, иначе (False, сообщение_для_пользователя).
+    При отсутствии DISCORD_TOKEN в окружении (не должно случаться на проде,
+    см. CLAUDE.md) не блокируем заявку — тот же fallback, что в guild_dashboard.py."""
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return True, None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://discord.com/api/v10/guilds/{discord_guild_id}",
+                headers={"Authorization": f"Bot {token}"},
+            )
+    except httpx.HTTPError:
+        return True, None  # сбой связи с Discord — не блокируем заявку из-за инфраструктуры
+    if resp.status_code == 200:
+        return True, None
+    invite_url = discord_invite.build_invite_url()
+    invite_hint = f" Пригласить бота: {invite_url}" if invite_url else ""
+    return False, f"Бот не найден на Discord-сервере с ID {discord_guild_id} — проверьте ID или сначала пригласите туда бота.{invite_hint}"
 
 
 def _renewal_guild(user: dict) -> dict | None:
@@ -94,8 +127,15 @@ async def subscribe_submit(
         if len(clean_code) != 9:
             context["error"] = "Код союзника должен состоять ровно из 9 цифр."
             return templates.TemplateResponse(request, "subscribe.html", context)
-        if not clean_discord_id:
-            context["error"] = "Укажите ID Discord-сервера вашей гильдии (ПКМ по иконке сервера → Копировать ID, нужен включённый режим разработчика в Discord)."
+        # Discord snowflake ID — 64-битное число, у реальных ID сейчас 18-19 цифр
+        # (минимум за всю историю Discord — 17); 17-20 даёт небольшой запас на будущее
+        # без риска пропустить откровенный мусор вроде "123" или вставленный код союзника.
+        if not (17 <= len(clean_discord_id) <= 20):
+            context["error"] = "ID Discord-сервера должен быть 17-20-значным числом (ПКМ по иконке сервера → Копировать ID, нужен включённый режим разработчика в Discord)."
+            return templates.TemplateResponse(request, "subscribe.html", context)
+        bot_present, bot_error = await _verify_bot_in_guild(clean_discord_id)
+        if not bot_present:
+            context["error"] = bot_error
             return templates.TemplateResponse(request, "subscribe.html", context)
 
         comlink = _get_comlink()

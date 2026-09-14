@@ -55,7 +55,9 @@
                 </label>
                 <label>
                     ID Discord-сервера
-                    <input type="text" name="discord_guild_id" placeholder="123456789012345678" required>
+                    <input type="text" name="discord_guild_id" placeholder="123456789012345678"
+                           pattern="[0-9]{17,20}" maxlength="20" inputmode="numeric"
+                           title="17-20 цифр — ПКМ по иконке сервера → Копировать ID" required>
                 </label>
                 <label>
                     Период
