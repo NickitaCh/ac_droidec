@@ -253,11 +253,13 @@ async def command_usage_page(request: Request, user: dict = Depends(require_supe
     if unknown_rows:
         groups.append({"title": "Не в каталоге (проверьте command_catalog.py)", "rows": unknown_rows})
 
-    logged_guild_ids = set(database.get_command_usage_guild_ids())
+    # Все подключённые гильдии, не только те, у кого уже есть залогированные вызовы —
+    # супер-админ должен видеть весь список сразу (прямой запрос пользователя
+    # 2026-09-14: "остальные подключённые? супер админы должны видеть все гильдии"),
+    # выбор гильдии без вызовов просто покажет нули по всем командам.
     guild_options = [
         {"id": g["id"], "name": g["name"]}
-        for g in database.get_all_guild_configs(active_only=False)
-        if g["id"] in logged_guild_ids
+        for g in database.get_all_guild_configs(active_only=True)
     ]
     if database.get_command_usage_counts_by_guild(0):
         guild_options.append({"id": 0, "name": "Гильдия не определена (ЛС и т.п.)"})

@@ -882,19 +882,6 @@ def get_command_usage_counts_by_guild(guild_id: int | None) -> dict:
     return {r[0]: {"count": r[1], "last_used_at": r[2]} for r in rows}
 
 
-def get_command_usage_guild_ids() -> list[int]:
-    """Гильдии (id), для которых хоть раз была залогирована команда — не включает
-    sentinel guild_id=0 ("гильдия не определена"). Для выпадашки на
-    /admin/command-usage."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    _ensure_command_usage_table(cursor)
-    cursor.execute("SELECT DISTINCT guild_id FROM command_usage_by_guild WHERE guild_id != 0 ORDER BY guild_id")
-    rows = cursor.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
-
-
 def get_username_for_discord_id(discord_id: str) -> str | None:
     """Лучшее известное отображаемое имя для чужого discord_id (не текущего
     залогиненного user — для него имя уже есть в сессии) — используется в
