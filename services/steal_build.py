@@ -9,16 +9,15 @@
 cogs.stat_requirements._build_synthetic_unit, тот же синтетический юнит, что уже строит
 /статы_релик) — получившееся отношение и есть "прирост от модов" в среднем по гильдии.
 
-Каждого участника ЧУЖОЙ гильдии приходится тянуть живым comlink.get_player (services.
-activity_diff.fetch_player_units) — в отличие от /mod-search и /статы, эти игроки не лежат в
-нашей player_unit_cache (синк покрывает только зарегистрированные у нас гильдии), поэтому
-расчёт на крупной гильдии (~50 участников, сеть по одному) может занять до минуты."""
+Каждого участника ЧУЖОЙ гильдии приходится тянуть живым comlink.get_player(player_id=...) —
+в отличие от /mod-search и /статы, эти игроки не лежат в нашей player_unit_cache (синк
+покрывает только зарегистрированные у нас гильдии), поэтому расчёт на крупной гильдии
+(~50 участников, сеть по одному) может занять до минуты."""
 
 import asyncio
 from dataclasses import dataclass, field
 
 import stat_engine
-from services import activity_diff
 from cogs.stat_requirements import STAT_CHOICES, _build_synthetic_unit
 
 # Те же строки, что показывает /mod-builder (STAT_CHOICES без Relic — уровень реликвии тут
@@ -32,7 +31,7 @@ class GuildLookupResult:
     error: str = None
     swgoh_guild_id: str = None
     guild_name: str = None
-    members: list = field(default_factory=list)  # [(ally_code, player_name), ...]
+    members: list = field(default_factory=list)  # [(player_id, player_name), ...]
 
 
 def _fmt_value(value: float) -> str:
@@ -68,15 +67,20 @@ async def resolve_guild(comlink, ally_code: str) -> GuildLookupResult:
         return GuildLookupResult(ok=False, error="Этот игрок не состоит ни в одной гильдии SWGOH.")
 
     try:
-        guild = await asyncio.to_thread(comlink.get_guild, swgoh_guild_id)
+        guild = await asyncio.to_thread(
+            comlink.get_guild, swgoh_guild_id, include_recent_guild_activity_info=True
+        )
     except Exception as e:
         return GuildLookupResult(ok=False, error=f"Не удалось получить данные гильдии из Comlink: {e}")
     guild = guild.get("guild", guild)
     profile = guild.get("profile", {})
     name = profile.get("name") or f"Гильдия {swgoh_guild_id}"
+    # comlink.get_guild's member[] не содержит allyCode вообще (проверено вживую 2026-09-14,
+    # тот же приём, что cogs/violations.py::update_roster_cache уже использует для СВОИХ гильдий) —
+    # только playerId, по нему и тянем ростер участника в build_report.
     members = [
-        (str(m["allyCode"]), m.get("playerName") or "")
-        for m in guild.get("member", []) if m.get("allyCode")
+        (m["playerId"], m.get("playerName") or "")
+        for m in guild.get("member", []) if m.get("playerId")
     ]
     return GuildLookupResult(ok=True, swgoh_guild_id=str(swgoh_guild_id), guild_name=name, members=members)
 
@@ -90,12 +94,18 @@ async def build_report(comlink, stat_calc, base_id: str, guild: GuildLookupResul
     contributors = 0
     fetch_errors = 0
 
-    for ally_code, _player_name in guild.members:
+    for player_id, _player_name in guild.members:
         try:
-            units = await activity_diff.fetch_player_units(comlink, ally_code)
+            player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
         except Exception:
             fetch_errors += 1
             continue
+        roster = player_data.get("rosterUnit") or player_data.get("roster") or []
+        units = {}
+        for u in roster:
+            unit_base_id = u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]
+            if unit_base_id:
+                units[unit_base_id] = u
         unit = units.get(base_id)
         if not unit:
             continue  # персонаж не открыт у этого участника — не считаем его в среднее
