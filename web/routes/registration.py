@@ -51,14 +51,25 @@ async def submit_registration(
     is_alt: bool = Form(False),
     discord_id_search: str = Form(""),
     discord_id_manual: str = Form(""),
+    next: str = Form("/registration"),
     user: dict = Depends(require_guild_access),
 ):
     # Веб-дашборд уже целиком officer-only (require_guild_access), поэтому, в отличие
     # от бота (где /регистрация участник:@X отдельно проверяет is_officer_for_resolved_guild),
     # доп. проверка роли тут не нужна — сюда и так не попасть без офицерского тира.
+    # `next` — куда редиректить после сабмита: сама форма на /registration, но виджет
+    # "Состав гильдии" на главной (dashboard.html, попап register-link-dialog) шлёт
+    # next=/, чтобы вернуть офицера туда же. На /registration используем error/registered_name
+    # (их читает registration.html), а для любого другого next — отдельные имена
+    # link_error/linked_name, чтобы не путать с "/?error=" — тем читает главная для ошибок
+    # входа через Discord (см. web/auth.py).
+    is_default_target = next == "/registration"
+    error_key = "error" if is_default_target else "link_error"
+    success_key = "registered_name" if is_default_target else "linked_name"
+
     target_discord_id = (discord_id_search or discord_id_manual).strip()
     if target_discord_id and not target_discord_id.isdigit():
-        return RedirectResponse(f"/registration?{urlencode({'error': 'Discord ID должен состоять только из цифр'})}", status_code=303)
+        return RedirectResponse(f"{next}?{urlencode({error_key: 'Discord ID должен состоять только из цифр'})}", status_code=303)
     target_discord_id = target_discord_id or user["discord_id"]
 
     comlink = _get_comlink()
@@ -67,6 +78,6 @@ async def submit_registration(
     # services/registration.py::register_player про allow_reassign.
     result = await register_player(comlink, target_discord_id, ally_code, is_alt=is_alt, allow_reassign=True)
     if not result.ok:
-        return RedirectResponse(f"/registration?{urlencode({'error': result.error})}", status_code=303)
-    params = {"registered_name": result.ingame_name} if target_discord_id != user["discord_id"] else {}
-    return RedirectResponse(f"/registration?{urlencode(params)}" if params else "/registration", status_code=303)
+        return RedirectResponse(f"{next}?{urlencode({error_key: result.error})}", status_code=303)
+    params = {success_key: result.ingame_name} if target_discord_id != user["discord_id"] else {}
+    return RedirectResponse(f"{next}?{urlencode(params)}" if params else next, status_code=303)

@@ -793,4 +793,28 @@ document.addEventListener("DOMContentLoaded", () => {
         closeBtn.addEventListener("click", () => dialog.close());
         dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
     })();
+
+    // ---- Попап привязки Discord из виджета "Состав гильдии" на главной — клик по
+    // бейджу "не привязан" (data-register-link-btn) открывает форму /registration
+    // (POST) с уже заполненным ally_code, офицеру остаётся указать только Discord ID.
+    (() => {
+        const dialog = document.getElementById("register-link-dialog");
+        if (!dialog) return;
+        const nameEl = document.getElementById("register-link-name");
+        const allyCodeDisplayEl = document.getElementById("register-link-ally-code-display");
+        const allyCodeInput = document.getElementById("register-link-ally-code");
+        const cancelBtn = document.getElementById("register-link-cancel");
+
+        document.querySelectorAll("[data-register-link-btn]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                nameEl.textContent = btn.dataset.name;
+                allyCodeDisplayEl.textContent = btn.dataset.allyCode;
+                allyCodeInput.value = btn.dataset.allyCode;
+                dialog.showModal();
+            });
+        });
+
+        cancelBtn.addEventListener("click", () => dialog.close());
+        dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+    })();
 });

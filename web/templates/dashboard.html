@@ -127,6 +127,12 @@
                     <h2>👥 Состав гильдии</h2>
                     <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
                 </div>
+                {% if link_error %}
+                    <p class="error">{{ link_error }}</p>
+                {% endif %}
+                {% if linked_name %}
+                    <p class="empty-state" style="padding: 0;">Готово — {{ linked_name }} привязан(а) к Discord.</p>
+                {% endif %}
                 {% if not widgets.roster_rows %}
                     <p class="widget-empty">Состав пуст — кэш ростера ещё не синхронизировался с Comlink.</p>
                 {% else %}
@@ -161,7 +167,8 @@
                                             {% if row.registered %}
                                                 <span class="badge badge-ok">привязан</span>
                                             {% else %}
-                                                <span class="badge badge-neutral">не привязан</span>
+                                                <button type="button" class="badge badge-neutral badge-clickable" data-register-link-btn
+                                                        data-ally-code="{{ row.ally_code }}" data-name="{{ row.ingame_name }}">не привязан</button>
                                             {% endif %}
                                         </td>
                                     </tr>
@@ -440,5 +447,22 @@
             </div>
             </div>
         </div>
+
+        <dialog id="register-link-dialog" class="confirm-dialog">
+            <h3>Привязать Discord</h3>
+            <p><strong id="register-link-name"></strong> · код союзника <code id="register-link-ally-code-display"></code></p>
+            <form method="post" action="/registration">
+                <input type="hidden" name="ally_code" id="register-link-ally-code">
+                <input type="hidden" name="next" value="/">
+                <label>
+                    Discord ID участника
+                    <input type="text" name="discord_id_manual" placeholder="например 123456789012345678" pattern="[0-9]+" required>
+                </label>
+                <div class="dialog-actions">
+                    <button type="button" class="button-secondary" id="register-link-cancel">Отмена</button>
+                    <button type="submit">Привязать</button>
+                </div>
+            </form>
+        </dialog>
     {% endif %}
 {% endblock %}

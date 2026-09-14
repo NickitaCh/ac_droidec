@@ -793,6 +793,8 @@ select { background: var(--page); }
 .badge-neutral { background: var(--surface-2); color: var(--fg-secondary); }
 .badge-danger { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
 .badge-warn { background: color-mix(in srgb, var(--status-warning) 20%, transparent); color: var(--status-warning); }
+.badge-clickable { border: none; font: inherit; cursor: pointer; }
+.badge-clickable:hover { text-decoration: underline; }
 
 /* ---- Бейджи по типу изменения на /activity (services/dashboard_data.py::ACTIVITY_ACTION_CLASSES) ---- */
 .badge-gear { background: color-mix(in srgb, var(--series-1) 16%, transparent); color: var(--series-1); }

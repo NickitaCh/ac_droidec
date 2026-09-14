@@ -168,6 +168,8 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "config_missing": missing_summary(guild_cfg) if widgets else None,
         "synced_now": request.query_params.get("synced"),
         "error": error,
+        "link_error": request.query_params.get("link_error"),
+        "linked_name": request.query_params.get("linked_name"),
         "access_status_message": dashboard_data.access_status_message(user) if user and user.get("tier") != "officer" else None,
         "bot_invite_url": discord_invite.build_invite_url() if not user else None,
         # Реквизиты/тарифы/оферта Prodamus нужны только на публичной посадочной
