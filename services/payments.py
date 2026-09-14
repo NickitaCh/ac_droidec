@@ -137,7 +137,19 @@ async def handle_webhook(payload: dict) -> WebhookResult:
     достать id платежа (object.id), дальше решение принимается исключительно по
     authoritative-ответу _fetch_payment, не по телу этого запроса (см. докстринг
     файла). ok=False здесь означает "не подтверждено, вебхук-роут не должен
-    отвечать 200" — ЮKassa сама повторит уведомление позже (до 24ч)."""
+    отвечать 200" — ЮKassa сама повторит уведомление позже (до 24ч).
+
+    Кабинет ЮKassa может быть настроен слать и другие события, кроме payment.* —
+    refund.succeeded/payment_method.active несут в object.id id ВОЗВРАТА/СПОСОБА
+    ОПЛАТЫ, а не платежа (наш единственный обрабатываемый случай), и попытка
+    переспросить такой id как платёж (_fetch_payment) просто 404-нется. Явно
+    игнорируем (ok=True, без похода в API) всё, что не начинается с "payment." —
+    не ошибка, эти события нам не нужны, отвечаем 200 и не заставляем ЮKassa
+    ретраить их зря."""
+    event = payload.get("event") or ""
+    if not event.startswith("payment."):
+        return WebhookResult(ok=True)
+
     order_id = (payload.get("object") or {}).get("id")
     if not order_id:
         return WebhookResult(ok=False, error="В уведомлении нет id платежа.")
