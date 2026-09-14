@@ -167,8 +167,8 @@
                                             {% if row.registered %}
                                                 <span class="badge badge-ok">привязан</span>
                                             {% else %}
-                                                <button type="button" class="badge badge-neutral badge-clickable" data-register-link-btn
-                                                        data-ally-code="{{ row.ally_code }}" data-name="{{ row.ingame_name }}">не привязан</button>
+                                                <span class="badge badge-neutral badge-clickable" role="button" tabindex="0" data-register-link-btn
+                                                      data-ally-code="{{ row.ally_code }}" data-name="{{ row.ingame_name }}">не привязан</span>
                                             {% endif %}
                                         </td>
                                     </tr>

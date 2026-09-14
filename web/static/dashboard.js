@@ -805,12 +805,21 @@ document.addEventListener("DOMContentLoaded", () => {
         const allyCodeInput = document.getElementById("register-link-ally-code");
         const cancelBtn = document.getElementById("register-link-cancel");
 
+        const openFor = (btn) => {
+            nameEl.textContent = btn.dataset.name;
+            allyCodeDisplayEl.textContent = btn.dataset.allyCode;
+            allyCodeInput.value = btn.dataset.allyCode;
+            dialog.showModal();
+        };
         document.querySelectorAll("[data-register-link-btn]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-                nameEl.textContent = btn.dataset.name;
-                allyCodeDisplayEl.textContent = btn.dataset.allyCode;
-                allyCodeInput.value = btn.dataset.allyCode;
-                dialog.showModal();
+            btn.addEventListener("click", () => openFor(btn));
+            // role="button" на <span> (не нативный <button>, см. фикс горизонтального
+            // скролла таблицы в этом же коммите) не даёт Enter/Space "из коробки".
+            btn.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openFor(btn);
+                }
             });
         });
 
