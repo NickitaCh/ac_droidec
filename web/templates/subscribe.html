@@ -51,7 +51,8 @@
             <form method="post" action="/subscribe" class="requirement-form">
                 <label>
                     Код союзника
-                    <input type="text" name="ally_code" placeholder="123456789" pattern="[0-9]{9}" maxlength="9" required>
+                    <input type="text" name="ally_code" placeholder="123456789" pattern="[1-9]{9}" maxlength="9"
+                           inputmode="numeric" title="9 цифр без нуля (1-9)" required>
                 </label>
                 <label>
                     ID Discord-сервера

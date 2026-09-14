@@ -24,6 +24,7 @@ main.py::_access_denied_message) годами обещали "подключит
 ALWAYS_ALLOWED_COMMANDS + inter.guild_id is not None)."""
 
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -124,8 +125,13 @@ async def subscribe_submit(
     else:
         clean_code = "".join(filter(str.isdigit, ally_code or ""))
         clean_discord_id = "".join(filter(str.isdigit, discord_guild_id or ""))
-        if len(clean_code) != 9:
-            context["error"] = "Код союзника должен состоять ровно из 9 цифр."
+        # Код союзника у Comlink всегда матчится паттерном ^[1-9]{9}$ — цифры 0 в нём
+        # не бывает вообще (подтверждено и самим Comlink: код с нулём падает с HTTP 400
+        # и «утекающим» в ответ сырым телом ошибки — see add_guild ниже, — и вживую по
+        # реальным кодам союзника из ростера). Проверяем это ДО похода в Comlink, а не
+        # полагаемся на его же валидацию, чтобы не показывать пользователю технический JSON.
+        if not re.fullmatch(r"[1-9]{9}", clean_code):
+            context["error"] = "Код союзника должен состоять ровно из 9 цифр без нуля (1-9)."
             return templates.TemplateResponse(request, "subscribe.html", context)
         # Discord snowflake ID — 64-битное число, у реальных ID сейчас 18-19 цифр
         # (минимум за всю историю Discord — 17); 17-20 даёт небольшой запас на будущее
