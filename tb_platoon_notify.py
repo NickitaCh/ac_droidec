@@ -46,9 +46,20 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
         round_entries.append(e)
 
     assignments = database.get_tb_platoon_assignments(guild_id, plan["id"])
+    # user_mapping.discord_id (get_all_user_mappings) НЕ значит "игрок привязал Discord" —
+    # это ростер-зеркало из sync_guild_roster (cogs/violations.py), которое для ещё не
+    # зарегистрированных игроков заполняет discord_id тем же значением, что и ally_code
+    # (плейсхолдер "хотя бы не терять строку", см. комментарий там же) — реальный Discord
+    # ID берётся из отдельной user_registration (заполняется только /регистрацией).
+    # Перепутать эти два источника — реальный баг живьём: 400 "Invalid Recipient(s)" от
+    # Discord при попытке открыть DM с 9-значным "ID" (это был ally_code, не snowflake),
+    # см. database.py::get_discord_id_for_ally — тот же паттерн уже используется в
+    # tasks.py для личных уведомлений о задачах.
     mappings = database.get_all_user_mappings(guild_id)
     name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
-    discord_id_by_ally = {ally_code: discord_id for discord_id, ally_code, _name in mappings}
+    discord_id_by_ally = {
+        ally_code: discord_id for discord_id, ally_code, _name in database.get_all_main_registrations(guild_id)
+    }
 
     rows: dict[str, dict] = {}
     for e in round_entries:

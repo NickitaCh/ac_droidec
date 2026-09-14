@@ -40,7 +40,7 @@
             </div>
             <p><a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ round_num }}">↻ Отправить ещё раз (например, тем, кто не получил)</a></p>
         {% else %}
-            <form method="post" action="/tb/platoons/notify">
+            <form method="post" action="/tb/platoons/notify" class="platoon-notify-form">
                 <input type="hidden" name="plan_id" value="{{ plan.id }}">
                 <input type="hidden" name="round_num" value="{{ round_num }}">
 
