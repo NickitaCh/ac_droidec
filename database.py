@@ -5493,20 +5493,33 @@ def add_mod_scan_events(events: list[tuple[int, str, str, str, str, str]]):
     conn.close()
 
 
-def get_mod_scan_events(owner_guild_id: int = 1, kind: str = "minor", limit: int = 200) -> list[dict]:
+def get_mod_scan_events(owner_guild_id: int = 1, kind: str = "minor", limit: int = 200, offset: int = 0,
+                         base_ids: list[str] | None = None) -> tuple[list[dict], int]:
+    """base_ids — фильтр по персонажу (web/routes/mod_scan.py: base_id уже резолвлен из
+    выбора в живом поиске, а не текстом — SQL LIKE не годится для кириллических имён, см.
+    докстринг search_game_units, поэтому фильтруем по готовому base_id, а не по подстроке
+    имени). Возвращает (строки страницы, общее число строк под фильтром) — пагинация тем
+    же паттерном, что web/routes/guild_dashboard.py (page/page_size)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_mod_scan_tables(cursor)
-    cursor.execute("""
+    where = "WHERE t.owner_guild_id = ? AND e.kind = ?"
+    params = [owner_guild_id, kind]
+    if base_ids:
+        where += f" AND e.base_id IN ({','.join('?' for _ in base_ids)})"
+        params.extend(base_ids)
+    cursor.execute(f"SELECT COUNT(*) FROM mod_scan_events e JOIN mod_scan_targets t ON t.id = e.target_id {where}", params)
+    total = cursor.fetchone()[0]
+    cursor.execute(f"""
         SELECT e.id, e.target_id, t.guild_name, e.ally_code, e.player_name, e.base_id, e.description, e.detected_at
         FROM mod_scan_events e JOIN mod_scan_targets t ON t.id = e.target_id
-        WHERE t.owner_guild_id = ? AND e.kind = ?
-        ORDER BY e.id DESC LIMIT ?
-    """, (owner_guild_id, kind, limit))
+        {where}
+        ORDER BY e.id DESC LIMIT ? OFFSET ?
+    """, params + [limit, offset])
     rows = cursor.fetchall()
     conn.close()
     keys = ["id", "target_id", "guild_name", "ally_code", "player_name", "base_id", "description", "detected_at"]
-    return [dict(zip(keys, row)) for row in rows]
+    return [dict(zip(keys, row)) for row in rows], total
 
 
 def prune_mod_scan_events(days: int = 14):

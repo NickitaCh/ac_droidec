@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
@@ -24,6 +24,9 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 RESTRICTED_TO_GUILD_ID = 1
+# Как на /activity (web/routes/guild_dashboard.py) — умеренный размер страницы, чтобы
+# и на телефоне таблица не превращалась в простыню, и лишних кликов "дальше" не было.
+EVENTS_PAGE_SIZE = 25
 
 
 def require_mod_scan_access(user: dict = Depends(require_officer_access)) -> dict:
@@ -48,14 +51,65 @@ def _with_character_labels(events: list[dict]) -> list[dict]:
     return events
 
 
+@router.get("/api/units", response_class=JSONResponse)
+async def mod_scan_units_search(q: str = "", user: dict = Depends(require_mod_scan_access)):
+    # Тот же приём, что web/routes/stat_plates.py::units_search и
+    # web/routes/guild_dashboard.py::tb_platoons_units_search — свой эндпоинт, а не чужой
+    # /plates/api/units, чтобы фильтр по персонажу тут не зависел от чужого feature-флага
+    # (mod-scan захардкожен на guild_id=1 отдельной проверкой, см. докстринг выше).
+    if not q or len(q.strip()) < 2:
+        return []
+    rows = database.search_game_units(q.strip(), limit=20)
+    return [{"base_id": base_id, "name": name} for base_id, name in rows]
+
+
+def _paginate_events(kind: str, base_ids: list[str] | None, page_param: str) -> dict:
+    try:
+        page = max(1, int(page_param or "1"))
+    except ValueError:
+        page = 1
+    rows, total = database.get_mod_scan_events(
+        owner_guild_id=RESTRICTED_TO_GUILD_ID, kind=kind,
+        limit=EVENTS_PAGE_SIZE, offset=(page - 1) * EVENTS_PAGE_SIZE, base_ids=base_ids,
+    )
+    total_pages = max(1, -(-total // EVENTS_PAGE_SIZE))  # ceil div
+    page = min(page, total_pages)
+    return {"events": _with_character_labels(rows), "page": page, "total_pages": total_pages, "total": total}
+
+
 @router.get("", response_class=HTMLResponse)
 async def mod_scan_page(request: Request, user: dict = Depends(require_mod_scan_access)):
+    qp = request.query_params
+    character = (qp.get("character") or "").strip()
+    character_label = database.get_game_unit_name(character) if character else ""
+    base_ids = [character] if character else None
+
+    minor = _paginate_events("minor", base_ids, qp.get("minor_page"))
+    anomaly = _paginate_events("anomaly", base_ids, qp.get("anomaly_page"))
+
+    def _page_url(page_param: str, page: int) -> str:
+        params = {"character": character} if character else {}
+        params[page_param] = page
+        return f"/mod-scan?{urlencode(params)}"
+
     context = {
         "user": user,
         "error": request.query_params.get("error"),
         "targets": database.get_mod_scan_targets(owner_guild_id=RESTRICTED_TO_GUILD_ID),
-        "minor_events": _with_character_labels(database.get_mod_scan_events(owner_guild_id=RESTRICTED_TO_GUILD_ID, kind="minor")),
-        "anomaly_events": _with_character_labels(database.get_mod_scan_events(owner_guild_id=RESTRICTED_TO_GUILD_ID, kind="anomaly")),
+        "minor_events": minor["events"],
+        "minor_page": minor["page"],
+        "minor_total_pages": minor["total_pages"],
+        "minor_total": minor["total"],
+        "minor_prev_url": _page_url("minor_page", minor["page"] - 1) if minor["page"] > 1 else None,
+        "minor_next_url": _page_url("minor_page", minor["page"] + 1) if minor["page"] < minor["total_pages"] else None,
+        "anomaly_events": anomaly["events"],
+        "anomaly_page": anomaly["page"],
+        "anomaly_total_pages": anomaly["total_pages"],
+        "anomaly_total": anomaly["total"],
+        "anomaly_prev_url": _page_url("anomaly_page", anomaly["page"] - 1) if anomaly["page"] > 1 else None,
+        "anomaly_next_url": _page_url("anomaly_page", anomaly["page"] + 1) if anomaly["page"] < anomaly["total_pages"] else None,
+        "character": character,
+        "character_label": character_label,
         "max_targets": database.MOD_SCAN_MAX_TARGETS,
     }
     return templates.TemplateResponse(request, "mod_scan.html", context)

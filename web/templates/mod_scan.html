@@ -64,10 +64,25 @@
         {% endif %}
     </div>
 
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title">
+            <span>Фильтр по персонажу</span>
+            {% if character %}<a href="/mod-scan" class="panel-hint">✕ сбросить</a>{% endif %}
+        </div>
+        <form method="get" action="/mod-scan" class="inline-form">
+            <div class="unit-search" data-live-search data-url="/mod-scan/api/units" data-required="false" style="flex: 1;">
+                <input type="text" class="unit-search-input" placeholder="Имя персонажа — можно на русском или английском…" autocomplete="off" value="{{ character_label }}">
+                <input type="hidden" name="character" class="unit-search-value" value="{{ character }}">
+                <div class="unit-search-results"></div>
+            </div>
+            <button type="submit">Фильтр</button>
+        </form>
+    </div>
+
     <div class="panel">
-        <div class="panel-title"><span>🚨 Аномалии</span><span class="panel-hint">последние {{ anomaly_events|length }}</span></div>
+        <div class="panel-title"><span>🚨 Аномалии</span><span class="panel-hint">{{ anomaly_total }} всего</span></div>
         {% if not anomaly_events %}
-            <p class="empty-state">Аномалий пока не найдено.</p>
+            <p class="empty-state">{{ "Ничего не найдено по фильтру." if character else "Аномалий пока не найдено." }}</p>
         {% else %}
             <div class="table-scroll">
                 <table class="data">
@@ -87,13 +102,20 @@
                     </tbody>
                 </table>
             </div>
+            {% if anomaly_total_pages > 1 %}
+                <div class="table-toolbar" style="justify-content: center; margin-top: 1em; gap: 1em;">
+                    {% if anomaly_prev_url %}<a class="button" href="{{ anomaly_prev_url }}">← Новее</a>{% endif %}
+                    <span class="muted">стр. {{ anomaly_page }} из {{ anomaly_total_pages }}</span>
+                    {% if anomaly_next_url %}<a class="button" href="{{ anomaly_next_url }}">Старее →</a>{% endif %}
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 
     <div class="panel">
-        <div class="panel-title"><span>Изменения</span><span class="panel-hint">последние {{ minor_events|length }}</span></div>
+        <div class="panel-title"><span>Изменения</span><span class="panel-hint">{{ minor_total }} всего</span></div>
         {% if not minor_events %}
-            <p class="empty-state">Изменений пока не найдено.</p>
+            <p class="empty-state">{{ "Ничего не найдено по фильтру." if character else "Изменений пока не найдено." }}</p>
         {% else %}
             <div class="table-scroll">
                 <table class="data">
@@ -113,6 +135,13 @@
                     </tbody>
                 </table>
             </div>
+            {% if minor_total_pages > 1 %}
+                <div class="table-toolbar" style="justify-content: center; margin-top: 1em; gap: 1em;">
+                    {% if minor_prev_url %}<a class="button" href="{{ minor_prev_url }}">← Новее</a>{% endif %}
+                    <span class="muted">стр. {{ minor_page }} из {{ minor_total_pages }}</span>
+                    {% if minor_next_url %}<a class="button" href="{{ minor_next_url }}">Старее →</a>{% endif %}
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 {% endblock %}
