@@ -22,7 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 load_dotenv()
 
 from web import auth
-from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks
+from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, mod_analysis, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -76,6 +76,7 @@ app.include_router(mod_optimizer.router, prefix="/mod-optimizer", tags=["mod-opt
 app.include_router(mod_scan.router, prefix="/mod-scan", tags=["mod-scan"])
 app.include_router(mod_search.router, prefix="/mod-search", tags=["mod-search"])
 app.include_router(steal_build.router, prefix="/steal-build", tags=["steal-build"])
+app.include_router(mod_analysis.router, prefix="/mod-analysis", tags=["mod-analysis"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
 app.include_router(subscribe.router, tags=["subscribe"])
 app.include_router(qa_checklist.router, prefix="/qa-checklist", tags=["qa-checklist"])

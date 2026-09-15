@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Анализ модинга — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <h1>Анализ модинга</h1>
+    <p class="muted">
+        Как гильдия в среднем модит выбранного персонажа: какие сеты и основы популярны,
+        в какие характеристики вкладываются больше всего (вклад именно от модов — статы
+        каждого релевантного игрока нормируются на один и тот же уровень реликвии, чтобы
+        разница в реликах между игроками не искажала картину), и сколько в гильдии разных
+        "направлений" сборки этого персонажа.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Параметры</span></div>
+        <form method="get" action="/mod-analysis" class="builder-form">
+            <label>
+                Персонаж
+                <div class="unit-search" data-unit-search>
+                    <input type="text" class="unit-search-input" placeholder="Имя персонажа — можно на русском или английском…" autocomplete="off" required value="{{ selected_character_label }}">
+                    <input type="hidden" name="character" class="unit-search-value" required value="{{ selected_character }}">
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+
+            <label>
+                Целевой уровень реликвии (для нормирования всех билдов)
+                <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
+            </label>
+
+            <button type="submit">Посчитать</button>
+        </form>
+    </div>
+
+    {% if loading %}
+        <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
+    {% elif result %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>{{ result.char_name }}</span>
+                <span class="panel-hint">релик {{ result.target_relic }} · открыт у {{ result.total_open }}, релевантно {{ result.relevant_count }}</span>
+            </div>
+
+            {% if result.relevant_count == 0 %}
+                <p class="empty-state">
+                    Ни один игрок не прошёл фильтр релевантности (релик &gt; 5, все 6 слотов
+                    заняты, средний уровень модов = 15) — данных для анализа нет.
+                </p>
+            {% else %}
+                <p class="muted">Средний реальный релик релевантных игроков: {{ "%.1f"|format(result.avg_relic) }}</p>
+
+                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 сетовых комбинации</span></div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Комбинация</th><th>Игроков</th><th>Доля</th></tr></thead>
+                        <tbody>
+                            {% for c in result.top_combos %}
+                                <tr><td>{{ c.label }}</td><td>{{ c.count }}</td><td>{{ c.freq_pct }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 основы по слоту</span></div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Слот</th><th>Основа</th><th>Игроков</th><th>Доля</th></tr></thead>
+                        <tbody>
+                            {% for slot in result.top_primaries_by_slot %}
+                                {% for row in slot.rows %}
+                                    <tr>
+                                        {% if loop.first %}<td rowspan="{{ slot.rows|length }}">{{ slot.slot_label }}</td>{% endif %}
+                                        <td>{{ row.name }}</td><td>{{ row.count }}</td><td>{{ row.freq_pct }}</td>
+                                    </tr>
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel-title" style="margin-top: 1em;">
+                    <span>Характеристики</span>
+                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модов на релике {{ result.target_relic }}</span>
+                </div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>Ранг</th><th>Характеристика</th><th>SF</th>
+                                <th>p50(Δ)</th><th>p70(Δ)</th><th>p90(Δ)</th><th>Разброс</th>
+                                <th>CV</th><th>NM</th><th>GF</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in result.stat_rows %}
+                                <tr class="{{ 'muted' if row.n == 0 }}">
+                                    <td>{{ row.rank or "—" }}</td>
+                                    <td>{{ row.label }}</td>
+                                    {% if row.n == 0 %}
+                                        <td colspan="8">нет данных</td>
+                                    {% else %}
+                                        <td>{{ row.sf_pct }}</td>
+                                        <td>{{ row.p50_fmt }}</td>
+                                        <td>{{ row.p70_fmt }}</td>
+                                        <td>{{ row.p90_fmt }}</td>
+                                        <td>{{ row.spread_fmt }}</td>
+                                        <td title="{{ row.cv_level or '' }}">{{ row.cv_fmt }}</td>
+                                        <td>{{ row.nm_fmt }}</td>
+                                        <td title="{{ row.gf_level or '' }}">{{ row.gf_fmt }}</td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 характеристики по фокусу гильдии</span></div>
+                <ul>
+                    {% for row in result.top3_stats %}
+                        <li><strong>{{ row.label }}</strong> — GF {{ row.gf_fmt }} ({{ row.gf_level }})</li>
+                    {% endfor %}
+                </ul>
+
+                <p>
+                    Консенсус гильдии: <strong>{{ result.consensus_fmt }}</strong> — {{ result.consensus_level }}.
+                    Направлений модинга (конфигурации с долей &gt;10%): <strong>{{ result.directions_count }}</strong>.
+                </p>
+
+                {% if result.directions %}
+                    <div class="panel-title" style="margin-top: 1em;"><span>Направления модинга</span></div>
+                    {% for d in result.directions %}
+                        <div class="panel" style="margin-top: .5em;">
+                            <div class="panel-title">
+                                <span>{{ d.label }}</span>
+                                <span class="panel-hint">{{ d.count }} игроков · {{ d.freq_pct }} · средний релик {{ "%.1f"|format(d.avg_relic) }}</span>
+                            </div>
+                            <div class="table-scroll">
+                                <table class="data">
+                                    <thead><tr><th>Характеристика</th><th>p50(Δ)</th><th>p70(Δ)</th><th>p90(Δ)</th><th>CV</th></tr></thead>
+                                    <tbody>
+                                        {% for s in d.stats %}
+                                            <tr><td>{{ s.label }}</td><td>{{ s.p50_fmt }}</td><td>{{ s.p70_fmt }}</td><td>{{ s.p90_fmt }}</td><td>{{ s.cv_fmt }}</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} запусков</span></div>
+        {% if not history %}
+            <p class="empty-state">Пока нет запусков — посчитайте что-нибудь выше.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Персонаж</th><th>Релик</th><th>Когда</th><th></th></tr></thead>
+                    <tbody>
+                        {% for h in history %}
+                            <tr>
+                                <td>{{ h.character_label }}</td>
+                                <td>{{ h.relic }}</td>
+                                <td>{{ h.created_at }}</td>
+                                <td><a class="link-btn" href="/mod-analysis?history_id={{ h.id }}">открыть</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

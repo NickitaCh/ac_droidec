@@ -39,6 +39,7 @@ FEATURES: dict[str, dict] = {
     "mod_search": {"label": "Поиск модов", "category": "Мод-инструменты"},
     "mod_builder": {"label": "Калькулятор модов", "category": "Мод-инструменты"},
     "steal_build": {"label": "Стил-билд", "category": "Мод-инструменты"},
+    "mod_analysis": {"label": "Анализ модинга гильдии", "category": "Мод-инструменты"},
     "gear_farm": {"label": "Фарм снаряжения", "category": "Прочее"},
     "antispam": {"label": "Антиспам", "category": "Прочее"},
 }

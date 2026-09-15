@@ -4196,6 +4196,59 @@ def get_steal_build_history_entry(history_id: int, guild_id: int = 1):
 
 
 # =====================================================================
+# АНАЛИЗ МОДИНГА ГИЛЬДИИ (веб /mod-analysis, services/mod_analysis.py) — история запусков
+# (персонаж + целевой релик), тот же паттерн, что steal_build_history. Без пресетов — в
+# отличие от /steal-build (там "гильдия" — самостоятельная сущность, стоит сохранять),
+# здесь единственный содержательный параметр — персонаж, который и так виден в истории.
+# =====================================================================
+MOD_ANALYSIS_HISTORY_KEEP = 20
+
+
+def _ensure_mod_analysis_history_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_analysis_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            base_id TEXT NOT NULL,
+            target_relic INTEGER NOT NULL,
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+
+def add_mod_analysis_history(base_id: str, target_relic: int, created_by: str, guild_id: int = 1, keep: int = MOD_ANALYSIS_HISTORY_KEEP):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_analysis_history_table(cursor)
+    cursor.execute(
+        "INSERT INTO mod_analysis_history (guild_id, base_id, target_relic, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+        (guild_id, base_id, target_relic, created_by),
+    )
+    cursor.execute("SELECT id FROM mod_analysis_history WHERE guild_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?", (guild_id, keep))
+    old_ids = [r[0] for r in cursor.fetchall()]
+    if old_ids:
+        placeholders = ",".join("?" * len(old_ids))
+        cursor.execute(f"DELETE FROM mod_analysis_history WHERE id IN ({placeholders})", old_ids)
+    conn.commit()
+    conn.close()
+
+
+def get_mod_analysis_history(guild_id: int = 1, limit: int = MOD_ANALYSIS_HISTORY_KEEP):
+    """Возвращает [(id, base_id, target_relic, created_by, created_at), ...] от новых к старым."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_analysis_history_table(cursor)
+    cursor.execute(
+        "SELECT id, base_id, target_relic, created_by, created_at FROM mod_analysis_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+        (guild_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+# =====================================================================
 # КЭШ ЮНИТОВ ИГРОКОВ: сырой rosterUnit из comlink.get_player (для локального
 # расчёта статов через StatCalc — хранится как есть, без разбора по колонкам,
 # т.к. StatCalc.calc_char_stats принимает этот формат напрямую, см. cogs/stat_engine.py).
