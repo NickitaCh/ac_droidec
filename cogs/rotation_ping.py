@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import database
+from services import feature_flags, tb_schedule
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -19,14 +20,16 @@ class RotationPing(commands.Cog):
         self.rotation_ping_loop.cancel()
 
     @staticmethod
-    def _is_ping_week(start_date, now_msk_date) -> bool:
-        delta = (now_msk_date - start_date).days
+    def _is_ping_week(now_msk_date) -> bool:
+        # Якорь чётности недели общий для всех гильдий (services/tb_schedule.py) —
+        # это факт игрового календаря ТБ, а не настройка одной гильдии.
+        delta = (now_msk_date - tb_schedule.get_week_anchor_date()).days
         week_number = delta // 7
         return week_number % 2 == 0
 
     # Без интеракции резолвить гильдию по роли нечем — идём по всем зарегистрированным
     # гильдиям на каждом тике (как update_roster_cache в violations.py), у каждой
-    # своё расписание/канал/роль/дата старта из guilds.
+    # своё расписание/канал/роль из guilds; чётность недели и DST-поправка общие.
     @tasks.loop(seconds=30)
     async def rotation_ping_loop(self):
         now_msk = datetime.now(MSK)
@@ -34,26 +37,29 @@ class RotationPing(commands.Cog):
         weekday = now_msk.weekday()
         hour = now_msk.hour
         minute = now_msk.minute
+        dst_correction = tb_schedule.effective_dst_offset_minutes(today_msk)
+
+        if not self._is_ping_week(today_msk):
+            return
 
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             if not guild_cfg.get("ping_channel_id") or not guild_cfg.get("ping_role_id") or \
-                    not guild_cfg.get("ping_start_date") or not guild_cfg.get("ping_schedule_json"):
+                    not guild_cfg.get("ping_schedule_json"):
+                continue
+            if not feature_flags.is_enabled(gid, "tb_ping"):
                 continue
 
             try:
-                start_date = datetime.strptime(guild_cfg["ping_start_date"], "%Y-%m-%d").date()
                 schedule = json.loads(guild_cfg["ping_schedule_json"])
             except (ValueError, TypeError, json.JSONDecodeError) as e:
                 print(f"❌ [RotationPing] [{gname}] Некорректный конфиг расписания: {e}")
                 continue
 
-            if not self._is_ping_week(start_date, today_msk):
-                continue
-
             for entry in schedule:
-                h, m = map(int, entry["time"].split(":"))
+                raw_h, raw_m = map(int, entry["time"].split(":"))
+                h, m = tb_schedule.apply_correction(raw_h, raw_m, dst_correction)
                 if weekday not in entry["days"]:
                     continue
                 if hour != h or minute != m:

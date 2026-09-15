@@ -68,6 +68,7 @@ import database
 import guild_resolver
 import tb_platoon_autofill
 import tb_platoon_notify
+from services import feature_flags
 from cogs.guild_events import (
     TB_ORDER_STAGE_RE,
     _tb_order_stage_number,
@@ -236,7 +237,7 @@ async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
 
 async def autocomplete_tb_plans(inter: disnake.ApplicationCommandInteraction, user_input: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
-    if guild_id is None:
+    if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
         return []
     user_input = (user_input or "").lower()
     return [p["name"] for p in database.get_tb_saved_plans(guild_id) if user_input in p["name"].lower()][:25]
@@ -373,6 +374,8 @@ class TBOrderImage(commands.Cog):
             return
 
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            guild_id = None
         plan_id = database.save_tb_plan(guild_id, название, thread.id, total, created_by=str(inter.author.id))
 
         # Автозаполнение взводов сразу после сохранения плана — по прямому запросу
@@ -420,6 +423,8 @@ class TBOrderImage(commands.Cog):
     @tb_plan_group.sub_command(name="список", description="Список сохранённых планов ордера ТБ")
     async def tb_plan_list(self, inter: disnake.ApplicationCommandInteraction):
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            guild_id = None
         plans = database.get_tb_saved_plans(guild_id)
         if not plans:
             await inter.response.send_message(
@@ -445,8 +450,8 @@ class TBOrderImage(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
         guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить гильдию.")
+        if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            await inter.edit_original_response("❌ Не удалось определить гильдию, либо функция плана/ордера ТБ отключена для неё.")
             return
 
         if название:
@@ -506,6 +511,8 @@ class TBOrderImage(commands.Cog):
         название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
     ):
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            guild_id = None
         plan = database.get_tb_saved_plan_by_name(guild_id, название)
         if plan is None:
             await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
@@ -559,6 +566,8 @@ class TBOrderImage(commands.Cog):
             return
 
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            guild_id = None
         database.save_tb_plan(guild_id, название, thread.id, звёзды, created_by=str(inter.author.id))
         await inter.edit_original_response(
             f"💾 План сохранён как «{название}» ({звёзды} ★, <#{thread.id}>) — выбрать его для ежедневной "
@@ -577,8 +586,8 @@ class TBOrderImage(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
         guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None:
-            await inter.edit_original_response("❌ Не удалось определить гильдию.")
+        if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            await inter.edit_original_response("❌ Не удалось определить гильдию, либо функция плана/ордера ТБ отключена для неё.")
             return
 
         if название:
@@ -627,6 +636,8 @@ class TBOrderImage(commands.Cog):
         название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
     ):
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
+            guild_id = None
         deleted = database.delete_tb_saved_plan(guild_id, название)
         if not deleted:
             await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)

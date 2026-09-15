@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 import database
 import guild_resolver
 import services.stat_forecast as stat_forecast
-from web.deps import require_officer_access
+from services import feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -44,7 +44,7 @@ async def stats_check_form(
     force_refresh: bool = False,
     action: str = "",
     ignore_relic: bool = False,
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
@@ -134,7 +134,7 @@ async def stats_relic_form(
     plate: str = "",
     character: str = "",
     relic: int | None = None,
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)

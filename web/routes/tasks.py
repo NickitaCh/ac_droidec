@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
+from services import feature_flags
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -187,7 +188,7 @@ def _validate_deadline(deadline: str) -> str | None:
 
 
 @router.get("", response_class=HTMLResponse)
-async def tasks_list(request: Request, user: dict = Depends(require_officer_access)):
+async def tasks_list(request: Request, user: dict = Depends(feature_flags.require_feature("tasks"))):
     guild_id = user["guild_id"]
     status_filter = request.query_params.get("status")
     view = request.query_params.get("view", "flat")
@@ -300,7 +301,7 @@ async def tasks_list(request: Request, user: dict = Depends(require_officer_acce
 
 
 @router.get("/api/players", response_class=JSONResponse)
-async def players_search(q: str = "", user: dict = Depends(require_officer_access)):
+async def players_search(q: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
     if not q or len(q.strip()) < 2:
         return []
     q_lower = q.strip().lower()
@@ -315,7 +316,7 @@ async def players_search(q: str = "", user: dict = Depends(require_officer_acces
 
 
 @router.get("/api/units", response_class=JSONResponse)
-async def units_search(q: str = "", user: dict = Depends(require_officer_access)):
+async def units_search(q: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
     if not q or len(q.strip()) < 2:
         return []
     rows = database.search_game_units(q.strip(), limit=20)
@@ -323,7 +324,7 @@ async def units_search(q: str = "", user: dict = Depends(require_officer_access)
 
 
 @router.get("/api/omicron-skills", response_class=JSONResponse)
-async def omicron_skills(base_id: str = "", user: dict = Depends(require_officer_access)):
+async def omicron_skills(base_id: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
     if not base_id:
         return []
     return _omicron_options(base_id)
@@ -336,7 +337,7 @@ async def task_add(
     target_type: str = Form(...),
     target_value: str = Form(...),
     deadline: str = Form(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
 
@@ -393,7 +394,7 @@ async def bulk_preview(
     base_id: str = Form(...),
     target_type: str = Form(...),
     target_value: str = Form(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     """Предпросмотр массовой постановки — сколько реально будет создано, сколько
     пропустится (дубль / уже выполнено), с именами игроков — для модалки подтверждения
@@ -448,7 +449,7 @@ async def task_add_bulk(
     target_type: str = Form(...),
     target_value: str = Form(...),
     deadline: str = Form(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
 
@@ -515,7 +516,7 @@ async def task_edit(
     task_id: int,
     target_value: str = Form(...),
     deadline: str = Form(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
     task = database.get_task(task_id)
@@ -537,7 +538,7 @@ async def task_edit(
 
 
 @router.post("/{task_id}/delete", response_class=HTMLResponse)
-async def task_delete(task_id: int, user: dict = Depends(require_officer_access)):
+async def task_delete(task_id: int, user: dict = Depends(feature_flags.require_feature("tasks"))):
     guild_id = user["guild_id"]
     task = database.get_task(task_id)
     if task and task[7] == guild_id:
@@ -546,7 +547,7 @@ async def task_delete(task_id: int, user: dict = Depends(require_officer_access)
 
 
 @router.post("/batch/{batch_id}/delete", response_class=HTMLResponse)
-async def batch_delete(batch_id: str, user: dict = Depends(require_officer_access)):
+async def batch_delete(batch_id: str, user: dict = Depends(feature_flags.require_feature("tasks"))):
     deleted = database.delete_tasks_by_batch(batch_id, user["guild_id"])
     return RedirectResponse(f"/tasks?{urlencode({'notice': f'Отменено заданий: {deleted}'})}", status_code=303)
 

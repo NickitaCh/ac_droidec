@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import database
 import guild_resolver
+from services import feature_flags
 from services.config_status import config_warning_text
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -68,6 +69,8 @@ class Birthday(commands.Cog):
         # зарегистрированным гильдиям на каждом тике (как в rotation_ping.py).
         for guild_cfg in database.get_all_guild_configs():
             if not guild_cfg.get("birthday_channel_id") or not guild_cfg.get("birthday_role_id"):
+                continue
+            if not feature_flags.is_enabled(guild_cfg["id"], "birthdays"):
                 continue
             # Утром в 6:00 – поздравление и выдача роли
             if hour == 6 and minute == 0:
@@ -196,7 +199,7 @@ class Birthday(commands.Cog):
         user: disnake.User = commands.Param(description="Пользователь"),
         date: str = commands.Param(description="Дата в формате ДД-ММ-ГГГГ или ДД-ММ")
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "birthdays")
         if guild_id is None:
             return
 
@@ -222,7 +225,7 @@ class Birthday(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         user: disnake.User = commands.Param(description="Пользователь")
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "birthdays")
         if guild_id is None:
             return
 
@@ -233,7 +236,7 @@ class Birthday(commands.Cog):
     async def birthday_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "birthdays")
         if guild_id is None:
             return
 

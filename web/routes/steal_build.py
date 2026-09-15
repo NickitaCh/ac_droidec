@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 import database
 import services.stat_forecast as stat_forecast
 import services.steal_build as steal_build
-from web.deps import require_officer_access
+from services import feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -63,7 +63,7 @@ def _history_rows(guild_id: int):
 
 
 @router.get("", response_class=HTMLResponse)
-async def steal_build_form(request: Request, user: dict = Depends(require_officer_access)):
+async def steal_build_form(request: Request, user: dict = Depends(feature_flags.require_feature("steal_build"))):
     qp = request.query_params
     guild_id = user["guild_id"]
     ally_code = qp.get("ally_code", "").strip()
@@ -148,7 +148,7 @@ async def steal_build_form(request: Request, user: dict = Depends(require_office
 
 
 @router.post("/presets/save", response_class=HTMLResponse)
-async def preset_save(request: Request, user: dict = Depends(require_officer_access)):
+async def preset_save(request: Request, user: dict = Depends(feature_flags.require_feature("steal_build"))):
     form = await request.form()
     name = (form.get("name") or "").strip()
     ally_code = (form.get("ally_code") or "").strip()
@@ -175,6 +175,6 @@ async def preset_save(request: Request, user: dict = Depends(require_officer_acc
 
 
 @router.post("/presets/{preset_id}/delete", response_class=HTMLResponse)
-async def preset_delete(preset_id: int, user: dict = Depends(require_officer_access)):
+async def preset_delete(preset_id: int, user: dict = Depends(feature_flags.require_feature("steal_build"))):
     database.delete_steal_build_preset(preset_id, guild_id=user["guild_id"])
     return RedirectResponse("/steal-build", status_code=303)

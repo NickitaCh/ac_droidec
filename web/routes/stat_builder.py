@@ -21,7 +21,7 @@ import database
 import stat_engine
 import services.stat_forecast as stat_forecast
 from cogs.stat_requirements import STAT_CHOICES
-from web.deps import require_officer_access
+from services import feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -241,7 +241,7 @@ def _redirect_qs(mapping) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
-async def builder_form(request: Request, user: dict = Depends(require_officer_access)):
+async def builder_form(request: Request, user: dict = Depends(feature_flags.require_feature("mod_builder"))):
     guild_id = user["guild_id"]
     qp = request.query_params
 
@@ -382,7 +382,7 @@ async def builder_form(request: Request, user: dict = Depends(require_officer_ac
 
 
 @router.post("/presets/save", response_class=HTMLResponse)
-async def preset_save(request: Request, user: dict = Depends(require_officer_access)):
+async def preset_save(request: Request, user: dict = Depends(feature_flags.require_feature("mod_builder"))):
     form = await request.form()
     name = (form.get("name") or "").strip()
     if not name:
@@ -400,6 +400,6 @@ async def preset_save(request: Request, user: dict = Depends(require_officer_acc
 
 
 @router.post("/presets/{preset_id}/delete", response_class=HTMLResponse)
-async def preset_delete(preset_id: int, user: dict = Depends(require_officer_access)):
+async def preset_delete(preset_id: int, user: dict = Depends(feature_flags.require_feature("mod_builder"))):
     database.delete_stat_mod_preset(preset_id, guild_id=user["guild_id"])
     return RedirectResponse("/mod-builder", status_code=303)

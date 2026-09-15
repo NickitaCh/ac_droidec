@@ -1137,7 +1137,7 @@ class DatacronRequirementsCog(commands.Cog):
         значение5: float = commands.Param(default=None, description="Минимальный % для стата №5", ge=0, le=100),
         комментарий: str = commands.Param(default=None, description="Прочая заметка (необязательно)"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1177,7 +1177,7 @@ class DatacronRequirementsCog(commands.Cog):
         уровень: int = commands.Param(description="Какой уровень дополнить", choices=[3, 6, 9]),
         вариант: str = commands.Param(description="Ещё один допустимый бонус для этого уровня", autocomplete=autocomplete_datacron_alt_value),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1227,7 +1227,7 @@ class DatacronRequirementsCog(commands.Cog):
         отряд: str = commands.Param(default=None, description="На какой отряд/персонажа этот датакрон (справочно, не проверяется)"),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1271,7 +1271,7 @@ class DatacronRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Новая заметка"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1379,7 +1379,7 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон для очистки", autocomplete=autocomplete_datacron_season),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1488,7 +1488,7 @@ class DatacronRequirementsCog(commands.Cog):
     ):
         await inter.response.defer(ephemeral=True)
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 
@@ -1628,7 +1628,7 @@ class DatacronRequirementsCog(commands.Cog):
     async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=False)
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "datacrons")
         if guild_id is None:
             return
 

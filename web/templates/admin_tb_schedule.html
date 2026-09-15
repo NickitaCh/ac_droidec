@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}ТБ-расписание — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>ТБ-расписание (бот-вайд)</h1>
+    <p class="muted">
+        Эти настройки общие для всех обслуживаемых гильдий — расписание тега и текст ордера
+        каждая гильдия задаёт себе сама на <code>/settings</code>, а вот чётность "тегаемой"
+        недели ТБ и поправка на летнее/зимнее время в Европе — одна на весь бот.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 32em;">
+        <div class="panel-title"><span>Якорь чётности недели</span></div>
+        <p class="muted" style="margin: 0 0 0.75em;">
+            Дата понедельника первой "тегаемой" недели цикла ТБ. Меняется, только если сама
+            игровая ротация циклов ТБ сбилась — иначе не трогать.
+        </p>
+        <form method="post" action="/admin/tb-schedule/anchor">
+            <label>
+                Дата (ГГГГ-ММ-ДД)
+                <input type="date" name="anchor_date" value="{{ anchor_date }}" required>
+            </label>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+
+    <div class="panel" style="max-width: 32em;">
+        <div class="panel-title"><span>Смещение на летнее/зимнее время (DST)</span></div>
+        <p class="muted" style="margin: 0 0 0.75em;">
+            Этап ТБ в игре стартует по европейскому времени, которое дважды в год сдвигается на
+            час (Россия — нет). Задайте, на сколько минут сдвинуть все МСК-триггеры (тег ротации,
+            автоордер) с определённой даты — знак любой: положительное число сдвигает время
+            позже по МСК, отрицательное — раньше. Например, если сейчас тег уходит в 19:50/20:50
+            МСК и Европа переводит часы на час назад, поправка обычно <code>+60</code>; если
+            вперёд — обычно <code>-60</code>. Определяйте по факту в игре, не заранее.
+        </p>
+        <p>Действующее смещение сейчас: <strong>{{ effective_offset }} мин.</strong>{% if current_offset != effective_offset %} (базовое: {{ current_offset }} мин., см. запланированный переход ниже){% endif %}</p>
+
+        {% if pending %}
+            <div class="panel" style="background: var(--panel-alt-bg, rgba(127,127,127,0.08));">
+                <p style="margin: 0;">
+                    Запланирован переход: смещение <strong>{{ pending.offset_minutes }}</strong> мин.
+                    с <strong>{{ pending.effective_date }}</strong>
+                    {% if pending.note %}— {{ pending.note }}{% endif %}
+                </p>
+                <form method="post" action="/admin/tb-schedule/dst/cancel" style="margin-top: 0.5em;">
+                    <button type="submit" class="button-danger">Отменить переход</button>
+                </form>
+            </div>
+        {% endif %}
+
+        <form method="post" action="/admin/tb-schedule/dst/schedule" style="margin-top: 0.75em;">
+            <label>
+                Смещение, минуты (можно отрицательное)
+                <input type="number" name="offset_minutes" min="-180" max="180" required>
+            </label>
+            <label>
+                Дата вступления в силу (ГГГГ-ММ-ДД)
+                <input type="date" name="effective_date" required>
+            </label>
+            <label>
+                Заметка (необязательно)
+                <input type="text" name="note" placeholder="например: переход на зимнее время в Европе">
+            </label>
+            <button type="submit">Запланировать</button>
+        </form>
+    </div>
+{% endblock %}

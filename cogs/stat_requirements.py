@@ -10,7 +10,7 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 import stat_engine
-from services import activity_diff
+from services import activity_diff, feature_flags
 from services.config_status import config_warning_text
 from cogs.violations import autocomplete_players
 from cogs.tasks import units_autocomplete
@@ -705,6 +705,8 @@ class StatRequirementsCog(commands.Cog):
         channels_by_id: dict[int, object] = {}
         items_by_channel: dict[int, list[tuple[int, str]]] = {}
         for event_id, ally_code, base_id, skill_id, guild_id in hits:
+            if not feature_flags.is_enabled(guild_id, "omicron"):
+                continue
             guild_cfg = database.get_guild_config(guild_id)
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
@@ -851,7 +853,7 @@ class StatRequirementsCog(commands.Cog):
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -881,7 +883,7 @@ class StatRequirementsCog(commands.Cog):
         комментарий: str = commands.Param(default=None, description="Новый комментарий"),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -917,7 +919,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
     ):
         await inter.response.defer(ephemeral=True)
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -952,7 +954,7 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Название нового плейта (как в HotUtils, например AC_ALL)"),
         описание: str = commands.Param(default=None, description="Заметка о плейте"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -966,7 +968,7 @@ class StatRequirementsCog(commands.Cog):
     @stat_req.sub_command(name="плейты", description="Показать список всех плейтов")
     async def stat_req_list_plates(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -992,7 +994,7 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт для переименования", autocomplete=autocomplete_stat_plate),
         новое_имя: str = commands.Param(description="Новое название плейта"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -1013,7 +1015,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — удаляется весь плейт)", autocomplete=autocomplete_stat_character),
         подтвердить: bool = commands.Param(default=False, description="Установите true только после проверки количества требований для удаления"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -1068,7 +1070,7 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
@@ -1218,7 +1220,7 @@ class StatRequirementsCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 

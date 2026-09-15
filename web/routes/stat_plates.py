@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
 from cogs.stat_requirements import OPERATOR_CHOICES, STAT_CHOICES
-from web.deps import require_officer_access
+from services import feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -35,7 +35,7 @@ def _unit_name(base_id: str) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
-async def plates_list(request: Request, user: dict = Depends(require_officer_access)):
+async def plates_list(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     rows = database.get_all_stat_plates_detailed(guild_id=user["guild_id"])
     plates = [
         {"name": name, "description": description, "char_count": char_count, "req_count": req_count}
@@ -53,7 +53,7 @@ async def plates_create(
     request: Request,
     name: str = Form(...),
     description: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     ok = database.create_stat_plate(name.strip(), description.strip() or None, user["discord_id"], guild_id=user["guild_id"])
     if not ok:
@@ -62,7 +62,7 @@ async def plates_create(
 
 
 @router.post("/{plate_name}/rename", response_class=HTMLResponse)
-async def plates_rename(plate_name: str, new_name: str = Form(...), user: dict = Depends(require_officer_access)):
+async def plates_rename(plate_name: str, new_name: str = Form(...), user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     new_name = new_name.strip()
     ok = database.rename_stat_plate(plate_name, new_name, guild_id=user["guild_id"])
     if not ok:
@@ -72,13 +72,13 @@ async def plates_rename(plate_name: str, new_name: str = Form(...), user: dict =
 
 
 @router.post("/{plate_name}/delete", response_class=HTMLResponse)
-async def plates_delete(plate_name: str, user: dict = Depends(require_officer_access)):
+async def plates_delete(plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     database.delete_stat_plate(plate_name, guild_id=user["guild_id"])
     return RedirectResponse("/plates", status_code=303)
 
 
 @router.get("/api/units", response_class=JSONResponse)
-async def units_search(q: str = "", user: dict = Depends(require_officer_access)):
+async def units_search(q: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     if not q or len(q.strip()) < 2:
         return []
     rows = database.search_game_units(q.strip(), limit=20)
@@ -86,7 +86,7 @@ async def units_search(q: str = "", user: dict = Depends(require_officer_access)
 
 
 @router.get("/{plate_name}", response_class=HTMLResponse)
-async def plate_detail(request: Request, plate_name: str, user: dict = Depends(require_officer_access)):
+async def plate_detail(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     guild_id = user["guild_id"]
     char_keys = database.get_stat_requirement_characters(plate_name, guild_id=guild_id)
     characters = []
@@ -128,7 +128,7 @@ async def requirement_add(
     threshold: float = Form(...),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
@@ -151,7 +151,7 @@ async def requirement_edit(
     threshold: float = Form(...),
     priority: str = Form(...),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     row = database.get_stat_requirement(req_id, guild_id=guild_id)
@@ -165,6 +165,6 @@ async def requirement_edit(
 
 
 @router.post("/{plate_name}/requirements/{req_id}/delete", response_class=HTMLResponse)
-async def requirement_delete(plate_name: str, req_id: int, user: dict = Depends(require_officer_access)):
+async def requirement_delete(plate_name: str, req_id: int, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     database.delete_stat_requirement(req_id, guild_id=user["guild_id"])
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)

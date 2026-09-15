@@ -10,6 +10,7 @@ import re
 import database
 import guild_resolver
 from cogs.violations import autocomplete_players
+from services import feature_flags, tb_schedule
 import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -271,6 +272,8 @@ class GuildEvents(commands.Cog):
         )
         if guild_cfg is None:
             return
+        if not feature_flags.is_enabled(guild_cfg["id"], "tb_plan_order"):
+            return
         parsed = self._parse_tb_plan_message(message.content)
         if not parsed:
             return
@@ -321,11 +324,11 @@ class GuildEvents(commands.Cog):
     # публикация автоматически совпадает с днями, когда RotationPing и так напоминает
     # про взводы/ордер — отдельного расписания не заводим.
     @staticmethod
-    def _is_ping_week(guild_cfg, today_date) -> bool:
-        if not guild_cfg.get("ping_start_date"):
-            return False
-        start_date = datetime.strptime(guild_cfg["ping_start_date"], "%Y-%m-%d").date()
-        delta = (today_date - start_date).days
+    def _is_ping_week(today_date) -> bool:
+        # Якорь чётности недели общий для всех гильдий (services/tb_schedule.py),
+        # см. тот же метод в cogs/rotation_ping.py — раньше это было
+        # guilds.ping_start_date каждой гильдии по отдельности.
+        delta = (today_date - tb_schedule.get_week_anchor_date()).days
         return (delta // 7) % 2 == 0
 
     @staticmethod
@@ -347,7 +350,16 @@ class GuildEvents(commands.Cog):
     @tasks.loop(seconds=30)
     async def tb_order_loop(self):
         now_msk = datetime.now(MSK)
-        if now_msk.hour != 20 or now_msk.minute != 0:
+        # 20:00 — номинальный МСК-триггер, но фактический старт этапа ТБ в игре
+        # завязан на европейское время, которое дважды в год сдвигается на
+        # летнее/зимнее (Россия — нет); DST-поправка (см. services/tb_schedule.py,
+        # задаётся супер-админом в /admin/tb-schedule) общая для всех гильдий.
+        target_hour, target_minute = tb_schedule.apply_correction(
+            20, 0, tb_schedule.effective_dst_offset_minutes(now_msk.date())
+        )
+        if now_msk.hour != target_hour or now_msk.minute != target_minute:
+            return
+        if not self._is_ping_week(now_msk.date()):
             return
 
         current_key = now_msk.strftime("%Y%m%d%H%M")
@@ -355,6 +367,8 @@ class GuildEvents(commands.Cog):
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
+            if not feature_flags.is_enabled(gid, "tb_plan_order"):
+                continue
             # Источник блока ордера: если офицер выбрал сохранённый план
             # (/тб_план выбрать) — берём его ветку, иначе фолбэк на старый
             # статический guilds.tb_order_source_channel_id (ручная ветка-план).
@@ -368,8 +382,6 @@ class GuildEvents(commands.Cog):
 
             if not guild_cfg.get("tb_plan_channel_id") or not source_channel_id \
                     or not guild_cfg.get("tb_order_role_id"):
-                continue
-            if not self._is_ping_week(guild_cfg, now_msk.date()):
                 continue
             phase = self._tb_order_phase_for_weekday(guild_cfg, now_msk.weekday())
             if not phase:
@@ -462,7 +474,7 @@ class GuildEvents(commands.Cog):
                 self.last_reported_tb_fingerprint[gid] = database.get_bot_state("last_reported_tb_fingerprint", guild_id=gid)
             try:
                 result = guild.get("recentTerritoryBattleResult", [])
-                if result:
+                if result and feature_flags.is_enabled(gid, "tb_reports"):
                     fingerprint = hashlib.sha1(
                         json.dumps(result, sort_keys=True, default=str).encode()
                     ).hexdigest()
@@ -475,7 +487,7 @@ class GuildEvents(commands.Cog):
 
             try:
                 tw_results = guild.get("recentTerritoryWarResult", [])
-                if tw_results:
+                if tw_results and feature_flags.is_enabled(gid, "tw_order"):
                     self.generate_tw_report(gid, tw_results)
             except Exception as e:
                 print(f"❌ [{gname}] Ошибка обработки истории ВГ: {e}")
@@ -911,9 +923,14 @@ class GuildEvents(commands.Cog):
     def _resolve_guild_config(self, inter):
         """Общий шаг для команд /тб_отчет: резолвит guild_id по роли автора и
         достаёт конфиг гильдии. Возвращает None, если не удалось (нет роли ни
-        одной гильдии, либо для гильдии ещё не резолвлен swgoh_guild_id)."""
+        одной гильдии, для гильдии ещё не резолвлен swgoh_guild_id, либо
+        фича "tb_reports" выключена для гильдии через /admin/features) —
+        вызывающий код не различает эти случаи, все показывают один и тот же
+        текст ошибки."""
         guild_id = guild_resolver.resolve_guild_id(inter.author)
         if guild_id is None:
+            return None
+        if not feature_flags.is_enabled(guild_id, "tb_reports"):
             return None
         guild_cfg = database.get_guild_config(guild_id)
         if not guild_cfg or not guild_cfg.get("swgoh_guild_id"):
@@ -1039,7 +1056,7 @@ class GuildEvents(commands.Cog):
     async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tb_reports")
         if guild_id is None:
             return
 
@@ -1067,7 +1084,7 @@ class GuildEvents(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tb_reports")
         if guild_id is None:
             return
 
@@ -1151,7 +1168,7 @@ class GuildEvents(commands.Cog):
         ),
         планета: str = commands.Param(description="Название планеты"),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tb_plan_order")
         if guild_id is None:
             return
 

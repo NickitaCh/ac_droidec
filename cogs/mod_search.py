@@ -57,7 +57,7 @@ class ModSearchCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "mod_search")
         if guild_id is None:
             return
 

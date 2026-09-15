@@ -15,15 +15,15 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday, parse_birthday
+from services import feature_flags
 from services.config_status import config_warning_html
-from web.deps import require_officer_access
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 
 @router.get("", response_class=HTMLResponse)
-async def birthdays_list(request: Request, user: dict = Depends(require_officer_access)):
+async def birthdays_list(request: Request, user: dict = Depends(feature_flags.require_feature("birthdays"))):
     guild_id = user["guild_id"]
     all_bdays = database.get_all_birthdays(guild_id=guild_id)
 
@@ -58,7 +58,7 @@ async def birthdays_list(request: Request, user: dict = Depends(require_officer_
 
 
 @router.get("/api/players", response_class=JSONResponse)
-async def players_search(q: str = "", user: dict = Depends(require_officer_access)):
+async def players_search(q: str = "", user: dict = Depends(feature_flags.require_feature("birthdays"))):
     if not q or len(q.strip()) < 2:
         return []
     search = q.strip().lower()
@@ -75,7 +75,7 @@ async def birthdays_add(
     discord_id_search: str = Form(""),
     discord_id_manual: str = Form(""),
     date_str: str = Form(...),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("birthdays")),
 ):
     # Форма предлагает два способа выбрать игрока — живой поиск по регистрациям
     # (основной путь) или ручной ввод ID (для незарегистрированных участников).
@@ -94,6 +94,6 @@ async def birthdays_add(
 
 
 @router.post("/{discord_id}/remove", response_class=HTMLResponse)
-async def birthdays_remove(discord_id: str, user: dict = Depends(require_officer_access)):
+async def birthdays_remove(discord_id: str, user: dict = Depends(feature_flags.require_feature("birthdays"))):
     database.remove_birthday(discord_id, guild_id=user["guild_id"])
     return RedirectResponse("/birthdays", status_code=303)

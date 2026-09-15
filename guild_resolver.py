@@ -122,6 +122,26 @@ async def require_guild_id(inter):
     return guild_id
 
 
+async def require_feature(inter, feature_key: str):
+    """require_guild_id + проверка per-guild фиче-тумблера (services/feature_flags.py)
+    одним вызовом — используется вместо require_guild_id в командах, которые
+    относятся к отключаемой фиче. Возвращает guild_id, либо None (и отвечает
+    пользователю сама), если гильдию не определить ИЛИ фича выключена для неё."""
+    from services import feature_flags
+
+    guild_id = await require_guild_id(inter)
+    if guild_id is None:
+        return None
+    if not feature_flags.is_enabled(guild_id, feature_key):
+        msg = f"❌ Функция «{feature_flags.label(feature_key)}» отключена для вашей гильдии."
+        if inter.response.is_done():
+            await inter.edit_original_response(msg)
+        else:
+            await inter.response.send_message(msg, ephemeral=True)
+        return None
+    return guild_id
+
+
 def is_officer_for_resolved_guild(author) -> bool:
     """Сигнатура не менялась — используется в @commands.check на офицерских
     сабкомандах (birthday.py, stat_requirements.py, datacron_requirements.py,

@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
-from services import fun_features
+from services import feature_flags, fun_features, tb_schedule
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -298,3 +298,100 @@ async def fun_enable(action_key: str, user: dict = Depends(require_super_admin))
 async def fun_disable(action_key: str, user: dict = Depends(require_super_admin)):
     fun_features.set_enabled(action_key, False, user["discord_id"])
     return RedirectResponse("/admin/fun", status_code=303)
+
+
+# =====================================================================
+# ТБ-расписание, бот-вайд (не per-guild): якорь чётности "тегаемой" недели +
+# DST-коррекция МСК-триггеров (см. services/tb_schedule.py за подробным
+# объяснением, почему это не per-guild настройка). Смещение вводится как
+# знаковое число минут, без готовых лейблов "лето/зима" — супер-админ сам
+# определяет знак и величину, глядя на реальный сдвиг в игре.
+# =====================================================================
+@router.get("/tb-schedule", response_class=HTMLResponse)
+async def tb_schedule_page(request: Request, user: dict = Depends(require_super_admin)):
+    return templates.TemplateResponse(request, "admin_tb_schedule.html", {
+        "user": user,
+        "anchor_date": tb_schedule.get_week_anchor_date().isoformat(),
+        "current_offset": tb_schedule.get_dst_offset_minutes(),
+        "effective_offset": tb_schedule.effective_dst_offset_minutes(),
+        "pending": tb_schedule.get_pending_dst_change(),
+        "error": request.query_params.get("error"),
+        "saved": request.query_params.get("saved"),
+    })
+
+
+@router.post("/tb-schedule/anchor", response_class=HTMLResponse)
+async def tb_schedule_set_anchor(
+    request: Request,
+    anchor_date: str = Form(...),
+    user: dict = Depends(require_super_admin),
+):
+    try:
+        tb_schedule.set_week_anchor_date(anchor_date.strip(), user["discord_id"])
+    except ValueError:
+        return RedirectResponse(
+            f"/admin/tb-schedule?{urlencode({'error': 'Дата должна быть в формате ГГГГ-ММ-ДД'})}", status_code=303
+        )
+    return RedirectResponse("/admin/tb-schedule?saved=1", status_code=303)
+
+
+@router.post("/tb-schedule/dst/schedule", response_class=HTMLResponse)
+async def tb_schedule_schedule_dst(
+    request: Request,
+    effective_date: str = Form(...),
+    offset_minutes: int = Form(...),
+    note: str = Form(""),
+    user: dict = Depends(require_super_admin),
+):
+    if not (-180 <= offset_minutes <= 180):
+        return RedirectResponse(
+            f"/admin/tb-schedule?{urlencode({'error': 'Смещение должно быть в пределах ±180 минут'})}", status_code=303
+        )
+    try:
+        tb_schedule.schedule_dst_change(effective_date.strip(), offset_minutes, user["discord_id"], note.strip())
+    except ValueError:
+        return RedirectResponse(
+            f"/admin/tb-schedule?{urlencode({'error': 'Дата должна быть в формате ГГГГ-ММ-ДД'})}", status_code=303
+        )
+    return RedirectResponse("/admin/tb-schedule?saved=1", status_code=303)
+
+
+@router.post("/tb-schedule/dst/cancel", response_class=HTMLResponse)
+async def tb_schedule_cancel_dst(user: dict = Depends(require_super_admin)):
+    tb_schedule.cancel_pending_dst_change()
+    return RedirectResponse("/admin/tb-schedule", status_code=303)
+
+
+# =====================================================================
+# Фиче-тумблеры по гильдиям (services/feature_flags.py) — матрица гильдия×фича,
+# один общий <form> на всю таблицу (по образцу /admin/fun, но сразу батчем на
+# все ячейки, а не по одной кнопке на переключение — при 6+ гильдиях и 15
+# фичах отдельная кнопка на каждую пару была бы неюзабельна).
+# =====================================================================
+@router.get("/features", response_class=HTMLResponse)
+async def features_page(request: Request, user: dict = Depends(require_super_admin)):
+    guilds = list_guilds(active_only=True)
+    rows = feature_flags.matrix([g["id"] for g in guilds])
+    categories = {}
+    for row in rows:
+        categories.setdefault(row["category"], []).append(row)
+    return templates.TemplateResponse(request, "admin_features.html", {
+        "user": user,
+        "guilds": guilds,
+        "categories": categories,
+        "saved": request.query_params.get("saved"),
+    })
+
+
+@router.post("/features/save", response_class=HTMLResponse)
+async def features_save(request: Request, user: dict = Depends(require_super_admin)):
+    form = await request.form()
+    checked = set(form.keys())  # "{guild_id}:{key}" только для отмеченных чекбоксов
+    guilds = list_guilds(active_only=True)
+    for guild in guilds:
+        gid = guild["id"]
+        for key in feature_flags.FEATURES:
+            want_enabled = f"{gid}:{key}" in checked
+            if feature_flags.is_enabled(gid, key) != want_enabled:
+                feature_flags.set_enabled(gid, key, want_enabled, user["discord_id"])
+    return RedirectResponse("/admin/features?saved=1", status_code=303)

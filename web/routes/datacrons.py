@@ -48,8 +48,7 @@ from cogs.datacron_requirements import (
     _match_requirements,
     _parse_stat_pair_params,
 )
-from services import datacron_catalog
-from web.deps import require_officer_access
+from services import datacron_catalog, feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -110,7 +109,7 @@ def _redirect_season(set_id: int, error: str = None, notice: str = None):
 # Список сезонов
 # =====================================================================
 @router.get("", response_class=HTMLResponse)
-async def datacrons_list(request: Request, user: dict = Depends(require_officer_access)):
+async def datacrons_list(request: Request, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     guild_id = user["guild_id"]
     catalog = await _safe_catalog()
 
@@ -139,7 +138,7 @@ async def datacrons_list(request: Request, user: dict = Depends(require_officer_
 # он перехватывал бы GET /datacrons/check (set_id="check") и падал 422 при попытке
 # привести "check" к int, до "/check" очередь бы не дошла вообще.
 @router.get("/check", response_class=HTMLResponse)
-async def check_form(request: Request, user: dict = Depends(require_officer_access)):
+async def check_form(request: Request, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     guild_id = user["guild_id"]
     catalog = await _safe_catalog()
     seasons = []
@@ -224,7 +223,7 @@ async def check_form(request: Request, user: dict = Depends(require_officer_acce
 # Детальная страница сезона: список требований + формы добавления
 # =====================================================================
 @router.get("/{set_id}", response_class=HTMLResponse)
-async def season_detail(request: Request, set_id: int, user: dict = Depends(require_officer_access)):
+async def season_detail(request: Request, set_id: int, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     guild_id = user["guild_id"]
     catalog = await _safe_catalog()
     season_data = catalog["seasons"].get(set_id) if catalog else None
@@ -305,7 +304,7 @@ async def add_base_requirement(
     stat4: str = Form(""), value4: float = Form(None),
     stat5: str = Form(""), value5: float = Form(None),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("datacrons")),
 ):
     guild_id = user["guild_id"]
     catalog = await _safe_catalog()
@@ -337,7 +336,7 @@ async def add_focused_requirement(
     pack: str = Form(""),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("datacrons")),
 ):
     guild_id = user["guild_id"]
     catalog = await _safe_catalog()
@@ -359,7 +358,7 @@ async def add_focused_requirement(
 # Добавить альтернативу существующему уровню (аналог /дк_требования добавить_альтернативу)
 # =====================================================================
 @router.post("/{set_id}/requirements/{req_id}/add-alt", response_class=HTMLResponse)
-async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str = Form(...), user: dict = Depends(require_officer_access)):
+async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str = Form(...), user: dict = Depends(feature_flags.require_feature("datacrons"))):
     guild_id = user["guild_id"]
     if level not in (3, 6, 9):
         return _redirect_season(set_id, error="Некорректный уровень (должен быть 3, 6 или 9).")
@@ -408,7 +407,7 @@ async def edit_base_requirement(
     stat4: str = Form(""), value4: float = Form(None),
     stat5: str = Form(""), value5: float = Form(None),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("datacrons")),
 ):
     guild_id = user["guild_id"]
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
@@ -424,7 +423,7 @@ async def edit_base_requirement(
 
 
 @router.post("/{set_id}/requirements/{req_id}/delete", response_class=HTMLResponse)
-async def delete_base_requirement(set_id: int, req_id: int, user: dict = Depends(require_officer_access)):
+async def delete_base_requirement(set_id: int, req_id: int, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     database.delete_datacron_requirement(req_id, guild_id=user["guild_id"])
     return _redirect_season(set_id, notice=f"Требование #{req_id} удалено.")
 
@@ -437,7 +436,7 @@ async def edit_focused_requirement(
     pack: str = Form(""),
     priority: str = Form(...),
     comment: str = Form(""),
-    user: dict = Depends(require_officer_access),
+    user: dict = Depends(feature_flags.require_feature("datacrons")),
 ):
     guild_id = user["guild_id"]
     row = database.get_datacron_focused_requirement(req_id, guild_id=guild_id)
@@ -451,7 +450,7 @@ async def edit_focused_requirement(
 
 
 @router.post("/{set_id}/focused/{req_id}/delete", response_class=HTMLResponse)
-async def delete_focused_requirement(set_id: int, req_id: int, user: dict = Depends(require_officer_access)):
+async def delete_focused_requirement(set_id: int, req_id: int, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     database.delete_datacron_focused_requirement(req_id, guild_id=user["guild_id"])
     return _redirect_season(set_id, notice=f"Спец. требование F{req_id} удалено.")
 
@@ -462,7 +461,7 @@ async def delete_focused_requirement(set_id: int, req_id: int, user: dict = Depe
 # не может показать их иначе как отдельным ответом — здесь двухшаговый POST не нужен).
 # =====================================================================
 @router.post("/{set_id}/clear", response_class=HTMLResponse)
-async def clear_season(set_id: int, user: dict = Depends(require_officer_access)):
+async def clear_season(set_id: int, user: dict = Depends(feature_flags.require_feature("datacrons"))):
     guild_id = user["guild_id"]
     deleted_base = database.delete_datacron_requirements_by_set(set_id, guild_id=guild_id)
     deleted_focused = database.delete_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
@@ -477,7 +476,7 @@ async def clear_season(set_id: int, user: dict = Depends(require_officer_access)
 # live-search по-прежнему оправдан.
 # =====================================================================
 @router.get("/api/focused-characters/{season}", response_class=JSONResponse)
-async def focused_characters_search(season: int, q: str = "", user: dict = Depends(require_officer_access)):
+async def focused_characters_search(season: int, q: str = "", user: dict = Depends(feature_flags.require_feature("datacrons"))):
     catalog = await _safe_catalog()
     season_data = catalog["seasons"].get(season) if catalog else None
     if not season_data:

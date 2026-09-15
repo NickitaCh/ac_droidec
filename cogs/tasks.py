@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import database
 import guild_resolver
+from services import feature_flags
 from services.units_sync import sync_units
 from services.equipment_sync import sync_equipment
 from services.config_status import config_warning_text
@@ -306,6 +307,8 @@ class TasksCog(commands.Cog):
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
+            if not feature_flags.is_enabled(gid, "tasks"):
+                continue
             try:
                 active_tasks = database.get_active_tasks(gid)
                 if not active_tasks:
@@ -365,6 +368,8 @@ class TasksCog(commands.Cog):
 
         for guild_cfg in database.get_all_guild_configs():
             gid = guild_cfg["id"]
+            if not feature_flags.is_enabled(gid, "tasks"):
+                continue
             notify_time = guild_cfg.get("tasks_notify_time") or self.bot.TASKS_DEFAULT_NOTIFY_TIME
             try:
                 target_hour, target_minute = map(int, notify_time.split(":"))
@@ -420,7 +425,7 @@ class TasksCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tasks")
         if guild_id is None:
             return
 
@@ -508,7 +513,7 @@ class TasksCog(commands.Cog):
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tasks")
         if guild_id is None:
             return
 

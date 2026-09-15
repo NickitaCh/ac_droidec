@@ -24,7 +24,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data, omicron_priority
+from services import activity_diff, dashboard_data, feature_flags, omicron_priority
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -130,7 +130,7 @@ def _extract_thread_id(value: str) -> int | None:
 
 
 @router.get("/tw", response_class=HTMLResponse)
-async def tw_report(request: Request, user: dict = Depends(require_guild_access)):
+async def tw_report(request: Request, user: dict = Depends(feature_flags.require_feature("tw_order"))):
     rows = dashboard_data.get_recent_tw_results(user["guild_id"], limit=50)
     wins = sum(1 for r in rows if r.result == "win")
     return templates.TemplateResponse(request, "tw_report.html", {
@@ -147,7 +147,7 @@ def _parse_event_id(request: Request) -> int | None:
 
 
 @router.get("/tb", response_class=HTMLResponse)
-async def tb_report(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_report(request: Request, user: dict = Depends(feature_flags.require_feature("tb_reports"))):
     report = dashboard_data.get_tb_report(user["guild_id"], event_id=_parse_event_id(request))
     max_summary = report.latest[0].summary if report and report.latest else 0
     max_trend_total = max((t for _, t in report.event_totals), default=0) if report else 0
@@ -160,7 +160,7 @@ async def tb_report(request: Request, user: dict = Depends(require_guild_access)
 
 
 @router.get("/tb/player/{name}", response_class=HTMLResponse)
-async def tb_player(name: str, request: Request, user: dict = Depends(require_guild_access)):
+async def tb_player(name: str, request: Request, user: dict = Depends(feature_flags.require_feature("tb_reports"))):
     report = dashboard_data.get_tb_player_report(user["guild_id"], name, event_id=_parse_event_id(request))
     if report is None:
         raise HTTPException(status_code=404, detail=f"Нет сохранённых данных ТБ для игрока «{name}»")
@@ -168,7 +168,7 @@ async def tb_player(name: str, request: Request, user: dict = Depends(require_gu
 
 
 @router.get("/tb/compare/{name}", response_class=HTMLResponse)
-async def tb_compare_player(name: str, request: Request, user: dict = Depends(require_guild_access)):
+async def tb_compare_player(name: str, request: Request, user: dict = Depends(feature_flags.require_feature("tb_reports"))):
     compare = dashboard_data.get_tb_player_compare(user["guild_id"], name)
     if compare is None:
         raise HTTPException(status_code=404, detail=f"Нет сохранённых данных ТБ для игрока «{name}»")
@@ -176,7 +176,7 @@ async def tb_compare_player(name: str, request: Request, user: dict = Depends(re
 
 
 @router.get("/tb/plan", response_class=HTMLResponse)
-async def tb_plan(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_plan(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     current = database.get_tb_planet_names(user["guild_id"])
     conflict_label_map = {opt["value"]: opt["label"] for opt in TB_PLAN_CONFLICT_OPTIONS}
     rows = [
@@ -202,7 +202,7 @@ async def tb_plan_save(
     phase: int = Form(...),
     conflict_key: str = Form(...),
     planet_name: str = Form(...),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     planet_name = planet_name.strip()
     valid_conflicts = {opt["value"] for opt in TB_PLAN_CONFLICT_OPTIONS}
@@ -217,7 +217,7 @@ async def tb_plan_save(
 
 
 @router.get("/tb/order-plans", response_class=HTMLResponse)
-async def tb_order_plans(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_order_plans(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
@@ -258,7 +258,7 @@ async def tb_order_plans(request: Request, user: dict = Depends(require_guild_ac
 
 
 @router.post("/tb/order-plans/select", response_class=HTMLResponse)
-async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(require_guild_access)):
+async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     plan = database.get_tb_saved_plan(plan_id)
     if plan is None or plan["guild_id"] != user["guild_id"]:
         return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'План не найден'})}", status_code=303)
@@ -267,7 +267,7 @@ async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(r
 
 
 @router.post("/tb/order-plans/delete", response_class=HTMLResponse)
-async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(require_guild_access)):
+async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     database.delete_tb_saved_plan(user["guild_id"], name)
     return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
 
@@ -277,7 +277,7 @@ async def tb_order_plans_save_manual(
     name: str = Form(...),
     thread_link: str = Form(...),
     stars: int = Form(...),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     # Веб-процесс не держит Discord-клиент (см. web/app.py — "без промежуточного
     # API у бота"), поэтому, в отличие от бот-команды /тб_план сохранить, здесь
@@ -396,7 +396,7 @@ PLATOON_CANDIDATES_LIMIT = 20
 
 
 @router.get("/tb/platoons", response_class=HTMLResponse)
-async def tb_platoons(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
     plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
 
@@ -673,7 +673,7 @@ async def tb_platoons_assign(
     slot_index: int = Form(...),
     ally_code: str = Form(...),
     anchor: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     plan = database.get_tb_saved_plan(plan_id)
@@ -695,7 +695,7 @@ async def tb_platoons_unassign(
     operation: int = Form(...),
     slot_index: int = Form(...),
     anchor: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     plan = database.get_tb_saved_plan(plan_id)
@@ -718,7 +718,7 @@ _AUTOFILL_REASON_LABELS = {
 async def tb_platoons_autofill_route(
     plan_id: int = Form(...),
     round_num: int = Form(...),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     """Заполняет все ещё пустые слоты ВСЕГО плана (все распознанные этапы сразу, не
     только открытый) — tb_platoon_autofill.py. round_num здесь — только чтобы вернуть
@@ -774,7 +774,7 @@ async def tb_platoons_hold_route(
     round_num: int = Form(...),
     planet: str = Form(...),
     held: str = Form(...),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     plan = database.get_tb_saved_plan(plan_id)
@@ -791,7 +791,7 @@ async def tb_platoons_clear_route(
     scope: str = Form(...),  # "operation" / "planet" / "round" / "plan"
     planet: str = Form(""),
     operation: int = Form(0),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     """Кнопки «очистить» на /tb/platoons — по операции/планете/этапу/всему плану. "Этап"
     чистит все планеты, показанные на этом этапе (включая перенесённые с прошлого этапа —
@@ -818,7 +818,7 @@ async def tb_platoons_clear_route(
 
 
 @router.get("/tb/platoons/api/units", response_class=JSONResponse)
-async def tb_platoons_units_search(q: str = "", user: dict = Depends(require_guild_access)):
+async def tb_platoons_units_search(q: str = "", user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Подстрочный поиск юнита по имени (RU/EN) для интерактивного автодополнения на
     /tb/platoons/filters (см. web/static/dashboard.js — контекст "unit") — по прямому
     запросу пользователя 2026-08-31. Тот же database.search_game_units, что и
@@ -831,7 +831,7 @@ async def tb_platoons_units_search(q: str = "", user: dict = Depends(require_gui
 
 
 @router.get("/tb/platoons/api/slot", response_class=JSONResponse)
-async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Полный список кандидатов на один слот взвода (планета/операция/индекс), без
     урезания до PLATOON_CANDIDATES_LIMIT и включая игроков, которые юнитом вообще не
     владеют — для попапа выбора игрока на /tb/platoons (по прямому запросу пользователя
@@ -964,7 +964,7 @@ async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends
 
 
 @router.get("/tb/platoons/filters", response_class=HTMLResponse)
-async def tb_platoons_filters_page(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons_filters_page(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
     rules_text = database.get_tb_platoon_filter_rules(guild_id)
     parsed, errors = tb_platoon_filters.parse_rules(rules_text, guild_id)
@@ -981,7 +981,7 @@ async def tb_platoons_filters_page(request: Request, user: dict = Depends(requir
 async def tb_platoons_filters_save(
     request: Request,
     rules_text: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     parsed, errors = tb_platoon_filters.parse_rules(rules_text, guild_id)
@@ -1024,7 +1024,7 @@ def _omicron_priority_context(guild_id: int, rules_text: str = None) -> dict:
 
 
 @router.get("/omicrons/priority", response_class=HTMLResponse)
-async def omicrons_priority_page(request: Request, user: dict = Depends(require_guild_access)):
+async def omicrons_priority_page(request: Request, user: dict = Depends(feature_flags.require_feature("omicron"))):
     guild_id = user["guild_id"]
     return templates.TemplateResponse(request, "omicron_priority.html", {
         "user": user,
@@ -1038,7 +1038,7 @@ async def omicrons_priority_page(request: Request, user: dict = Depends(require_
 async def omicrons_priority_save(
     request: Request,
     skill_ids: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("omicron")),
 ):
     guild_id = user["guild_id"]
     ordered = [s for s in skill_ids.split(",") if s.strip()]
@@ -1052,7 +1052,7 @@ async def omicrons_priority_save(
 
 
 @router.get("/omicrons/api/search", response_class=JSONResponse)
-async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depends(require_guild_access)):
+async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depends(feature_flags.require_feature("omicron"))):
     """Поиск омикронов для добавления в приоритетный список — по умолчанию только "ВГ" (по
     прямому запросу пользователя 2026-09-02 "оставить только те, что ВГшные", сузили с
     исходного ВГ+ТБ), ?all=1 снимает фильтр по игровому режиму (см. план). Сама страница
@@ -1065,7 +1065,7 @@ async def omicrons_priority_search(q: str = "", all: str = "", user: dict = Depe
 
 
 @router.get("/omicrons/api/abilities", response_class=JSONResponse)
-async def omicrons_priority_ability_search(unit: str = "", q: str = "", user: dict = Depends(require_guild_access)):
+async def omicrons_priority_ability_search(unit: str = "", q: str = "", user: dict = Depends(feature_flags.require_feature("omicron"))):
     """Автодополнение названия способности после "Юнит: " внутри скобок [...] на
     /omicrons/priority (см. web/static/dashboard.js, textarea .omicron-rules-textarea) — нужно
     только когда у юнита несколько омикрон-способностей (guild_omicron_rules._resolve_omicron_target
@@ -1098,7 +1098,7 @@ async def omicrons_priority_rules_page_redirect():
 async def omicrons_priority_rules_save(
     request: Request,
     rules_text: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("omicron")),
 ):
     guild_id = user["guild_id"]
     parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
@@ -1113,7 +1113,7 @@ async def omicrons_priority_rules_save(
 
 
 @router.get("/omicrons/report", response_class=HTMLResponse)
-async def omicrons_report(request: Request, user: dict = Depends(require_guild_access)):
+async def omicrons_report(request: Request, user: dict = Depends(feature_flags.require_feature("omicron"))):
     guild_id = user["guild_id"]
     rows = omicron_priority.missing_omicrons_report(guild_id)
     for row in rows:
@@ -1126,7 +1126,7 @@ async def omicrons_report(request: Request, user: dict = Depends(require_guild_a
 
 
 @router.get("/omicrons/report/{name}", response_class=HTMLResponse)
-async def omicrons_report_player(name: str, request: Request, user: dict = Depends(require_guild_access)):
+async def omicrons_report_player(name: str, request: Request, user: dict = Depends(feature_flags.require_feature("omicron"))):
     guild_id = user["guild_id"]
     hit = next(
         ((ally_code, ingame_name) for _discord_id, ally_code, ingame_name in database.get_all_user_mappings(guild_id)
@@ -1233,7 +1233,7 @@ def _attachment_headers(filename: str) -> dict:
 
 
 @router.get("/tb/platoons/export")
-async def tb_platoons_export(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons_export(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
     plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
     if plan is None:
@@ -1257,7 +1257,7 @@ async def tb_platoons_export(request: Request, user: dict = Depends(require_guil
 
 
 @router.get("/tb/platoons/export/all")
-async def tb_platoons_export_all(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons_export_all(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
     plan, error = _resolve_viewed_plan(guild_id, request.query_params.get("plan_id"))
     if plan is None:
@@ -1293,7 +1293,7 @@ async def tb_platoons_export_all(request: Request, user: dict = Depends(require_
 
 
 @router.get("/tb/platoons/notify", response_class=HTMLResponse)
-async def tb_platoons_notify_page(request: Request, user: dict = Depends(require_guild_access)):
+async def tb_platoons_notify_page(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Страница выбора получателей перед рассылкой взводов в личку — по прямому запросу
     пользователя 2026-09-14 ("окно, где можно указать, кому отправить или кому НЕ
     отправлять", например при повторной отправке не всем, кто уже задонатил). Кто уже
@@ -1320,7 +1320,7 @@ async def tb_platoons_notify_send(
     plan_id: int = Form(...),
     round_num: int = Form(...),
     ally_codes: list[str] = Form([]),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     plan = database.get_tb_saved_plan(plan_id)
@@ -1557,7 +1557,7 @@ async def activity_players(request: Request, user: dict = Depends(require_guild_
 
 
 @router.get("/violations", response_class=HTMLResponse)
-async def violations(request: Request, user: dict = Depends(require_guild_access)):
+async def violations(request: Request, user: dict = Depends(feature_flags.require_feature("violations"))):
     show_all = request.query_params.get("all") == "1"
     rows = dashboard_data.get_violations_overview(user["guild_id"], include_zero=show_all)
     top_offenders = [r for r in rows if r.recent_total > 0][:8]
@@ -1575,7 +1575,7 @@ async def violations(request: Request, user: dict = Depends(require_guild_access
 
 
 @router.get("/violations/api/players", response_class=JSONResponse)
-async def violations_players_search(q: str = "", user: dict = Depends(require_guild_access)):
+async def violations_players_search(q: str = "", user: dict = Depends(feature_flags.require_feature("violations"))):
     if not q or len(q.strip()) < 2:
         return []
     q_lower = q.strip().lower()
@@ -1600,7 +1600,7 @@ async def violation_add(
     violation_3: str = Form(""),
     comment_3: str = Form(""),
     date: str = Form(""),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("violations")),
 ):
     guild_id = user["guild_id"]
     ally_code = ally_code.strip()
@@ -1745,7 +1745,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
 
 
 @router.get("/violations/{ally_code}", response_class=HTMLResponse)
-async def violation_dossier(request: Request, ally_code: str, user: dict = Depends(require_guild_access)):
+async def violation_dossier(request: Request, ally_code: str, user: dict = Depends(feature_flags.require_feature("violations"))):
     guild_id = user["guild_id"]
     names_by_code = {code: name for _discord_id, code, name in database.get_all_user_mappings(guild_id)}
     player_name = names_by_code.get(ally_code, ally_code)
@@ -1783,7 +1783,7 @@ async def violation_dossier(request: Request, ally_code: str, user: dict = Depen
 async def violation_delete(
     warn_id: int,
     ally_code: str = Form(...),
-    user: dict = Depends(require_guild_access),
+    user: dict = Depends(feature_flags.require_feature("violations")),
 ):
     database.remove_warn_by_id(warn_id, guild_id=user["guild_id"])
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
@@ -1800,10 +1800,16 @@ GUILD_SETTINGS_GROUPS = [
     {
         "name": "ТБ — тег на подготовку",
         "hint": "Раз в две недели, в начале «тегаемой» недели цикла ТБ, бот пишет в этот канал и тегает эту "
-                "роль — напоминание проверить взвод и заказ склада перед стартом Территориальной битвы.",
+                "роль — напоминание проверить взвод и заказ склада перед стартом Территориальной битвы. "
+                "Чётность самой недели общая для всех гильдий бота (задаёт супер-админ), а расписание "
+                "дней/времени/текста тега — своё для каждой гильдии, задаётся ниже. Запись с текстом «ордер» "
+                "дополнительно определяет, в какие дни недели публикуется автоордер ТБ (1-й день расписания — "
+                "1-й этап, и т.д.) — время этой записи на публикацию автоордера не влияет, она публикуется в "
+                "фиксированное время (см. /admin/tb-schedule).",
         "fields": [
             ("ping_channel_id", "Канал для тега на ротацию/взводы", "channel"),
             ("ping_role_id", "Тегаемая роль", "role"),
+            ("ping_schedule_json", "Расписание тега (время/дни/текст)", "schedule"),
         ],
     },
     {
@@ -1897,6 +1903,46 @@ async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
     return data.get("name") if data else None
 
 
+# Редактор ping_schedule_json (kind == "schedule" в GUILD_SETTINGS_GROUPS) — тот
+# же формат [{"time": "ЧЧ:ММ", "text": "...", "days": [0..6]}], что уже лежит в
+# колонке (0=Пн). Дни — обычное текстовое поле "0,1,2,3,4,5", а не чекбоксы:
+# повторяемые строки рендерятся через уже существующий общий JS-паттерн
+# [data-row-group] (web/static/dashboard.js) — он клонирует последнюю строку и
+# зачищает .value у input/select, но НЕ снимает .checked у чекбоксов, так что
+# чекбоксы для дней недели унаследовали бы отметки исходной строки; текстовое
+# поле не страдает от этого и не требует правки общего скрипта.
+def _parse_schedule_rows(raw_json: str) -> list[dict]:
+    if not raw_json:
+        return []
+    try:
+        entries = json.loads(raw_json)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [
+        {
+            "time": e.get("time", ""),
+            "text": e.get("text", ""),
+            "days": ",".join(str(d) for d in e.get("days", [])),
+        }
+        for e in entries if isinstance(e, dict)
+    ]
+
+
+def _parse_schedule_days(raw: str) -> list[int] | None:
+    """Парсит "0,1, 4" -> [0,1,4] (отсортировано, без дублей). None, если хоть
+    один элемент не 0-6 — вызывающий код должен отклонить всю форму, не тихо
+    отбросить кривую строку."""
+    days = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit() or not (0 <= int(part) <= 6):
+            return None
+        days.add(int(part))
+    return sorted(days)
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
     guild_cfg = database.get_guild_config(user["guild_id"])
@@ -1923,6 +1969,7 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             rows.append({
                 "field": field, "label": label, "kind": kind, "value": value,
                 "channel_options": await _channel_options(value) if kind == "channel" else None,
+                "schedule_entries": _parse_schedule_rows(value) if kind == "schedule" else None,
             })
         groups.append({"name": group["name"], "hint": group["hint"], "rows": rows})
     return templates.TemplateResponse(request, "guild_settings.html", {
@@ -1947,6 +1994,8 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
         for field, _label, kind in group["fields"]:
             if kind == "time":
                 continue  # tasks_notify_time — отдельно, ниже
+            if kind == "schedule":
+                continue  # ping_schedule_json — отдельно, ниже
 
             if kind == "role":
                 raw = (form.get(field) or "").strip()
@@ -1993,6 +2042,35 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
             status_code=303,
         )
     cleaned["tasks_notify_time"] = tasks_notify_time or None
+
+    # ping_schedule_json — повторяемые строки [data-row-group] (см. guild_settings.html),
+    # одноимённые поля во всех строках -> form.getlist. Пустые строки (время и текст оба
+    # пусты — пользователь добавил строку и не заполнил) пропускаются молча, любая другая
+    # некорректная строка отклоняет всю форму, а не тихо теряет часть расписания.
+    sched_times = form.getlist("ping_schedule_json_time")
+    sched_texts = form.getlist("ping_schedule_json_text")
+    sched_days = form.getlist("ping_schedule_json_days")
+    schedule_rows = []
+    for raw_time, raw_text, raw_days in zip(sched_times, sched_texts, sched_days):
+        raw_time, raw_text, raw_days = raw_time.strip(), raw_text.strip(), raw_days.strip()
+        if not raw_time and not raw_text and not raw_days:
+            continue
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw_time):
+            return RedirectResponse(
+                f"/settings?{urlencode({'error': f'Время тега должно быть в формате ЧЧ:ММ: \"{raw_time}\"'})}", status_code=303
+            )
+        if not raw_text:
+            return RedirectResponse(
+                f"/settings?{urlencode({'error': 'У каждой строки расписания тега должен быть текст'})}", status_code=303
+            )
+        days = _parse_schedule_days(raw_days)
+        if not days:
+            return RedirectResponse(
+                f"/settings?{urlencode({'error': f'Дни недели должны быть числами 0-6 через запятую (0=Пн): \"{raw_days}\"'})}",
+                status_code=303,
+            )
+        schedule_rows.append({"time": raw_time, "text": raw_text, "days": days})
+    cleaned["ping_schedule_json"] = json.dumps(schedule_rows) if schedule_rows else None
 
     database.update_guild_config(guild_id, **cleaned)
     return RedirectResponse("/settings?saved=1", status_code=303)

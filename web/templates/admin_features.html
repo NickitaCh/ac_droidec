@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Фичи по гильдиям — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Фичи по гильдиям</h1>
+    <p class="muted">
+        Включает/выключает функциональные блоки бота (слэш-команды, фоновые уведомления, веб-страницы)
+        отдельно для каждой гильдии. Пустая клетка (не отмечено) — фича выключена: команды отвечают
+        "функция отключена", веб-страницы недоступны, фоновые задачи молча пропускают эту гильдию.
+        Отметьте нужные клетки и нажмите "Сохранить" — меняются только те, что вы поменяли.
+    </p>
+
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    {% if not guilds %}
+        <p class="empty-state">Нет активных гильдий.</p>
+    {% else %}
+        <form method="post" action="/admin/features/save">
+            <div class="panel">
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>Фича</th>
+                                {% for g in guilds %}
+                                    <th>{{ g.name }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for category, rows in categories.items() %}
+                                <tr>
+                                    <td colspan="{{ guilds|length + 1 }}"><strong>{{ category }}</strong></td>
+                                </tr>
+                                {% for row in rows %}
+                                    <tr>
+                                        <td>{{ row.label }}</td>
+                                        {% for g in guilds %}
+                                            <td style="text-align: center;">
+                                                <input
+                                                    type="checkbox"
+                                                    class="checkbox"
+                                                    name="{{ g.id }}:{{ row.key }}"
+                                                    {% if row.states[g.id] %}checked{% endif %}
+                                                >
+                                            </td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <button type="submit">Сохранить</button>
+        </form>
+    {% endif %}
+{% endblock %}

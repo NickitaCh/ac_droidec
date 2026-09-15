@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 import database
 import stat_engine
 from services import mod_search
-from web.deps import require_officer_access
+from services import feature_flags
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -180,7 +180,7 @@ def _redirect_qs(mapping) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
-async def mod_search_page(request: Request, user: dict = Depends(require_officer_access)):
+async def mod_search_page(request: Request, user: dict = Depends(feature_flags.require_feature("mod_search"))):
     guild_id = user["guild_id"]
     qp = request.query_params
 
@@ -292,7 +292,7 @@ async def mod_search_page(request: Request, user: dict = Depends(require_officer
 
 
 @router.post("/presets/save", response_class=HTMLResponse)
-async def preset_save(request: Request, user: dict = Depends(require_officer_access)):
+async def preset_save(request: Request, user: dict = Depends(feature_flags.require_feature("mod_search"))):
     form = await request.form()
     name = (form.get("name") or "").strip()
     if not name:
@@ -313,6 +313,6 @@ async def preset_save(request: Request, user: dict = Depends(require_officer_acc
 
 
 @router.post("/presets/{preset_id}/delete", response_class=HTMLResponse)
-async def preset_delete(preset_id: int, user: dict = Depends(require_officer_access)):
+async def preset_delete(preset_id: int, user: dict = Depends(feature_flags.require_feature("mod_search"))):
     database.delete_mod_search_preset(preset_id, guild_id=user["guild_id"])
     return RedirectResponse("/mod-search", status_code=303)

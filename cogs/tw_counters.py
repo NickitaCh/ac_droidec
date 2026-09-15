@@ -16,6 +16,7 @@ from disnake.ext import commands, tasks
 
 import database
 import guild_resolver
+from services import feature_flags
 from services.config_status import config_warning_text
 
 # Фиксированные 10 локаций карты ВГ (зоны 1/2 делятся только на верх/низ, зоны
@@ -361,6 +362,8 @@ class TWCounters(commands.Cog):
         for guild_cfg in database.get_all_guild_configs():
             if not guild_cfg.get("tw_guide_forum_channel_id"):
                 continue
+            if not feature_flags.is_enabled(guild_cfg["id"], "tw_order"):
+                continue
             try:
                 stats = await self._sync_guild(guild_cfg)
                 marker = "⚠️ ПОДОЗРИТЕЛЬНО МАЛО" if stats.get("suspect_partial") else "✅"
@@ -379,7 +382,7 @@ class TWCounters(commands.Cog):
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def tw_sync_command(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tw_order")
         if guild_id is None:
             return
         guild_cfg = database.get_guild_config(guild_id)
@@ -430,7 +433,7 @@ class TWCounters(commands.Cog):
         контра5: str = commands.Param(default=None, description="Наша контра на пак №5", autocomplete=autocomplete_tw_counter5),
         локация5: str = commands.Param(default=None, description="Где бить пак №5", autocomplete=autocomplete_tw_location),
     ):
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = await guild_resolver.require_feature(inter, "tw_order")
         if guild_id is None:
             return
 

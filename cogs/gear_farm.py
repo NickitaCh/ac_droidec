@@ -20,6 +20,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
+from services import feature_flags
 from services.message_image import extract_channel_id, extract_message_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
 
@@ -161,6 +162,10 @@ class GearFarm(commands.Cog):
             return
 
         await inter.response.defer(ephemeral=True)
+
+        guild_id = await guild_resolver.require_feature(inter, "gear_farm")
+        if guild_id is None:
+            return
 
         channel_id = extract_channel_id(ссылка)
         message_id = extract_message_id(ссылка)
