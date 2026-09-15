@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
-from cogs.stat_requirements import OPERATOR_CHOICES, STAT_CHOICES
+from cogs.stat_requirements import OPERATOR_CHOICES, STAT_CHOICES, STAT_OMICRON
 from services import feature_flags
 
 router = APIRouter()
@@ -32,6 +32,31 @@ def _fmt_value(value: float) -> str:
 
 def _unit_name(base_id: str) -> str:
     return database.get_game_unit_name(base_id) or base_id
+
+
+def _omicron_options(base_id: str) -> list:
+    """[{skill_id, label}, ...] — та же логика, что web/routes/tasks.py::_omicron_options /
+    cogs/stat_requirements.py::_omicron_options_for_base, независимая копия (у каждого модуля
+    свой собственный набор feature-гейтов вокруг вызовов, шарить нечего)."""
+    skill_ids = database.get_all_unit_omicron_skills().get(base_id, [])
+    if not skill_ids:
+        return []
+    info = database.get_skill_display_info(skill_ids)
+    options = []
+    for skill_id in skill_ids:
+        name, _ability_id, ability_type, omicron_mode = info.get(skill_id, (skill_id, None, None, None))
+        label = name or skill_id
+        extra = " / ".join(p for p in (ability_type, omicron_mode) if p)
+        if extra:
+            label += f" ({extra})"
+        options.append({"skill_id": skill_id, "label": label})
+    return options
+
+
+def _omicron_ability_name(skill_id: str) -> str:
+    info = database.get_skill_display_info([skill_id])
+    name, _ability_id, _ability_type, _omicron_mode = info.get(skill_id, (None, None, None, None))
+    return name or skill_id
 
 
 @router.get("", response_class=HTMLResponse)
@@ -85,20 +110,29 @@ async def units_search(q: str = "", user: dict = Depends(feature_flags.require_f
     return [{"base_id": base_id, "name": name} for base_id, name in rows]
 
 
+@router.get("/api/omicron-skills", response_class=JSONResponse)
+async def omicron_skills(base_id: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    if not base_id:
+        return []
+    return _omicron_options(base_id)
+
+
 @router.get("/{plate_name}", response_class=HTMLResponse)
 async def plate_detail(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     guild_id = user["guild_id"]
     char_keys = database.get_stat_requirement_characters(plate_name, guild_id=guild_id)
     characters = []
     for base_id in char_keys:
-        reqs = [
-            {
+        reqs = []
+        for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
+            is_omicron = r[3] == STAT_OMICRON
+            reqs.append({
                 "id": r[0], "stat_name": r[3], "operator": r[4], "threshold": r[5],
                 "threshold_fmt": _fmt_value(r[5]), "priority": r[6], "comment": r[8],
                 "priority_label": PRIORITY_LABELS.get(r[6], r[6]), "priority_emoji": PRIORITY_EMOJI.get(r[6], ""),
-            }
-            for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
-        ]
+                "is_omicron": is_omicron,
+                "value_display": f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован" if is_omicron else f"{r[3]} {r[4]} {_fmt_value(r[5])}",
+            })
         characters.append({"base_id": base_id, "name": _unit_name(base_id), "requirements": reqs})
     characters.sort(key=lambda c: c["name"].lower())
 
@@ -143,12 +177,41 @@ async def requirement_add(
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
+@router.post("/{plate_name}/requirements/add_omicron", response_class=HTMLResponse)
+async def requirement_add_omicron(
+    plate_name: str,
+    base_id: str = Form(...),
+    skill_id: str = Form(...),
+    priority: str = Form(PRIORITY_REQUIRED),
+    comment: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    guild_id = user["guild_id"]
+    if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+        return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+
+    valid_skill_ids = {o["skill_id"] for o in _omicron_options(base_id)}
+    if skill_id not in valid_skill_ids:
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Выберите омикрон из списка — у персонажа нет такого.'})}", status_code=303
+        )
+
+    char_name = _unit_name(base_id)
+    ability_name = _omicron_ability_name(skill_id)
+    raw_text = f"{char_name} — омикрон «{ability_name}»"
+    database.add_stat_requirement(
+        plate_name, base_id, STAT_OMICRON, ">=", 1.0, priority, raw_text, comment.strip() or None,
+        user["discord_id"], guild_id=guild_id, skill_id=skill_id,
+    )
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
 @router.post("/{plate_name}/requirements/{req_id}/edit", response_class=HTMLResponse)
 async def requirement_edit(
     plate_name: str,
     req_id: int,
-    operator: str = Form(...),
-    threshold: float = Form(...),
+    operator: str = Form(None),
+    threshold: float = Form(None),
     priority: str = Form(...),
     comment: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
@@ -157,9 +220,13 @@ async def requirement_edit(
     row = database.get_stat_requirement(req_id, guild_id=guild_id)
     if not row:
         return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': f'Требование #{req_id} не найдено.'})}", status_code=303)
-    _, row_plate, character_key, stat_name, *_ = row
+    _, row_plate, character_key, stat_name, cur_operator, cur_threshold, *_ = row
+    # Оператор/значение у требования на омикрон захардкожены (см. cogs/stat_requirements.py::
+    # stat_req_add_omicron) — форма для таких строк их вообще не присылает, оставляем как есть.
+    new_operator = cur_operator if stat_name == STAT_OMICRON or operator is None else operator
+    new_threshold = cur_threshold if stat_name == STAT_OMICRON or threshold is None else threshold
     database.update_stat_requirement(
-        req_id, row_plate, character_key, stat_name, operator, threshold, priority, comment.strip() or None, guild_id=guild_id,
+        req_id, row_plate, character_key, stat_name, new_operator, new_threshold, priority, comment.strip() or None, guild_id=guild_id,
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 

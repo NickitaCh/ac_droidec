@@ -3420,6 +3420,13 @@ def _ensure_stat_requirements_table(cursor):
         cursor.execute("ALTER TABLE stat_requirements ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Требование "разблокирован омикрон X" (stat_name='Omicron', operator='>=', threshold_value=1 —
+        # см. cogs/stat_requirements.py::stat_req_add_omicron) хранит, КАКОЙ именно омикрон, здесь —
+        # у персонажа их может быть несколько (unit_omicron_skills). NULL для обычных стат-требований.
+        cursor.execute("ALTER TABLE stat_requirements ADD COLUMN skill_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_stat_req_guild_plate_char ON stat_requirements(guild_id, plate_name, character_key)"
     )
@@ -3611,15 +3618,15 @@ def get_all_stat_plates_detailed(guild_id: int = 1):
 
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
-                          created_by: str, guild_id: int = 1) -> int:
+                          created_by: str, guild_id: int = 1, skill_id: str = None) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO stat_requirements
-            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
-    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id))
+            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id, skill_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id, skill_id))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -3660,7 +3667,7 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
         FROM stat_requirements WHERE id = ? AND guild_id = ?
     """, (req_id, guild_id))
     row = cursor.fetchone()
@@ -3673,7 +3680,7 @@ def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
         FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
     """, (guild_id, plate_name, character_key))
     rows = cursor.fetchall()
@@ -3717,7 +3724,7 @@ def get_all_stat_requirements(guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
         FROM stat_requirements WHERE guild_id = ? ORDER BY plate_name, character_key, id
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -4470,6 +4477,28 @@ def get_all_skill_tier_thresholds() -> dict:
     rows = cursor.fetchall()
     conn.close()
     return {skill_id: (zeta_tier, omicron_tier) for skill_id, zeta_tier, omicron_tier in rows}
+
+
+def get_skill_omicron_tiers(skill_ids: list[str]) -> dict:
+    """{skill_id: omicron_tier|None} — targeted-запрос по конкретным skill_id (в отличие от
+    get_all_skill_tier_thresholds, которая грузит весь справочник разом для цикла синка).
+    Используется cogs/stat_requirements.py::_evaluate_character_player, чтобы проверить
+    статус омикрон-требования плейта у конкретного игрока: разблокирован, если tier его
+    записи в rosterUnit.skill[] >= omicron_tier (см. services/activity_diff.py::diff_unit —
+    та же модель сравнения, единого порога вроде tier>=8 не существует)."""
+    if not skill_ids:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    placeholders = ",".join("?" * len(skill_ids))
+    cursor.execute(
+        f"SELECT skill_id, omicron_tier FROM skill_tier_thresholds WHERE skill_id IN ({placeholders})",
+        skill_ids,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {skill_id: omicron_tier for skill_id, omicron_tier in rows}
 
 
 def get_skill_display_info(skill_ids: list[str]) -> dict:

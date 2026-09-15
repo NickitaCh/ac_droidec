@@ -71,6 +71,12 @@ RELIC_PROJECTION_FLAT_OFFSET = {
     "Armor": 20,
 }
 
+# Спец-значение stat_name (как "Relic") для требования "у персонажа разблокирован омикрон X" —
+# см. /статы_требования добавить_омикрон. operator/threshold_value для таких строк всегда
+# захардкожены как ">="/1.0 (сам факт разблокировки как булево 1/0, см. _evaluate_character_player),
+# а КАКОЙ именно омикрон — в отдельной колонке skill_id (персонаж может иметь их несколько).
+STAT_OMICRON = "Omicron"
+
 OPERATOR_CHOICES = [
     disnake.OptionChoice(name=">=", value=">="),
     disnake.OptionChoice(name="<=", value="<="),
@@ -203,6 +209,37 @@ def _stat_label(stat_name: str, priority: str) -> str:
     return f"{label}*" if priority == "optional" else label
 
 
+def _omicron_options_for_base(base_id: str) -> list:
+    """[(skill_id, label), ...] — омикроны конкретного персонажа/корабля, для автодополнения
+    и валидации в /статы_требования добавить_омикрон. Та же логика, что
+    web/routes/tasks.py::_omicron_options — независимая локальная копия (cogs/ не может
+    подтягивать код из web/), справочник (unit_omicron_skills/skill_tier_thresholds) общий."""
+    skill_ids = database.get_all_unit_omicron_skills().get(base_id, [])
+    if not skill_ids:
+        return []
+    info = database.get_skill_display_info(skill_ids)
+    options = []
+    for skill_id in skill_ids:
+        name, _ability_id, ability_type, omicron_mode = info.get(skill_id, (skill_id, None, None, None))
+        label = name or skill_id
+        extra = " / ".join(p for p in (ability_type, omicron_mode) if p)
+        if extra:
+            label += f" ({extra})"
+        options.append((skill_id, label))
+    return options
+
+
+def _omicron_ability_label(skill_id: str) -> str:
+    info = database.get_skill_display_info([skill_id])
+    name, _ability_id, _ability_type, _omicron_mode = info.get(skill_id, (None, None, None, None))
+    return name or skill_id
+
+
+def _omicron_label(skill_id: str, priority: str) -> str:
+    label = f"Омикрон: {_omicron_ability_label(skill_id)}"
+    return f"{label}*" if priority == "optional" else label
+
+
 def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     """Общий префикс для обоих режимов расчёта: сохранённые требования персонажа в плейте,
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
@@ -252,6 +289,20 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
     current_values["Relic"] = current_relic
 
+    # Омикрон-требования (stat_name==STAT_OMICRON) не входят в calc_final_stats — статус
+    # "разблокирован" считается отдельно per skill_id (персонаж может иметь требования на
+    # несколько разных омикронов сразу) и кладётся в тот же current_values под ключом
+    # "Omicron:<skill_id>", чтобы дальше их можно было читать той же общей логикой _compare.
+    omicron_skill_ids = [row[11] for row in rows if row[3] == STAT_OMICRON]
+    if omicron_skill_ids:
+        skill_tiers = {s.get("id"): s.get("tier") for s in (unit.get("skill") or [])}
+        omicron_tiers = database.get_skill_omicron_tiers(omicron_skill_ids)
+        for skill_id in omicron_skill_ids:
+            omicron_tier = omicron_tiers.get(skill_id)
+            current_tier = skill_tiers.get(skill_id)
+            has_omicron = omicron_tier is not None and current_tier is not None and current_tier >= omicron_tier
+            current_values[f"Omicron:{skill_id}"] = 1.0 if has_omicron else 0.0
+
     # Показываем прогноз не только вверх (у игрока релик ниже требуемого), но и вниз
     # (у игрока уже выше — интересно, каким был бы стат ровно на уровне плейта).
     # Формула "Нужно" (порог минус дельта) не зависит от направления: дельта от релика
@@ -278,10 +329,12 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
 
     table_rows = []
     for row in rows:
-        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
-        label = _stat_label(stat_name, priority)
-        req_cell = f"{operator} {_fmt_compact(threshold)}"
-        cur_val = current_values.get(stat_name)
+        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id = row
+        is_omicron = stat_name == STAT_OMICRON
+        label = _omicron_label(skill_id, priority) if is_omicron else _stat_label(stat_name, priority)
+        lookup_key = f"Omicron:{skill_id}" if is_omicron else stat_name
+        req_cell = "разблокирован" if is_omicron else f"{operator} {_fmt_compact(threshold)}"
+        cur_val = current_values.get(lookup_key)
         if cur_val is None:
             table_rows.append([label, "нет данных", "—", "—", req_cell] if show_projection else [label, "нет данных", req_cell])
             continue
@@ -289,13 +342,18 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         cur_ok = _compare(cur_val, operator, threshold)
         if cur_ok:
             matched += 1
-        cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
+        cur_cell = ("Есть ✅" if cur_ok else "Нет ❌") if is_omicron else f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
 
         # relic-free счёт: для Relic — пропускаем строку целиком (сравнивать реликвию саму
-        # с собой на прогнозе бессмысленно); для остальных статов — берём прогнозное значение
-        # на целевой релик, если есть прогноз, иначе (игрок уже на нужном релике) то же cur_val.
+        # с собой на прогнозе бессмысленно); для омикрона — от релика вообще не зависит,
+        # поэтому идёт как есть (cur_val), без прогноза; для остальных статов — берём
+        # прогнозное значение на целевой релик, если есть прогноз, иначе (игрок уже на
+        # нужном релике) то же cur_val.
         if stat_name != "Relic":
-            relic_free_val = (projected_values.get(stat_name) if projected_values else None) if show_projection else cur_val
+            if is_omicron:
+                relic_free_val = cur_val
+            else:
+                relic_free_val = (projected_values.get(stat_name) if projected_values else None) if show_projection else cur_val
             if relic_free_val is not None:
                 total_relic_free += 1
                 if _compare(relic_free_val, operator, threshold):
@@ -303,7 +361,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
 
         # adjusted_ok/adjusted_req_text — норма, пересчитанная под ФАКТИЧЕСКИЙ релик игрока
         # (та же величина, что показана в колонке "Нужно"), а не порог плейта в лоб. Для
-        # строки Relic и для случаев без прогноза пересчитывать нечего — сравниваем как есть.
+        # строк Relic/Omicron и для случаев без прогноза пересчитывать нечего — сравниваем как есть.
         adjusted_ok = cur_ok
         adjusted_req_text = req_cell
 
@@ -312,7 +370,11 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         else:
             needed_cell = "—"
             proj_cell = "—"
-            if stat_name != "Relic":
+            if is_omicron:
+                # Разблокировка не зависит от релика — во всех трёх колонках один и тот же статус.
+                needed_cell = cur_cell
+                proj_cell = cur_cell
+            elif stat_name != "Relic":
                 proj_val = projected_values.get(stat_name) if projected_values else None
                 if proj_val is not None:
                     proj_ok = _compare(proj_val, operator, threshold)
@@ -332,8 +394,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         if priority == PRIORITY_REQUIRED and not adjusted_ok:
             failed_required.append({
                 "stat": label,
-                "current": _fmt_compact(cur_val),
-                "requirement": adjusted_req_text,
+                "current": "не разблокирован" if is_omicron else _fmt_compact(cur_val),
+                "requirement": "нужна разблокировка" if is_omicron else adjusted_req_text,
             })
 
     block = caption + "\n" + _build_table(headers, table_rows)
@@ -444,7 +506,15 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
     headers = ["Стат", f"Норма Р{required_relic}", f"Норма Р{target_relic}"]
     table_rows = []
     for row in rows:
-        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
+        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id = row
+
+        if stat_name == STAT_OMICRON:
+            # Разблокировка омикрона от релика не зависит — норма не меняется между релик-колонками.
+            label = _omicron_label(skill_id, priority)
+            cell = "разблокирован"
+            table_rows.append([label, cell, cell])
+            continue
+
         label = _stat_label(stat_name, priority)
         orig_cell = f"{operator} {_fmt_compact(threshold)}"
 
@@ -542,6 +612,25 @@ async def autocomplete_omicron_capable_character(inter: disnake.ApplicationComma
     return options[:25]
 
 
+async def autocomplete_character_omicron_skill(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Требует, чтобы «персонаж» уже был выбран (тот же паттерн, что autocomplete_stat_character
+    требует предварительного выбора «плейт») — у персонажа может быть больше одного омикрона
+    (unit_omicron_skills), тут выбирается конкретный skill_id."""
+    персонаж = inter.filled_options.get("персонаж")
+    if not персонаж:
+        return ["⚠️ СНАЧАЛА выберите персонажа!"]
+    base_id = _parse_bracket_id(персонаж)
+    options = _omicron_options_for_base(base_id)
+    if not options:
+        return ["❌ У этого персонажа нет омикронов в справочнике."]
+    search = string.lower().strip()
+    choices = []
+    for skill_id, label in options:
+        if not search or search in label.lower():
+            choices.append(disnake.OptionChoice(name=label[:100], value=skill_id))
+    return choices[:25]
+
+
 async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction, string: str):
     guild_id = guild_resolver.resolve_guild_id(inter.author)
     if guild_id is None:
@@ -552,9 +641,12 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
     search = string.lower().strip()
     options = []
     for row in rows:
-        req_id, plate_name, character_key, stat_name, operator, threshold, priority, raw_text, comment, _, _ = row
+        req_id, plate_name, character_key, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id = row
         char_name = _unit_display_name(character_key)
-        label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} {stat_name} {operator} {_fmt_value(threshold)}"
+        if stat_name == STAT_OMICRON:
+            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — омикрон «{_omicron_ability_label(skill_id)}»"
+        else:
+            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} {stat_name} {operator} {_fmt_value(threshold)}"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=f"#{req_id}"))
     return options[:25]
@@ -872,6 +964,42 @@ class StatRequirementsCog(commands.Cog):
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
+    @stat_req.sub_command(name="добавить_омикрон", description="Добавить требование на разблокированный омикрон персонажа в плейт")
+    async def stat_req_add_omicron(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Плейт (как в HotUtils, например AC_ALL)", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(description="Персонаж/корабль с омикроном", autocomplete=autocomplete_omicron_capable_character),
+        омикрон: str = commands.Param(description="Какой именно омикрон (если их несколько)", autocomplete=autocomplete_character_omicron_skill),
+        приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
+        комментарий: str = commands.Param(default=None, description="Заметка"),
+    ):
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+
+        if плейт not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+            await inter.response.send_message(
+                f"❌ Плейт «{плейт}» не найден — выберите вариант из списка автодополнения либо создайте его сначала через /статы_требования создать.",
+                ephemeral=True,
+            )
+            return
+
+        base_id = _parse_bracket_id(персонаж)
+        valid_skill_ids = {sid for sid, _ in _omicron_options_for_base(base_id)}
+        if омикрон not in valid_skill_ids:
+            await inter.response.send_message("❌ Выберите омикрон из списка автодополнения — у персонажа нет такого.", ephemeral=True)
+            return
+
+        char_name = _unit_display_name(base_id)
+        ability_name = _omicron_ability_label(омикрон)
+        raw_text = f"{char_name} — омикрон «{ability_name}»"
+        req_id = database.add_stat_requirement(
+            плейт, base_id, STAT_OMICRON, ">=", 1.0, приоритет, raw_text, комментарий, str(inter.author.id),
+            guild_id=guild_id, skill_id=омикрон,
+        )
+        await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
+
     @stat_req.sub_command(name="редактировать", description="Изменить требование к статам или удалить его")
     async def stat_req_edit(
         self,
@@ -901,13 +1029,21 @@ class StatRequirementsCog(commands.Cog):
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
-        _, plate_name, character_key, stat_name, cur_operator, cur_threshold, cur_priority, _raw_text, cur_comment, _, _ = row
+        _, plate_name, character_key, stat_name, cur_operator, cur_threshold, cur_priority, _raw_text, cur_comment, _, _, _skill_id = row
+
+        if stat_name == STAT_OMICRON and (оператор is not None or значение is not None):
+            await inter.response.send_message(
+                "❌ У требования на омикрон нельзя менять оператор/значение — доступны только приоритет и комментарий.",
+                ephemeral=True,
+            )
+            return
+
         new_operator = оператор if оператор is not None else cur_operator
         new_threshold = значение if значение is not None else cur_threshold
         new_priority = приоритет if приоритет is not None else cur_priority
         new_comment = комментарий if комментарий is not None else cur_comment
         char_name = _unit_display_name(character_key)
-        new_raw_text = f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
+        new_raw_text = _raw_text if stat_name == STAT_OMICRON else f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
         database.update_stat_requirement(req_id, plate_name, character_key, stat_name, new_operator, new_threshold, new_priority, new_comment, guild_id=guild_id)
         await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {new_raw_text}", ephemeral=True)
 
@@ -935,7 +1071,7 @@ class StatRequirementsCog(commands.Cog):
                 continue
             lines.append(f"## {_unit_display_name(base_id)}")
             for row in rows:
-                req_id, _, _, _, _, _, priority, raw_text, comment, _, _ = row
+                req_id, _, _, _, _, _, priority, raw_text, comment, _, _, _ = row
                 comment_part = f" · _{comment}_" if comment else ""
                 lines.append(f"`#{req_id}` {PRIORITY_EMOJI.get(priority, '')} {raw_text}{comment_part}")
 

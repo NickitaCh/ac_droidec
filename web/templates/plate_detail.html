@@ -68,6 +68,39 @@
         </form>
     </div>
 
+    <div class="panel">
+        <div class="panel-title"><span>Добавить требование на омикрон</span></div>
+        <form method="post" action="/plates/{{ plate_name }}/requirements/add_omicron" class="requirement-form" data-omicron-add-form>
+            <label>
+                Персонаж/корабль
+                <div class="unit-search" data-unit-search>
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                    <input type="hidden" name="base_id" class="unit-search-value" required>
+                    <div class="unit-search-results"></div>
+                </div>
+            </label>
+            <label>
+                Омикрон
+                <select name="skill_id" class="omicron-skill-select" required disabled>
+                    <option value="">— сначала выберите персонажа —</option>
+                </select>
+            </label>
+            <label>
+                Приоритет
+                <select name="priority" required>
+                    {% for label, value in priority_options %}
+                        <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Комментарий (необязательно)
+                <input type="text" name="comment">
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+    </div>
+
     {% if not characters %}
         <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
     {% else %}
@@ -87,19 +120,21 @@
                         <tbody>
                             {% for r in char.requirements %}
                                 <tr>
-                                    <td>{{ r.stat_name }} {{ r.operator }} {{ r.threshold_fmt }}</td>
+                                    <td>{{ r.value_display }}</td>
                                     <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
                                     <td>{{ r.comment or "—" }}</td>
                                     <td class="row-actions">
                                         <details>
                                             <summary class="link-btn">править</summary>
                                             <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                                <select name="operator">
-                                                    {% for label, value in operator_options %}
-                                                        <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
+                                                {% if not r.is_omicron %}
+                                                    <select name="operator">
+                                                        {% for label, value in operator_options %}
+                                                            <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
+                                                {% endif %}
                                                 <select name="priority">
                                                     {% for label, value in priority_options %}
                                                         <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
@@ -110,7 +145,7 @@
                                             </form>
                                         </details>
                                         <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
-                                              onsubmit="return confirm('Удалить требование «{{ r.stat_name }} {{ r.operator }} {{ r.threshold_fmt }}» для {{ char.name }}?');">
+                                              onsubmit="return confirm('Удалить требование «{{ r.value_display }}» для {{ char.name }}?');">
                                             <button type="submit" class="button-danger">Удалить</button>
                                         </form>
                                     </td>
@@ -122,4 +157,49 @@
             </div>
         {% endfor %}
     {% endif %}
+
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Форма "Добавить требование на омикрон" — выпадающий список омикронов зависит от
+        // выбранного персонажа (у него их может быть несколько), подгружается через
+        // /plates/api/omicron-skills. Та же связка unit-search + select, что на /tasks
+        // (см. tasks.html, data-omicron-picker), но проще: тут это единственная цель формы,
+        // без переключателя target_type.
+        const form = document.querySelector("[data-omicron-add-form]");
+        if (!form) return;
+        const unitHidden = form.querySelector(".unit-search-value");
+        const select = form.querySelector(".omicron-skill-select");
+
+        const refresh = async () => {
+            const baseId = unitHidden.value;
+            if (!baseId) {
+                select.innerHTML = '<option value="">— сначала выберите персонажа —</option>';
+                select.disabled = true;
+                return;
+            }
+            select.disabled = true;
+            select.innerHTML = '<option value="">— загрузка… —</option>';
+            try {
+                const resp = await fetch(`/plates/api/omicron-skills?base_id=${encodeURIComponent(baseId)}`);
+                const options = resp.ok ? await resp.json() : [];
+                if (options.length === 0) {
+                    select.innerHTML = '<option value="">— у персонажа нет омикронов —</option>';
+                    return;
+                }
+                select.innerHTML = "";
+                options.forEach((item) => {
+                    const opt = document.createElement("option");
+                    opt.value = item.skill_id;
+                    opt.textContent = item.label;
+                    select.appendChild(opt);
+                });
+                select.disabled = false;
+            } catch {
+                select.innerHTML = '<option value="">— ошибка загрузки —</option>';
+            }
+        };
+
+        unitHidden.addEventListener("change", refresh);
+    });
+    </script>
 {% endblock %}
