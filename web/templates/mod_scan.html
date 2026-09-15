@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Скан модов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <h1>Скан модов чужих гильдий</h1>
+    <p class="muted">
+        Укажите до {{ max_targets }} гильдий (аликод любого участника или сам ID гильдии) —
+        каждые 5 минут бот проходит по всем участникам и сравнивает моды с прошлым срезом.
+        Ниже — отдельно рутинные изменения и аномалии (сильный % сдвиг по вторичкам либо
+        смена сета/основного стата на слоте).
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Добавить цель</span><span class="panel-hint">{{ targets|length }}/{{ max_targets }}</span></div>
+        {% if targets|length >= max_targets %}
+            <p class="empty-state">Достигнут лимит целей — удалите одну, чтобы добавить другую.</p>
+        {% else %}
+            <form method="post" action="/mod-scan/targets" class="inline-form">
+                <input type="text" name="input_value" placeholder="Аликод (123456789) или ID гильдии" required>
+                <button type="submit">Добавить</button>
+            </form>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>Цели</span></div>
+        {% if not targets %}
+            <p class="empty-state">Пока ни одной цели не добавлено.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Гильдия</th><th>Участников</th><th>Последний скан</th><th>Статус</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for t in targets %}
+                            <tr>
+                                <td>{{ t.guild_name or "—" }} <span class="muted">(ID {{ t.swgoh_guild_id }})</span></td>
+                                <td>{{ t.member_count if t.member_count is not none else "—" }}</td>
+                                <td>{{ t.last_synced_at or "ещё не сканировалась" }}</td>
+                                <td>
+                                    {% if t.last_error %}
+                                        <span class="error">{{ t.last_error }}</span>
+                                    {% else %}
+                                        ✅
+                                    {% endif %}
+                                </td>
+                                <td class="row-actions">
+                                    <form method="post" action="/mod-scan/targets/{{ t.id }}/delete"
+                                          onsubmit="return confirm('Удалить цель «{{ t.guild_name }}»?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>🚨 Аномалии</span><span class="panel-hint">последние {{ anomaly_events|length }}</span></div>
+        {% if not anomaly_events %}
+            <p class="empty-state">Аномалий пока не найдено.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Гильдия</th><th>Игрок</th><th>Персонаж</th><th>Изменение</th><th>Когда</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for e in anomaly_events %}
+                            <tr>
+                                <td>{{ e.guild_name or "—" }}</td>
+                                <td>{{ e.player_name or e.ally_code }}</td>
+                                <td>{{ e.character_label }}</td>
+                                <td>{{ e.description }}</td>
+                                <td>{{ e.detected_at }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="panel-title"><span>Изменения</span><span class="panel-hint">последние {{ minor_events|length }}</span></div>
+        {% if not minor_events %}
+            <p class="empty-state">Изменений пока не найдено.</p>
+        {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr><th>Гильдия</th><th>Игрок</th><th>Персонаж</th><th>Изменение</th><th>Когда</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for e in minor_events %}
+                            <tr>
+                                <td>{{ e.guild_name or "—" }}</td>
+                                <td>{{ e.player_name or e.ally_code }}</td>
+                                <td>{{ e.character_label }}</td>
+                                <td>{{ e.description }}</td>
+                                <td>{{ e.detected_at }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

@@ -5255,3 +5255,211 @@ def set_qa_checklist_item(page_key: str, checked: bool, checked_by: str) -> None
     """, (page_key, int(checked), checked_by))
     conn.commit()
     conn.close()
+
+
+# =====================================================================
+# СКАН МОДДИНГА ЧУЖИХ ГИЛЬДИЙ (services/mod_scan.py, cogs/mod_scan.py) — до 5 целей
+# (лимит проверяется в веб-роуте, не тут), раз в 5 минут проходим по всем участникам
+# через comlink.get_player (bulk-эндпоинта с модами по гильдии нет — см. docstring
+# services/mod_scan.py) и диффим equippedStatMod по слотам против предыдущего среза.
+# owner_guild_id — задел на будущее (сейчас всегда 1, AbsoluteChaos — доступ к странице
+# захардкожен на guild_id=1 в web/routes/mod_scan.py, см. project_permission_model_comlink_rank).
+# =====================================================================
+MOD_SCAN_MAX_TARGETS = 5
+
+
+def _ensure_mod_scan_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_scan_targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_guild_id INTEGER NOT NULL DEFAULT 1,
+            input_kind TEXT NOT NULL,
+            input_value TEXT NOT NULL,
+            swgoh_guild_id TEXT NOT NULL,
+            guild_name TEXT,
+            member_count INTEGER,
+            last_synced_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_scan_snapshot (
+            target_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            player_name TEXT,
+            base_id TEXT NOT NULL,
+            mods_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (target_id, ally_code, base_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_scan_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            player_name TEXT,
+            base_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            description TEXT NOT NULL,
+            detected_at TEXT NOT NULL
+        )
+    """)
+
+
+def count_mod_scan_targets(owner_guild_id: int = 1) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("SELECT COUNT(*) FROM mod_scan_targets WHERE owner_guild_id = ?", (owner_guild_id,))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def create_mod_scan_target(input_kind: str, input_value: str, swgoh_guild_id: str, guild_name: str,
+                            member_count: int, owner_guild_id: int = 1) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("""
+        INSERT INTO mod_scan_targets
+            (owner_guild_id, input_kind, input_value, swgoh_guild_id, guild_name, member_count, last_synced_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    """, (owner_guild_id, input_kind, input_value, swgoh_guild_id, guild_name, member_count))
+    conn.commit()
+    target_id = cursor.lastrowid
+    conn.close()
+    return target_id
+
+
+def get_mod_scan_targets(owner_guild_id: int | None = None) -> list[dict]:
+    """owner_guild_id=None (используется фоновым циклом) — все цели всех гильдий разом,
+    как player_units_sync_loop синкает объединённый ростер; веб-роут передаёт свою
+    гильдию явно."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cols = "id, owner_guild_id, input_kind, input_value, swgoh_guild_id, guild_name, member_count, last_synced_at, last_error, created_at"
+    if owner_guild_id is None:
+        cursor.execute(f"SELECT {cols} FROM mod_scan_targets ORDER BY id")
+    else:
+        cursor.execute(f"SELECT {cols} FROM mod_scan_targets WHERE owner_guild_id = ? ORDER BY id", (owner_guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    keys = cols.split(", ")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def get_mod_scan_target(target_id: int) -> dict | None:
+    targets = [t for t in get_mod_scan_targets(owner_guild_id=None) if t["id"] == target_id]
+    return targets[0] if targets else None
+
+
+def update_mod_scan_target_sync(target_id: int, guild_name: str | None, member_count: int | None,
+                                 error: str | None):
+    """Пишется после каждой попытки скана цели (успех или нет) — guild_name/member_count
+    только при успехе (None при ошибке — не затираем последнее известное), last_error
+    очищается на успехе (передать error=None)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    if error is None:
+        cursor.execute(
+            "UPDATE mod_scan_targets SET guild_name = ?, member_count = ?, last_synced_at = datetime('now'), last_error = NULL WHERE id = ?",
+            (guild_name, member_count, target_id),
+        )
+    else:
+        cursor.execute(
+            "UPDATE mod_scan_targets SET last_synced_at = datetime('now'), last_error = ? WHERE id = ?",
+            (error, target_id),
+        )
+    conn.commit()
+    conn.close()
+
+
+def delete_mod_scan_target(target_id: int, owner_guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("DELETE FROM mod_scan_targets WHERE id = ? AND owner_guild_id = ?", (target_id, owner_guild_id))
+    deleted = cursor.rowcount > 0
+    cursor.execute("DELETE FROM mod_scan_snapshot WHERE target_id = ?", (target_id,))
+    cursor.execute("DELETE FROM mod_scan_events WHERE target_id = ?", (target_id,))
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def get_mod_scan_snapshot(target_id: int) -> dict:
+    """base_id ключом по факту не годится — один и тот же base_id уникален на игрока, но
+    цель включает много игроков, поэтому возвращает {(ally_code, base_id): mods_list}."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("SELECT ally_code, base_id, mods_json FROM mod_scan_snapshot WHERE target_id = ?", (target_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {(ally_code, base_id): json.loads(mods_json) for ally_code, base_id, mods_json in rows}
+
+
+def upsert_mod_scan_snapshot(target_id: int, entries: list[tuple[str, str, str, list]]):
+    """entries: [(ally_code, player_name, base_id, mods_list), ...]"""
+    if not entries:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    rows = [(target_id, ally_code, player_name, base_id, json.dumps(mods_list))
+            for ally_code, player_name, base_id, mods_list in entries]
+    cursor.executemany("""
+        INSERT INTO mod_scan_snapshot (target_id, ally_code, player_name, base_id, mods_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(target_id, ally_code, base_id) DO UPDATE SET
+            player_name = excluded.player_name, mods_json = excluded.mods_json, updated_at = excluded.updated_at
+    """, rows)
+    conn.commit()
+    conn.close()
+
+
+def add_mod_scan_events(events: list[tuple[int, str, str, str, str, str]]):
+    """events: [(target_id, ally_code, player_name, base_id, kind, description), ...]"""
+    if not events:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    rows = [(target_id, ally_code, player_name, base_id, kind, description)
+            for target_id, ally_code, player_name, base_id, kind, description in events]
+    cursor.executemany("""
+        INSERT INTO mod_scan_events (target_id, ally_code, player_name, base_id, kind, description, detected_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    """, rows)
+    conn.commit()
+    conn.close()
+
+
+def get_mod_scan_events(owner_guild_id: int = 1, kind: str = "minor", limit: int = 200) -> list[dict]:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("""
+        SELECT e.id, e.target_id, t.guild_name, e.ally_code, e.player_name, e.base_id, e.description, e.detected_at
+        FROM mod_scan_events e JOIN mod_scan_targets t ON t.id = e.target_id
+        WHERE t.owner_guild_id = ? AND e.kind = ?
+        ORDER BY e.id DESC LIMIT ?
+    """, (owner_guild_id, kind, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    keys = ["id", "target_id", "guild_name", "ally_code", "player_name", "base_id", "description", "detected_at"]
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def prune_mod_scan_events(days: int = 14):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("DELETE FROM mod_scan_events WHERE detected_at < datetime('now', ?)", (f"-{days} days",))
+    conn.commit()
+    conn.close()
