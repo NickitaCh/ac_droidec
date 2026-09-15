@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Конструктор — AC Droidec{% endblock %}
+{% block title %}Калькулятор — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 
 {% macro slot_icon(key) -%}
@@ -13,7 +13,7 @@
 {%- endmacro %}
 
 {% block content %}
-    <h1>Конструктор</h1>
+    <h1>Калькулятор</h1>
     <p class="muted">
         Прикидка статов персонажа, которого ещё никто не прокачал — под гипотетический набор
         модов. Primary-статы на 6 слотах — точные игровые константы для 6★ уровня 15
@@ -56,12 +56,16 @@
                         <div class="mod-slot-card{% if primaries.get(key) %} filled{% endif %}">
                             <div class="mod-slot-icon">{{ slot_icon(key) }}</div>
                             <div class="mod-slot-label">{{ label }}</div>
-                            <select name="slot_{{ key }}">
-                                <option value="">—</option>
-                                {% for opt in mod_primary_options.get(key, []) %}
-                                    <option value="{{ opt.unit_stat }}" {% if primaries.get(key) == opt.unit_stat %}selected{% endif %}>{{ opt.label }}</option>
-                                {% endfor %}
-                            </select>
+                            {% if key in locked_primary_slots %}
+                                <div class="mod-slot-locked">{{ mod_primary_options.get(key)[0].label }}</div>
+                            {% else %}
+                                <select name="slot_{{ key }}">
+                                    <option value="">—</option>
+                                    {% for opt in mod_primary_options.get(key, []) %}
+                                        <option value="{{ opt.unit_stat }}" {% if primaries.get(key) == opt.unit_stat %}selected{% endif %}>{{ opt.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            {% endif %}
                         </div>
                     {% endfor %}
                 </div>

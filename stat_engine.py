@@ -79,7 +79,7 @@ def calc_base_stats(stat_calc: StatCalc, unit: dict) -> dict:
     return base
 
 
-# Для веб-only "Конструктора" (/mod-builder, web/routes/stat_builder.py): гипотетическая
+# Для веб-only "Калькулятора" (/mod-builder, web/routes/stat_builder.py): гипотетическая
 # сборка модов для персонажа, которого никто ещё не прокачал.
 #
 # ПЕРВИЧНЫЕ статы модов (primary) на 6★ уровне 15 — это фиксированные игровые константы

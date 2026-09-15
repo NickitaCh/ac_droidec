@@ -37,7 +37,7 @@ FEATURES: dict[str, dict] = {
     "omicron": {"label": "Омикрон-объявления", "category": "Прочее"},
     "stat_requirements": {"label": "Статы и плейты", "category": "Мод-инструменты"},
     "mod_search": {"label": "Поиск модов", "category": "Мод-инструменты"},
-    "mod_builder": {"label": "Конструктор модов", "category": "Мод-инструменты"},
+    "mod_builder": {"label": "Калькулятор модов", "category": "Мод-инструменты"},
     "steal_build": {"label": "Стил-билд", "category": "Мод-инструменты"},
     "gear_farm": {"label": "Фарм снаряжения", "category": "Прочее"},
     "antispam": {"label": "Антиспам", "category": "Прочее"},

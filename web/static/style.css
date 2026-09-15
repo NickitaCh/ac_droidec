@@ -1570,7 +1570,7 @@ dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
     color: var(--fg-secondary);
 }
 
-/* ---- Конструктор (/mod-builder): 6 карточек-слотов модов (форма + выбранный primary-стат
+/* ---- Калькулятор (/mod-builder): 6 карточек-слотов модов (форма + выбранный primary-стат
    на ней) — один слот каждой формы у персонажа всегда ровно один. ---- */
 .mod-slot-grid {
     display: grid;
@@ -1594,8 +1594,9 @@ dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .mod-slot-card.filled .mod-slot-icon { color: var(--accent); }
 .mod-slot-label { font-size: 0.76em; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .mod-slot-card select { width: 100%; font-size: 0.85em; padding: 0.35em; }
+.mod-slot-locked { font-size: 0.85em; text-align: center; color: var(--fg-secondary); }
 
-/* ---- Конструктор (/mod-builder): интерактивный выбор сетов — 8 строк с подписанным
+/* ---- Калькулятор (/mod-builder): интерактивный выбор сетов — 8 строк с подписанным
    нужным количеством + живой счётчик "выбрано/6" (dashboard.js). ---- */
 .mod-set-picker { max-width: 28em; }
 .mod-set-rows { display: flex; flex-direction: column; gap: 0.4em; }

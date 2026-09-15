@@ -1,4 +1,4 @@
-"""Веб-only "Конструктор" (/mod-builder) — гипотетическая сборка модов для персонажа,
+"""Веб-only "Калькулятор" (/mod-builder) — гипотетическая сборка модов для персонажа,
 которого никто ещё не прокачал: 6 слотов (форма мода) с выбором ТОЧНОГО primary-стата
 (реальные игровые константы на 6★/ур.15, добыты эмпирически из реальных модов гильдии —
 см. stat_engine.MOD_PRIMARY_OPTIONS) + отдельно интерактивный выбор сетов (сколько модов
@@ -66,6 +66,21 @@ MOD_SLOT_DEFS = [
     ("cross", "Крест"),
 ]
 MOD_SLOT_KEYS = [key for key, _ in MOD_SLOT_DEFS]
+
+# square/diamond имеют РОВНО один легальный primary-стат (см. MOD_PRIMARY_OPTIONS выше) —
+# выбирать там нечего, поэтому эти слоты не редактируются в форме, а всегда подставляют
+# свой единственный вариант (см. _apply_locked_primaries).
+LOCKED_PRIMARY_SLOTS = {
+    slot_key: opts[0]["unit_stat"]
+    for slot_key, opts in stat_engine.MOD_PRIMARY_OPTIONS.items()
+    if len(opts) == 1
+}
+
+
+def _apply_locked_primaries(primaries: dict) -> dict:
+    result = dict(primaries)
+    result.update(LOCKED_PRIMARY_SLOTS)
+    return result
 
 
 def _get_comlink():
@@ -272,12 +287,14 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
     # совпадало с MOD_SET_CHOICES/шаблоном; для set_counts из _parse_set_counts ключи и так
     # int. primaries хранит {slot_key: unit_stat_id} — ключи уже строки, значения int.
     set_counts = {int(k): v for k, v in set_counts.items()}
+    primaries = _apply_locked_primaries(primaries)
 
     context = {
         "user": user,
         "mod_sets": MOD_SET_CHOICES,
         "mod_set_piece_count": stat_engine.MOD_SET_PIECE_COUNT,
         "mod_slots": MOD_SLOT_DEFS,
+        "locked_primary_slots": LOCKED_PRIMARY_SLOTS,
         "mod_primary_options": stat_engine.MOD_PRIMARY_OPTIONS,
         "stat_name_choices": STAT_NAME_CHOICES_WITH_UNIT,
         "target_stat_choices": STAT_TARGET_CHOICES,
@@ -389,7 +406,7 @@ async def preset_save(request: Request, user: dict = Depends(feature_flags.requi
         return RedirectResponse(f"/mod-builder?{urlencode({'error': 'Укажите имя пресета.'})}", status_code=303)
 
     set_counts = _parse_set_counts(form)
-    primaries = _parse_primary_picks(form)
+    primaries = _apply_locked_primaries(_parse_primary_picks(form))
     manual_stats = _parse_manual_stats(form)
     ok = database.create_stat_mod_preset(name, set_counts, primaries, manual_stats, user["discord_id"], guild_id=user["guild_id"])
     qs = _redirect_qs(form)

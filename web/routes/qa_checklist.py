@@ -36,7 +36,7 @@ PAGES = [
     ("plates", "Моды — Плейты", "/plates"),
     ("stats_check", "Моды — Статы", "/stats-check"),
     ("stats_relic", "Моды — Статы (релик)", "/stats-check/relic"),
-    ("mod_builder", "Моды — Конструктор", "/mod-builder"),
+    ("mod_builder", "Моды — Калькулятор", "/mod-builder"),
     ("admin_guilds", "Админ — Гильдии", "/admin/guilds"),
     ("admin_access", "Админ — Админы", "/admin/access"),
     ("admin_web_accounts", "Админ — Логин/пароль", "/admin/web-accounts"),
