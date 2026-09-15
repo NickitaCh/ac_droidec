@@ -32,16 +32,15 @@
                 {% for row in group.rows %}
                     {% if row.kind == 'schedule' %}
                         <div class="form-block" data-row-group>
-                            <span>{{ row.label }} (0=Пн, 1=Вт, ... 6=Вс)</span>
+                            <span>{{ row.label }}</span>
                             <table class="stat-rows-table">
                                 <thead>
-                                    <tr><th>Время (МСК)</th><th>Дни</th><th>Текст</th><th></th></tr>
+                                    <tr><th>Время (МСК)</th><th>Текст</th><th></th></tr>
                                 </thead>
                                 <tbody class="row-group-rows">
-                                    {% for entry in (row.schedule_entries or [{"time": "", "text": "", "days": ""}]) %}
+                                    {% for entry in (row.schedule_entries or [{"time": "", "text": ""}]) %}
                                         <tr class="row-group-row">
                                             <td><input type="text" name="{{ row.field }}_time" value="{{ entry.time }}" placeholder="19:50"></td>
-                                            <td><input type="text" name="{{ row.field }}_days" value="{{ entry.days }}" placeholder="0,1,2,3,4,5"></td>
                                             <td><input type="text" name="{{ row.field }}_text" value="{{ entry.text }}" placeholder="взводы"></td>
                                             <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
                                         </tr>

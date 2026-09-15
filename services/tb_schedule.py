@@ -21,6 +21,17 @@ from datetime import date, datetime
 
 import database
 
+# Дни (0=Пн..6=Вс) записи "ордер" в ping_schedule_json, которыми
+# _tb_order_phase_for_weekday (cogs/guild_events.py) сопоставляет день недели с
+# номером этапа ТБ (1-й день в списке = 1-й этап и т.д.). Это тоже факт общего
+# игрового календаря ТБ (тот же реальный ВБ-цикл у всех гильдий бота), а не
+# per-guild настройка — поэтому в веб-редакторе /settings поле "дни" officer'у
+# не показывается и не редактируется, каждая строка расписания при сохранении
+# получает именно этот список (см. web/routes/guild_dashboard.py). Значение
+# совпадает с тем, что уже годами используется у AbsoluteChaos (main.py::
+# PING_SCHEDULE), Вс исключён.
+STANDARD_ORDER_DAYS = [0, 1, 2, 3, 4, 5]
+
 _ANCHOR_KEY = "tb_week_anchor_date"
 _OFFSET_KEY = "dst_offset_minutes"
 _PENDING_KEY = "dst_pending_change"

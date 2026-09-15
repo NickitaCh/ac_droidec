@@ -964,6 +964,12 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
    2026-09-01 "добавь все команды с примером и описанием"). */
 .pf-example { margin-top: 0.3em; margin-left: 0.2em; font-size: 0.9em; opacity: 0.8; }
 .platoon-filters-textarea { width: 100%; max-width: 60em; font-family: ui-monospace, Consolas, monospace; font-size: 0.95em; padding: 0.8em; border-radius: 8px; box-sizing: border-box; }
+/* Тот же баг снова (см. .omicron-priority-form/.settings-form/.builder-form/
+   .platoon-notify-form/.features-form выше): дефолтный `form { max-width: 20em }`
+   резал форму /tb/platoons/filters до 320px, из-за чего textarea.platoon-filters-textarea
+   выше (max-width: 60em, width: 100% от РОДИТЕЛЯ) физически не могла растянуться
+   шире 20em, как бы её max-width ни задавали — родитель уже её обрезал. */
+.platoon-filters-form { max-width: none; }
 .platoon-hold-toggle { font-size: 0.85em; }
 /* /omicrons/priority — приоритет (drag-list, SortableJS) и требования (textarea) в двух
    колонках рядом (по прямому запросу пользователя 2026-09-02: раньше были отдельными
@@ -1139,6 +1145,10 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
    карточек ниже физически не могла растянуться на всю ширину страницы, как бы её саму
    ни чинили (жалоба пользователя 2026-09-14 "всё ещё не на всю длину страницы"). */
 .platoon-notify-form { max-width: none; }
+/* Тот же баг снова: /admin/features оборачивает всю матрицу гильдия×фича в один
+   <form>, дефолтный `form { max-width: 20em }` схлопывал таблицу в узкую колонку
+   на всю страницу (не только сам .panel, а вообще всё внутри form). */
+.features-form { max-width: none; }
 .notify-recipients-grid {
     display: grid;
     /* auto-fit (не auto-fill) — с auto-fill пустые "хвостовые" колонки при малом числе

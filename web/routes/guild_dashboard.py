@@ -24,7 +24,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data, feature_flags, omicron_priority
+from services import activity_diff, dashboard_data, feature_flags, omicron_priority, tb_schedule
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -1801,15 +1801,14 @@ GUILD_SETTINGS_GROUPS = [
         "name": "ТБ — тег на подготовку",
         "hint": "Раз в две недели, в начале «тегаемой» недели цикла ТБ, бот пишет в этот канал и тегает эту "
                 "роль — напоминание проверить взвод и заказ склада перед стартом Территориальной битвы. "
-                "Чётность самой недели общая для всех гильдий бота (задаёт супер-админ), а расписание "
-                "дней/времени/текста тега — своё для каждой гильдии, задаётся ниже. Запись с текстом «ордер» "
-                "дополнительно определяет, в какие дни недели публикуется автоордер ТБ (1-й день расписания — "
-                "1-й этап, и т.д.) — время этой записи на публикацию автоордера не влияет, она публикуется в "
-                "фиксированное время (см. /admin/tb-schedule).",
+                "Чётность самой недели общая для всех гильдий бота (задаёт супер-админ). Ниже — своё для "
+                "каждой гильдии расписание: время и текст тега (дни недели одинаковы для всех гильдий — "
+                "это общий календарь ТБ, задаёт супер-админ). Запись с текстом «ордер» отвечает и за "
+                "автопубликацию ордера ТБ (см. /admin/tb-schedule за временем публикации).",
         "fields": [
             ("ping_channel_id", "Канал для тега на ротацию/взводы", "channel"),
             ("ping_role_id", "Тегаемая роль", "role"),
-            ("ping_schedule_json", "Расписание тега (время/дни/текст)", "schedule"),
+            ("ping_schedule_json", "Расписание тега (время/текст)", "schedule"),
         ],
     },
     {
@@ -1905,12 +1904,12 @@ async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
 
 # Редактор ping_schedule_json (kind == "schedule" в GUILD_SETTINGS_GROUPS) — тот
 # же формат [{"time": "ЧЧ:ММ", "text": "...", "days": [0..6]}], что уже лежит в
-# колонке (0=Пн). Дни — обычное текстовое поле "0,1,2,3,4,5", а не чекбоксы:
-# повторяемые строки рендерятся через уже существующий общий JS-паттерн
-# [data-row-group] (web/static/dashboard.js) — он клонирует последнюю строку и
-# зачищает .value у input/select, но НЕ снимает .checked у чекбоксов, так что
-# чекбоксы для дней недели унаследовали бы отметки исходной строки; текстовое
-# поле не страдает от этого и не требует правки общего скрипта.
+# колонке. "days" officer'у в веб-форме НЕ показывается и не редактируется (по
+# прямому запросу пользователя 2026-09-15) — это факт общего игрового календаря
+# ТБ, единый для всех гильдий (см. services/tb_schedule.py::STANDARD_ORDER_DAYS),
+# при сохранении каждая строка получает его автоматически. Повторяемые строки
+# рендерятся через уже существующий общий JS-паттерн [data-row-group]
+# (web/static/dashboard.js).
 def _parse_schedule_rows(raw_json: str) -> list[dict]:
     if not raw_json:
         return []
@@ -1919,28 +1918,9 @@ def _parse_schedule_rows(raw_json: str) -> list[dict]:
     except (TypeError, json.JSONDecodeError):
         return []
     return [
-        {
-            "time": e.get("time", ""),
-            "text": e.get("text", ""),
-            "days": ",".join(str(d) for d in e.get("days", [])),
-        }
+        {"time": e.get("time", ""), "text": e.get("text", "")}
         for e in entries if isinstance(e, dict)
     ]
-
-
-def _parse_schedule_days(raw: str) -> list[int] | None:
-    """Парсит "0,1, 4" -> [0,1,4] (отсортировано, без дублей). None, если хоть
-    один элемент не 0-6 — вызывающий код должен отклонить всю форму, не тихо
-    отбросить кривую строку."""
-    days = set()
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if not part.isdigit() or not (0 <= int(part) <= 6):
-            return None
-        days.add(int(part))
-    return sorted(days)
 
 
 @router.get("/settings", response_class=HTMLResponse)
@@ -2046,14 +2026,15 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
     # ping_schedule_json — повторяемые строки [data-row-group] (см. guild_settings.html),
     # одноимённые поля во всех строках -> form.getlist. Пустые строки (время и текст оба
     # пусты — пользователь добавил строку и не заполнил) пропускаются молча, любая другая
-    # некорректная строка отклоняет всю форму, а не тихо теряет часть расписания.
+    # некорректная строка отклоняет всю форму, а не тихо теряет часть расписания. "days"
+    # не приходит из формы вообще (officer его не видит/не редактирует) — каждая строка
+    # получает единый tb_schedule.STANDARD_ORDER_DAYS, см. коммент у _parse_schedule_rows.
     sched_times = form.getlist("ping_schedule_json_time")
     sched_texts = form.getlist("ping_schedule_json_text")
-    sched_days = form.getlist("ping_schedule_json_days")
     schedule_rows = []
-    for raw_time, raw_text, raw_days in zip(sched_times, sched_texts, sched_days):
-        raw_time, raw_text, raw_days = raw_time.strip(), raw_text.strip(), raw_days.strip()
-        if not raw_time and not raw_text and not raw_days:
+    for raw_time, raw_text in zip(sched_times, sched_texts):
+        raw_time, raw_text = raw_time.strip(), raw_text.strip()
+        if not raw_time and not raw_text:
             continue
         if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw_time):
             error_msg = f"Время тега должно быть в формате ЧЧ:ММ: «{raw_time}»"
@@ -2062,11 +2043,7 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
             return RedirectResponse(
                 f"/settings?{urlencode({'error': 'У каждой строки расписания тега должен быть текст'})}", status_code=303
             )
-        days = _parse_schedule_days(raw_days)
-        if not days:
-            error_msg = f"Дни недели должны быть числами 0-6 через запятую (0=Пн): «{raw_days}»"
-            return RedirectResponse(f"/settings?{urlencode({'error': error_msg})}", status_code=303)
-        schedule_rows.append({"time": raw_time, "text": raw_text, "days": days})
+        schedule_rows.append({"time": raw_time, "text": raw_text, "days": tb_schedule.STANDARD_ORDER_DAYS})
     cleaned["ping_schedule_json"] = json.dumps(schedule_rows) if schedule_rows else None
 
     database.update_guild_config(guild_id, **cleaned)
