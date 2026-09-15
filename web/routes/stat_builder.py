@@ -309,7 +309,6 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
         "presets": _preset_rows(guild_id),
         "history": _history_rows(guild_id),
         "result": None,
-        "targets": [],
         "loading": False,
         "error": qp.get("error"),
     }
@@ -348,15 +347,12 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
     raw_base_stats = stat_engine.calc_base_stats(stat_calc, unit)
     final_stats = stat_engine.apply_manual_stat_totals(base_final_stats, manual_stats, raw_base_stats)
 
-    context["result"] = {
-        "char_name": _char_label(character),
-        "rows": [(label, _fmt_value(final_stats.get(value, 0))) for label, value in STAT_NAME_CHOICES],
-    }
-
-    # Несколько независимых целевых значений (по запросу пользователя 2026-09-10 — по
-    # аналогии с блоком вторичек, но БЕЗ суммирования: каждая строка target_stat/
-    # target_value проверяется отдельно и выводится отдельной карточкой).
-    targets = []
+    # Несколько независимых целевых значений на стат (по запросу пользователя
+    # 2026-09-10), сгруппированные по стату для колонки "До цели" ниже — БЕЗ
+    # суммирования: каждая строка target_stat/target_value проверяется отдельно, и для
+    # одного стата может быть больше одной цели (например Speed 200 и Speed 220 для
+    # сравнения) — тогда в ячейке колонки они просто перечисляются через "; ".
+    targets_by_stat = {}
     stat_label_by_value = dict((v, l) for l, v in STAT_NAME_CHOICES)
     for target_stat, target_value_raw in target_pairs:
         try:
@@ -379,17 +375,24 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
         value_unit = "%" if target_stat in stat_engine.PERCENT_STATS else ""
         needed_unit = "%" if target_stat in _STAT_UNIT_IS_PERCENT else ""
         needed_label = "Defense" if target_stat in stat_engine.NONLINEAR_DEFENSE_STATS else stat_label_by_value.get(target_stat, target_stat)
-        targets.append({
-            "stat_label": stat_label_by_value.get(target_stat, target_stat),
-            "needed_label": needed_label,
-            "base_value_fmt": _fmt_value(base_value),
-            "target_value_fmt": _fmt_value(target_value),
-            "needed_fmt": _fmt_value(needed),
-            "unit": value_unit,
-            "needed_unit": needed_unit,
-            "already_reached": needed <= 0,
-        })
-    context["targets"] = targets
+        if needed <= 0:
+            cell = f"{_fmt_value(target_value)}{value_unit} (цель достигнута)"
+        else:
+            cell = f"{_fmt_value(target_value)}{value_unit} (нужно ещё +{_fmt_value(needed)}{needed_unit} {needed_label})"
+        targets_by_stat.setdefault(target_stat, []).append(cell)
+
+    context["result"] = {
+        "char_name": _char_label(character),
+        "rows": [
+            {
+                "label": label,
+                "base": _fmt_value(raw_base_stats.get(value, 0)),
+                "final": _fmt_value(final_stats.get(value, 0)),
+                "target": "; ".join(targets_by_stat[value]) if value in targets_by_stat else "—",
+            }
+            for label, value in STAT_NAME_CHOICES
+        ],
+    }
 
     if not reopened_from_history:
         database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id, rarity=rarity)
