@@ -2056,19 +2056,16 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
         if not raw_time and not raw_text and not raw_days:
             continue
         if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw_time):
-            return RedirectResponse(
-                f"/settings?{urlencode({'error': f'Время тега должно быть в формате ЧЧ:ММ: \"{raw_time}\"'})}", status_code=303
-            )
+            error_msg = f"Время тега должно быть в формате ЧЧ:ММ: «{raw_time}»"
+            return RedirectResponse(f"/settings?{urlencode({'error': error_msg})}", status_code=303)
         if not raw_text:
             return RedirectResponse(
                 f"/settings?{urlencode({'error': 'У каждой строки расписания тега должен быть текст'})}", status_code=303
             )
         days = _parse_schedule_days(raw_days)
         if not days:
-            return RedirectResponse(
-                f"/settings?{urlencode({'error': f'Дни недели должны быть числами 0-6 через запятую (0=Пн): \"{raw_days}\"'})}",
-                status_code=303,
-            )
+            error_msg = f"Дни недели должны быть числами 0-6 через запятую (0=Пн): «{raw_days}»"
+            return RedirectResponse(f"/settings?{urlencode({'error': error_msg})}", status_code=303)
         schedule_rows.append({"time": raw_time, "text": raw_text, "days": days})
     cleaned["ping_schedule_json"] = json.dumps(schedule_rows) if schedule_rows else None
 
