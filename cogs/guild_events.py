@@ -318,11 +318,19 @@ class GuildEvents(commands.Cog):
     # /тб_план выбрать (см. cogs/tb_order_image.py) — берётся его тред (guilds.tb_
     # active_plan_id → tb_saved_plans.thread_id); иначе фолбэк на старый статический
     # guilds.tb_order_source_channel_id, куда офицеры писали план текстом вручную. Какой этап
-    # актуален "сегодня" определяем не по датам ТБ (бот их не знает), а по дню
-    # недели внутри "тегаемой" недели: этап 1 — в тот день, что идёт первым в
-    # расписании "ордер" (guilds.ping_schedule_json), этап 2 — во второй и т.д. Так
-    # публикация автоматически совпадает с днями, когда RotationPing и так напоминает
-    # про взводы/ордер — отдельного расписания не заводим.
+    # актуален "сегодня" определяем не по датам ТБ (бот их не знает), а по дню недели
+    # внутри "тегаемой" недели, используя ОБЩИЙ для всех гильдий календарь
+    # tb_schedule.STANDARD_ORDER_DAYS (этап 1 — первый день в списке и т.д.).
+    # ВАЖНО (пересмотрено 2026-09-16): раньше этот список брался из записи с
+    # текстом "ордер" в guilds.ping_schedule_json — но т.к. каждая строка
+    # расписания при сохранении и так получает именно STANDARD_ORDER_DAYS (см.
+    # web/routes/guild_dashboard.py), это было лишним и опасным связыванием: без
+    # отдельной строки "ордер" в ЛИЧНОМ расписании тега автопубликация ордера
+    # тихо переставала работать (см. [[project_tb_schedule_dst_feature_2026-09-15]],
+    # инцидент APotheosiss), хотя ordera и напоминание-тег — независимые вещи
+    # (гильдия может не хотеть тег-напоминание, но хотеть автопост, и наоборот).
+    # Включение/выключение самой публикации ордера — только через feature_flags
+    # ("tb_plan_order", см. ниже), а не через наличие/отсутствие тега.
     @staticmethod
     def _is_ping_week(today_date) -> bool:
         # Якорь чётности недели общий для всех гильдий (services/tb_schedule.py),
@@ -332,17 +340,8 @@ class GuildEvents(commands.Cog):
         return (delta // 7) % 2 == 0
 
     @staticmethod
-    def _tb_order_phase_for_weekday(guild_cfg, weekday: int):
-        if not guild_cfg.get("ping_schedule_json"):
-            return None
-        try:
-            schedule = json.loads(guild_cfg["ping_schedule_json"])
-        except (TypeError, json.JSONDecodeError):
-            return None
-        order_entry = next((e for e in schedule if e.get("text") == "ордер"), None)
-        if not order_entry:
-            return None
-        days = sorted(order_entry.get("days", []))
+    def _tb_order_phase_for_weekday(weekday: int):
+        days = sorted(tb_schedule.STANDARD_ORDER_DAYS)
         if weekday not in days:
             return None
         return str(days.index(weekday) + 1)
@@ -360,6 +359,11 @@ class GuildEvents(commands.Cog):
         if now_msk.hour != target_hour or now_msk.minute != target_minute:
             return
         if not self._is_ping_week(now_msk.date()):
+            return
+        # Этап — факт общего календаря ТБ, один и тот же для всех гильдий
+        # каждый тик (см. комментарий выше _tb_order_phase_for_weekday).
+        phase = self._tb_order_phase_for_weekday(now_msk.weekday())
+        if not phase:
             return
 
         current_key = now_msk.strftime("%Y%m%d%H%M")
@@ -382,9 +386,6 @@ class GuildEvents(commands.Cog):
 
             if not guild_cfg.get("tb_plan_channel_id") or not source_channel_id \
                     or not guild_cfg.get("tb_order_role_id"):
-                continue
-            phase = self._tb_order_phase_for_weekday(guild_cfg, now_msk.weekday())
-            if not phase:
                 continue
 
             if current_key == self._tb_order_sent_key.get(gid):

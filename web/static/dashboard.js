@@ -298,24 +298,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const last = rows.querySelector(".row-group-row:last-child");
             if (!last) return;
             const clone = last.cloneNode(true);
-            clone.querySelectorAll("input, select").forEach((el) => {
-                el.value = "";
-                el.removeAttribute("readonly");
-            });
-            // Строка-клон может быть скопирована с обязательной "взводы"/"ордер"
-            // строки (без крестика удаления, см. guild_settings.html) — новая
-            // строка сама по себе не обязательная, крестик ей нужен всегда.
-            if (!clone.querySelector(".row-group-remove")) {
-                const cell = clone.querySelector("td:last-child");
-                if (cell) {
-                    const btn = document.createElement("button");
-                    btn.type = "button";
-                    btn.className = "row-group-remove";
-                    btn.title = "Убрать строку";
-                    btn.textContent = "✕";
-                    cell.appendChild(btn);
-                }
-            }
+            clone.querySelectorAll("input, select").forEach((el) => { el.value = ""; });
             bindRemove(clone);
             rows.appendChild(clone);
             syncUnit(clone);
