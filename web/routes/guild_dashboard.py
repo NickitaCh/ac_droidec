@@ -1806,8 +1806,10 @@ GUILD_SETTINGS_GROUPS = [
                 "оставить пустым, если напоминания не нужны вообще, добавить свои строки или удалить "
                 "любую (дни недели одинаковы для всех гильдий — это общий календарь ТБ, задаёт супер-админ). "
                 "Автопубликация самого ордера ТБ (заполняется отдельно ниже, «ТБ — план и ордер») от этого "
-                "расписания не зависит — работает независимо, даже если тег-напоминания выключены.",
+                "расписания не зависит — работает независимо, даже если тег-напоминания выключены. Общий "
+                "переключатель ниже отключает этот блок целиком, без удаления самих настроек.",
         "fields": [
+            ("tb_ping", "Тег-напоминания включены", "flag"),
             ("ping_channel_id", "Канал для тега на ротацию/взводы", "channel"),
             ("ping_role_id", "Тегаемая роль", "role"),
             ("ping_schedule_json", "Расписание тега (время/текст)", "schedule"),
@@ -1816,8 +1818,10 @@ GUILD_SETTINGS_GROUPS = [
     {
         "name": "ТБ — план и ордер",
         "hint": "Канал, куда бот публикует план ТБ (планеты по этапам) и автоматические ордера на каждый этап. "
-                "Ордера бот собирает из канала/ветки со стратегией и тегает в них указанную роль.",
+                "Ордера бот собирает из канала/ветки со стратегией и тегает в них указанную роль. Общий "
+                "переключатель ниже отключает автопубликацию целиком, без удаления самих настроек канала/роли.",
         "fields": [
+            ("tb_plan_order", "Автопубликация плана/ордера включена", "flag"),
             ("tb_plan_channel_id", "Канал анонсов плана ТБ и автоордеров", "channel"),
             ("tb_order_source_channel_id", "Канал/ветка-источник стратегии по этапам", "channel"),
             ("tb_order_role_id", "Роль, тегаемая в автоордере", "role"),
@@ -1962,7 +1966,10 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
     for group in GUILD_SETTINGS_GROUPS:
         rows = []
         for field, label, kind in group["fields"]:
-            value = guild_cfg.get(field) or ""
+            # "flag" — не колонка guilds, а services.feature_flags (тот же bot_state,
+            # что и /admin/features у супер-админа) — офицер сам включает/выключает
+            # блок целиком, не удаляя сами настройки канала/роли под ним.
+            value = feature_flags.is_enabled(user["guild_id"], field) if kind == "flag" else (guild_cfg.get(field) or "")
             rows.append({
                 "field": field, "label": label, "kind": kind, "value": value,
                 "channel_options": await _channel_options(value) if kind == "channel" else None,
@@ -1993,6 +2000,12 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
                 continue  # tasks_notify_time — отдельно, ниже
             if kind == "schedule":
                 continue  # ping_schedule_json — отдельно, ниже
+            if kind == "flag":
+                # Не guilds-колонка — services.feature_flags (bot_state), не часть
+                # cleaned/update_guild_config. Чекбокс не приходит в form вообще,
+                # если снят — присутствие ключа и есть "включено".
+                feature_flags.set_enabled(guild_id, field, field in form, updated_by=str(user["discord_id"]))
+                continue
 
             if kind == "role":
                 raw = (form.get(field) or "").strip()

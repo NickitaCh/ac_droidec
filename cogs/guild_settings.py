@@ -20,6 +20,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
+from services import feature_flags
 
 
 def _make_channel_autocomplete(allowed_types: set[str] | None = None):
@@ -44,13 +45,19 @@ autocomplete_text_channel = _make_channel_autocomplete({"text", "news"})
 autocomplete_thread_or_text_channel = _make_channel_autocomplete({"text", "news", "public_thread", "private_thread", "news_thread"})
 autocomplete_forum_channel = _make_channel_autocomplete({"forum"})
 
-# (поле в guilds, человекочитаемое название) — для /настройки список
+# (поле в guilds, человекочитаемое название) — для /настройки список.
+# "tb_ping"/"tb_plan_order" — НЕ колонки guilds, а services.feature_flags (см.
+# _FEATURE_FLAG_FIELDS ниже и settings_list) — оставлены здесь только чтобы
+# попасть в нужную секцию SETTINGS_GROUPS по порядку, показываются отдельной
+# веткой, не через guild_cfg.get(field).
 SETTINGS_FIELDS = [
+    ("tb_ping", "Модуль тегов-напоминаний (взводы/ордер) включён"),
     ("ping_channel_id", "Канал для тега на ротацию/взводы перед ТБ"),
     ("ping_role_id", "Роль, тегаемая на ротацию/взводы перед ТБ"),
     ("birthday_channel_id", "Канал для поздравлений с ДР"),
     ("birthday_role_id", "Роль, выдаваемая в ДР"),
     ("officer_channel_id", "Канал для автоотчёта и уведомлений по ТБ"),
+    ("tb_plan_order", "Модуль автопубликации плана/ордера включён"),
     ("tb_plan_channel_id", "Канал анонсов плана ТБ (планеты + автоордера)"),
     ("tb_order_source_channel_id", "Канал/ветка-источник со стратегией на этапы ТБ"),
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
@@ -70,8 +77,8 @@ SETTINGS_FIELDS = [
 # уже названы сабкоманды (тб_ротация_*/тб_план_*/тб_ордер_*/тб_отчет_*), иначе
 # один блок на 6 разнородных полей читался плохо что в Discord, что в вебе.
 SETTINGS_GROUPS = [
-    ("ТБ — тег на подготовку", ["ping_channel_id", "ping_role_id"]),
-    ("ТБ — план и ордер", ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
+    ("ТБ — тег на подготовку", ["tb_ping", "ping_channel_id", "ping_role_id"]),
+    ("ТБ — план и ордер", ["tb_plan_order", "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
     ("ТБ — итоговый отчёт", ["officer_channel_id"]),
     ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
     ("Территориальная Война (ВГ)", ["tw_guide_forum_channel_id"]),
@@ -191,6 +198,30 @@ class GuildSettings(commands.Cog):
         роль: disnake.Role = commands.Param(description="Тегаемая роль в ордере"),
     ):
         await self._set_field(inter, "tb_order_role_id", роль, "Роль, тегаемая в автоордере ТБ")
+
+    @settings_group.sub_command(
+        name="тб_модуль",
+        description="Включить/выключить тег-напоминания и автопубликацию плана/ордера ТБ (не удаляет настройки каналов/ролей)",
+    )
+    async def set_tb_module(
+        self, inter: disnake.ApplicationCommandInteraction,
+        тег: bool = commands.Param(default=None, description="Тег-напоминания (взводы/ордер) — True включить, False выключить"),
+        автоордер: bool = commands.Param(default=None, description="Автопубликация плана/ордера ТБ — True включить, False выключить"),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        if тег is None and автоордер is None:
+            await inter.response.send_message("❌ Укажите хотя бы один параметр: тег или автоордер.", ephemeral=True)
+            return
+        lines = []
+        if тег is not None:
+            feature_flags.set_enabled(guild_id, "tb_ping", тег, updated_by=str(inter.author.id))
+            lines.append(f"Тег-напоминания (взводы/ордер): {'✅ включены' if тег else '❌ выключены'}")
+        if автоордер is not None:
+            feature_flags.set_enabled(guild_id, "tb_plan_order", автоордер, updated_by=str(inter.author.id))
+            lines.append(f"Автопубликация плана/ордера ТБ: {'✅ включена' if автоордер else '❌ выключена'}")
+        await inter.response.send_message("✅ " + "\n".join(lines), ephemeral=True)
 
     @settings_group.sub_command(name="вг_гайды_канал", description="Форум-канал с гайдами по контрам ВГ, откуда бот берёт данные для /вг_ордер")
     async def set_tw_guide_forum_channel(
@@ -329,6 +360,10 @@ class GuildSettings(commands.Cog):
             lines = []
             for field in fields:
                 label = _SETTINGS_LABELS[field]
+                if field in ("tb_ping", "tb_plan_order"):
+                    enabled = feature_flags.is_enabled(guild_id, field)
+                    lines.append(f"• {label}: {'✅ да' if enabled else '❌ нет'}")
+                    continue
                 raw = guild_cfg.get(field)
                 if field == "antispam_enabled":
                     lines.append(f"• {label}: {'✅ да' if raw else '❌ нет'}")

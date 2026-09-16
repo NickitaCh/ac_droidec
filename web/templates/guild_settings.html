@@ -30,7 +30,12 @@
                 <h3 style="margin-top: 0;">{{ group.name }}</h3>
                 <p class="muted" style="margin-top: -0.5em;">{{ group.hint }}</p>
                 {% for row in group.rows %}
-                    {% if row.kind == 'schedule' %}
+                    {% if row.kind == 'flag' %}
+                        <label class="checkbox">
+                            <input type="checkbox" name="{{ row.field }}" {% if row.value %}checked{% endif %}>
+                            {{ row.label }}
+                        </label>
+                    {% elif row.kind == 'schedule' %}
                         <div class="form-block" data-row-group>
                             <span>{{ row.label }}</span>
                             <table class="stat-rows-table">
