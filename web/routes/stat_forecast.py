@@ -128,7 +128,7 @@ async def stats_check_form(
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at, char_failed_required = outcome
+        char_name, block, matched, total, updated_at, char_failed_required, _required_total = outcome
         results.append({
             "char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at,
         })

@@ -274,12 +274,16 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
 
 
 async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_FULL):
-    """Возвращает (char_name, block, matched, total, updated_at, failed_required) для одного
-    персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота, прогноз
-    на релик плейта. matched/total и failed_required (список не прошедших норму обязательных
-    (priority=="required") строк) считаются по ОДНОМУ И ТОМУ ЖЕ критерию — какой именно, задаёт
-    scenario (см. SCENARIO_RAW/UP/FULL выше), чтобы гильдийская дробь "X/Y" и решение
-    compliant/problem/итоговый блок никогда не расходились между собой:
+    """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total)
+    для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
+    прогноз на релик плейта. matched/total (ВСЕ приоритеты — required+optional+useful) и
+    failed_required/required_total (только priority=="required") считаются по ОДНОМУ И ТОМУ ЖЕ
+    критерию — какой именно, задаёт scenario (см. SCENARIO_RAW/UP/FULL выше), чтобы гильдийская
+    дробь "X/Y" и решение compliant/problem/итоговый блок никогда не расходились между собой.
+    required_total − len(failed_required) = сколько обязательных строк реально пройдено —
+    используется гильдийским отчётом, чтобы показывать дробь именно по обязательным, а не по
+    всем строкам плейта разом (иначе, если в плейте вперемешку 83 required+optional+useful
+    строки, дробь "27/83" не даёт понять, сколько из непройденного — реально обязательное):
     - SCENARIO_RAW — сырое "как сейчас" сравнение (реальный текущий стат против порога плейта
       в лоб, без всякой проекции на релик) — то же самое, что делает ХБ.
     - SCENARIO_UP — билд/моды игрока проецируются на релик плейта, только если релик игрока
@@ -297,12 +301,13 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     rows, char_name, required_relic, comments, legend = loaded
     matched = 0
     total = 0
+    required_total = 0
     failed_required = []
 
     unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
     if not unit:
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
-        return char_name, block, 0, 0, None, []
+        return char_name, block, 0, 0, None, [], 0
 
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
@@ -420,6 +425,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         total += 1
         if scenario_ok:
             matched += 1
+        if priority == PRIORITY_REQUIRED:
+            required_total += 1
 
         if priority == PRIORITY_REQUIRED and not scenario_ok:
             if is_omicron:
@@ -441,7 +448,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total, updated_at, failed_required
+    return char_name, block, matched, total, updated_at, failed_required, required_total
 
 
 async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_FULL) -> dict:
@@ -475,34 +482,46 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
 
     compliant, problem, no_data = [], [], []
     for _discord_id, ally_code, name in roster:
-        matched_total = 0
-        rows_total = 0
+        rows_total = 0  # ВСЕ приоритеты — только чтобы понять, есть ли вообще данные (no_data)
+        required_total_all = 0
+        required_matched_all = 0
         char_problems = []
         has_failed_required = False
         for base_id in char_keys:
             result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario)
             if result is None:
                 continue
-            char_name, _block, matched, total, _updated_at, failed_required = result
-            matched_total += matched
+            char_name, _block, _matched, total, _updated_at, failed_required, required_total = result
             rows_total += total
+            required_matched = required_total - len(failed_required)
+            required_total_all += required_total
+            required_matched_all += required_matched
             if failed_required:
                 has_failed_required = True
-            if total > 0 and matched < total:
+            if required_total > 0 and required_matched < required_total:
                 char_problems.append({
-                    "char_name": char_name, "base_id": base_id, "matched": matched, "total": total,
+                    "char_name": char_name, "base_id": base_id, "matched": required_matched, "total": required_total,
                     "required_relic": required_relic_by_char.get(base_id),
                 })
 
         # "Полностью соответствуют" — только по ОБЯЗАТЕЛЬНЫМ статам (failed_required,
-        # см. _evaluate_character_player), а не по matched_total == rows_total: та сумма
+        # см. _evaluate_character_player), а не по всем строкам плейта разом: та сумма
         # включает и "по желанию"/"полезные" строки, из-за чего один невыполненный
         # опциональный стат топил игрока целиком (реальный баг, найденный пользователем
         # на тестовом плейте, где ВСЕ строки были опциональными — гильдия показывала
         # 0/49 соответствуют, хотя обязательных требований не было вовсе). Тот же
         # принцип, что уже используется guild-репортом по датакронам (_match_counts —
         # там тоже "missing_required" считается только по priority=="required").
-        entry = {"name": name, "ally_code": ally_code, "matched": matched_total, "total": rows_total, "chars": char_problems}
+        # Показанная дробь "matched/total" ниже — тоже ТОЛЬКО по обязательным строкам
+        # (required_total_all/required_matched_all), а не по всем строкам плейта разом:
+        # иначе на плейте с большим числом опциональных требований дробь вида "27/83"
+        # не даёт понять, сколько из непройденного реально обязательно (реальная путаница
+        # у пользователя на AC_TW, 2026-09-16).
+        entry = {
+            "name": name, "ally_code": ally_code,
+            "matched": required_matched_all, "total": required_total_all,
+            "chars": char_problems,
+        }
         if rows_total == 0:
             no_data.append(entry)
         elif not has_failed_required:
@@ -1281,8 +1300,9 @@ class StatRequirementsCog(commands.Cog):
                 lines.append("✅ " + ", ".join(r["name"] for r in report["compliant"]))
                 lines.append("")
             if report["problem"]:
+                lines.append("_(дробь ниже — только по ОБЯЗАТЕЛЬНЫМ требованиям, без опциональных/полезных)_")
                 for r in report["problem"]:
-                    lines.append(f"❌ {r['name']} — {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
+                    lines.append(f"❌ {r['name']} — обязательных {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
             else:
                 lines.append("Все закрыли все требования! 🎉")
 
@@ -1336,7 +1356,7 @@ class StatRequirementsCog(commands.Cog):
             result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий)
             if result is None:
                 continue
-            char_name, block, matched, total, updated_at, failed_required = result
+            char_name, block, matched, total, updated_at, failed_required, _required_total = result
             any_char_shown = True
             lines.append(f"## {char_name}")
             lines.append(block)

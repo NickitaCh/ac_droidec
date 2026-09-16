@@ -51,9 +51,9 @@ async def evaluate_character_player(
     scenario: str = SCENARIO_FULL,
 ):
     """Обёртка над cogs.stat_requirements._evaluate_character_player — см. её докстринг
-    для формата результата (char_name, block, matched, total, updated_at, failed_required)
-    и для смысла scenario (SCENARIO_RAW/UP/FULL), либо None, если для этого персонажа нет
-    сохранённых требований в плейте."""
+    для формата результата (char_name, block, matched, total, updated_at, failed_required,
+    required_total) и для смысла scenario (SCENARIO_RAW/UP/FULL), либо None, если для этого
+    персонажа нет сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
     return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario)
 
