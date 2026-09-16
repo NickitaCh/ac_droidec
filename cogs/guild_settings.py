@@ -201,7 +201,7 @@ class GuildSettings(commands.Cog):
 
     @settings_group.sub_command(
         name="тб_модуль",
-        description="Включить/выключить тег-напоминания и автопубликацию плана/ордера ТБ (не удаляет настройки каналов/ролей)",
+        description="Вкл/выкл тег-напоминания и автопубликацию плана/ордера ТБ (без потери настроек канала/роли)",
     )
     async def set_tb_module(
         self, inter: disnake.ApplicationCommandInteraction,
