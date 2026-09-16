@@ -216,11 +216,17 @@ def _stat_delta_stats(deltas: list, relevant_count: int) -> dict:
     p90 = _percentile(sorted_deltas, 90)
     spread = p90 - p50
 
+    # PDF раздел 3: если SF >= 70%, CV считается по ВСЕЙ выборке релевантных игроков;
+    # если SF < 70%, CV считается только по тем, у кого дельта уже превышает тот же
+    # "порог осмысленного упора" (> SF_DELTA_THRESHOLD от базы), что и в SF — иначе стат,
+    # которым реально пользуется меньшинство гильдии, разбавляется морем игроков с почти
+    # нулевой дельтой и получает обманчиво огромный/бессмысленный CV.
+    cv_population = sorted_deltas if sf >= 0.70 else sorted(d for d, b in deltas if b and (d / b) > SF_DELTA_THRESHOLD)
     cv = None
-    if n >= 2:
-        mean_delta = statistics.mean(sorted_deltas)
+    if len(cv_population) >= 2:
+        mean_delta = statistics.mean(cv_population)
         if mean_delta:
-            cv = statistics.stdev(sorted_deltas) / mean_delta
+            cv = statistics.stdev(cv_population) / mean_delta
 
     nm = (p50 / p90) if p90 else 0.0
     gf = sf * nm
