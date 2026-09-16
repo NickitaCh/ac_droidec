@@ -13,7 +13,7 @@ import time
 import types
 
 import stat_engine
-from cogs.stat_requirements import _evaluate_character_player, _project_character_relic, _build_guild_report
+from cogs.stat_requirements import _evaluate_character_player, _project_character_relic, _build_guild_report, SCENARIO_FULL
 
 _TTL_SECONDS = 12 * 60 * 60
 
@@ -47,14 +47,15 @@ def _bot_stand_in(comlink, stat_calc):
 
 
 async def evaluate_character_player(
-    comlink, stat_calc, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1
+    comlink, stat_calc, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1,
+    scenario: str = SCENARIO_FULL,
 ):
     """Обёртка над cogs.stat_requirements._evaluate_character_player — см. её докстринг
-    для формата результата (char_name, block, matched, total, updated_at, matched_relic_free,
-    total_relic_free, failed_required) либо None, если для этого персонажа нет сохранённых
-    требований в плейте."""
+    для формата результата (char_name, block, matched, total, updated_at, failed_required)
+    и для смысла scenario (SCENARIO_RAW/UP/FULL), либо None, если для этого персонажа нет
+    сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id)
+    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario)
 
 
 async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1):
@@ -64,9 +65,9 @@ async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: 
     return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id)
 
 
-async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, account_for_relic: bool = True) -> dict:
+async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_FULL) -> dict:
     """Обёртка над cogs.stat_requirements._build_guild_report — см. её докстринг для формата
     результата ({"error", "total_players", "compliant", "problem", "no_data"}) и параметра
-    account_for_relic."""
+    scenario."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, account_for_relic=account_for_relic)
+    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, scenario=scenario)

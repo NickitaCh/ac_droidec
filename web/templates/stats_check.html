@@ -53,9 +53,13 @@
                     Обновить статы игрока с сервера (медленнее, но актуально прямо сейчас)
                 </label>
 
-                <label class="checkbox-label">
-                    <input type="checkbox" name="ignore_relic" value="1" {% if ignore_relic %}checked{% endif %}>
-                    Игнорировать нехватку реликвии (только при проверке всей гильдии) — считать по прогнозу на релик плейта, а не по факту
+                <label>
+                    Сценарий сравнения с нормой плейта
+                    <select name="scenario">
+                        {% for value, label in scenario_choices %}
+                            <option value="{{ value }}" {% if value == selected_scenario %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
             {% endif %}
 
@@ -83,7 +87,7 @@
             {% endfor %}
 
             <div class="panel">
-                <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
+                <div class="panel-title"><span>⚠️ Итог: обязательные статы — {{ scenario_label }}</span></div>
                 {% if not failed_required %}
                     <p class="empty-state">✅ Все обязательные статы в норме.</p>
                 {% else %}
@@ -109,9 +113,7 @@
         {% if guild_report.error %}
             <p class="error">{{ guild_report.error }}</p>
         {% else %}
-            {% if ignore_relic %}
-                <p class="muted">⚠️ Без учёта нехватки реликвии — прогноз на релик плейта, требование к самой реликвии в подсчёт не входит.</p>
-            {% endif %}
+            <p class="muted">⚠️ Сценарий: {{ scenario_label }}.</p>
             <div class="stats-grid">
                 <div class="stat-tile"><div class="stat-value">{{ guild_report.total_players }}</div><div class="stat-label">Проверено</div></div>
                 <div class="stat-tile status-danger"><div class="stat-value">{{ guild_report.problem|length }}</div><div class="stat-label">Есть проблемы</div></div>

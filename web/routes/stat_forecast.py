@@ -13,7 +13,14 @@ from fastapi.templating import Jinja2Templates
 import database
 import guild_resolver
 import services.stat_forecast as stat_forecast
+from cogs.stat_requirements import SCENARIO_RAW, SCENARIO_UP, SCENARIO_FULL
 from services import feature_flags
+
+SCENARIO_LABELS = {
+    SCENARIO_RAW: "Как есть, без проекции (как в ХБ)",
+    SCENARIO_UP: "Релик вверх тем, кто ниже цели плейта",
+    SCENARIO_FULL: "Полный подгон релика (вверх и вниз)",
+}
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -43,12 +50,14 @@ async def stats_check_form(
     character: str = "",
     force_refresh: bool = False,
     action: str = "",
-    ignore_relic: bool = False,
+    scenario: str = SCENARIO_FULL,
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     roster = _roster_choices(guild_id)
+    if scenario not in SCENARIO_LABELS:
+        scenario = SCENARIO_FULL
 
     context = {
         "user": user,
@@ -59,7 +68,9 @@ async def stats_check_form(
         "selected_ally_code_manual": ally_code_manual,
         "selected_character": character,
         "force_refresh": force_refresh,
-        "ignore_relic": ignore_relic,
+        "selected_scenario": scenario,
+        "scenario_choices": SCENARIO_LABELS.items(),
+        "scenario_label": SCENARIO_LABELS[scenario],
         "characters": [],
         "results": None,
         "guild_report": None,
@@ -103,7 +114,7 @@ async def stats_check_form(
     if not target_ally_code:
         # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
         context["guild_report"] = await stat_forecast.build_guild_report(
-            comlink, stat_calc, plate, target_chars, guild_id=guild_id, account_for_relic=not ignore_relic,
+            comlink, stat_calc, plate, target_chars, guild_id=guild_id, scenario=scenario,
         )
         return templates.TemplateResponse(request, "stats_check.html", context)
 
@@ -113,10 +124,11 @@ async def stats_check_form(
     for base_id in target_chars:
         outcome = await stat_forecast.evaluate_character_player(
             comlink, stat_calc, plate, base_id, target_ally_code, force_refresh, player_label, guild_id=guild_id,
+            scenario=scenario,
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at, _matched_rf, _total_rf, char_failed_required = outcome
+        char_name, block, matched, total, updated_at, char_failed_required = outcome
         results.append({
             "char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at,
         })

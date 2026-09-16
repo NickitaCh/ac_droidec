@@ -83,6 +83,24 @@ OPERATOR_CHOICES = [
     disnake.OptionChoice(name="=", value="="),
 ]
 
+# Три сценария сравнения реального билда/модов игрока с нормой плейта — влияют и на
+# одиночный "Итог" (failed_required), и на гильдийский compliant/problem (см.
+# _evaluate_character_player/_build_guild_report). Раньше был один булев параметр
+# "учитывать_релик", который (а) не читался вообще на одиночном игроке и (б) даже в
+# гильдии двигал только показанную дробь matched/total, а не сам факт прохождения —
+# сам "Итог" всегда фактически считал SCENARIO_FULL, что не совпадало ни с ХБ (сырое
+# сравнение), ни с "поднять релик только тем, кто ниже цели" — оба варианта теперь
+# отдельные явные сценарии.
+SCENARIO_RAW = "raw"
+SCENARIO_UP = "up"
+SCENARIO_FULL = "full"
+
+SCENARIO_CHOICES = [
+    disnake.OptionChoice(name="Как сейчас, без проекции (как в ХБ)", value=SCENARIO_RAW),
+    disnake.OptionChoice(name="Релик вверх тем, кто ниже цели плейта", value=SCENARIO_UP),
+    disnake.OptionChoice(name="Полный подгон релика (вверх и вниз)", value=SCENARIO_FULL),
+]
+
 # Короткие подписи для колонки "Стат" в таблице /статы — полные названия (особенно
 # Physical/Special Damage, Critical Chance/Avoidance) не влезают в ширину на мобильных.
 # Health/Speed/Armor/Potency и т.п. уже достаточно короткие — оставлены как есть (fallback).
@@ -255,20 +273,23 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     return rows, char_name, required_relic, comments, legend
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1):
-    """Возвращает (char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free, failed_required)
-    для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
-    прогноз на релик плейта. matched/total — соответствие СЕЙЧАС (при текущем релике игрока, как
-    видно в колонке "Сейчас"); matched_relic_free/total_relic_free — соответствие БЕЗ УЧЁТА нехватки
-    реликвии (при показанном прогнозе — как в колонке "Релик N", т.е. прошёл бы билд/моды норму,
-    если бы релик уже был нужного уровня; строка Relic из этого счёта исключена — сравнивать
-    "реликвию с самой собой" бессмысленно). Используется гильдийским отчётом (_build_guild_report)
-    для переключателя "учитывать реликвию" — сама детальная таблица блока не меняется, там и так
-    видны обе колонки одновременно. failed_required — список обязательных (priority=="required")
-    строк, не прошедших норму, ПЕРЕСЧИТАННУЮ на текущий релик игрока (то же "ok", что и в колонке
-    "Нужно" — т.е. билд/моды сравниваются с нормой, скорректированной под фактический релик,
-    а не в лоб с порогом плейта, который был задан для другого релика); используется для итогового
-    блока в /статы, чтобы низкий релик сам по себе не превращал приемлемый билд в "не пройдено".
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_FULL):
+    """Возвращает (char_name, block, matched, total, updated_at, failed_required) для одного
+    персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота, прогноз
+    на релик плейта. matched/total и failed_required (список не прошедших норму обязательных
+    (priority=="required") строк) считаются по ОДНОМУ И ТОМУ ЖЕ критерию — какой именно, задаёт
+    scenario (см. SCENARIO_RAW/UP/FULL выше), чтобы гильдийская дробь "X/Y" и решение
+    compliant/problem/итоговый блок никогда не расходились между собой:
+    - SCENARIO_RAW — сырое "как сейчас" сравнение (реальный текущий стат против порога плейта
+      в лоб, без всякой проекции на релик) — то же самое, что делает ХБ.
+    - SCENARIO_UP — билд/моды игрока проецируются на релик плейта, только если релик игрока
+      НИЖЕ требуемого (тем, кто уже выше, релик вниз не опускается — их реальный стат просто
+      берётся как есть); отвечает на вопрос "кто уже замодился и пройдёт, когда докачает релик".
+    - SCENARIO_FULL — билд/моды проецируются на релик плейта в обе стороны (и вверх, и вниз) —
+      то же самое, что показано в колонке "Релик N" детальной таблицы; отвечает на вопрос
+      "кто хочет в целевом релике замодить персонажа как следует".
+    Строки Relic и Omicron сценарием не затрагиваются — их наличие/уровень либо есть у игрока
+    прямо сейчас, либо нет, "спроецировать" их на другой релик бессмысленно.
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
     loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
@@ -276,14 +297,12 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     rows, char_name, required_relic, comments, legend = loaded
     matched = 0
     total = 0
-    matched_relic_free = 0
-    total_relic_free = 0
     failed_required = []
 
     unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
     if not unit:
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
-        return char_name, block, 0, 0, None, 0, 0, []
+        return char_name, block, 0, 0, None, []
 
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = dict(stat_engine.calc_final_stats(bot.stat_calc, unit))
@@ -315,6 +334,14 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         projected_values = dict(stat_engine.calc_final_stats(bot.stat_calc, projected_unit))
         projected_values["Relic"] = target_relic
 
+    # SCENARIO_UP: проекция только вверх — target_relic выше current_relic ровно тогда,
+    # когда игрок ниже требуемого релика (см. show_projection/target_relic выше), так что
+    # projected_values в этом случае УЖЕ является нужной "up"-проекцией, пересчитывать не
+    # нужно; если же игрок на нужном релике или выше, up-значения — это просто его текущие
+    # статы (релик вниз не опускаем).
+    up_direction = show_projection and target_relic > current_relic
+    up_values = projected_values if up_direction else current_values
+
     caption = f"Релик игрока: {current_relic}"
     if show_projection:
         if target_relic > current_relic:
@@ -331,6 +358,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     for row in rows:
         _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id = row
         is_omicron = stat_name == STAT_OMICRON
+        is_relic_row = stat_name == "Relic"
         label = _omicron_label(skill_id, priority) if is_omicron else _stat_label(stat_name, priority)
         lookup_key = f"Omicron:{skill_id}" if is_omicron else stat_name
         req_cell = "разблокирован" if is_omicron else f"{operator} {_fmt_compact(threshold)}"
@@ -338,32 +366,10 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         if cur_val is None:
             table_rows.append([label, "нет данных", "—", "—", req_cell] if show_projection else [label, "нет данных", req_cell])
             continue
-        total += 1
         cur_ok = _compare(cur_val, operator, threshold)
-        if cur_ok:
-            matched += 1
         cur_cell = ("Есть ✅" if cur_ok else "Нет ❌") if is_omicron else f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
 
-        # relic-free счёт: для Relic — пропускаем строку целиком (сравнивать реликвию саму
-        # с собой на прогнозе бессмысленно); для омикрона — от релика вообще не зависит,
-        # поэтому идёт как есть (cur_val), без прогноза; для остальных статов — берём
-        # прогнозное значение на целевой релик, если есть прогноз, иначе (игрок уже на
-        # нужном релике) то же cur_val.
-        if stat_name != "Relic":
-            if is_omicron:
-                relic_free_val = cur_val
-            else:
-                relic_free_val = (projected_values.get(stat_name) if projected_values else None) if show_projection else cur_val
-            if relic_free_val is not None:
-                total_relic_free += 1
-                if _compare(relic_free_val, operator, threshold):
-                    matched_relic_free += 1
-
-        # adjusted_ok/adjusted_req_text — норма, пересчитанная под ФАКТИЧЕСКИЙ релик игрока
-        # (та же величина, что показана в колонке "Нужно"), а не порог плейта в лоб. Для
-        # строк Relic/Omicron и для случаев без прогноза пересчитывать нечего — сравниваем как есть.
-        adjusted_ok = cur_ok
-        adjusted_req_text = req_cell
+        proj_val = (projected_values.get(stat_name) if projected_values else None) if (show_projection and not is_omicron and not is_relic_row) else None
 
         if not show_projection:
             table_rows.append([label, cur_cell, req_cell])
@@ -374,49 +380,82 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 # Разблокировка не зависит от релика — во всех трёх колонках один и тот же статус.
                 needed_cell = cur_cell
                 proj_cell = cur_cell
-            elif stat_name != "Relic":
-                proj_val = projected_values.get(stat_name) if projected_values else None
-                if proj_val is not None:
-                    proj_ok = _compare(proj_val, operator, threshold)
-                    proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
-                    # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
-                    # при тех же модах/шмоте, не зависит от текущего значения (см. план фичи).
-                    # needed = порог минус этот рост = сколько нужно ИМЕННО СЕЙЧАС, чтобы после
-                    # апа реликвии стат дотянул до нормы плейта.
-                    delta = proj_val - cur_val
-                    needed_now = threshold - delta
-                    needed_ok = _compare(cur_val, operator, needed_now)
-                    needed_cell = f"{_fmt_compact(needed_now)} {'✅' if needed_ok else '❌'}"
-                    adjusted_ok = needed_ok
-                    adjusted_req_text = f"{operator} {_fmt_compact(needed_now)}"
+            elif not is_relic_row and proj_val is not None:
+                proj_ok = _compare(proj_val, operator, threshold)
+                proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
+                # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
+                # при тех же модах/шмоте, не зависит от текущего значения (см. план фичи).
+                # needed = порог минус этот рост = сколько нужно ИМЕННО СЕЙЧАС, чтобы после
+                # апа реликвии стат дотянул до нормы плейта.
+                delta = proj_val - cur_val
+                needed_now = threshold - delta
+                needed_ok = _compare(cur_val, operator, needed_now)
+                needed_cell = f"{_fmt_compact(needed_now)} {'✅' if needed_ok else '❌'}"
             table_rows.append([label, cur_cell, needed_cell, proj_cell, req_cell])
 
-        if priority == PRIORITY_REQUIRED and not adjusted_ok:
+        # scenario_val/scenario_ok — критерий, который РЕАЛЬНО решает и подсчёт matched/total,
+        # и "Итог" (failed_required) — единый источник правды для обоих, в отличие от старой
+        # версии, где отображаемая дробь и итоговый список могли расходиться.
+        # Omicron не зависит от релика вообще — всегда сырое сравнение, в любом сценарии.
+        # Relic — наоборот, ровно то, что каждый непустой сценарий хочет "отвязать" от
+        # остального билда: в RAW считается как есть (это и есть факт нехватки реликвии,
+        # который сценарий должен показать), а в UP/FULL строка целиком исключается из
+        # подсчёта — иначе сама реликвия срывала бы "Итог" даже когда сценарий специально
+        # проверяет билд/моды в отрыве от текущего уровня реликвии.
+        if is_omicron:
+            scenario_val = cur_val
+        elif is_relic_row:
+            scenario_val = cur_val if scenario == SCENARIO_RAW else None
+        elif scenario == SCENARIO_RAW:
+            scenario_val = cur_val
+        elif scenario == SCENARIO_UP:
+            scenario_val = up_values.get(stat_name, cur_val)
+        else:  # SCENARIO_FULL
+            scenario_val = proj_val if proj_val is not None else cur_val
+
+        if scenario_val is None:
+            continue
+
+        scenario_ok = _compare(scenario_val, operator, threshold)
+        total += 1
+        if scenario_ok:
+            matched += 1
+
+        if priority == PRIORITY_REQUIRED and not scenario_ok:
+            if is_omicron:
+                requirement_text = "нужна разблокировка"
+            elif scenario_val == cur_val:
+                requirement_text = req_cell
+            else:
+                # Такая же "нужно СЕЙЧАС" величина, что и в колонке "Нужно" — но пересчитанная
+                # под delta выбранного сценария, а не всегда под полную проекцию.
+                delta = scenario_val - cur_val
+                requirement_text = f"{operator} {_fmt_compact(threshold - delta)}"
             failed_required.append({
                 "stat": label,
                 "current": "не разблокирован" if is_omicron else _fmt_compact(cur_val),
-                "requirement": "нужна разблокировка" if is_omicron else adjusted_req_text,
+                "requirement": requirement_text,
             })
 
     block = caption + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total, updated_at, matched_relic_free, total_relic_free, failed_required
+    return char_name, block, matched, total, updated_at, failed_required
 
 
-async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, account_for_relic: bool = True) -> dict:
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_FULL) -> dict:
     """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
     ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
     персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
     без обращений к Comlink — то же самое, что видит /статы без "обновить"). Раскладывает
     игроков на три бакета для рендера и в Discord, и в вебе.
 
-    account_for_relic (по умолчанию True — прежнее поведение без изменений): считать
-    соответствие по РЕАЛЬНЫМ текущим статам игрока (низкий релик естественно валит многие
-    строки). False — игнорировать нехватку реликвии: считать по прогнозу на релик плейта
-    (билд/моды уже готовы, реликвию просто ещё не подняли) — сама реликвия как требование
-    из подсчёта в этом режиме исключается (см. _evaluate_character_player)."""
+    scenario — тот же критерий, что и в _evaluate_character_player (SCENARIO_RAW/UP/FULL),
+    прокидывается туда как есть: и показанная дробь matched/total, и compliant/problem
+    (has_failed_required) считаются по нему консистентно — раньше это были два независимых,
+    несогласованных друг с другом переключателя (одно двигало только дробь, другое — вообще
+    ничего, всегда молча считало как SCENARIO_FULL)."""
     roster = database.get_all_user_mappings(guild_id)
     if not roster:
         return {
@@ -441,11 +480,10 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
         char_problems = []
         has_failed_required = False
         for base_id in char_keys:
-            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id)
+            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario)
             if result is None:
                 continue
-            char_name, _block, matched_cur, total_cur, _updated_at, matched_rf, total_rf, failed_required = result
-            matched, total = (matched_cur, total_cur) if account_for_relic else (matched_rf, total_rf)
+            char_name, _block, matched, total, _updated_at, failed_required = result
             matched_total += matched
             rows_total += total
             if failed_required:
@@ -1202,7 +1240,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
-        учитывать_релик: bool = commands.Param(default=True, description="Гильдия: True — как сейчас (низкий релик валит статы), False — прогноз на релик плейта"),
+        сценарий: str = commands.Param(default=SCENARIO_FULL, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
     ):
         await inter.response.defer()
 
@@ -1224,14 +1262,18 @@ class StatRequirementsCog(commands.Cog):
                 await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
                 return
 
-            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, account_for_relic=учитывать_релик)
+            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий)
             if report["error"]:
                 await inter.edit_original_response(f"❌ {report['error']}")
                 return
 
             lines = [f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
-            if not учитывать_релик:
-                lines.append("_(без учёта нехватки реликвии — прогноз на релик плейта)_")
+            if сценарий == SCENARIO_RAW:
+                lines.append("_(как есть, без проекции на релик — как в ХБ)_")
+            elif сценарий == SCENARIO_UP:
+                lines.append("_(релик поднят только тем, кто ниже цели плейта)_")
+            else:
+                lines.append("_(полный подгон релика к цели плейта — вверх и вниз)_")
             if report["no_data"]:
                 lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
             lines.append("")
@@ -1291,10 +1333,10 @@ class StatRequirementsCog(commands.Cog):
         any_char_shown = False
         failed_required_by_char = []
         for base_id in char_keys:
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id)
+            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий)
             if result is None:
                 continue
-            char_name, block, matched, total, updated_at, _matched_rf, _total_rf, failed_required = result
+            char_name, block, matched, total, updated_at, failed_required = result
             any_char_shown = True
             lines.append(f"## {char_name}")
             lines.append(block)
@@ -1309,11 +1351,15 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
 
-        # Итоговый блок внизу отчёта: только ОБЯЗАТЕЛЬНЫЕ статы, не прошедшие норму, где норма
-        # пересчитана под фактический релик игрока (см. failed_required в
-        # _evaluate_character_player) — низкий релик сам по себе не топит билд в этом счёте,
-        # только реально плохие моды/шмот.
-        lines.append("## ⚠️ Итог: обязательные статы (с пересчётом на текущий релик)")
+        # Итоговый блок внизу отчёта: только ОБЯЗАТЕЛЬНЫЕ статы, не прошедшие норму по выбранному
+        # сценарию (см. failed_required в _evaluate_character_player) — раньше этот блок ВСЕГДА
+        # считал по полному подгону релика независимо от параметра, теперь честно следует за ним.
+        _scenario_titles = {
+            SCENARIO_RAW: "как есть, без проекции — как в ХБ",
+            SCENARIO_UP: "релик поднят только тем, кто ниже цели",
+            SCENARIO_FULL: "с полным подгоном релика на цель плейта",
+        }
+        lines.append(f"## ⚠️ Итог: обязательные статы ({_scenario_titles[сценарий]})")
         if failed_required_by_char:
             for char_name, failed_items in failed_required_by_char:
                 for item in failed_items:
