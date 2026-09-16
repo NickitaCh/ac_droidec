@@ -3432,6 +3432,23 @@ def _ensure_stat_requirements_table(cursor):
     )
 
 
+def _ensure_stat_plate_character_order_table(cursor):
+    """Пользовательский порядок персонажей внутри плейта (drag-and-drop на /plates/<name>
+    в вебе) — отдельная таблица, а не колонка в stat_requirements, т.к. "персонаж плейта"
+    сам по себе не строка, а DISTINCT character_key по нескольким требованиям (см.
+    get_stat_requirement_characters). Персонажи без строки здесь (новые, ещё не
+    перетаскивались) уходят в конец по алфавиту — см. сортировку в get_stat_requirement_characters."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_plate_character_order (
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            plate_name TEXT NOT NULL,
+            character_key TEXT NOT NULL,
+            sort_order INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, plate_name, character_key)
+        )
+    """)
+
+
 def _ensure_stat_plates_table(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stat_plates (
@@ -3517,6 +3534,11 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
             "UPDATE stat_requirements SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
             (new_name, guild_id, old_name)
         )
+        _ensure_stat_plate_character_order_table(cursor)
+        cursor.execute(
+            "UPDATE stat_plate_character_order SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
+            (new_name, guild_id, old_name)
+        )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -3574,6 +3596,8 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_requirements WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     deleted = cursor.rowcount
     cursor.execute("DELETE FROM stat_plates WHERE guild_id = ? AND name = ?", (guild_id, name))
+    _ensure_stat_plate_character_order_table(cursor)
+    cursor.execute("DELETE FROM stat_plate_character_order WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted
@@ -3707,16 +3731,40 @@ def get_all_stat_requirement_plates(guild_id: int = 1):
 
 
 def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
+    """Персонажи плейта в пользовательском порядке (см. set_stat_plate_character_order,
+    драг-н-дроп на /plates/<name>); персонажи без сохранённого порядка (новые, ещё не
+    перетаскивались) идут следом, по алфавиту."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
-    cursor.execute(
-        "SELECT DISTINCT character_key FROM stat_requirements WHERE guild_id = ? AND plate_name = ? ORDER BY character_key",
-        (guild_id, plate_name)
-    )
+    _ensure_stat_plate_character_order_table(cursor)
+    cursor.execute("""
+        SELECT DISTINCT r.character_key
+        FROM stat_requirements r
+        LEFT JOIN stat_plate_character_order o
+            ON o.guild_id = r.guild_id AND o.plate_name = r.plate_name AND o.character_key = r.character_key
+        WHERE r.guild_id = ? AND r.plate_name = ?
+        ORDER BY (o.sort_order IS NULL), o.sort_order, r.character_key
+    """, (guild_id, plate_name))
     rows = [r[0] for r in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def set_stat_plate_character_order(plate_name: str, ordered_keys: list, guild_id: int = 1) -> None:
+    """Перезаписывает сохранённый порядок персонажей плейта целиком — веб drag-and-drop
+    (SortableJS) шлёт полный новый порядок при каждом перетаскивании, поэтому проще
+    удалить старые строки и вставить заново, чем пересчитывать диффы."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_character_order_table(cursor)
+    cursor.execute("DELETE FROM stat_plate_character_order WHERE guild_id = ? AND plate_name = ?", (guild_id, plate_name))
+    cursor.executemany(
+        "INSERT INTO stat_plate_character_order (guild_id, plate_name, character_key, sort_order) VALUES (?, ?, ?, ?)",
+        [(guild_id, plate_name, key, idx) for idx, key in enumerate(ordered_keys)],
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_all_stat_requirements(guild_id: int = 1):

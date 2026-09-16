@@ -134,7 +134,8 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 "value_display": f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован" if is_omicron else f"{r[3]} {r[4]} {_fmt_value(r[5])}",
             })
         characters.append({"base_id": base_id, "name": _unit_name(base_id), "requirements": reqs})
-    characters.sort(key=lambda c: c["name"].lower())
+    # Порядок уже задан database.get_stat_requirement_characters (сохранённый
+    # drag-and-drop порядок, новые персонажи — по алфавиту следом) — не пересортировывать.
 
     plate = database.get_stat_plate(plate_name, guild_id=guild_id)
     req_count = database.count_stat_requirements_by_plate(plate_name, guild_id=guild_id)
@@ -151,6 +152,23 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "priority_default": PRIORITY_REQUIRED,
         "error": request.query_params.get("error"),
     })
+
+
+@router.post("/{plate_name}/characters/reorder", response_class=JSONResponse)
+async def characters_reorder(
+    request: Request,
+    plate_name: str,
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Драг-н-дроп панелей персонажей на /plates/<name> (см. plate_detail.html, SortableJS) —
+    шлёт fetch с JSON-телом {"order": [base_id, ...]} при каждом перетаскивании."""
+    guild_id = user["guild_id"]
+    body = await request.json()
+    order = body.get("order") or []
+    known = set(database.get_stat_requirement_characters(plate_name, guild_id=guild_id))
+    order = [base_id for base_id in order if base_id in known]
+    database.set_stat_plate_character_order(plate_name, order, guild_id=guild_id)
+    return {"ok": True}
 
 
 @router.post("/{plate_name}/requirements/add", response_class=HTMLResponse)

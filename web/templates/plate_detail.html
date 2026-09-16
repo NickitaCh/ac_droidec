@@ -104,9 +104,14 @@
     {% if not characters %}
         <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
     {% else %}
+        <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу.</p>
+        <div id="plate-characters-list">
         {% for char in characters %}
-            <div class="panel">
-                <div class="panel-title"><span>{{ char.name }}</span><span class="panel-hint">{{ char.requirements|length }} треб.</span></div>
+            <div class="panel" data-base-id="{{ char.base_id }}">
+                <div class="panel-title">
+                    <span class="panel-title-left"><span class="drag-handle">⠿</span><span>{{ char.name }}</span></span>
+                    <span class="panel-hint">{{ char.requirements|length }} треб.</span>
+                </div>
                 <div class="table-scroll">
                     <table class="data">
                         <thead>
@@ -156,7 +161,50 @@
                 </div>
             </div>
         {% endfor %}
+        </div>
     {% endif %}
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const list = document.getElementById("plate-characters-list");
+        if (!list) return;
+        const status = document.createElement("span");
+        status.className = "badge badge-ok";
+        status.style.display = "none";
+        status.style.marginLeft = "0.6em";
+        status.textContent = "Сохранено";
+        list.previousElementSibling.appendChild(status);
+
+        let statusTimer = null;
+        const flashStatus = (ok) => {
+            status.textContent = ok ? "Сохранено" : "Ошибка сохранения";
+            status.className = ok ? "badge badge-ok" : "badge badge-danger";
+            status.style.display = "";
+            clearTimeout(statusTimer);
+            statusTimer = setTimeout(() => { status.style.display = "none"; }, 2000);
+        };
+
+        new Sortable(list, {
+            handle: ".drag-handle",
+            animation: 150,
+            ghostClass: "sortable-ghost",
+            onEnd: async () => {
+                const order = Array.from(list.children).map((el) => el.dataset.baseId);
+                try {
+                    const resp = await fetch(`/plates/${encodeURIComponent("{{ plate_name }}")}/characters/reorder`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ order }),
+                    });
+                    flashStatus(resp.ok);
+                } catch {
+                    flashStatus(false);
+                }
+            },
+        });
+    });
+    </script>
 
     <script>
     document.addEventListener("DOMContentLoaded", () => {

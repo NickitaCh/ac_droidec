@@ -822,6 +822,8 @@ select { background: var(--page); }
     flex-wrap: wrap;
 }
 .panel-title .panel-hint { font-weight: 400; color: var(--fg-muted); font-size: 0.85em; }
+.panel-title-left { display: flex; align-items: center; gap: 0.5em; }
+#plate-characters-list .panel.sortable-ghost { opacity: 0.4; }
 
 /* ---- Таблицы данных: поиск, скролл, сортировка ---- */
 .table-toolbar {
@@ -1469,6 +1471,33 @@ dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .platoon-picker-stat { color: var(--fg-secondary); font-size: 0.9em; }
 .platoon-picker-reason { color: var(--status-warning); font-size: 0.85em; flex-basis: 100%; }
 .platoon-picker-row button { margin-left: auto; }
+
+/* ---- Попап невыполненных требований игрока (/stats-check, гильдийский отчёт) ---- */
+table.data tbody tr.stat-problem-row { cursor: pointer; }
+dialog.stat-problem-dialog {
+    max-width: 36em;
+    width: 92vw;
+    max-height: 85vh;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 1.25em 1.5em;
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+}
+dialog.stat-problem-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.stat-problem-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 0.8em; }
+.stat-problem-dialog-header h3 { margin: 0; font-size: 1.05em; }
+#stat-problem-dialog-body { overflow-y: auto; }
+.stat-problem-char { margin-bottom: 1em; }
+.stat-problem-char:last-child { margin-bottom: 0; }
+.stat-problem-char-title { font-weight: 500; margin-bottom: 0.3em; }
+.stat-problem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2em; }
+.stat-problem-list li { padding: 0.2em 0; border-bottom: 1px solid var(--border); font-size: 0.9em; }
+.stat-problem-list li:last-child { border-bottom: none; }
+.stat-problem-stat { color: var(--fg-secondary); }
 
 /* ---- Поиск персонажа с выпадающим списком (добавление требования к плейту) ---- */
 .unit-search { position: relative; }
