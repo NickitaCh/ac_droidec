@@ -152,7 +152,10 @@
                     {% for d in result.directions %}
                         <div class="panel" style="margin-top: .5em;">
                             <div class="panel-title">
-                                <span>{{ d.label }}</span>
+                                <span>
+                                    {{ d.label }}
+                                    {% if d.primaries_label %}<br><span class="muted" style="font-weight: 400; font-size: .85em;">{{ d.primaries_label }}</span>{% endif %}
+                                </span>
                                 <span class="panel-hint">{{ d.count }} игроков · {{ d.freq_pct }} · средний релик {{ "%.1f"|format(d.avg_relic) }}</span>
                             </div>
                             <div class="table-scroll">

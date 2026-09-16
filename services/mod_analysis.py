@@ -63,6 +63,7 @@ ANALYZED_STATS = [
     ("Physical Damage", "Атака (физ.)"),
     ("Special Damage", "Атака (особая)"),
     ("Health", "Здоровье"),
+    ("Protection", "Защита"),
     ("Critical Damage", "Крит. урон"),
     ("Physical Critical Chance", "Крит. шанс (физ.)"),
     ("Special Critical Chance", "Крит. шанс (особая)"),
@@ -141,18 +142,17 @@ def _config_key(decoded_mods: list) -> tuple:
     return combo, primaries
 
 
-def _config_label(config_key: tuple) -> str:
+def _config_label_parts(config_key: tuple) -> tuple:
+    """Сеты и основы отдельно — на странице сеты идут первой строкой заголовка, основы
+    второй (см. web/templates/mod_analysis.html, блок "Направления модинга")."""
     combo, primaries = config_key
-    parts = [_combo_label(combo)]
     primary_parts = []
     for slot_key, stat_id in zip(CONFIG_SLOTS, primaries):
         if stat_id is None:
             continue
         name, _is_pct = mod_search.STAT_ID_TO_INFO.get(stat_id, (f"#{stat_id}", False))
         primary_parts.append(f"{mod_search.SLOT_KEY_TO_LABEL[slot_key]}: {name}")
-    if primary_parts:
-        parts.append(", ".join(primary_parts))
-    return " · ".join(parts)
+    return _combo_label(combo), ", ".join(primary_parts)
 
 
 def _fmt_delta(value: float, stat_name: str) -> str:
@@ -296,6 +296,8 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
 
     top_primaries_by_slot = []
     for slot_key, slot_label in mod_search.SLOT_CHOICES:
+        if slot_key not in CONFIG_SLOTS:
+            continue  # квадрат/ромб — фиксированный primary, "топ-3" там не несёт информации
         bucket = slot_primary_counts[slot_key]
         total = sum(bucket.values())
         rows = [
@@ -368,8 +370,9 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
                 "p90_fmt": _fmt_delta(_percentile(deltas, 90), stat_name),
                 "cv_fmt": f"{cv:.2f}" if cv is not None else "—",
             })
+        sets_label, primaries_label = _config_label_parts(config_key)
         directions.append({
-            "label": _config_label(config_key), "count": count,
+            "label": sets_label, "primaries_label": primaries_label, "count": count,
             "freq_pct": f"{freq * 100:.0f}%",
             "avg_relic": statistics.mean(m["current_relic"] for m in members),
             "stats": dir_stats,
