@@ -4215,15 +4215,26 @@ def _ensure_mod_analysis_history_table(cursor):
             created_at TEXT NOT NULL
         )
     """)
+    # guild_ref/guild_name — добавлены 2026-09-16 вместе с опцией проверить чужую
+    # гильдию (код союзника/ID вместо своей); NULL = своя гильдия (кэш), как
+    # было раньше. Тот же приём ALTER-и-проглотить-OperationalError, что и
+    # остальные "новые" таблицы в этом файле (см. CLAUDE.md).
+    for column in ("guild_ref TEXT", "guild_name TEXT"):
+        try:
+            cursor.execute(f"ALTER TABLE mod_analysis_history ADD COLUMN {column}")
+        except sqlite3.OperationalError:
+            pass
 
 
-def add_mod_analysis_history(base_id: str, target_relic: int, created_by: str, guild_id: int = 1, keep: int = MOD_ANALYSIS_HISTORY_KEEP):
+def add_mod_analysis_history(base_id: str, target_relic: int, created_by: str, guild_id: int = 1,
+                              guild_ref: str = None, guild_name: str = None, keep: int = MOD_ANALYSIS_HISTORY_KEEP):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_mod_analysis_history_table(cursor)
     cursor.execute(
-        "INSERT INTO mod_analysis_history (guild_id, base_id, target_relic, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
-        (guild_id, base_id, target_relic, created_by),
+        "INSERT INTO mod_analysis_history (guild_id, base_id, target_relic, created_by, guild_ref, guild_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+        (guild_id, base_id, target_relic, created_by, guild_ref, guild_name),
     )
     cursor.execute("SELECT id FROM mod_analysis_history WHERE guild_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?", (guild_id, keep))
     old_ids = [r[0] for r in cursor.fetchall()]
@@ -4235,12 +4246,14 @@ def add_mod_analysis_history(base_id: str, target_relic: int, created_by: str, g
 
 
 def get_mod_analysis_history(guild_id: int = 1, limit: int = MOD_ANALYSIS_HISTORY_KEEP):
-    """Возвращает [(id, base_id, target_relic, created_by, created_at), ...] от новых к старым."""
+    """Возвращает [(id, base_id, target_relic, created_by, created_at, guild_ref, guild_name), ...]
+    от новых к старым — guild_ref/guild_name пустые для запусков по своей гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_mod_analysis_history_table(cursor)
     cursor.execute(
-        "SELECT id, base_id, target_relic, created_by, created_at FROM mod_analysis_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+        "SELECT id, base_id, target_relic, created_by, created_at, guild_ref, guild_name "
+        "FROM mod_analysis_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
         (guild_id, limit)
     )
     rows = cursor.fetchall()

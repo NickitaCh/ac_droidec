@@ -33,7 +33,17 @@
                 <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
             </label>
 
+            <label>
+                Код союзника или ID чужой гильдии (необязательно)
+                <input type="text" name="guild_ref" placeholder="Пусто — своя гильдия" value="{{ guild_ref }}">
+            </label>
+
             <button type="submit">Посчитать</button>
+            <p class="muted" style="margin-top: .5em;">
+                Без кода/ID — анализ по своей гильдии (быстро, из кэша). С кодом союзника
+                любого игрока чужой гильдии (или её ID напрямую, если уже известен) — бот
+                опрашивает участников живьём, на крупной гильдии может занять до минуты.
+            </p>
         </form>
     </div>
 
@@ -42,8 +52,14 @@
     {% elif result %}
         <div class="panel">
             <div class="panel-title">
-                <span>{{ result.char_name }}</span>
-                <span class="panel-hint">релик {{ result.target_relic }} · открыт у {{ result.total_open }}, релевантно {{ result.relevant_count }}</span>
+                <span>
+                    {{ result.char_name }}
+                    {% if result.guild_name %}<span class="muted">— {{ result.guild_name }} (ID {{ result.swgoh_guild_id }})</span>{% endif %}
+                </span>
+                <span class="panel-hint">
+                    релик {{ result.target_relic }} · открыт у {{ result.total_open }}{% if result.total_members %}/{{ result.total_members }}{% endif %}, релевантно {{ result.relevant_count }}
+                    {%- if result.fetch_errors %}, ошибок опроса {{ result.fetch_errors }}{% endif %}
+                </span>
             </div>
 
             {% if result.relevant_count == 0 %}
@@ -163,11 +179,12 @@
         {% else %}
             <div class="table-scroll">
                 <table class="data">
-                    <thead><tr><th>Персонаж</th><th>Релик</th><th>Когда</th><th></th></tr></thead>
+                    <thead><tr><th>Персонаж</th><th>Гильдия</th><th>Релик</th><th>Когда</th><th></th></tr></thead>
                     <tbody>
                         {% for h in history %}
                             <tr>
                                 <td>{{ h.character_label }}</td>
+                                <td>{{ h.guild_name or "своя" }}</td>
                                 <td>{{ h.relic }}</td>
                                 <td>{{ h.created_at }}</td>
                                 <td><a class="link-btn" href="/mod-analysis?history_id={{ h.id }}">открыть</a></td>

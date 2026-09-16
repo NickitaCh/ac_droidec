@@ -5,9 +5,13 @@
 получают наибольший осознанный вклад от модов (не от реликвии/шмота), и сколько в гильдии
 разных "направлений" сборки.
 
-Данные — уже закэшированный player_unit_cache (database.get_player_units_bulk), без живых
-обращений к Comlink — тот же приём, что services/mod_search.py (поиск по 50-90 игрокам не
-должен бить по Comlink на каждый вызов страницы).
+Данные для СВОЕЙ гильдии (build_report) — уже закэшированный player_unit_cache
+(database.get_player_units_bulk), без живых обращений к Comlink — тот же приём, что
+services/mod_search.py (поиск по 50-90 игрокам не должен бить по Comlink на каждый вызов
+страницы). Для ЧУЖОЙ гильдии (build_report_live, добавлено 2026-09-16 — код союзника/ID любой
+другой гильдии на /mod-analysis) кэша нет, участников приходится тянуть живым Comlink по
+одному, как services/steal_build.py. Обе ветки считают модель по общей паре
+_build_relevant/_compute_report, чтобы сама модель анализа не дублировалась.
 
 Модель (см. PDF, раздел "Порядок расчётов"):
 1. Фильтр релевантных игроков — см. _relevant_unit.
@@ -28,6 +32,7 @@
    MOD_PRIMARY_OPTIONS) с долей игроков > 10%.
 """
 
+import asyncio
 import math
 import statistics
 
@@ -219,19 +224,14 @@ def _stat_delta_stats(deltas: list, relevant_count: int) -> dict:
     return {"n": n, "sf": sf, "p50": p50, "p70": p70, "p90": p90, "spread": spread, "cv": cv, "nm": nm, "gf": gf}
 
 
-async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int = 1) -> dict:
-    """Возвращает {"error"} либо полный отчёт — см. блок return в конце."""
-    roster = database.get_all_user_mappings(guild_id)
-    if not roster:
-        return {"error": "Никто из гильдии не зарегистрирован (/регистрация) — анализировать некого."}
-
-    ally_codes = [ac for _discord_id, ac, _name in roster]
-    units_by_ally = database.get_player_units_bulk(ally_codes)
-
+def _build_relevant(base_id: str, roster_units: list) -> tuple:
+    """roster_units: [(id_label, name, unit_or_None), ...] — id_label — код союзника (своя
+    гильдия) либо playerId (чужая гильдия, см. build_report_live), только для отображения.
+    Возвращает (relevant, total_open) — общая часть между своей (build_report) и чужой
+    (build_report_live) гильдией, чтобы модель анализа не дублировалась."""
     relevant = []
     total_open = 0
-    for _discord_id, ally_code, name in roster:
-        unit = units_by_ally.get(ally_code, {}).get(base_id)
+    for id_label, name, unit in roster_units:
         if not unit:
             continue
         total_open += 1
@@ -241,12 +241,15 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
         if len(decoded_mods) != REQUIRED_MOD_COUNT:
             continue  # повреждённые/нечитаемые моды — не должно случаться, но не рушим отчёт
         relevant.append({
-            "ally_code": ally_code, "name": name, "unit": unit,
+            "ally_code": id_label, "name": name, "unit": unit,
             "current_relic": stat_engine.get_current_relic_level(unit),
             "decoded_mods": decoded_mods,
             "config_key": _config_key(decoded_mods),
         })
+    return relevant, total_open
 
+
+def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, total_open: int) -> dict:
     char_name = database.get_game_unit_name(base_id) or base_id
     if not relevant:
         return {
@@ -389,3 +392,56 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
         "directions": directions,
         "directions_count": len(directions),
     }
+
+
+async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int = 1) -> dict:
+    """Анализ по СВОЕЙ (обслуживаемой) гильдии — данные из уже закэшированного
+    player_unit_cache, без обращений к Comlink (см. докстринг модуля)."""
+    roster = database.get_all_user_mappings(guild_id)
+    if not roster:
+        return {"error": "Никто из гильдии не зарегистрирован (/регистрация) — анализировать некого."}
+
+    ally_codes = [ac for _discord_id, ac, _name in roster]
+    units_by_ally = database.get_player_units_bulk(ally_codes)
+    roster_units = [
+        (ally_code, name, units_by_ally.get(ally_code, {}).get(base_id))
+        for _discord_id, ally_code, name in roster
+    ]
+    relevant, total_open = _build_relevant(base_id, roster_units)
+    return _compute_report(stat_calc, base_id, target_relic, relevant, total_open)
+
+
+async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int, guild) -> dict:
+    """Анализ по ЧУЖОЙ гильдии (добавлено 2026-09-16, по прямому запросу пользователя —
+    "чужую гильдию, а не только свою") — `guild` это services.steal_build.GuildLookupResult,
+    уже отресолвленный по коду союзника/ID гильдии (см. web/routes/mod_analysis.py). В отличие
+    от build_report, участников чужой гильдии приходится тянуть живым
+    comlink.get_player(player_id=...) по одному — та же плата и тот же троттлинг, что
+    services/steal_build.py::build_report (для крупной гильдии может занять до минуты)."""
+    if not guild.members:
+        return {"error": f"В гильдии «{guild.guild_name}» нет участников."}
+
+    roster_units = []
+    fetch_errors = 0
+    for player_id, player_name in guild.members:
+        try:
+            player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
+        except Exception:
+            fetch_errors += 1
+            continue
+        roster = player_data.get("rosterUnit") or player_data.get("roster") or []
+        unit = next(
+            (u for u in roster if (u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]) == base_id),
+            None,
+        )
+        roster_units.append((player_id, player_name, unit))
+        await asyncio.sleep(0.1)
+
+    relevant, total_open = _build_relevant(base_id, roster_units)
+    report = _compute_report(stat_calc, base_id, target_relic, relevant, total_open)
+    if report["error"] is None:
+        report["guild_name"] = guild.guild_name
+        report["swgoh_guild_id"] = guild.swgoh_guild_id
+        report["total_members"] = len(guild.members)
+        report["fetch_errors"] = fetch_errors
+    return report

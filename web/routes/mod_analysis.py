@@ -1,10 +1,13 @@
-"""Веб-only "Анализ модинга" (/mod-analysis) — форма (персонаж + целевой релик) + рендер
-отчёта, расчёт целиком в services/mod_analysis.py. GET с query-параметрами (как
-/mod-search, /steal-build) — результат можно заблокмаркить/переоткрыть по ссылке.
+"""Веб-only "Анализ модинга" (/mod-analysis) — форма (персонаж + целевой релик, опционально
+код союзника/ID чужой гильдии) + рендер отчёта, расчёт целиком в services/mod_analysis.py.
+GET с query-параметрами (как /mod-search, /steal-build) — результат можно заблокмаркить/
+переоткрыть по ссылке.
 
 Реализация ТЗ из "Описание модели анализа модинга персонажа по гильдии.pdf" (пользователь,
-чат 2026-09-15). Данные — уже закэшированный player_unit_cache всей нашей гильдии (не чужой,
-в отличие от /steal-build) — без обращений к Comlink, кроме однократной сборки StatCalc."""
+чат 2026-09-15). По умолчанию данные — уже закэшированный player_unit_cache своей гильдии,
+без обращений к Comlink, кроме однократной сборки StatCalc. Опция "чужая гильдия" (добавлено
+2026-09-16, по прямому запросу пользователя) переиспользует services.steal_build.resolve_guild
+и бьёт по Comlink живьём, как /steal-build."""
 
 from pathlib import Path
 
@@ -15,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 import database
 import services.mod_analysis as mod_analysis
 import services.stat_forecast as stat_forecast
+import services.steal_build as steal_build
 from services import feature_flags
 
 router = APIRouter()
@@ -36,8 +40,11 @@ def _char_label(base_id: str) -> str:
 
 def _history_rows(guild_id: int):
     return [
-        {"id": hid, "character_label": _char_label(base_id), "base_id": base_id, "relic": relic, "created_at": created_at}
-        for hid, base_id, relic, _created_by, created_at in database.get_mod_analysis_history(guild_id=guild_id)
+        {
+            "id": hid, "character_label": _char_label(base_id), "base_id": base_id, "relic": relic,
+            "created_at": created_at, "guild_ref": guild_ref or "", "guild_name": guild_name or "",
+        }
+        for hid, base_id, relic, _created_by, created_at, guild_ref, guild_name in database.get_mod_analysis_history(guild_id=guild_id)
     ]
 
 
@@ -47,20 +54,23 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
     guild_id = user["guild_id"]
     character = qp.get("character", "")
     relic_raw = qp.get("relic", DEFAULT_RELIC)
+    guild_ref = qp.get("guild_ref", "").strip()
 
     history_id = qp.get("history_id")
     if history_id:
         entries = database.get_mod_analysis_history(guild_id=guild_id)
         entry = next((e for e in entries if e[0] == int(history_id)), None)
         if entry:
-            _hid, character, relic_raw, _created_by, _created_at = entry
+            _hid, character, relic_raw, _created_by, _created_at, guild_ref, _guild_name = entry
             relic_raw = str(relic_raw)
+            guild_ref = guild_ref or ""
 
     context = {
         "user": user,
         "selected_character": character,
         "selected_character_label": _char_label(character) if character else "",
         "selected_relic": relic_raw,
+        "guild_ref": guild_ref,
         "result": None,
         "loading": False,
         "error": None,
@@ -88,14 +98,27 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
         context["loading"] = True
         return templates.TemplateResponse(request, "mod_analysis.html", context)
 
-    report = await mod_analysis.build_report(stat_calc, character, relic, guild_id=guild_id)
+    guild_name_for_history = None
+    if guild_ref:
+        lookup = await steal_build.resolve_guild(comlink, guild_ref)
+        if not lookup.ok:
+            context["error"] = lookup.error
+            return templates.TemplateResponse(request, "mod_analysis.html", context)
+        guild_name_for_history = lookup.guild_name
+        report = await mod_analysis.build_report_live(comlink, stat_calc, character, relic, lookup)
+    else:
+        report = await mod_analysis.build_report(stat_calc, character, relic, guild_id=guild_id)
+
     if report["error"]:
         context["error"] = report["error"]
         return templates.TemplateResponse(request, "mod_analysis.html", context)
 
     context["result"] = report
 
-    database.add_mod_analysis_history(character, relic, user["discord_id"], guild_id=guild_id)
+    database.add_mod_analysis_history(
+        character, relic, user["discord_id"], guild_id=guild_id,
+        guild_ref=guild_ref or None, guild_name=guild_name_for_history,
+    )
     context["history"] = _history_rows(guild_id)
 
     return templates.TemplateResponse(request, "mod_analysis.html", context)

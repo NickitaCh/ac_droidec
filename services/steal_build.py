@@ -47,24 +47,33 @@ def _fmt_stat(value: float, stat_name: str) -> str:
     return _fmt_value(value) + suffix
 
 
-async def resolve_guild(comlink, ally_code: str) -> GuildLookupResult:
-    """Код союзника ЛЮБОГО игрока -> его гильдия целиком (имя + список участников). Не трогает
-    нашу БД — в отличие от services/guild_admin.py::add_guild, эта гильдия не заводится как
-    обслуживаемая, просто читается."""
-    clean_code = "".join(filter(str.isdigit, ally_code or ""))
-    if len(clean_code) != 9:
-        return GuildLookupResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
+async def resolve_guild(comlink, ally_code_or_guild_id: str) -> GuildLookupResult:
+    """Код союзника ЛЮБОГО игрока, ИЛИ напрямую raw ID гильдии SWGOH (как отдаёт
+    comlink.get_player()["guildId"], например "-kJhCaGGQqGOjgbWpJFEIg" — не
+    похож на код союзника, тот всегда ровно 9 цифр, см.
+    [[feedback_swgoh_ally_code_no_zero_digit]]) -> гильдия целиком (имя + список
+    участников). Добавлено 2026-09-16 для /mod-analysis (проверить чужую гильдию
+    по её ID, если он уже известен, без обязательного промежуточного кода
+    союзника). Не трогает нашу БД — в отличие от services/guild_admin.py::
+    add_guild, эта гильдия не заводится как обслуживаемая, просто читается."""
+    raw = (ally_code_or_guild_id or "").strip()
+    if raw and not raw.isdigit():
+        swgoh_guild_id = raw
+    else:
+        clean_code = "".join(filter(str.isdigit, raw))
+        if len(clean_code) != 9:
+            return GuildLookupResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр (или укажите ID гильдии SWGOH)!")
 
-    try:
-        player_data = await asyncio.to_thread(comlink.get_player, clean_code)
-    except Exception as e:
-        return GuildLookupResult(ok=False, error=f"Не удалось проверить код из-за сбоя связи с сервером: {e}")
-    if not player_data or "name" not in player_data:
-        return GuildLookupResult(ok=False, error=f"Игрок с кодом союзника {clean_code} не найден на серверах EA/CG.")
+        try:
+            player_data = await asyncio.to_thread(comlink.get_player, clean_code)
+        except Exception as e:
+            return GuildLookupResult(ok=False, error=f"Не удалось проверить код из-за сбоя связи с сервером: {e}")
+        if not player_data or "name" not in player_data:
+            return GuildLookupResult(ok=False, error=f"Игрок с кодом союзника {clean_code} не найден на серверах EA/CG.")
 
-    swgoh_guild_id = player_data.get("guildId")
-    if not swgoh_guild_id:
-        return GuildLookupResult(ok=False, error="Этот игрок не состоит ни в одной гильдии SWGOH.")
+        swgoh_guild_id = player_data.get("guildId")
+        if not swgoh_guild_id:
+            return GuildLookupResult(ok=False, error="Этот игрок не состоит ни в одной гильдии SWGOH.")
 
     try:
         guild = await asyncio.to_thread(
