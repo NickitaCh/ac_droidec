@@ -146,6 +146,24 @@ def _unit_display_name(base_id: str) -> str:
     return database.get_game_unit_name(base_id) or base_id
 
 
+_EMOJI_SHORTCODE_RE = re.compile(r":([a-zA-Z0-9_~]+):")
+
+
+def _resolve_emoji_shortcodes(text: str, guild) -> str:
+    """Заменяет `:name:` в тексте фразы на реальный кастомный эмодзи гильдии
+    (`<:name:id>`), если такой эмодзи там есть. Discord API не делает это
+    автоматически (в отличие от клиента, где автоподстановка при наборе
+    происходит на стороне пользователя ДО отправки) — офицеры вводят фразы
+    как текст в /омикрон_текст или на веб-странице /omicron/phrases и без
+    этой замены `:priyatno:` уходит в канал буквами, а не самим эмодзи."""
+    if not text or guild is None or not guild.emojis:
+        return text
+    by_name = {e.name: e for e in guild.emojis if e.available}
+    if not by_name:
+        return text
+    return _EMOJI_SHORTCODE_RE.sub(lambda m: str(by_name[m.group(1)]) if m.group(1) in by_name else m.group(0), text)
+
+
 def _fmt_value(value: float) -> str:
     return f"{value:g}"
 
@@ -887,6 +905,8 @@ class StatRequirementsCog(commands.Cog):
             line += f" на **{_unit_display_name(base_id)}**."
             phrase = database.get_omicron_phrase(base_id, skill_id)
             if phrase:
+                channel = channels_by_id[channel_id]
+                phrase = _resolve_emoji_shortcodes(phrase, getattr(channel, "guild", None))
                 line += f" {phrase}"
             items_by_channel.setdefault(channel_id, []).append((event_id, line))
 
