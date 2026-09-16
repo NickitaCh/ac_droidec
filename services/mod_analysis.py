@@ -30,6 +30,10 @@ _build_relevant/_compute_report, чтобы сама модель анализа
 5. "Направления модинга" — уникальные конфигурации (сет-комбо + primary на 4 гибких слотах,
    без квадрата/ромба — там всегда один фиксированный primary, см. stat_engine.
    MOD_PRIMARY_OPTIONS) с долей игроков > 10%.
+6. Итоговый ConsensusScore (CS) — по PDF v2, раздел 4: WeightedCV = Σ(CV·GF) / Σ(GF)
+   (среднее CV по статам, взвешенное их GF — статы, в которые гильдия почти не
+   вкладывается, почти не влияют на консенсус), CS = 1 − WeightedCV. НЕ простое
+   среднее CV по статам — этот баг уже был и исправлен (нашёл пользователь 2026-09-16).
 """
 
 import asyncio
@@ -312,7 +316,7 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
 
     # --- Статистика по дельте на характеристику ---
     stat_rows = []
-    cv_values = []
+    cv_gf_pairs = []
     for stat_name, label in ANALYZED_STATS:
         deltas = [(p["delta"][stat_name], p["base"][stat_name]) for p in relevant if stat_name in p["delta"]]
         stats = _stat_delta_stats(deltas, relevant_count)
@@ -329,7 +333,7 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
             row["gf_fmt"] = f"{stats['gf']:.2f}"
             row["gf_level"] = _gf_level(stats["gf"])
             if stats["cv"] is not None:
-                cv_values.append(stats["cv"])
+                cv_gf_pairs.append((stats["cv"], stats["gf"]))
         stat_rows.append(row)
 
     # Второй элемент ключа — фиктивный -1 (ниже любого реального GF) для строк без данных,
@@ -339,7 +343,14 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
         row["rank"] = i if row["gf"] is not None else None
     top3_stats = [r for r in stat_rows if r["gf"] is not None][:3]
 
-    consensus = (1 - statistics.mean(cv_values)) if cv_values else None
+    # PDF раздел 4: WeightedCV = Σ(CV·GF) / Σ(GF) — статы, в которые гильдия почти не
+    # вкладывается (низкий GF, например "чужой" тип урона персонажа с CV, раздутым
+    # делением на близкую к нулю MeanDelta), почти не влияют на итоговый консенсус.
+    # Раньше здесь было простое (невзвешенное) среднее CV — из-за этого такие
+    # нерелевантные статы могли необоснованно занижать ConsensusScore.
+    total_gf = sum(gf for _cv, gf in cv_gf_pairs)
+    weighted_cv = (sum(cv * gf for cv, gf in cv_gf_pairs) / total_gf) if total_gf else None
+    consensus = (1 - weighted_cv) if weighted_cv is not None else None
 
     # --- Направления модинга (конфигурации с частотой > 10%) ---
     config_counts = {}
