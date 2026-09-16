@@ -130,12 +130,13 @@
                 {% if not guild_report.problem %}
                     <p class="empty-state">Все закрыли все требования! 🎉</p>
                 {% else %}
+                    <p class="muted">Кликните по строке игрока (кроме ссылки «+ задача»), чтобы увидеть, какие именно статы не выполнены.</p>
                     <div class="table-scroll">
                         <table class="data">
                             <thead><tr><th>Игрок</th><th>Прогресс (только обязательные)</th><th>Персонажи с проблемами (только обязательные)</th></tr></thead>
                             <tbody>
                                 {% for r in guild_report.problem %}
-                                    <tr>
+                                    <tr class="stat-problem-row" data-player-index="{{ loop.index0 }}" tabindex="0">
                                         <td>{{ r.name }}</td>
                                         <td>{{ r.matched }}/{{ r.total }}</td>
                                         <td>
@@ -152,11 +153,73 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <script type="application/json" id="stat-problem-data">{{ guild_report.problem | tojson }}</script>
+                    <dialog id="stat-problem-dialog" class="stat-problem-dialog">
+                        <div class="stat-problem-dialog-header">
+                            <h3 id="stat-problem-dialog-title"></h3>
+                            <button type="button" class="button-secondary" id="stat-problem-dialog-close">Закрыть</button>
+                        </div>
+                        <div id="stat-problem-dialog-body"></div>
+                    </dialog>
                 {% endif %}
             </div>
 
             {% if guild_report.no_data %}
                 <p class="muted">⚠️ Нет кэшированных данных ни по одному юниту: {{ guild_report.no_data|map(attribute="name")|join(", ") }}</p>
+            {% endif %}
+
+            {% if guild_report.problem %}
+                <script>
+                (function () {
+                    const players = JSON.parse(document.getElementById("stat-problem-data").textContent);
+                    const dialog = document.getElementById("stat-problem-dialog");
+                    const title = document.getElementById("stat-problem-dialog-title");
+                    const body = document.getElementById("stat-problem-dialog-body");
+
+                    function escapeHtml(s) {
+                        return String(s).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+                    }
+
+                    function openPlayer(player) {
+                        title.textContent = `${player.name} — ${player.matched}/${player.total}`;
+                        const parts = [];
+                        for (const c of player.chars) {
+                            parts.push(`<div class="stat-problem-char"><div class="stat-problem-char-title">${escapeHtml(c.char_name)} (${c.matched}/${c.total})</div>`);
+                            if (c.failed_required && c.failed_required.length) {
+                                parts.push('<ul class="stat-problem-list">');
+                                for (const item of c.failed_required) {
+                                    parts.push(`<li><span class="stat-problem-stat">${escapeHtml(item.stat)}</span>: ${escapeHtml(item.current)} → ${escapeHtml(item.requirement)}</li>`);
+                                }
+                                parts.push('</ul>');
+                            }
+                            parts.push('</div>');
+                        }
+                        body.innerHTML = parts.join("");
+                        dialog.showModal();
+                    }
+
+                    document.querySelectorAll(".stat-problem-row").forEach((row) => {
+                        row.addEventListener("click", (e) => {
+                            if (e.target.closest("a")) return;
+                            const player = players[Number(row.dataset.playerIndex)];
+                            if (player) openPlayer(player);
+                        });
+                        row.addEventListener("keydown", (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                const player = players[Number(row.dataset.playerIndex)];
+                                if (player) openPlayer(player);
+                            }
+                        });
+                    });
+
+                    document.getElementById("stat-problem-dialog-close").addEventListener("click", () => dialog.close());
+                    dialog.addEventListener("click", (e) => {
+                        if (e.target === dialog) dialog.close();
+                    });
+                })();
+                </script>
             {% endif %}
         {% endif %}
     {% endif %}

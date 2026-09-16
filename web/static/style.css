@@ -1484,6 +1484,12 @@ dialog.stat-problem-dialog {
     background: var(--surface);
     color: var(--fg);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+/* display:flex must be scoped to [open] — dialog.stat-problem-dialog{display:flex}
+   unconditionally would beat the UA default dialog:not([open]){display:none} (same
+   0-1-1 specificity, our stylesheet loads after it) and show the empty dialog inline
+   on every page load, not just when showModal() is called. */
+dialog.stat-problem-dialog[open] {
     display: flex;
     flex-direction: column;
 }

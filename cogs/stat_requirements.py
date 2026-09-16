@@ -480,7 +480,12 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
     прокидывается туда как есть: и показанная дробь matched/total, и compliant/problem
     (has_failed_required) считаются по нему консистентно — раньше это были два независимых,
     несогласованных друг с другом переключателя (одно двигало только дробь, другое — вообще
-    ничего, всегда молча считало как SCENARIO_FULL)."""
+    ничего, всегда молча считало как SCENARIO_FULL).
+
+    Каждая запись problem[i]["chars"][j] несёт "failed_required" — тот же список
+    {"stat", "current", "requirement"}, что возвращает _evaluate_character_player, — чтобы
+    вызывающий код (веб-попап на /stats-check) мог показать конкретные невыполненные статы
+    персонажа, а не только дробь matched/total."""
     roster = database.get_all_user_mappings(guild_id)
     if not roster:
         return {
@@ -520,6 +525,7 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
                 char_problems.append({
                     "char_name": char_name, "base_id": base_id, "matched": required_matched, "total": required_total,
                     "required_relic": required_relic_by_char.get(base_id),
+                    "failed_required": failed_required,
                 })
 
         # "Полностью соответствуют" — только по ОБЯЗАТЕЛЬНЫМ статам (failed_required,
