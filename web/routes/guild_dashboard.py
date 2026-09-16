@@ -1804,7 +1804,9 @@ GUILD_SETTINGS_GROUPS = [
                 "Чётность самой недели общая для всех гильдий бота (задаёт супер-админ). Ниже — своё для "
                 "каждой гильдии расписание: время и текст тега (дни недели одинаковы для всех гильдий — "
                 "это общий календарь ТБ, задаёт супер-админ). Запись с текстом «ордер» отвечает и за "
-                "автопубликацию ордера ТБ (см. /admin/tb-schedule за временем публикации).",
+                "автопубликацию ордера ТБ (см. /admin/tb-schedule за временем публикации). Строки «взводы» "
+                "и «ордер» обязательны и не удаляются — можно поменять только время; без записи «ордер» "
+                "автопубликация ордера тихо не сработает.",
         "fields": [
             ("ping_channel_id", "Канал для тега на ротацию/взводы", "channel"),
             ("ping_role_id", "Тегаемая роль", "role"),
@@ -1910,17 +1912,36 @@ async def _resolve_unregistered_channel_name(channel_id: str) -> str | None:
 # при сохранении каждая строка получает его автоматически. Повторяемые строки
 # рендерятся через уже существующий общий JS-паттерн [data-row-group]
 # (web/static/dashboard.js).
+# Дефолт для новой/ещё не настроенной гильдии — те же время и текст, что уже
+# годами живьём работают у AbsoluteChaos (см. [[project_tb_schedule_dst_feature_2026-09-15]]
+# за инцидентом, который это исправляет): офицер видит готовые обязательные
+# строки вместо одной пустой и заполняет только каналы/роль выше.
+DEFAULT_SCHEDULE_ENTRIES = [
+    {"time": "18:50", "text": "взводы"},
+    {"time": "19:50", "text": "ордер"},
+]
+
+
 def _parse_schedule_rows(raw_json: str) -> list[dict]:
-    if not raw_json:
-        return []
-    try:
-        entries = json.loads(raw_json)
-    except (TypeError, json.JSONDecodeError):
-        return []
-    return [
-        {"time": e.get("time", ""), "text": e.get("text", "")}
-        for e in entries if isinstance(e, dict)
-    ]
+    parsed = []
+    if raw_json:
+        try:
+            entries = json.loads(raw_json)
+        except (TypeError, json.JSONDecodeError):
+            entries = []
+        parsed = [
+            {"time": e.get("time", ""), "text": e.get("text", "")}
+            for e in entries if isinstance(e, dict)
+        ]
+    # Гарантируем, что "взводы"/"ордер" всегда показаны — не только на пустой
+    # гильдии, но и когда уже сохранена только одна из двух (см. APotheosiss,
+    # [[project_tb_schedule_dst_feature_2026-09-15]]): без этого офицер не видит
+    # недостающую обязательную строку и не может её добавить одним "Сохранить".
+    existing_texts = {e["text"] for e in parsed}
+    for default in DEFAULT_SCHEDULE_ENTRIES:
+        if default["text"] not in existing_texts:
+            parsed.append(dict(default))
+    return parsed
 
 
 @router.get("/settings", response_class=HTMLResponse)

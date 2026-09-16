@@ -39,10 +39,11 @@
                                 </thead>
                                 <tbody class="row-group-rows">
                                     {% for entry in (row.schedule_entries or [{"time": "", "text": ""}]) %}
+                                        {% set locked = entry.text in ('взводы', 'ордер') %}
                                         <tr class="row-group-row">
                                             <td><input type="time" name="{{ row.field }}_time" value="{{ entry.time }}"></td>
-                                            <td><input type="text" name="{{ row.field }}_text" value="{{ entry.text }}" placeholder="взводы"></td>
-                                            <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
+                                            <td><input type="text" name="{{ row.field }}_text" value="{{ entry.text }}" placeholder="взводы" {% if locked %}readonly title="Обязательная запись, текст менять нельзя"{% endif %}></td>
+                                            <td>{% if not locked %}<button type="button" class="row-group-remove" title="Убрать строку">✕</button>{% endif %}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>
