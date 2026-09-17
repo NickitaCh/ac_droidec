@@ -1118,10 +1118,16 @@ async def omicrons_report(request: Request, user: dict = Depends(feature_flags.r
     rows = omicron_priority.missing_omicrons_report(guild_id)
     for row in rows:
         row["player_url"] = f"/omicrons/report/{quote(row['name'])}"
+
+    skill_filter_options = omicron_priority.missing_omicrons_by_skill(guild_id)
+    modes = sorted({e["omicron_mode"] for e in skill_filter_options if e["omicron_mode"]})
+
     return templates.TemplateResponse(request, "omicron_report.html", {
         "user": user,
         "rows": rows,
         "has_priority": bool(database.get_guild_omicron_priority(guild_id)),
+        "skill_filter_options": skill_filter_options,
+        "modes": modes,
     })
 
 

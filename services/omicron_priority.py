@@ -127,10 +127,11 @@ def missing_omicrons_for_player(ally_code: str, guild_id: int) -> list:
     return _missing_for_units(units, catalog, parsed_rules)
 
 
-def missing_omicrons_report(guild_id: int) -> list:
+def _missing_report_raw(guild_id: int) -> list:
     """[{ally_code, name, missing: [...]}, ...] по всем игрокам гильдии, только у кого есть
-    хотя бы один отсутствующий готовый омикрон, отсортировано по убыванию количества —
-    гильд-wide вид на /omicrons/report."""
+    хотя бы один отсутствующий готовый омикрон — общий проход по ростеру, которым пользуются
+    и missing_omicrons_report (группировка по игроку), и missing_omicrons_by_skill (группировка
+    по конкретному омикрону, для фильтра "у кого не стоит X" на /omicrons/report)."""
     catalog = _load_catalog(guild_id)
     if not catalog["priority"]:
         return []
@@ -147,5 +148,36 @@ def missing_omicrons_report(guild_id: int) -> list:
         missing = _missing_for_units(units, catalog, parsed_rules)
         if missing:
             result.append({"ally_code": ally_code, "name": ingame_name, "missing": missing})
+    return result
+
+
+def missing_omicrons_report(guild_id: int) -> list:
+    """[{ally_code, name, missing: [...]}, ...] по всем игрокам гильдии, только у кого есть
+    хотя бы один отсутствующий готовый омикрон, отсортировано по убыванию количества —
+    гильд-wide вид на /omicrons/report (таблица "по игроку")."""
+    result = _missing_report_raw(guild_id)
     result.sort(key=lambda r: len(r["missing"]), reverse=True)
     return result
+
+
+def missing_omicrons_by_skill(guild_id: int) -> list:
+    """[{skill_id, base_id, unit_name, skill_name, omicron_mode, players: [{ally_code, name}, ...]}, ...]
+    — та же выборка "готов, но не поставлен", развёрнутая по конкретному омикрону вместо игрока:
+    для фильтра "режим + омикрон -> кому не стоит X" на /omicrons/report (см. отзыв в чате,
+    2026-09-17: "хочу посмотреть у кого не поставлен омик на Кэла"). Только омикроны, у которых
+    сейчас есть хотя бы один готовый-но-не-поставивший игрок — по прямому запросу пользователя
+    ("если там нет омикрона... то и в фильтре не надо его показывать"), отсортировано по
+    (режим, юнит, способность)."""
+    by_skill = {}
+    for row in _missing_report_raw(guild_id):
+        for m in row["missing"]:
+            entry = by_skill.setdefault(m["skill_id"], {
+                "skill_id": m["skill_id"],
+                "base_id": m["base_id"],
+                "unit_name": m["unit_name"],
+                "skill_name": m["skill_name"],
+                "omicron_mode": m["omicron_mode"],
+                "players": [],
+            })
+            entry["players"].append({"ally_code": row["ally_code"], "name": row["name"]})
+    return sorted(by_skill.values(), key=lambda e: (e["omicron_mode"] or "", e["unit_name"], e["skill_name"]))

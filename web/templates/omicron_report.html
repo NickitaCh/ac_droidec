@@ -15,6 +15,64 @@
         <p class="empty-state">Сейчас все омикроны из списка приоритета либо уже поставлены, либо требования ещё не выполнены ни у кого.</p>
     {% else %}
         <div class="panel">
+            <div class="panel-title"><span>Найти по конкретному омикрону</span></div>
+            <p class="muted">Например: «у кого ещё не стоит „Я упрямый“ на Кэле» — выберите режим и омикрон, отметьте игроков и сразу поставьте им задачу.</p>
+            <div class="requirement-form">
+                <label>
+                    Режим
+                    <select id="omicron-filter-mode">
+                        <option value="">Все режимы</option>
+                        {% for mode in modes %}
+                            <option value="{{ mode }}">{{ mode }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Омикрон
+                    <select id="omicron-filter-skill">
+                        <option value="">— выберите —</option>
+                        {% for e in skill_filter_options %}
+                            <option value="{{ e.skill_id }}" data-mode="{{ e.omicron_mode }}">
+                                {{ e.unit_name }} — {{ e.skill_name }} ({{ e.players|length }}){% if e.omicron_mode %} · {{ e.omicron_mode }}{% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+
+            <div id="omicron-filter-result" hidden>
+                <p class="muted" id="omicron-filter-count"></p>
+                <label class="checkbox"><input type="checkbox" id="omicron-filter-select-all"> Выбрать всех отображаемых</label>
+                <div class="table-scroll" style="max-height: 20em;">
+                    <table class="data" id="omicron-filter-table">
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <form class="requirement-form" id="omicron-filter-task-form">
+                    <label>
+                        Дедлайн
+                        <input type="date" id="omicron-filter-deadline" required>
+                    </label>
+                    <button type="submit" id="omicron-filter-submit">Поставить задачу выбранным</button>
+                </form>
+                <p class="error" id="omicron-filter-error" hidden></p>
+            </div>
+        </div>
+
+        <dialog id="omicron-bulk-confirm-dialog" class="confirm-dialog">
+            <h3>Подтверждение постановки</h3>
+            <div id="omicron-bulk-confirm-body"></div>
+            <div class="dialog-actions">
+                <button type="button" class="button-secondary" id="omicron-bulk-confirm-cancel">Отмена</button>
+                <button type="button" id="omicron-bulk-confirm-ok">Поставить</button>
+            </div>
+        </dialog>
+
+        <script type="application/json" id="omicron-filter-data">{{ skill_filter_options | tojson }}</script>
+    {% endif %}
+
+    {% if rows %}
+        <div class="panel">
             <div class="table-scroll">
                 <table class="data">
                     <thead>
@@ -44,4 +102,152 @@
             </div>
         </div>
     {% endif %}
+
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Фильтр "режим + омикрон -> кому не стоит" (см. services/omicron_priority.py::
+        // missing_omicrons_by_skill) — все данные уже отрисованы в JSON-блоке ниже, дальше
+        // это чистая клиентская фильтрация без похода на сервер, плюс постановка задачи
+        // выбранным через уже существующие /tasks/api/bulk-preview + /tasks/add-bulk
+        // (тот же предпросмотр-диалог, что на /tasks — см. tasks.html).
+        const dataEl = document.getElementById("omicron-filter-data");
+        if (!dataEl) return;
+        let skillOptions = [];
+        try { skillOptions = JSON.parse(dataEl.textContent || "[]"); } catch { skillOptions = []; }
+        const bySkill = {};
+        skillOptions.forEach((e) => { bySkill[e.skill_id] = e; });
+
+        const modeSelect = document.getElementById("omicron-filter-mode");
+        const skillSelect = document.getElementById("omicron-filter-skill");
+        const resultBox = document.getElementById("omicron-filter-result");
+        const countEl = document.getElementById("omicron-filter-count");
+        const tableBody = document.querySelector("#omicron-filter-table tbody");
+        const selectAll = document.getElementById("omicron-filter-select-all");
+        const skillOptionEls = Array.from(skillSelect.options).filter((o) => o.value);
+
+        function renderTable() {
+            const entry = bySkill[skillSelect.value];
+            if (!entry) {
+                resultBox.hidden = true;
+                return;
+            }
+            resultBox.hidden = false;
+            countEl.textContent = `Игроков без этого омикрона: ${entry.players.length}`;
+            tableBody.innerHTML = "";
+            entry.players.forEach((p) => {
+                const tr = document.createElement("tr");
+                const td = document.createElement("td");
+                const label = document.createElement("label");
+                label.className = "checkbox";
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.className = "omicron-filter-player";
+                cb.value = p.ally_code;
+                label.appendChild(cb);
+                label.append(" " + p.name);
+                td.appendChild(label);
+                tr.appendChild(td);
+                tableBody.appendChild(tr);
+            });
+            selectAll.checked = false;
+        }
+
+        function refreshSkillOptions() {
+            const mode = modeSelect.value;
+            skillOptionEls.forEach((opt) => { opt.hidden = !!mode && opt.dataset.mode !== mode; });
+            const current = skillOptionEls.find((o) => o.value === skillSelect.value);
+            if (skillSelect.value && (!current || current.hidden)) {
+                skillSelect.value = "";
+            }
+            renderTable();
+        }
+
+        modeSelect.addEventListener("change", refreshSkillOptions);
+        skillSelect.addEventListener("change", renderTable);
+        selectAll.addEventListener("change", () => {
+            tableBody.querySelectorAll(".omicron-filter-player").forEach((cb) => { cb.checked = selectAll.checked; });
+        });
+        refreshSkillOptions();
+
+        const form = document.getElementById("omicron-filter-task-form");
+        const dialog = document.getElementById("omicron-bulk-confirm-dialog");
+        const dialogBody = document.getElementById("omicron-bulk-confirm-body");
+        const okBtn = document.getElementById("omicron-bulk-confirm-ok");
+        const cancelBtn = document.getElementById("omicron-bulk-confirm-cancel");
+        const submitBtn = document.getElementById("omicron-filter-submit");
+        const errorEl = document.getElementById("omicron-filter-error");
+
+        const buildForm = (entry, codes, deadline) => {
+            const fd = new FormData();
+            fd.append("base_id", entry.base_id);
+            fd.append("target_type", "omicron");
+            fd.append("target_value", entry.skill_id);
+            fd.append("deadline", deadline);
+            codes.forEach((c) => fd.append("ally_codes", c));
+            return fd;
+        };
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            errorEl.hidden = true;
+            const entry = bySkill[skillSelect.value];
+            if (!entry) return;
+            const codes = Array.from(tableBody.querySelectorAll(".omicron-filter-player:checked")).map((cb) => cb.value);
+            if (codes.length === 0) {
+                errorEl.textContent = "Выберите хотя бы одного игрока.";
+                errorEl.hidden = false;
+                return;
+            }
+            const deadline = document.getElementById("omicron-filter-deadline").value;
+
+            const originalText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = "⏳ Проверяю...";
+            let preview;
+            try {
+                const resp = await fetch("/tasks/api/bulk-preview", { method: "POST", body: buildForm(entry, codes, deadline) });
+                preview = await resp.json();
+                if (!resp.ok) {
+                    errorEl.textContent = preview.error || "Ошибка проверки.";
+                    errorEl.hidden = false;
+                    return;
+                }
+            } catch {
+                errorEl.textContent = "Ошибка проверки.";
+                errorEl.hidden = false;
+                return;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            }
+
+            const parts = [];
+            if (preview.create.length) parts.push(`<p>Будет поставлено: <strong>${preview.create.length}</strong> — ${preview.create.join(", ")}</p>`);
+            if (preview.duplicate.length) parts.push(`<p class="muted">Уже назначено (пропустится): ${preview.duplicate.join(", ")}</p>`);
+            if (preview.done.length) parts.push(`<p class="muted">Уже выполнено (пропустится): ${preview.done.join(", ")}</p>`);
+            if (!parts.length) parts.push("<p>Нечего ставить.</p>");
+            dialogBody.innerHTML = parts.join("");
+            okBtn.style.display = preview.create.length ? "" : "none";
+            okBtn.textContent = `Поставить (${preview.create.length})`;
+            dialog.showModal();
+
+            okBtn.onclick = async () => {
+                dialog.close();
+                submitBtn.disabled = true;
+                submitBtn.textContent = "⏳ Ставлю задачи...";
+                try {
+                    await fetch("/tasks/add-bulk", { method: "POST", body: buildForm(entry, codes, deadline) });
+                    submitBtn.textContent = "✅ Поставлено";
+                    setTimeout(() => { submitBtn.disabled = false; submitBtn.textContent = originalText; }, 2000);
+                } catch {
+                    errorEl.textContent = "Не удалось поставить задачи.";
+                    errorEl.hidden = false;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+                }
+            };
+            cancelBtn.onclick = () => dialog.close();
+        });
+    });
+    </script>
 {% endblock %}

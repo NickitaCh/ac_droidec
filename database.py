@@ -3461,6 +3461,15 @@ def _ensure_stat_plates_table(cursor):
             UNIQUE (guild_id, name)
         )
     """)
+    try:
+        # Модульный плейт не хранит требования напрямую — вместо этого ссылается на другие
+        # плейты (целиком либо по конкретному персонажу) через stat_plate_components, и
+        # разворачивается "на лету" при чтении (см. _resolve_modular_plate_leaf_pairs). Задаётся
+        # только при создании (/статы_требования создать, /plates/create) и не переключается
+        # обратно — см. обсуждение в CLAUDE.md-эквивалентной памяти проекта про модульные плейты.
+        cursor.execute("ALTER TABLE stat_plates ADD COLUMN is_modular INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     # Миграция с версии до мультитенантности (UNIQUE был только по name, без guild_id).
     cursor.execute("PRAGMA table_info(stat_plates)")
     cols = {row[1] for row in cursor.fetchall()}
@@ -3500,7 +3509,162 @@ def _ensure_stat_plates_table(cursor):
     cursor.connection.commit()
 
 
-def create_stat_plate(name: str, description: str, created_by: str, guild_id: int = 1) -> bool:
+def _ensure_stat_plate_components_table(cursor):
+    """Состав модульного плейта: ссылки на другие плейты либо на конкретного персонажа внутри
+    них (character_key='' означает "весь плейт целиком"). Один модульный плейт может ссылаться
+    на несколько источников; один и тот же персонаж может прийти из двух разных источников —
+    по решению пользователя (project note про модульные плейты) это НЕ схлопывается и НЕ
+    считается конфликтом, оба набора требований просто применяются вместе."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_plate_components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            parent_plate TEXT NOT NULL,
+            source_plate TEXT NOT NULL,
+            character_key TEXT NOT NULL DEFAULT '',
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE (guild_id, parent_plate, source_plate, character_key)
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_stat_plate_components_parent ON stat_plate_components(guild_id, parent_plate)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_stat_plate_components_source ON stat_plate_components(guild_id, source_plate)"
+    )
+
+
+def _is_modular_raw(plate_name: str, guild_id: int, cursor) -> bool:
+    cursor.execute("SELECT is_modular FROM stat_plates WHERE guild_id = ? AND name = ?", (guild_id, plate_name))
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _stat_plate_transitive_sources(plate_name: str, guild_id: int, cursor, visited: set = None) -> set:
+    """Все плейты, до которых можно дотянуться из plate_name через цепочку модульных
+    компонентов (включая сам plate_name) — используется для проверки циклов ПЕРЕД записью
+    новой ссылки: если предполагаемый источник уже (прямо или транзитивно) включает целевой
+    плейт, добавлять такую ссылку нельзя."""
+    visited = visited if visited is not None else set()
+    if plate_name in visited:
+        return visited
+    visited.add(plate_name)
+    cursor.execute(
+        "SELECT DISTINCT source_plate FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?",
+        (guild_id, plate_name),
+    )
+    for (source_plate,) in cursor.fetchall():
+        _stat_plate_transitive_sources(source_plate, guild_id, cursor, visited)
+    return visited
+
+
+def _resolve_modular_plate_leaf_pairs(plate_name: str, guild_id: int, cursor, visited: set = None) -> list:
+    """Разворачивает модульный плейт в плоский список (leaf_plate, character_key), рекурсивно
+    проходя вложенные модульные компоненты до "обычных" (не модульных) плейтов-источников.
+    Дубликаты намеренно не схлопываются (см. _ensure_stat_plate_components_table) — если один
+    персонаж пришёл из двух источников, он просто встретится в результате дважды и требования
+    обоих источников применятся вместе. visited защищает от зацикливания на случай гонки/ручной
+    правки БД в обход set_stat_plate_components (штатно циклы отсекаются при записи)."""
+    visited = visited if visited is not None else set()
+    if plate_name in visited:
+        return []
+    visited = visited | {plate_name}
+    cursor.execute(
+        "SELECT source_plate, character_key FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ? ORDER BY id",
+        (guild_id, plate_name),
+    )
+    components = cursor.fetchall()
+    result = []
+    for source_plate, character_key in components:
+        if _is_modular_raw(source_plate, guild_id, cursor):
+            nested = _resolve_modular_plate_leaf_pairs(source_plate, guild_id, cursor, visited)
+            if character_key:
+                result.extend((lp, ck) for lp, ck in nested if ck == character_key)
+            else:
+                result.extend(nested)
+        else:
+            if character_key:
+                result.append((source_plate, character_key))
+            else:
+                cursor.execute(
+                    "SELECT DISTINCT character_key FROM stat_requirements WHERE guild_id = ? AND plate_name = ?",
+                    (guild_id, source_plate),
+                )
+                result.extend((source_plate, ck) for (ck,) in cursor.fetchall())
+    return result
+
+
+def is_stat_plate_modular(name: str, guild_id: int = 1) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plates_table(cursor)
+    result = _is_modular_raw(name, guild_id, cursor)
+    conn.close()
+    return result
+
+
+def get_stat_plate_components(parent_plate: str, guild_id: int = 1):
+    """[(id, source_plate, character_key), ...] в порядке добавления; character_key='' значит
+    "весь плейт целиком", иначе — конкретный персонаж внутри source_plate."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_components_table(cursor)
+    cursor.execute(
+        "SELECT id, source_plate, character_key FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ? ORDER BY id",
+        (guild_id, parent_plate),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def set_stat_plate_components(parent_plate: str, components: list, created_by: str, guild_id: int = 1):
+    """Полная замена состава модульного плейта (как set_stat_plate_character_order — веб шлёт
+    целиком новый набор чекбоксов при каждом сохранении). components: list[(source_plate,
+    character_key)], character_key='' или None означает "весь плейт". Возвращает (True, None)
+    при успехе либо (False, сообщение_об_ошибке) — цикл проверяется ДО удаления старых строк,
+    чтобы неудачная попытка сохранить не потеряла существующую композицию."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plates_table(cursor)
+    _ensure_stat_plate_components_table(cursor)
+
+    for source_plate, _character_key in components:
+        if source_plate == parent_plate:
+            conn.close()
+            return False, f"Плейт не может ссылаться сам на себя («{source_plate}»)."
+        reachable = _stat_plate_transitive_sources(source_plate, guild_id, cursor)
+        if parent_plate in reachable:
+            conn.close()
+            return False, f"Циклическая ссылка: «{source_plate}» уже (прямо либо через другие плейты) включает «{parent_plate}»."
+
+    cursor.execute("DELETE FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?", (guild_id, parent_plate))
+    cursor.executemany(
+        "INSERT OR IGNORE INTO stat_plate_components (guild_id, parent_plate, source_plate, character_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        [(guild_id, parent_plate, source_plate, character_key or "", created_by) for source_plate, character_key in components],
+    )
+    conn.commit()
+    conn.close()
+    return True, None
+
+
+def get_stat_plates_referencing(source_plate: str, guild_id: int = 1):
+    """Модульные плейты (имена), которые ссылаются на source_plate как на компонент —
+    для предупреждения при переименовании/удалении source_plate."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_components_table(cursor)
+    cursor.execute(
+        "SELECT DISTINCT parent_plate FROM stat_plate_components WHERE guild_id = ? AND source_plate = ?",
+        (guild_id, source_plate),
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def create_stat_plate(name: str, description: str, created_by: str, guild_id: int = 1, modular: bool = False) -> bool:
     """Возвращает False, если плейт с таким именем уже существует в этой гильдии."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3508,8 +3672,8 @@ def create_stat_plate(name: str, description: str, created_by: str, guild_id: in
     _ensure_stat_plates_table(cursor)
     try:
         cursor.execute(
-            "INSERT INTO stat_plates (guild_id, name, description, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
-            (guild_id, name, description, created_by),
+            "INSERT INTO stat_plates (guild_id, name, description, created_by, created_at, is_modular) VALUES (?, ?, ?, ?, datetime('now'), ?)",
+            (guild_id, name, description, created_by, 1 if modular else 0),
         )
         conn.commit()
         return True
@@ -3537,6 +3701,18 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
         _ensure_stat_plate_character_order_table(cursor)
         cursor.execute(
             "UPDATE stat_plate_character_order SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
+            (new_name, guild_id, old_name)
+        )
+        # Переименование должно поспевать за модульными ссылками в обе стороны: и если
+        # переименовывают сам модульный плейт (parent_plate), и если переименовывают плейт,
+        # на который кто-то ссылается как на источник (source_plate).
+        _ensure_stat_plate_components_table(cursor)
+        cursor.execute(
+            "UPDATE stat_plate_components SET parent_plate = ? WHERE guild_id = ? AND parent_plate = ?",
+            (new_name, guild_id, old_name)
+        )
+        cursor.execute(
+            "UPDATE stat_plate_components SET source_plate = ? WHERE guild_id = ? AND source_plate = ?",
             (new_name, guild_id, old_name)
         )
         conn.commit()
@@ -3588,7 +3764,13 @@ def delete_stat_requirements_by_character(plate_name: str, character_key: str, g
 
 
 def delete_stat_plate(name: str, guild_id: int = 1) -> int:
-    """Удаляет плейт и все его требования (в пределах гильдии), возвращает количество удалённых требований."""
+    """Удаляет плейт и все его требования (в пределах гильдии), возвращает количество удалённых
+    требований. Для модульного плейта требований в stat_requirements нет (у него только
+    компоненты-ссылки) — удаляется его собственная композиция (как parent_plate). Ссылки НА
+    этот плейт из других модульных плейтов (как source_plate) намеренно не трогаются — они
+    просто перестанут что-либо разворачивать (см. _resolve_modular_plate_leaf_pairs), а не
+    упадут с ошибкой; предупредить об этом до удаления — дело вызывающего кода
+    (см. get_stat_plates_referencing)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
@@ -3598,6 +3780,8 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_plates WHERE guild_id = ? AND name = ?", (guild_id, name))
     _ensure_stat_plate_character_order_table(cursor)
     cursor.execute("DELETE FROM stat_plate_character_order WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
+    _ensure_stat_plate_components_table(cursor)
+    cursor.execute("DELETE FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted
@@ -3619,14 +3803,18 @@ def get_stat_plate(name: str, guild_id: int = 1):
 
 
 def get_all_stat_plates_detailed(guild_id: int = 1):
-    """Возвращает список (name, description, character_count, requirement_count) по всем плейтам
-    гильдии, включая пустые (без единого требования), отсортированный по имени."""
+    """Возвращает список (name, description, is_modular, character_count, requirement_count) по
+    всем плейтам гильдии, включая пустые (без единого требования/компонента), отсортированный
+    по имени. Для модульных плейтов char_count/req_count считаются по развёрнутой композиции
+    (см. _resolve_modular_plate_leaf_pairs), а не по прямым строкам stat_requirements — у
+    модульного плейта своих строк там нет."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plates_table(cursor)
+    _ensure_stat_plate_components_table(cursor)
     cursor.execute("""
-        SELECT p.name, p.description,
+        SELECT p.name, p.description, p.is_modular,
                COUNT(DISTINCT r.character_key) AS char_count,
                COUNT(r.id) AS req_count
         FROM stat_plates p
@@ -3636,8 +3824,21 @@ def get_all_stat_plates_detailed(guild_id: int = 1):
         ORDER BY p.name
     """, (guild_id,))
     rows = cursor.fetchall()
+    result = []
+    for name, description, is_modular, char_count, req_count in rows:
+        if is_modular:
+            pairs = _resolve_modular_plate_leaf_pairs(name, guild_id, cursor)
+            char_count = len({character_key for _leaf_plate, character_key in pairs})
+            req_count = 0
+            for leaf_plate, character_key in pairs:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
+                    (guild_id, leaf_plate, character_key),
+                )
+                req_count += cursor.fetchone()[0]
+        result.append((name, description, bool(is_modular), char_count, req_count))
     conn.close()
-    return rows
+    return result
 
 
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
@@ -3700,9 +3901,28 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
 
 
 def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1):
+    """Для модульного плейта прозрачно разворачивает композицию и возвращает требования из
+    ВСЕХ плейтов-источников, где встретился этот персонаж (см. _resolve_modular_plate_leaf_pairs) —
+    возвращаемые строки хранят plate_name исходного (leaf) плейта, а не имя модульного плейта,
+    что и нужно: /статы_требования редактировать/удалить правят настоящую строку-источник."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    _ensure_stat_plate_components_table(cursor)
+    if _is_modular_raw(plate_name, guild_id, cursor):
+        pairs = _resolve_modular_plate_leaf_pairs(plate_name, guild_id, cursor)
+        rows = []
+        for leaf_plate, ck in pairs:
+            if ck != character_key:
+                continue
+            cursor.execute("""
+                SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
+                FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
+            """, (guild_id, leaf_plate, character_key))
+            rows.extend(cursor.fetchall())
+        conn.close()
+        return rows
     cursor.execute("""
         SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
         FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
@@ -3733,11 +3953,26 @@ def get_all_stat_requirement_plates(guild_id: int = 1):
 def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
     """Персонажи плейта в пользовательском порядке (см. set_stat_plate_character_order,
     драг-н-дроп на /plates/<name>); персонажи без сохранённого порядка (новые, ещё не
-    перетаскивались) идут следом, по алфавиту."""
+    перетаскивались) идут следом, по алфавиту.
+
+    Для модульного плейта вместо прямого запроса к stat_requirements разворачивает композицию
+    (см. _resolve_modular_plate_leaf_pairs) и возвращает персонажей в порядке первого появления
+    по компонентам — драг-н-дроп порядок к модульным плейтам не применяется, у них порядок
+    задаёт сама композиция."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     _ensure_stat_plate_character_order_table(cursor)
+    _ensure_stat_plates_table(cursor)
+    _ensure_stat_plate_components_table(cursor)
+    if _is_modular_raw(plate_name, guild_id, cursor):
+        pairs = _resolve_modular_plate_leaf_pairs(plate_name, guild_id, cursor)
+        conn.close()
+        seen = []
+        for _leaf_plate, character_key in pairs:
+            if character_key not in seen:
+                seen.append(character_key)
+        return seen
     cursor.execute("""
         SELECT DISTINCT r.character_key
         FROM stat_requirements r

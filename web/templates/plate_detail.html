@@ -3,7 +3,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <p><a href="/plates">← Все плейты</a></p>
-    <h1>{{ plate_name }}</h1>
+    <h1>{{ plate_name }}{% if is_modular %} <span class="badge" title="Модульный плейт">🧩 модульный</span>{% endif %}</h1>
     {% if description %}<p class="muted">{{ description }}</p>{% endif %}
 
     {% if error %}
@@ -21,95 +21,127 @@
         </div>
     </div>
 
-    <div class="panel">
-        <div class="panel-title"><span>Добавить требование</span></div>
-        <form method="post" action="/plates/{{ plate_name }}/requirements/add" class="requirement-form">
-            <label>
-                Персонаж
-                <div class="unit-search" data-unit-search>
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
-                    <input type="hidden" name="base_id" class="unit-search-value" required>
-                    <div class="unit-search-results"></div>
-                </div>
-            </label>
-            <label>
-                Стат
-                <select name="stat_name" required>
-                    {% for label, value in stat_options %}
-                        <option value="{{ value }}">{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>
-                Оператор
-                <select name="operator" required>
-                    {% for label, value in operator_options %}
-                        <option value="{{ value }}">{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>
-                Пороговое значение
-                <input type="number" name="threshold" step="any" required>
-            </label>
-            <label>
-                Приоритет
-                <select name="priority" required>
-                    {% for label, value in priority_options %}
-                        <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>
-                Комментарий (необязательно)
-                <input type="text" name="comment">
-            </label>
-            <button type="submit">Добавить</button>
-        </form>
-    </div>
+    {% if is_modular %}
+        <div class="panel">
+            <div class="panel-title"><span>Состав модульного плейта</span></div>
+            <p class="muted">Отметьте плейты целиком либо отдельных персонажей внутри них — их требования подтянутся сюда и будут обновляться автоматически при изменении исходного плейта.</p>
+            <div id="composition-tree" data-current='{{ current_components | tojson }}'>
+                {% if not other_plates %}
+                    <p class="empty-state">Других плейтов пока нет — сначала создайте хотя бы один обычный плейт.</p>
+                {% endif %}
+                {% for p in other_plates %}
+                    <details class="composition-plate-node" data-plate="{{ p.name }}">
+                        <summary>
+                            <label class="checkbox" onclick="event.stopPropagation();">
+                                <input type="checkbox" class="composition-whole-plate" data-source-plate="{{ p.name }}">
+                                <strong>{{ p.name }}</strong>{% if p.is_modular %} 🧩{% endif %} — весь плейт
+                            </label>
+                        </summary>
+                        <div class="composition-char-list" data-loaded="0">
+                            <p class="muted">Раскройте, чтобы загрузить персонажей…</p>
+                        </div>
+                    </details>
+                {% endfor %}
+            </div>
+            {% if other_plates %}
+                <p class="error" id="composition-error" hidden></p>
+                <button type="button" id="composition-save" class="button">Сохранить состав</button>
+                <span id="composition-status" class="badge badge-ok" style="display:none; margin-left:0.6em;">Сохранено</span>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="panel">
+            <div class="panel-title"><span>Добавить требование</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add" class="requirement-form">
+                <label>
+                    Персонаж
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Стат
+                    <select name="stat_name" required>
+                        {% for label, value in stat_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Оператор
+                    <select name="operator" required>
+                        {% for label, value in operator_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Пороговое значение
+                    <input type="number" name="threshold" step="any" required>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
 
-    <div class="panel">
-        <div class="panel-title"><span>Добавить требование на омикрон</span></div>
-        <form method="post" action="/plates/{{ plate_name }}/requirements/add_omicron" class="requirement-form" data-omicron-add-form>
-            <label>
-                Персонаж/корабль
-                <div class="unit-search" data-unit-search>
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
-                    <input type="hidden" name="base_id" class="unit-search-value" required>
-                    <div class="unit-search-results"></div>
-                </div>
-            </label>
-            <label>
-                Омикрон
-                <select name="skill_id" class="omicron-skill-select" required disabled>
-                    <option value="">— сначала выберите персонажа —</option>
-                </select>
-            </label>
-            <label>
-                Приоритет
-                <select name="priority" required>
-                    {% for label, value in priority_options %}
-                        <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>
-                Комментарий (необязательно)
-                <input type="text" name="comment">
-            </label>
-            <button type="submit">Добавить</button>
-        </form>
-    </div>
+        <div class="panel">
+            <div class="panel-title"><span>Добавить требование на омикрон</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add_omicron" class="requirement-form" data-omicron-add-form>
+                <label>
+                    Персонаж/корабль
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Омикрон
+                    <select name="skill_id" class="omicron-skill-select" required disabled>
+                        <option value="">— сначала выберите персонажа —</option>
+                    </select>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
+    {% endif %}
 
     {% if not characters %}
         <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
     {% else %}
-        <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу.</p>
+        {% if not is_modular %}
+            <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу.</p>
+        {% endif %}
         <div id="plate-characters-list">
         {% for char in characters %}
             <div class="panel" data-base-id="{{ char.base_id }}">
                 <div class="panel-title">
-                    <span class="panel-title-left"><span class="drag-handle">⠿</span><span>{{ char.name }}</span></span>
+                    <span class="panel-title-left">{% if not is_modular %}<span class="drag-handle">⠿</span>{% endif %}<span>{{ char.name }}</span></span>
                     <span class="panel-hint">{{ char.requirements|length }} треб.</span>
                 </div>
                 <div class="table-scroll">
@@ -119,7 +151,7 @@
                                 <th>Стат</th>
                                 <th>Приоритет</th>
                                 <th>Комментарий</th>
-                                <th></th>
+                                {% if is_modular %}<th>Источник</th>{% else %}<th></th>{% endif %}
                             </tr>
                         </thead>
                         <tbody>
@@ -128,6 +160,9 @@
                                     <td>{{ r.value_display }}</td>
                                     <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
                                     <td>{{ r.comment or "—" }}</td>
+                                    {% if is_modular %}
+                                        <td><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
+                                    {% else %}
                                     <td class="row-actions">
                                         <details>
                                             <summary class="link-btn">править</summary>
@@ -154,6 +189,7 @@
                                             <button type="submit" class="button-danger">Удалить</button>
                                         </form>
                                     </td>
+                                    {% endif %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -162,13 +198,16 @@
             </div>
         {% endfor %}
         </div>
+        {% if is_modular %}
+            <p class="muted">Требования показаны из подключённых плейтов — чтобы их изменить, откройте исходный плейт по ссылке в колонке «Источник».</p>
+        {% endif %}
     {% endif %}
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
     <script>
     document.addEventListener("DOMContentLoaded", () => {
         const list = document.getElementById("plate-characters-list");
-        if (!list) return;
+        if (!list || !list.querySelector(".drag-handle")) return;
         const status = document.createElement("span");
         status.className = "badge badge-ok";
         status.style.display = "none";
@@ -248,6 +287,119 @@
         };
 
         unitHidden.addEventListener("change", refresh);
+    });
+    </script>
+
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Дерево выбора состава модульного плейта: верхний уровень — чекбокс "весь плейт" на
+        // каждом другом плейте гильдии, раскрытие (<details>) лениво подгружает персонажей
+        // этого плейта через /plates/api/plate-characters и показывает чекбокс на каждого —
+        // сохранение шлёт полный набор отмеченного разом (как reorder выше шлёт полный порядок).
+        const tree = document.getElementById("composition-tree");
+        const saveBtn = document.getElementById("composition-save");
+        if (!tree || !saveBtn) return;
+
+        let current = [];
+        try { current = JSON.parse(tree.dataset.current || "[]"); } catch { current = []; }
+        const preselected = {};
+        current.forEach((c) => {
+            const key = c.character_key || "";
+            if (!preselected[c.source_plate]) preselected[c.source_plate] = new Set();
+            preselected[c.source_plate].add(key);
+        });
+
+        tree.querySelectorAll(".composition-whole-plate").forEach((cb) => {
+            const plate = cb.dataset.sourcePlate;
+            if (preselected[plate] && preselected[plate].has("")) cb.checked = true;
+        });
+
+        tree.querySelectorAll(".composition-plate-node").forEach((node) => {
+            node.addEventListener("toggle", async () => {
+                if (!node.open) return;
+                const listEl = node.querySelector(".composition-char-list");
+                if (listEl.dataset.loaded === "1") return;
+                listEl.dataset.loaded = "1";
+                const plate = node.dataset.plate;
+                listEl.innerHTML = '<p class="muted">Загрузка…</p>';
+                try {
+                    const resp = await fetch(`/plates/api/plate-characters?plate=${encodeURIComponent(plate)}`);
+                    const chars = resp.ok ? await resp.json() : [];
+                    if (chars.length === 0) {
+                        listEl.innerHTML = '<p class="muted">Нет персонажей.</p>';
+                        return;
+                    }
+                    listEl.innerHTML = "";
+                    const preselectedChars = preselected[plate] || new Set();
+                    chars.forEach((ch) => {
+                        const label = document.createElement("label");
+                        label.className = "checkbox";
+                        const cb = document.createElement("input");
+                        cb.type = "checkbox";
+                        cb.className = "composition-char";
+                        cb.dataset.sourcePlate = plate;
+                        cb.dataset.characterKey = ch.base_id;
+                        cb.checked = preselectedChars.has(ch.base_id);
+                        label.appendChild(cb);
+                        label.append(" " + ch.name);
+                        listEl.appendChild(label);
+                    });
+                } catch {
+                    listEl.innerHTML = '<p class="error">Ошибка загрузки.</p>';
+                }
+            });
+        });
+
+        // Плейты, у которых сохранены конкретные персонажи (не весь плейт целиком) — сразу
+        // раскрываем узел, иначе выбранное состояние спрятано в свёрнутом <details>.
+        Object.keys(preselected).forEach((plate) => {
+            const hasSpecific = [...preselected[plate]].some((k) => k !== "");
+            if (!hasSpecific) return;
+            const node = tree.querySelector(`.composition-plate-node[data-plate="${CSS.escape(plate)}"]`);
+            if (node) node.open = true;
+        });
+
+        const statusEl = document.getElementById("composition-status");
+        const errorEl = document.getElementById("composition-error");
+        const flashStatus = (ok) => {
+            statusEl.textContent = ok ? "Сохранено" : "Ошибка сохранения";
+            statusEl.className = ok ? "badge badge-ok" : "badge badge-danger";
+            statusEl.style.display = "";
+            setTimeout(() => { statusEl.style.display = "none"; }, 2000);
+        };
+
+        saveBtn.addEventListener("click", async () => {
+            errorEl.hidden = true;
+            const components = [];
+            tree.querySelectorAll(".composition-whole-plate:checked").forEach((cb) => {
+                components.push({ source_plate: cb.dataset.sourcePlate, character_key: "" });
+            });
+            tree.querySelectorAll(".composition-char:checked").forEach((cb) => {
+                const wholeCb = tree.querySelector(`.composition-whole-plate[data-source-plate="${CSS.escape(cb.dataset.sourcePlate)}"]`);
+                if (wholeCb && wholeCb.checked) return; // весь плейт уже включает этого персонажа
+                components.push({ source_plate: cb.dataset.sourcePlate, character_key: cb.dataset.characterKey });
+            });
+            try {
+                const resp = await fetch(`/plates/${encodeURIComponent("{{ plate_name }}")}/composition`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ components }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok && data.ok) {
+                    flashStatus(true);
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    flashStatus(false);
+                    errorEl.textContent = data.error || "Не удалось сохранить состав.";
+                    errorEl.hidden = false;
+                }
+            } catch {
+                flashStatus(false);
+                errorEl.textContent = "Не удалось сохранить состав.";
+                errorEl.hidden = false;
+            }
+        });
     });
     </script>
 {% endblock %}

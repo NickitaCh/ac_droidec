@@ -63,8 +63,8 @@ def _omicron_ability_name(skill_id: str) -> str:
 async def plates_list(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     rows = database.get_all_stat_plates_detailed(guild_id=user["guild_id"])
     plates = [
-        {"name": name, "description": description, "char_count": char_count, "req_count": req_count}
-        for name, description, char_count, req_count in rows
+        {"name": name, "description": description, "is_modular": bool(is_modular), "char_count": char_count, "req_count": req_count}
+        for name, description, is_modular, char_count, req_count in rows
     ]
     return templates.TemplateResponse(request, "plates.html", {
         "user": user,
@@ -78,9 +78,10 @@ async def plates_create(
     request: Request,
     name: str = Form(...),
     description: str = Form(""),
+    modular: bool = Form(False),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
-    ok = database.create_stat_plate(name.strip(), description.strip() or None, user["discord_id"], guild_id=user["guild_id"])
+    ok = database.create_stat_plate(name.strip(), description.strip() or None, user["discord_id"], guild_id=user["guild_id"], modular=modular)
     if not ok:
         return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{name}» уже существует.'})}", status_code=303)
     return RedirectResponse(f"/plates/{name.strip()}", status_code=303)
@@ -120,6 +121,10 @@ async def omicron_skills(base_id: str = "", user: dict = Depends(feature_flags.r
 @router.get("/{plate_name}", response_class=HTMLResponse)
 async def plate_detail(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     guild_id = user["guild_id"]
+    is_modular = database.is_stat_plate_modular(plate_name, guild_id=guild_id)
+    # get_stat_requirement_characters/get_stat_requirements уже прозрачно разворачивают
+    # композицию для модульных плейтов (database.py::_resolve_modular_plate_leaf_pairs) —
+    # эта часть не отличается от обычного плейта.
     char_keys = database.get_stat_requirement_characters(plate_name, guild_id=guild_id)
     characters = []
     for base_id in char_keys:
@@ -132,18 +137,33 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 "priority_label": PRIORITY_LABELS.get(r[6], r[6]), "priority_emoji": PRIORITY_EMOJI.get(r[6], ""),
                 "is_omicron": is_omicron,
                 "value_display": f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован" if is_omicron else f"{r[3]} {r[4]} {_fmt_value(r[5])}",
+                "source_plate": r[1],
             })
         characters.append({"base_id": base_id, "name": _unit_name(base_id), "requirements": reqs})
     # Порядок уже задан database.get_stat_requirement_characters (сохранённый
-    # drag-and-drop порядок, новые персонажи — по алфавиту следом) — не пересортировывать.
+    # drag-and-drop порядок, новые персонажи — по алфавиту следом — для обычных плейтов;
+    # порядок первого появления по компонентам — для модульных) — не пересортировывать.
 
     plate = database.get_stat_plate(plate_name, guild_id=guild_id)
     req_count = database.count_stat_requirements_by_plate(plate_name, guild_id=guild_id)
+
+    other_plates = []
+    current_components = []
+    if is_modular:
+        all_plates_detailed = database.get_all_stat_plates_detailed(guild_id=guild_id)
+        other_plates = [{"name": n, "is_modular": bool(im)} for n, _d, im, _c, _r in all_plates_detailed if n != plate_name]
+        current_components = [
+            {"source_plate": sp, "character_key": ck, "character_name": _unit_name(ck) if ck else None}
+            for _id, sp, ck in database.get_stat_plate_components(plate_name, guild_id=guild_id)
+        ]
 
     return templates.TemplateResponse(request, "plate_detail.html", {
         "user": user,
         "plate_name": plate_name,
         "description": plate[1] if plate else None,
+        "is_modular": is_modular,
+        "other_plates": other_plates,
+        "current_components": current_components,
         "characters": characters,
         "req_count": req_count,
         "stat_options": STAT_OPTIONS,
@@ -152,6 +172,30 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "priority_default": PRIORITY_REQUIRED,
         "error": request.query_params.get("error"),
     })
+
+
+@router.get("/api/plate-characters", response_class=JSONResponse)
+async def plate_characters_api(plate: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    """Персонажи плейта — для ленивого раскрытия узла в дереве выбора состава модульного
+    плейта (см. plate_detail.html, data-composition-picker)."""
+    if not plate:
+        return []
+    char_keys = database.get_stat_requirement_characters(plate, guild_id=user["guild_id"])
+    return [{"base_id": base_id, "name": _unit_name(base_id)} for base_id in char_keys]
+
+
+@router.post("/{plate_name}/composition", response_class=JSONResponse)
+async def plate_composition_save(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    guild_id = user["guild_id"]
+    if not database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        return JSONResponse({"ok": False, "error": "Этот плейт не модульный."}, status_code=400)
+    body = await request.json()
+    raw_components = body.get("components") or []
+    components = [(c.get("source_plate"), c.get("character_key") or "") for c in raw_components if c.get("source_plate")]
+    ok, error = database.set_stat_plate_components(plate_name, components, user["discord_id"], guild_id=guild_id)
+    if not ok:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+    return {"ok": True}
 
 
 @router.post("/{plate_name}/characters/reorder", response_class=JSONResponse)
@@ -185,6 +229,9 @@ async def requirement_add(
     guild_id = user["guild_id"]
     if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
         return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
 
     char_name = _unit_name(base_id)
     raw_text = f"{char_name} {stat_name} {operator} {_fmt_value(threshold)}"
@@ -207,6 +254,9 @@ async def requirement_add_omicron(
     guild_id = user["guild_id"]
     if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
         return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
 
     valid_skill_ids = {o["skill_id"] for o in _omicron_options(base_id)}
     if skill_id not in valid_skill_ids:

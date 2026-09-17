@@ -658,6 +658,28 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
     return options[:25]
 
 
+async def autocomplete_stat_source_character(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Как autocomplete_stat_character, но читает выбранный параметр «источник» — используется
+    в /статы_требования модуль_добавить/модуль_убрать, где «плейт» — это целевой модульный
+    плейт, а не тот, из которого берётся персонаж."""
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return []
+    source = inter.filled_options.get("источник")
+    if not source:
+        return ["⚠️ СНАЧАЛА выберите источник!"]
+    char_keys = database.get_stat_requirement_characters(source, guild_id=guild_id)
+    if not char_keys:
+        return ["❌ У этого плейта нет сохранённых персонажей."]
+    search = string.lower().strip()
+    options = []
+    for base_id in char_keys:
+        label = f"{_unit_display_name(base_id)} [{base_id}]"
+        if not search or search in label.lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=label))
+    return options[:25]
+
+
 async def autocomplete_omicron_phrase_character(inter: disnake.ApplicationCommandInteraction, string: str):
     rows = database.get_all_omicron_phrases()
     if not rows:
@@ -1038,6 +1060,13 @@ class StatRequirementsCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        if database.is_stat_plate_modular(плейт, guild_id=guild_id):
+            await inter.response.send_message(
+                f"❌ «{плейт}» — модульный плейт, в него нельзя добавлять требования напрямую. "
+                f"Используйте /статы_требования модуль_добавить, чтобы подключить другой плейт или персонажа из него.",
+                ephemeral=True,
+            )
+            return
 
         base_id = _parse_bracket_id(персонаж)
         char_name = _unit_display_name(base_id)
@@ -1064,6 +1093,13 @@ class StatRequirementsCog(commands.Cog):
         if плейт not in database.get_all_stat_requirement_plates(guild_id=guild_id):
             await inter.response.send_message(
                 f"❌ Плейт «{плейт}» не найден — выберите вариант из списка автодополнения либо создайте его сначала через /статы_требования создать.",
+                ephemeral=True,
+            )
+            return
+        if database.is_stat_plate_modular(плейт, guild_id=guild_id):
+            await inter.response.send_message(
+                f"❌ «{плейт}» — модульный плейт, в него нельзя добавлять требования напрямую. "
+                f"Используйте /статы_требования модуль_добавить, чтобы подключить другой плейт или персонажа из него.",
                 ephemeral=True,
             )
             return
@@ -1172,16 +1208,26 @@ class StatRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Название нового плейта (как в HotUtils, например AC_ALL)"),
         описание: str = commands.Param(default=None, description="Заметка о плейте"),
+        модульный: bool = commands.Param(
+            default=False,
+            description="Модульный плейт не содержит персонажей напрямую — вместо этого ссылается на другие плейты (см. /статы_требования модуль_добавить)",
+        ),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
             return
 
-        created = database.create_stat_plate(плейт, описание, str(inter.author.id), guild_id=guild_id)
+        created = database.create_stat_plate(плейт, описание, str(inter.author.id), guild_id=guild_id, modular=модульный)
         if not created:
             await inter.response.send_message(f"❌ Плейт «{плейт}» уже существует.", ephemeral=True)
             return
         suffix = f" · _{описание}_" if описание else ""
+        if модульный:
+            await inter.response.send_message(
+                f"✅ Модульный плейт «{плейт}» создан.{suffix} Добавьте в него плейты/персонажей через /статы_требования модуль_добавить.",
+                ephemeral=True,
+            )
+            return
         await inter.response.send_message(f"✅ Плейт «{плейт}» создан.{suffix}", ephemeral=True)
 
     @stat_req.sub_command(name="плейты", description="Показать список всех плейтов")
@@ -1197,9 +1243,10 @@ class StatRequirementsCog(commands.Cog):
             return
 
         lines = []
-        for name, description, char_count, req_count in rows:
+        for name, description, is_modular, char_count, req_count in rows:
             desc_part = f" — _{description}_" if description else ""
-            lines.append(f"`{name}`{desc_part} · персонажей: {char_count}, требований: {req_count}")
+            modular_part = " 🧩" if is_modular else ""
+            lines.append(f"`{name}`{modular_part}{desc_part} · персонажей: {char_count}, требований: {req_count}")
 
         embeds = _lines_to_embeds("📋 Плейты", DATACRON_LIST_COLOR, lines)
         await inter.edit_original_response(embed=embeds[0])
@@ -1238,7 +1285,16 @@ class StatRequirementsCog(commands.Cog):
         if guild_id is None:
             return
 
+        is_modular = database.is_stat_plate_modular(плейт, guild_id=guild_id)
+
         if персонаж:
+            if is_modular:
+                await inter.response.send_message(
+                    f"❌ «{плейт}» — модульный плейт, персонажи в нём приходят из подключённых плейтов. "
+                    f"Используйте /статы_требования модуль_убрать.",
+                    ephemeral=True,
+                )
+                return
             base_id = _parse_bracket_id(персонаж)
             char_name = _unit_display_name(base_id)
             count = database.count_stat_requirements_by_character(плейт, base_id, guild_id=guild_id)
@@ -1258,14 +1314,24 @@ class StatRequirementsCog(commands.Cog):
             await inter.response.send_message(f"🗑️ Персонаж «{char_name}» удалён из плейта «{плейт}» вместе с требованиями: {deleted}.", ephemeral=True)
             return
 
-        count = database.count_stat_requirements_by_plate(плейт, guild_id=guild_id)
+        if is_modular:
+            components = database.get_stat_plate_components(плейт, guild_id=guild_id)
+            count = len(components)
+        else:
+            count = database.count_stat_requirements_by_plate(плейт, guild_id=guild_id)
         if database.get_stat_plate(плейт, guild_id=guild_id) is None and count == 0:
             await inter.response.send_message(f"❌ Плейт «{плейт}» не найден.", ephemeral=True)
             return
 
+        referenced_by = [p for p in database.get_stat_plates_referencing(плейт, guild_id=guild_id) if p != плейт]
+        warn_part = ""
+        if referenced_by:
+            warn_part = f" ⚠️ Этот плейт используется как компонент в: {', '.join(f'«{p}»' for p in referenced_by)} — там он просто перестанет что-то разворачивать."
+
         if not подтвердить:
+            what = "компонентов состава" if is_modular else "требований"
             await inter.response.send_message(
-                f"⚠️ Будет удалён плейт «{плейт}» и его требований: {count}. "
+                f"⚠️ Будет удалён плейт «{плейт}» и его {what}: {count}.{warn_part} "
                 f"Повторите команду с подтвердить=True, чтобы подтвердить удаление.",
                 ephemeral=True,
             )
@@ -1273,6 +1339,107 @@ class StatRequirementsCog(commands.Cog):
 
         deleted = database.delete_stat_plate(плейт, guild_id=guild_id)
         await inter.response.send_message(f"🗑️ Плейт «{плейт}» удалён вместе с требованиями: {deleted}.", ephemeral=True)
+
+    # ------------------ Состав модульных плейтов ------------------
+    @stat_req.sub_command(name="модуль_добавить", description="Подключить плейт (целиком либо одного персонажа из него) к модульному плейту")
+    async def stat_req_module_add(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Целевой МОДУЛЬНЫЙ плейт", autocomplete=autocomplete_stat_plate),
+        источник: str = commands.Param(description="Плейт, который подключаем", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(default=None, description="Только этот персонаж из источника (если не указан — источник целиком)", autocomplete=autocomplete_stat_source_character),
+    ):
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+
+        if not database.is_stat_plate_modular(плейт, guild_id=guild_id):
+            await inter.response.send_message(
+                f"❌ «{плейт}» не модульный плейт (или не найден) — создайте его через /статы_требования создать с модульный=True.",
+                ephemeral=True,
+            )
+            return
+        if источник not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+            await inter.response.send_message(f"❌ Плейт-источник «{источник}» не найден.", ephemeral=True)
+            return
+
+        character_key = _parse_bracket_id(персонаж) if персонаж else ""
+        existing = [(sp, ck) for _id, sp, ck in database.get_stat_plate_components(плейт, guild_id=guild_id)]
+        if (источник, character_key) in existing:
+            label = _unit_display_name(character_key) if character_key else "весь плейт"
+            await inter.response.send_message(f"❌ «{источник}» ({label}) уже подключён к «{плейт}».", ephemeral=True)
+            return
+
+        ok, error = database.set_stat_plate_components(плейт, existing + [(источник, character_key)], str(inter.author.id), guild_id=guild_id)
+        if not ok:
+            await inter.response.send_message(f"❌ {error}", ephemeral=True)
+            return
+
+        label = _unit_display_name(character_key) if character_key else "весь плейт"
+        await inter.response.send_message(f"✅ «{источник}» ({label}) подключён к модульному плейту «{плейт}».", ephemeral=True)
+
+    @stat_req.sub_command(name="модуль_убрать", description="Отключить плейт/персонажа от модульного плейта")
+    async def stat_req_module_remove(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Целевой модульный плейт", autocomplete=autocomplete_stat_plate),
+        источник: str = commands.Param(description="Подключённый плейт", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(default=None, description="Только этот персонаж (если не указан — убирается вся ссылка на источник целиком)", autocomplete=autocomplete_stat_source_character),
+    ):
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+
+        character_key = _parse_bracket_id(персонаж) if персонаж else ""
+        existing = [(sp, ck) for _id, sp, ck in database.get_stat_plate_components(плейт, guild_id=guild_id)]
+        if (источник, character_key) not in existing:
+            await inter.response.send_message(f"❌ «{источник}» не подключён к «{плейт}» в таком виде.", ephemeral=True)
+            return
+
+        remaining = [c for c in existing if c != (источник, character_key)]
+        ok, error = database.set_stat_plate_components(плейт, remaining, str(inter.author.id), guild_id=guild_id)
+        if not ok:
+            await inter.response.send_message(f"❌ {error}", ephemeral=True)
+            return
+
+        label = _unit_display_name(character_key) if character_key else "весь плейт"
+        await inter.response.send_message(f"🗑️ «{источник}» ({label}) отключён от модульного плейта «{плейт}».", ephemeral=True)
+
+    @stat_req.sub_command(name="модуль_список", description="Показать состав модульного плейта")
+    async def stat_req_module_list(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Модульный плейт", autocomplete=autocomplete_stat_plate),
+    ):
+        await inter.response.defer(ephemeral=True)
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+
+        if not database.is_stat_plate_modular(плейт, guild_id=guild_id):
+            await inter.edit_original_response(f"❌ «{плейт}» не модульный плейт.")
+            return
+
+        components = database.get_stat_plate_components(плейт, guild_id=guild_id)
+        if not components:
+            await inter.edit_original_response(f"❌ У модульного плейта «{плейт}» пока нет ни одного компонента — добавьте через /статы_требования модуль_добавить.")
+            return
+
+        lines = []
+        for _id, source_plate, character_key in components:
+            if character_key:
+                lines.append(f"`{source_plate}` → {_unit_display_name(character_key)}")
+            else:
+                lines.append(f"`{source_plate}` → весь плейт")
+
+        char_count = len(database.get_stat_requirement_characters(плейт, guild_id=guild_id))
+        lines.append("")
+        lines.append(f"Итого развёрнуто персонажей: {char_count}")
+
+        embeds = _lines_to_embeds(f"🧩 {плейт} — состав", DATACRON_LIST_COLOR, lines)
+        await inter.edit_original_response(embed=embeds[0])
+        for e in embeds[1:]:
+            await inter.followup.send(embed=e, ephemeral=True)
 
     # ------------------ /статы (открытая команда) ------------------
     @commands.slash_command(name="статы", description="Прогноз статов персонажа(ей) игрока на релик плейта относительно требований")

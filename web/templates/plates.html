@@ -30,7 +30,7 @@
                     <tbody>
                         {% for p in plates %}
                             <tr data-search="{{ p.name|lower }}">
-                                <td><a href="/plates/{{ p.name }}"><strong>{{ p.name }}</strong></a></td>
+                                <td><a href="/plates/{{ p.name }}"><strong>{{ p.name }}</strong></a>{% if p.is_modular %} <span class="badge" title="Модульный плейт">🧩</span>{% endif %}</td>
                                 <td>{{ p.description or "—" }}</td>
                                 <td class="num">{{ p.char_count }}</td>
                                 <td class="num">{{ p.req_count }}</td>
@@ -43,7 +43,7 @@
                                         </form>
                                     </details>
                                     <form method="post" action="/plates/{{ p.name }}/delete"
-                                          onsubmit="return confirm('Удалить плейт «{{ p.name }}» и все его требования ({{ p.req_count }})? Это необратимо.');">
+                                          onsubmit="return confirm({% if p.is_modular %}'Удалить модульный плейт «{{ p.name }}»? Сами подключённые плейты не пострадают — удалится только состав ({{ p.req_count }} требований развёрнуто). Это необратимо.'{% else %}'Удалить плейт «{{ p.name }}» и все его требования ({{ p.req_count }})? Это необратимо.'{% endif %});">
                                         <button type="submit" class="button-danger">Удалить</button>
                                     </form>
                                 </td>
@@ -65,6 +65,10 @@
             <label>
                 Описание (необязательно)
                 <input type="text" name="description">
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" name="modular">
+                Модульный плейт (ссылается на другие плейты вместо своих персонажей)
             </label>
             <button type="submit">Создать</button>
         </form>
