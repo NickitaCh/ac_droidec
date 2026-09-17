@@ -3570,6 +3570,7 @@ def _resolve_modular_plate_leaf_pairs(plate_name: str, guild_id: int, cursor, vi
     if plate_name in visited:
         return []
     visited = visited | {plate_name}
+    _ensure_stat_plate_character_order_table(cursor)
     cursor.execute(
         "SELECT source_plate, character_key FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ? ORDER BY id",
         (guild_id, plate_name),
@@ -3587,10 +3588,18 @@ def _resolve_modular_plate_leaf_pairs(plate_name: str, guild_id: int, cursor, vi
             if character_key:
                 result.append((source_plate, character_key))
             else:
-                cursor.execute(
-                    "SELECT DISTINCT character_key FROM stat_requirements WHERE guild_id = ? AND plate_name = ?",
-                    (guild_id, source_plate),
-                )
+                # Персонажи "всего плейта"-компонента идут в том же пользовательском порядке,
+                # что и на /plates/<source_plate> (см. get_stat_requirement_characters) — иначе
+                # драг-н-дроп в source_plate не отражался бы в модульном плейте, который на него
+                # ссылается целиком (баг, поправлено 2026-09-17).
+                cursor.execute("""
+                    SELECT DISTINCT r.character_key
+                    FROM stat_requirements r
+                    LEFT JOIN stat_plate_character_order o
+                        ON o.guild_id = r.guild_id AND o.plate_name = r.plate_name AND o.character_key = r.character_key
+                    WHERE r.guild_id = ? AND r.plate_name = ?
+                    ORDER BY (o.sort_order IS NULL), o.sort_order, r.character_key
+                """, (guild_id, source_plate))
                 result.extend((source_plate, ck) for (ck,) in cursor.fetchall())
     return result
 
@@ -3957,8 +3966,10 @@ def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
 
     Для модульного плейта вместо прямого запроса к stat_requirements разворачивает композицию
     (см. _resolve_modular_plate_leaf_pairs) и возвращает персонажей в порядке первого появления
-    по компонентам — драг-н-дроп порядок к модульным плейтам не применяется, у них порядок
-    задаёт сама композиция."""
+    по компонентам — порядок между компонентами задаёт сама композиция (drag-and-drop у самого
+    модульного плейта нет), а порядок ВНУТРИ компонента-"весь плейт" следует за пользовательским
+    порядком его source-плейта (drag-and-drop на /plates/<source_plate> отражается сюда автоматически,
+    поправлено 2026-09-17 — раньше игнорировался, брался сырой порядок из stat_requirements)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
