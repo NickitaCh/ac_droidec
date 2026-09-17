@@ -26,14 +26,20 @@ _build_relevant/_compute_report, чтобы сама модель анализа
    слотов).
 4. Статистика по дельте на характеристику (SF/p50/p70/p90/Spread/CV/NM/GF) — по формулам PDF.
    CV = StdDev(выборочный, N-1) / MeanDelta (ДЕЛЕНИЕ — в самом PDF была опечатка "минус",
-   уточнено пользователем в чате 2026-09-15).
+   уточнено пользователем в чате 2026-09-15). SF считается по СВОЕМУ порогу на каждый стат
+   (STAT_SF_THRESHOLD, PDF v3 раздел 4) — не единым 10%-от-базы правилом, как было раньше
+   (см. докстринг STAT_SF_THRESHOLD).
 5. "Направления модинга" — уникальные конфигурации (сет-комбо + primary на 4 гибких слотах,
    без квадрата/ромба — там всегда один фиксированный primary, см. stat_engine.
    MOD_PRIMARY_OPTIONS) с долей игроков > 10%.
-6. Итоговый ConsensusScore (CS) — по PDF v2, раздел 4: WeightedCV = Σ(CV·GF) / Σ(GF)
+6. Итоговый ConsensusScore (CS) — по PDF, раздел 4: WeightedCV = Σ(CV·GF) / Σ(GF)
    (среднее CV по статам, взвешенное их GF — статы, в которые гильдия почти не
    вкладывается, почти не влияют на консенсус), CS = 1 − WeightedCV. НЕ простое
    среднее CV по статам — этот баг уже был и исправлен (нашёл пользователь 2026-09-16).
+
+Реализовано по "Описание модели анализа модинга персонажа по гильдии v3.pdf" (получено от
+пользователя 2026-09-17, лежал на Desktop рядом с v1/v2 — см. ANALYZED_STATS/STAT_SF_THRESHOLD
+ниже про то, что именно изменилось относительно v2).
 """
 
 import asyncio
@@ -53,43 +59,88 @@ MIN_RELIC = 5  # "Relic > 5" — фильтр релевантности (иск
 REQUIRED_MOD_COUNT = 6  # "Количество надетых модулей = 6"
 REQUIRED_MOD_LEVEL = 15  # "Средний уровень надетых модулей = 15"
 SIGNIFICANT_CF_THRESHOLD = 0.10  # "направление модинга" — конфигурация с частотой > 10%
-SF_DELTA_THRESHOLD = 0.10  # "явно ненулевая" дельта — > 10% от базы
 
-# Характеристики для анализа — закрытый список, привязанный к таблице сетов из PDF
-# (раздел 2: Скорость/Атака/Здоровье/Крит.урон/Крит.шанс/Оборона/Стойкость/Эффективность).
-# Генерик "Critical Chance"/"Offense"/"Defense" в финальном словаре StatCalc не существуют
-# (см. cogs/stat_requirements.py: только Physical/Special-варианты) — поэтому Атака,
-# Крит.шанс распадаются на физ./особую, Оборона — на Броню/Сопротивление. Дельта естественно
-# окажется ~0 на "неродном" для конкретного персонажа варианте — не нужно заранее угадывать
-# его тип атаки.
+# Характеристики для анализа — по PDF v3 (раздел 3: "Группировка и пересчёт характеристик").
+# Относительно v2 переработано втроём:
+# 1. Атака/Крит.шанс больше НЕ распадаются на физ./особую как отдельные строки отчёта — PDF v3
+#    явно требует усреднять их (см. _attack_and_crit_chance_delta ниже), чтобы "неродной" для
+#    персонажа тип урона не считался отдельным неинвестируемым статом, а просто наполовину
+#    гасил среднее (раньше это давало на выходе два ряда, один из которых всегда ~0).
+# 2. Броня/Сопротивление больше не сравниваются как отдельные %-статы — вместо этого PDF v3
+#    вводит производную "Оборону" (см. _defense_delta), а Сопротивление ("сопротивление не
+#    учитываем вообще") выброшено из модели целиком.
+# 3. У каждого стата теперь СВОЙ порог "осмысленного упора" (STAT_SF_THRESHOLD) вместо единого
+#    10%-от-базы, применявшегося раньше ко всем статам без разбора.
 ANALYZED_STATS = [
+    ("Critical Damage", "Крит. урон"),
+    ("Attack", "Атака (усредн.)"),
     ("Speed", "Скорость"),
-    ("Physical Damage", "Атака (физ.)"),
-    ("Special Damage", "Атака (особая)"),
     ("Health", "Здоровье"),
     ("Protection", "Защита"),
-    ("Critical Damage", "Крит. урон"),
-    ("Physical Critical Chance", "Крит. шанс (физ.)"),
-    ("Special Critical Chance", "Крит. шанс (особая)"),
-    ("Armor", "Броня"),
-    ("Resistance", "Сопротивление"),
+    ("Critical Chance", "Крит. шанс (усредн.)"),
+    ("Defense", "Оборона (от брони)"),
     ("Potency", "Эффективность"),
     ("Tenacity", "Стойкость"),
 ]
 STAT_LABELS = dict(ANALYZED_STATS)
 
+# "Порог осмысленного упора" на каждую характеристику (PDF v3, раздел 4) — ("absolute", X):
+# дельта > X в собственных единицах стата (без деления на базу); ("relative", X): дельта/база
+# > X. В v2 здесь стояло единое SF_DELTA_THRESHOLD = 0.10 (10% от базы на всё) — та же PDF (v2)
+# параллельно уже описывала эту самую по-статовую таблицу на стр. 3, но формула GF на стр. 5
+# буквально разворачивала SF как ">10% от базы", что ей прямо противоречило (см.
+# [[project_mod_analysis_feature]], "Scope note deliberately NOT taken further" 2026-09-16) —
+# implementировать её тогда сознательно не стали. PDF v3 это расхождение убрала (формула GF на
+# стр. 5 теперь ссылается общим "> порога", без "10% от базы"), поэтому здесь применяется
+# таблица.
+STAT_SF_THRESHOLD = {
+    "Critical Damage": ("absolute", 30.0),
+    "Attack": ("relative", 0.25),
+    "Speed": ("absolute", 100.0),
+    "Health": ("relative", 0.42),
+    "Protection": ("relative", 0.48),
+    "Critical Chance": ("absolute", 15.0),
+    "Defense": ("relative", 0.40),
+    "Potency": ("absolute", 30.0),
+    "Tenacity": ("absolute", 35.0),
+}
 
-def _comparable_base(base_stats: dict, name: str):
-    """stat_engine.calc_base_stats хранит Armor/Resistance как СЫРОЙ Defense-рейтинг (см. её
-    докстринг), а не %, — final_stats те же статы отдаёт в %. Для дельты нужно единое
-    представление, конвертируем базу тем же round-trip, что и stat_engine.
-    apply_manual_stat_totals (_defense_to_armor_pct)."""
-    value = base_stats.get(name)
-    if value is None:
-        return None
-    if name in stat_engine.NONLINEAR_DEFENSE_STATS:
-        return stat_engine._defense_to_armor_pct(value)
-    return value
+# Статы, показываемые с суффиксом "%" (_fmt_delta) — те же, что раньше входили в
+# stat_engine.PERCENT_STATS, но именами после усреднения/переименования в ANALYZED_STATS
+# (Attack/Defense — сырые числа, не %; Speed/Health/Protection — тоже).
+PERCENT_DISPLAY_STATS = frozenset({"Critical Damage", "Critical Chance", "Potency", "Tenacity"})
+
+
+def _attack_and_crit_chance_delta(final_values: dict, base_values: dict) -> dict:
+    """PDF v3, раздел 3: усредненная атака/крит.шанс — среднее физической и особой дельты (не
+    сумма), чтобы не задваивать вклад и не искажать итог "неродным" для персонажа типом урона
+    (Attack_Delta = (PhysAttack_Delta + SpecAttack_Delta) / 2, аналогично для крит.шанса). База
+    для относительного SF-порога усредняется тем же способом, симметрично дельте."""
+    result = {}
+    for out_name, phys_name, spec_name in (
+        ("Attack", "Physical Damage", "Special Damage"),
+        ("Critical Chance", "Physical Critical Chance", "Special Critical Chance"),
+    ):
+        phys_delta = final_values.get(phys_name, 0.0) - base_values.get(phys_name, 0.0)
+        spec_delta = final_values.get(spec_name, 0.0) - base_values.get(spec_name, 0.0)
+        result[out_name] = {
+            "delta": (phys_delta + spec_delta) / 2,
+            "base": (base_values.get(phys_name, 0.0) + base_values.get(spec_name, 0.0)) / 2,
+        }
+    return result
+
+
+def _defense_delta(final_values: dict, base_values: dict) -> dict:
+    """PDF v3, раздел 3: "пересчитываем броню в оборону... сопротивление не учитываем вообще".
+    Defense = Armor*637.5/(100-Armor) — тот же коэффициент 637.5, что уже подтверждён и
+    используется в stat_engine._armor_pct_to_defense (сверено с пользователем 2026-08-24, см.
+    её докстринг), переиспользуем эту функцию, а не переизобретаем формулу. final_values["Armor"]
+    — итоговый % (calc_final_stats), конвертируем в сырой Defense-рейтинг; base_values["Armor"]
+    calc_base_stats УЖЕ отдаёт сырым Defense-рейтингом (см. её докстринг) — конвертировать
+    повторно не нужно, раньше (v2) было наоборот: базу переводили В %, чтобы сравнить с final%."""
+    final_defense = stat_engine._armor_pct_to_defense(final_values.get("Armor", 0.0))
+    base_defense = base_values.get("Armor", 0.0)
+    return {"delta": final_defense - base_defense, "base": base_defense}
 
 
 def _relevant_unit(unit: dict) -> bool:
@@ -160,7 +211,7 @@ def _config_label_parts(config_key: tuple) -> tuple:
 
 
 def _fmt_delta(value: float, stat_name: str) -> str:
-    suffix = "%" if stat_name in stat_engine.PERCENT_STATS else ""
+    suffix = "%" if stat_name in PERCENT_DISPLAY_STATS else ""
     return mod_search.fmt_value(value) + suffix
 
 
@@ -201,13 +252,21 @@ def _consensus_level(cs) -> str:
     return "Низкий консенсус (много разных вариантов)"
 
 
-def _stat_delta_stats(deltas: list, relevant_count: int) -> dict:
-    """deltas — [(delta, base), ...] по всем релевантным игрокам, у которых стат посчитан."""
+def _meets_threshold(delta: float, base: float, threshold: tuple) -> bool:
+    kind, value = threshold
+    if kind == "absolute":
+        return delta > value
+    return bool(base) and (delta / base) > value
+
+
+def _stat_delta_stats(deltas: list, relevant_count: int, threshold: tuple) -> dict:
+    """deltas — [(delta, base), ...] по всем релевантным игрокам, у которых стат посчитан.
+    threshold — STAT_SF_THRESHOLD[stat_name], ("absolute"|"relative", значение)."""
     n = len(deltas)
     if n == 0:
         return {"n": 0, "sf": None, "p50": None, "p70": None, "p90": None, "spread": None, "cv": None, "nm": None, "gf": None}
 
-    sf_count = sum(1 for d, b in deltas if b and (d / b) > SF_DELTA_THRESHOLD)
+    sf_count = sum(1 for d, b in deltas if _meets_threshold(d, b, threshold))
     sf = sf_count / relevant_count if relevant_count else 0.0
 
     sorted_deltas = sorted(d for d, _b in deltas)
@@ -216,12 +275,12 @@ def _stat_delta_stats(deltas: list, relevant_count: int) -> dict:
     p90 = _percentile(sorted_deltas, 90)
     spread = p90 - p50
 
-    # PDF раздел 3: если SF >= 70%, CV считается по ВСЕЙ выборке релевантных игроков;
+    # PDF раздел 4: если SF >= 70%, CV считается по ВСЕЙ выборке релевантных игроков;
     # если SF < 70%, CV считается только по тем, у кого дельта уже превышает тот же
-    # "порог осмысленного упора" (> SF_DELTA_THRESHOLD от базы), что и в SF — иначе стат,
-    # которым реально пользуется меньшинство гильдии, разбавляется морем игроков с почти
-    # нулевой дельтой и получает обманчиво огромный/бессмысленный CV.
-    cv_population = sorted_deltas if sf >= 0.70 else sorted(d for d, b in deltas if b and (d / b) > SF_DELTA_THRESHOLD)
+    # "порог осмысленного упора" (STAT_SF_THRESHOLD), что и в SF — иначе стат, которым
+    # реально пользуется меньшинство гильдии, разбавляется морем игроков с почти нулевой
+    # дельтой и получает обманчиво огромный/бессмысленный CV.
+    cv_population = sorted_deltas if sf >= 0.70 else sorted(d for d, b in deltas if _meets_threshold(d, b, threshold))
     cv = None
     if len(cv_population) >= 2:
         mean_delta = statistics.mean(cv_population)
@@ -271,13 +330,23 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
         projected = stat_engine.project_unit_relic(p["unit"], target_relic)
         final_values = stat_engine.calc_final_stats(stat_calc, projected)
         base_values = stat_engine.calc_base_stats(stat_calc, projected)
-        base_by_stat = {name: _comparable_base(base_values, name) for name, _label in ANALYZED_STATS}
+
+        composite = _attack_and_crit_chance_delta(final_values, base_values)
+        composite["Defense"] = _defense_delta(final_values, base_values)
+
+        base_by_stat = {}
+        delta_by_stat = {}
+        for name, _label in ANALYZED_STATS:
+            if name in composite:
+                base_by_stat[name] = composite[name]["base"]
+                delta_by_stat[name] = composite[name]["delta"]
+            else:
+                base_by_stat[name] = base_values.get(name, 0.0)
+                delta_by_stat[name] = final_values.get(name, 0.0) - base_by_stat[name]
+
         p["final"] = final_values
         p["base"] = base_by_stat
-        p["delta"] = {
-            name: final_values.get(name, 0.0) - base_by_stat[name]
-            for name, _label in ANALYZED_STATS if base_by_stat.get(name) is not None
-        }
+        p["delta"] = delta_by_stat
 
     relevant_count = len(relevant)
     avg_relic = statistics.mean(p["current_relic"] for p in relevant)
@@ -325,7 +394,7 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
     cv_gf_pairs = []
     for stat_name, label in ANALYZED_STATS:
         deltas = [(p["delta"][stat_name], p["base"][stat_name]) for p in relevant if stat_name in p["delta"]]
-        stats = _stat_delta_stats(deltas, relevant_count)
+        stats = _stat_delta_stats(deltas, relevant_count, STAT_SF_THRESHOLD[stat_name])
         row = {"stat": stat_name, "label": label, **stats}
         if stats["n"]:
             row["sf_pct"] = f"{stats['sf'] * 100:.0f}%"
