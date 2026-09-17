@@ -1210,7 +1210,7 @@ class StatRequirementsCog(commands.Cog):
         описание: str = commands.Param(default=None, description="Заметка о плейте"),
         модульный: bool = commands.Param(
             default=False,
-            description="Модульный плейт не содержит персонажей напрямую — вместо этого ссылается на другие плейты (см. /статы_требования модуль_добавить)",
+            description="Не содержит персонажей напрямую — ссылается на другие плейты (см. модуль_добавить)",
         ),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
