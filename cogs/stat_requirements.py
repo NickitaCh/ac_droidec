@@ -291,7 +291,7 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     return rows, char_name, required_relic, comments, legend
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_FULL):
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW):
     """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total)
     для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
     прогноз на релик плейта. matched/total (ВСЕ приоритеты — required+optional+useful) и
@@ -469,7 +469,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     return char_name, block, matched, total, updated_at, failed_required, required_total
 
 
-async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_FULL) -> dict:
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW) -> dict:
     """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
     ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
     персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
@@ -1452,7 +1452,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
-        сценарий: str = commands.Param(default=SCENARIO_FULL, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
+        сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
     ):
         await inter.response.defer()
 

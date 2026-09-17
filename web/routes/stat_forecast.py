@@ -50,14 +50,14 @@ async def stats_check_form(
     character: str = "",
     force_refresh: bool = False,
     action: str = "",
-    scenario: str = SCENARIO_FULL,
+    scenario: str = SCENARIO_RAW,
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     roster = _roster_choices(guild_id)
     if scenario not in SCENARIO_LABELS:
-        scenario = SCENARIO_FULL
+        scenario = SCENARIO_RAW
 
     context = {
         "user": user,
