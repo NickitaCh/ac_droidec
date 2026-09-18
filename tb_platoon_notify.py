@@ -22,7 +22,6 @@ import httpx
 import database
 import tb_plan_reader
 import tb_platoon_data
-import tb_platoon_engine
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
@@ -32,7 +31,15 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
     "entries": [{"planet", "operation", "unit"}, ...]}, ...], отсортировано по имени.
     discord_id может быть None (игрок есть в user_mapping гильдии, но не привязал Discord —
     такие пропускаются на отправке, не здесь, чтобы вызывающая сторона могла показать их
-    в списке серым/с пометкой "нет привязки")."""
+    в списке серым/с пометкой "нет привязки").
+
+    Намеренно НЕ использует tb_platoon_engine.visible_assignment (кумулятивная видимость
+    "assignment.round_num <= round_num", нужная веб-странице для отображения N/M и
+    дедупа) — в рассылку должны попадать только доноры, впервые назначенные ИМЕННО на
+    этот этап (assignment["round_num"] == round_num). Иначе при многоэтапной планете
+    игрок, задонативший ещё на этапе 3, снова получал бы того же персонажа в личку и на
+    этапе 4, хотя это перенесённый (уже закрытый, помеченный 🔒 на веб-странице) слот, а
+    не новое задание — прямой запрос пользователя 2026-09-18."""
     entries, _error = await tb_plan_reader.fetch_plan_planets(plan)
 
     seen_planets = set()
@@ -73,10 +80,8 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
         for operation in range(1, 7):
             unit_names = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation)) or []
             for slot_index, unit_name in enumerate(unit_names):
-                assignment = tb_platoon_engine.visible_assignment(
-                    assignments.get((e["planet"], operation, slot_index)), round_num,
-                )
-                if not assignment:
+                assignment = assignments.get((e["planet"], operation, slot_index))
+                if not assignment or assignment.get("round_num") != round_num:
                     continue
                 ally_code = assignment["ally_code"]
                 row = rows.setdefault(ally_code, {
