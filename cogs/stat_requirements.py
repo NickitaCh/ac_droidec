@@ -1091,6 +1091,31 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
     return options[:25]
 
 
+# Кнопка «Показать всем» на скрытых (ephemeral) отчётах этого модуля — по образцу
+# cogs/datacron_requirements.py::DatacronCheckRevealView (тот же паттерн, что и там:
+# небольшое локальное дублирование класса вместо общего импорта — уже устоявшаяся
+# конвенция репозитория, см. CLAUDE.md). Публикует те же embed'ы отчёта в канал
+# открытым сообщением по нажатию — запрошено пользователем 2026-09-21 для
+# /омикроны отчёт "как и в схожих командах".
+class StatsRevealView(disnake.ui.View):
+    def __init__(self, embeds):
+        super().__init__(timeout=1800)
+        self.embeds = embeds
+        self.revealed = False
+
+    @disnake.ui.button(label="Показать всем", emoji="🔓", style=disnake.ButtonStyle.secondary)
+    async def reveal(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if self.revealed:
+            await interaction.response.defer()
+            return
+        self.revealed = True
+        button.disabled = True
+        button.label = "Показано всем"
+        await interaction.response.edit_message(view=self)
+        for e in self.embeds:
+            await interaction.channel.send(embed=e)
+
+
 # =====================================================================
 #                       ОСНОВНОЙ МОДУЛЬ /статы
 # =====================================================================
@@ -1408,7 +1433,8 @@ class StatRequirementsCog(commands.Cog):
             lines.append(f"**{item['unit_name']}** — {item['skill_name']}{mode_part}")
 
         embeds = _lines_to_embeds(f"🧬 {игрок} — что можно поставить", DATACRON_LIST_COLOR, lines)
-        await inter.edit_original_response(embed=embeds[0])
+        view = StatsRevealView(embeds)
+        await inter.edit_original_response(embed=embeds[0], view=view)
         for e in embeds[1:]:
             await inter.followup.send(embed=e, ephemeral=True)
 
@@ -2229,8 +2255,13 @@ class StatRequirementsCog(commands.Cog):
                 return
 
         report = resource_spend.build_report(guild_id, ally_code, период)
-        gear, signals = report["gear"], report["signals"]
+        gear, relic = report["gear"], report["relic"]
+        signals, craft = relic["signals"], relic["craft"]
 
+        # Полный список без усечения топ-N — по запросу пользователя 2026-09-21
+        # ("...и ещё 56 видов деталей тоже надо убрать и писать полный список, даже
+        # если он большой"): _lines_to_embeds сама режет на несколько embed'ов/
+        # followup-сообщений под лимит Discord, так что длина тут не проблема.
         lines = [f"За {report['period_label']}, с {report['date_from']}:", ""]
 
         if gear["upgrades"] == 0:
@@ -2239,20 +2270,25 @@ class StatRequirementsCog(commands.Cog):
             lines.append(f"🔧 Снаряжение: **{gear['total']}** деталей ({gear['upgrades']} повыш. тира)")
             if gear["by_equipment"]:
                 names = database.get_game_equipment_names(list(gear["by_equipment"].keys()))
-                top = sorted(gear["by_equipment"].items(), key=lambda kv: kv[1], reverse=True)[:10]
-                for equipment_id, qty in top:
+                for equipment_id, qty in sorted(gear["by_equipment"].items(), key=lambda kv: kv[1], reverse=True):
                     lines.append(f"  • {names.get(equipment_id, equipment_id)} × {qty}")
-                if len(gear["by_equipment"]) > 10:
-                    lines.append(f"  _...и ещё {len(gear['by_equipment']) - 10} видов деталей_")
 
         lines.append("")
-        if signals["upgrades"] == 0:
+        if relic["upgrades"] == 0:
             lines.append("📡 Реликвия: повышений тира не было")
         else:
-            lines.append(f"📡 Реликвия: **{signals['total']}** сигналов ({signals['upgrades']} повыш. тира)")
+            lines.append(f"📡 Реликвия: {relic['upgrades']} повыш. тира")
+            lines.append(f"  Сигналы: **{signals['total']}**")
             if signals["by_material"]:
                 names = database.get_game_equipment_names(list(signals["by_material"].keys()))
                 for material_id, qty in sorted(signals["by_material"].items()):
+                    lines.append(f"  • {names.get(material_id, material_id)} × {qty}")
+            # Материалы "Мусорщика" — по запросу пользователя 2026-09-21: апгрейд
+            # реликвии тратит не только сигналы, но и крафтовые детали (SCV_xxx).
+            if craft["by_material"]:
+                lines.append(f"  Детали для крафта: **{craft['total']}**")
+                names = database.get_game_equipment_names(list(craft["by_material"].keys()))
+                for material_id, qty in sorted(craft["by_material"].items()):
                     lines.append(f"  • {names.get(material_id, material_id)} × {qty}")
 
         title = f"📦 Ресурсы — {игрок}"

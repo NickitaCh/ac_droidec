@@ -21,6 +21,7 @@
     {% if not rows %}
         <p class="empty-state">Никто из гильдии не зарегистрирован (/регистрация) — считать некого.</p>
     {% else %}
+        <p class="muted">Клик по игроку — полный список деталей/материалов.</p>
         <div class="panel">
             <div class="table-toolbar">
                 <input type="search" placeholder="Поиск по игроку…" data-table-search="activity-resources-table">
@@ -33,17 +34,19 @@
                             <th class="num" data-sort="num">Деталей снаряжения</th>
                             <th class="num" data-sort="num">Повыш. тира снаряжения</th>
                             <th class="num" data-sort="num">Сигналов</th>
+                            <th class="num" data-sort="num">Крафт-материалов</th>
                             <th class="num" data-sort="num">Повыш. тира реликвии</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in rows %}
-                            <tr data-search="{{ row.name|lower }}">
+                            <tr data-search="{{ row.name|lower }}" class="resource-player-row" data-player-index="{{ row.player_index }}" tabindex="0">
                                 <td>{{ row.name }}</td>
                                 <td class="num">{% if row.gear_total > 0 %}<strong>{{ row.gear_total }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
                                 <td class="num">{{ row.gear_upgrades }}</td>
                                 <td class="num">{% if row.signals_total > 0 %}<strong>{{ row.signals_total }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
-                                <td class="num">{{ row.signals_upgrades }}</td>
+                                <td class="num">{% if row.craft_total > 0 %}<strong>{{ row.craft_total }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
+                                <td class="num">{{ row.relic_upgrades }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -51,5 +54,63 @@
             </div>
         </div>
         <p class="muted">Точный расчёт по официальным рецептам тиров снаряжения/реликвии — не оценка.</p>
+
+        <script type="application/json" id="resource-players-data">{{ players_detail | tojson }}</script>
+        <dialog id="resource-dialog" class="stat-problem-dialog">
+            <div class="stat-problem-dialog-header">
+                <h3 id="resource-dialog-title"></h3>
+                <button type="button" class="button-secondary" id="resource-dialog-close">Закрыть</button>
+            </div>
+            <div id="resource-dialog-body"></div>
+        </dialog>
+
+        <script>
+        (function () {
+            const players = JSON.parse(document.getElementById("resource-players-data").textContent);
+            const dialog = document.getElementById("resource-dialog");
+            const title = document.getElementById("resource-dialog-title");
+            const body = document.getElementById("resource-dialog-body");
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+            }
+
+            function renderList(heading, items) {
+                if (!items.length) return "";
+                const rows = items.map((it) => `<li>${escapeHtml(it.name)} × ${it.qty}</li>`).join("");
+                return `<div class="stat-problem-char"><div class="stat-problem-char-title">${heading}</div><ul class="stat-problem-list">${rows}</ul></div>`;
+            }
+
+            function openPlayer(player) {
+                title.textContent = player.name;
+                const parts = [
+                    renderList("🔧 Детали снаряжения", player.gear),
+                    renderList("📡 Сигналы", player.signals),
+                    renderList("♻️ Крафт-материалы", player.craft),
+                ].filter(Boolean);
+                body.innerHTML = parts.length ? parts.join("") : "<p class=\"muted\">Нечего показать за этот период.</p>";
+                dialog.showModal();
+            }
+
+            document.querySelectorAll(".resource-player-row").forEach((row) => {
+                row.addEventListener("click", () => {
+                    const player = players[Number(row.dataset.playerIndex)];
+                    if (player) openPlayer(player);
+                });
+                row.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        const player = players[Number(row.dataset.playerIndex)];
+                        if (player) openPlayer(player);
+                    }
+                });
+            });
+
+            document.getElementById("resource-dialog-close").addEventListener("click", () => dialog.close());
+            dialog.addEventListener("click", (e) => {
+                if (e.target === dialog) dialog.close();
+            });
+        })();
+        </script>
     {% endif %}
 {% endblock %}

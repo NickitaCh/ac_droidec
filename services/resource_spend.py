@@ -1,7 +1,7 @@
-"""Счётчик потраченных ресурсов (деталей снаряжения + "сигналов"/материалов реликвии) за
-период — по фиче-реквесту AC Ricardo в Discord-треде ас-задачи 2026-09-21: "за неделю, за
-месяц и за три месяца... даже командой в дискорде, чтоб любой игрок прописал и ему в ответ
-'за последний месяц потрачено столько-то ресов'".
+"""Счётчик потраченных ресурсов (деталей снаряжения + материалов реликвии) за период —
+по фиче-реквесту AC Ricardo в Discord-треде ас-задачи 2026-09-21: "за неделю, за месяц и
+за три месяца... даже командой в дискорде, чтоб любой игрок прописал и ему в ответ 'за
+последний месяц потрачено столько-то ресов'".
 
 Никаких новых обращений к Comlink на игрока не нужно — считает поверх УЖЕ трекаемых
 guild_activity_events 'gear'/'relic'-событий (см. services/activity_diff.py, пишутся раз в
@@ -9,12 +9,14 @@ guild_activity_events 'gear'/'relic'-событий (см. services/activity_dif
 - unit_gear_tier_recipe (per-character, из services/units_sync.py::sync_units) — какие именно
   6 деталей нужны на каждый тир снаряжения.
 - relic_promotion_recipe (глобальный, из services/equipment_sync.py::sync_equipment) — сколько
-  "данных сигнала" (RM_001-004)/кредитов/переработанных материалов на каждый тир реликвии.
+  "данных сигнала" (RM_001-004), переработанных материалов "Мусорщика" (SCV_xxx) и кредитов
+  (GRIND, не показывается — не "деталь") на каждый тир реликвии.
 
 Оба рецепта детерминированы по (base_id, старый_тир, новый_тир) — реального расхода из
 инвентаря игрока Comlink не отдаёт (и никогда не отдавал, в этом проекте таких данных нет
-нигде), поэтому это ТОЧНЫЙ, не оценочный, расчёт: если игрок прошёл тир снаряжения X→Y,
-он гарантированно потратил ровно те детали, которые требует официальный рецепт тира."""
+нигде), поэтому это ТОЧНЫЙ, не оценочный, расчёт: если игрок прошёл тир снаряжения/реликвии
+X→Y, он гарантированно потратил ровно те детали/материалы, которые требует официальный
+рецепт тира."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -32,11 +34,14 @@ PERIOD_LABELS = {
 # по месяцам, с каждого 1 числа"), а не скользящее окно 30/90 дней — иначе "месяц" 1-го
 # числа почти пустой, а 28-го показывает почти два месяца расхода.
 PERIOD_WEEK_DAYS = 7
-# 'RM_'-префикс — "данные сигнала" (см. CLAUDE.md/services/equipment_sync.py) — то, что в
-# гильдии называют "сигналами". Остальные ингредиенты рецепта реликвии (GRIND=кредиты,
-# SCV_xxx=переработанные материалы) не показываются в /ресурсы — запрос был именно про
-# детальки+сигналы, не про полный расход.
+# Ингредиенты рецепта реликвии (relic_promotion_recipe) делятся на три вида по префиксу
+# id: "GRIND" — кредиты (не деталь, не показывается), "RM_xxx" — "данные сигнала" (то, что
+# в гильдии называют "сигналами"), "SCV_xxx" — материалы, которые можно скрафтить у
+# "Мусорщика" из деталей снаряжения (см. game_scavenger_recipes/equipment_sync.py) —
+# добавлено 2026-09-21 по запросу пользователя: "апнул релик — потратил не только
+# сигналы, но и какие-то детали", отдельным блоком от сигналов.
 SIGNAL_MATERIAL_PREFIX = "RM_"
+CRAFT_MATERIAL_PREFIX = "SCV_"
 
 
 def period_date_from(period: str, today: "datetime.date | None" = None) -> str:
@@ -92,17 +97,20 @@ def gear_pieces_spent(guild_id: int, ally_code: str, date_from: str, date_to: st
     }
 
 
-def signals_spent(guild_id: int, ally_code: str, date_from: str, date_to: str | None = None) -> dict:
-    """Возвращает {"total": int, "upgrades": int, "by_material": {material_id: qty}} —
-    "данные сигнала" (RM_001-004), потраченные на все пройденные за период тиры реликвии
-    (все персонажи игрока разом). Тиры реликвии — общая для всех персонажей шкала (в
-    отличие от снаряжения), поэтому один и тот же диапазон тиров у разных персонажей стоит
-    одинаково — суммируется напрямую, без привязки к base_id."""
+def relic_materials_spent(guild_id: int, ally_code: str, date_from: str, date_to: str | None = None) -> dict:
+    """Возвращает {"upgrades": int, "signals": {"total", "by_material"}, "craft":
+    {"total", "by_material"}} — "данные сигнала" (RM_001-004) и отдельным блоком
+    переработанные материалы "Мусорщика" (SCV_xxx), потраченные на все пройденные за
+    период тиры реликвии (все персонажи игрока разом). Тиры реликвии — общая для всех
+    персонажей шкала (в отличие от снаряжения), поэтому один и тот же диапазон тиров у
+    разных персонажей стоит одинаково — суммируется напрямую, без привязки к base_id.
+    Один проход по событиям и рецептам на оба блока — не дублирует запросы."""
     events = database.get_guild_activity_events(
         guild_id, ally_code=ally_code, action_type="relic",
         date_from=date_from, date_to=date_to, limit=10000,
     )
-    by_material: dict[str, int] = {}
+    by_signal: dict[str, int] = {}
+    by_craft: dict[str, int] = {}
     upgrades = 0
     for _ally, _base_id, _action, old_value, new_value, _date, _scraped in events:
         try:
@@ -114,48 +122,44 @@ def signals_spent(guild_id: int, ally_code: str, date_from: str, date_to: str | 
         upgrades += 1
         ingredients = database.get_relic_promotion_recipe_range(old_tier, new_tier)
         for material_id, qty in ingredients.items():
-            if not material_id.startswith(SIGNAL_MATERIAL_PREFIX):
-                continue
-            by_material[material_id] = by_material.get(material_id, 0) + qty
+            if material_id.startswith(SIGNAL_MATERIAL_PREFIX):
+                by_signal[material_id] = by_signal.get(material_id, 0) + qty
+            elif material_id.startswith(CRAFT_MATERIAL_PREFIX):
+                by_craft[material_id] = by_craft.get(material_id, 0) + qty
 
     return {
-        "total": sum(by_material.values()),
         "upgrades": upgrades,
-        "by_material": by_material,
+        "signals": {"total": sum(by_signal.values()), "by_material": by_signal},
+        "craft": {"total": sum(by_craft.values()), "by_material": by_craft},
     }
 
 
 def build_report(guild_id: int, ally_code: str, period: str) -> dict:
-    """{"period_label", "date_from", "gear", "signals"} — сводка для /ресурсы и, при
-    необходимости, веб-паритета (см. /activity/players)."""
+    """{"period_label", "date_from", "gear", "relic"} — сводка для /ресурсы и веб-паритета
+    (/activity/resources). relic — см. relic_materials_spent (signals+craft)."""
     date_from = period_date_from(period)
     return {
         "period_label": PERIOD_LABELS.get(period, PERIOD_LABELS["month"]),
         "date_from": date_from,
         "gear": gear_pieces_spent(guild_id, ally_code, date_from),
-        "signals": signals_spent(guild_id, ally_code, date_from),
+        "relic": relic_materials_spent(guild_id, ally_code, date_from),
     }
 
 
 def build_guild_report(guild_id: int, period: str) -> list[dict]:
-    """[{"ally_code", "name", "gear_total", "gear_upgrades", "signals_total",
-    "signals_upgrades"}, ...] — для веб-страницы /activity/resources, все
-    зарегистрированные игроки гильдии разом, отсортировано по общей сумме (деталей+
-    сигналов) по убыванию. N отдельных запросов (по одному на игрока) — тот же
-    приемлемый паттерн, что уже используют другие гильдийские отчёты в этом проекте
-    (напр. _build_guild_report в cogs/stat_requirements.py)."""
+    """[{"ally_code", "name", "gear", "relic"}, ...] — для веб-страницы
+    /activity/resources, все зарегистрированные игроки гильдии разом, отсортировано по
+    общей сумме (деталей+сигналов+крафт-материалов) по убыванию. gear/relic — те же
+    структуры, что возвращают gear_pieces_spent/relic_materials_spent (полные
+    by_equipment/by_material внутри — нужны для попапа с полным списком на клике по
+    игроку, см. web/templates/activity_resources.html). N отдельных запросов (по одному
+    на игрока) — тот же приемлемый паттерн, что уже используют другие гильдийские отчёты
+    в этом проекте (напр. _build_guild_report в cogs/stat_requirements.py)."""
     date_from = period_date_from(period)
     rows = []
     for _discord_id, ally_code, name in database.get_all_user_mappings(guild_id):
         gear = gear_pieces_spent(guild_id, ally_code, date_from)
-        signals = signals_spent(guild_id, ally_code, date_from)
-        rows.append({
-            "ally_code": ally_code,
-            "name": name,
-            "gear_total": gear["total"],
-            "gear_upgrades": gear["upgrades"],
-            "signals_total": signals["total"],
-            "signals_upgrades": signals["upgrades"],
-        })
-    rows.sort(key=lambda r: r["gear_total"] + r["signals_total"], reverse=True)
+        relic = relic_materials_spent(guild_id, ally_code, date_from)
+        rows.append({"ally_code": ally_code, "name": name, "gear": gear, "relic": relic})
+    rows.sort(key=lambda r: r["gear"]["total"] + r["relic"]["signals"]["total"] + r["relic"]["craft"]["total"], reverse=True)
     return rows

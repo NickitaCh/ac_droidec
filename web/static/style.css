@@ -1474,6 +1474,8 @@ dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 
 /* ---- Попап невыполненных требований игрока (/stats-check, гильдийский отчёт) ---- */
 table.data tbody tr.stat-problem-row { cursor: pointer; }
+/* ---- Попап полного списка деталей/материалов игрока (/activity/resources) ---- */
+table.data tbody tr.resource-player-row { cursor: pointer; }
 dialog.stat-problem-dialog {
     max-width: 36em;
     width: 92vw;

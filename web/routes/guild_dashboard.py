@@ -1569,10 +1569,16 @@ async def activity_players(request: Request, user: dict = Depends(require_guild_
 
 @router.get("/activity/resources", response_class=HTMLResponse)
 async def activity_resources(request: Request, user: dict = Depends(require_guild_access)):
-    """Детали снаряжения + сигналы реликвии, потраченные за период — веб-паритет
+    """Детали снаряжения + материалы реликвии, потраченные за период — веб-паритет
     /ресурсы (см. services/resource_spend.py), запрошен пользователем 2026-09-21 сразу
     после деплоя Discord-команды. period — "week"/"month"/"3months", те же ключи и
-    семантика (месяц/3 месяца — по календарю, с 1 числа), что и в Discord-команде."""
+    семантика (месяц/3 месяца — по календарю, с 1 числа), что и в Discord-команде.
+
+    По запросу пользователя (тот же день): клик по игроку открывает попап с ПОЛНЫМ
+    списком деталей/сигналов/крафт-материалов и их количеством (без усечения, тот же
+    принцип, что и в /ресурсы после правки лимита топ-N). Имена резолвятся ОДНИМ
+    bulk-запросом на все id разом (по всей гильдии), а не по разу на игрока — тот же
+    паттерн, что stats_check.html/get_game_unit_names для попапа "проблемных" игроков."""
     guild_id = user["guild_id"]
     period = request.query_params.get("period") or "month"
     if period not in resource_spend.PERIOD_LABELS:
@@ -1584,9 +1590,44 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
         for key in resource_spend.PERIOD_LABELS
     }
 
+    all_ids = set()
+    for row in rows:
+        all_ids.update(row["gear"]["by_equipment"].keys())
+        all_ids.update(row["relic"]["signals"]["by_material"].keys())
+        all_ids.update(row["relic"]["craft"]["by_material"].keys())
+    names = database.get_game_equipment_names(list(all_ids))
+
+    def _named_sorted(by_id: dict) -> list:
+        return [
+            {"name": names.get(item_id, item_id), "qty": qty}
+            for item_id, qty in sorted(by_id.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+
+    table_rows = []
+    players_detail = []
+    for i, row in enumerate(rows):
+        gear, relic = row["gear"], row["relic"]
+        signals, craft = relic["signals"], relic["craft"]
+        table_rows.append({
+            "player_index": i,
+            "name": row["name"],
+            "gear_total": gear["total"],
+            "gear_upgrades": gear["upgrades"],
+            "signals_total": signals["total"],
+            "craft_total": craft["total"],
+            "relic_upgrades": relic["upgrades"],
+        })
+        players_detail.append({
+            "name": row["name"],
+            "gear": _named_sorted(gear["by_equipment"]),
+            "signals": _named_sorted(signals["by_material"]),
+            "craft": _named_sorted(craft["by_material"]),
+        })
+
     return templates.TemplateResponse(request, "activity_resources.html", {
         "user": user,
-        "rows": rows,
+        "rows": table_rows,
+        "players_detail": players_detail,
         "period": period,
         "period_labels": resource_spend.PERIOD_LABELS,
         "period_urls": period_urls,
