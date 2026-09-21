@@ -24,7 +24,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data, feature_flags, omicron_priority, tb_schedule
+from services import activity_diff, dashboard_data, feature_flags, omicron_priority, resource_spend, tb_schedule
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -1564,6 +1564,32 @@ async def activity_players(request: Request, user: dict = Depends(require_guild_
         "rows": rows,
         "period": period,
         "action_types": list(dashboard_data.ACTIVITY_ACTION_LABELS.items()),
+    })
+
+
+@router.get("/activity/resources", response_class=HTMLResponse)
+async def activity_resources(request: Request, user: dict = Depends(require_guild_access)):
+    """Детали снаряжения + сигналы реликвии, потраченные за период — веб-паритет
+    /ресурсы (см. services/resource_spend.py), запрошен пользователем 2026-09-21 сразу
+    после деплоя Discord-команды. period — "week"/"month"/"3months", те же ключи и
+    семантика (месяц/3 месяца — по календарю, с 1 числа), что и в Discord-команде."""
+    guild_id = user["guild_id"]
+    period = request.query_params.get("period") or "month"
+    if period not in resource_spend.PERIOD_LABELS:
+        period = "month"
+
+    rows = resource_spend.build_guild_report(guild_id, period)
+    period_urls = {
+        key: f"/activity/resources?{urlencode({'period': key})}"
+        for key in resource_spend.PERIOD_LABELS
+    }
+
+    return templates.TemplateResponse(request, "activity_resources.html", {
+        "user": user,
+        "rows": rows,
+        "period": period,
+        "period_labels": resource_spend.PERIOD_LABELS,
+        "period_urls": period_urls,
     })
 
 

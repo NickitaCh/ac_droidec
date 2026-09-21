@@ -27,11 +27,11 @@ PERIOD_LABELS = {
     "month": "месяц",
     "3months": "3 месяца",
 }
-PERIOD_DAYS = {
-    "week": 7,
-    "month": 30,
-    "3months": 90,
-}
+# 'week' — скользящее окно (7 последних дней, календарной "недели" в игре нет). 'month'/
+# '3months' — ПО КАЛЕНДАРЮ, с 1 числа (по явному запросу пользователя 2026-09-21: "считать
+# по месяцам, с каждого 1 числа"), а не скользящее окно 30/90 дней — иначе "месяц" 1-го
+# числа почти пустой, а 28-го показывает почти два месяца расхода.
+PERIOD_WEEK_DAYS = 7
 # 'RM_'-префикс — "данные сигнала" (см. CLAUDE.md/services/equipment_sync.py) — то, что в
 # гильдии называют "сигналами". Остальные ингредиенты рецепта реликвии (GRIND=кредиты,
 # SCV_xxx=переработанные материалы) не показываются в /ресурсы — запрос был именно про
@@ -41,8 +41,14 @@ SIGNAL_MATERIAL_PREFIX = "RM_"
 
 def period_date_from(period: str, today: "datetime.date | None" = None) -> str:
     today = today or datetime.now(MSK).date()
-    days = PERIOD_DAYS.get(period, PERIOD_DAYS["month"])
-    return (today - timedelta(days=days)).isoformat()
+    if period == "week":
+        return (today - timedelta(days=PERIOD_WEEK_DAYS)).isoformat()
+    if period == "3months":
+        month_index = today.month - 1 - 2  # 0-based, 2 полных месяца назад + текущий
+        year = today.year + month_index // 12
+        month = month_index % 12 + 1
+        return today.replace(year=year, month=month, day=1).isoformat()
+    return today.replace(day=1).isoformat()  # "month" — с 1 числа текущего месяца
 
 
 def _gear_tier_pairs(events: list) -> set[tuple[str, int]]:
@@ -129,3 +135,27 @@ def build_report(guild_id: int, ally_code: str, period: str) -> dict:
         "gear": gear_pieces_spent(guild_id, ally_code, date_from),
         "signals": signals_spent(guild_id, ally_code, date_from),
     }
+
+
+def build_guild_report(guild_id: int, period: str) -> list[dict]:
+    """[{"ally_code", "name", "gear_total", "gear_upgrades", "signals_total",
+    "signals_upgrades"}, ...] — для веб-страницы /activity/resources, все
+    зарегистрированные игроки гильдии разом, отсортировано по общей сумме (деталей+
+    сигналов) по убыванию. N отдельных запросов (по одному на игрока) — тот же
+    приемлемый паттерн, что уже используют другие гильдийские отчёты в этом проекте
+    (напр. _build_guild_report в cogs/stat_requirements.py)."""
+    date_from = period_date_from(period)
+    rows = []
+    for _discord_id, ally_code, name in database.get_all_user_mappings(guild_id):
+        gear = gear_pieces_spent(guild_id, ally_code, date_from)
+        signals = signals_spent(guild_id, ally_code, date_from)
+        rows.append({
+            "ally_code": ally_code,
+            "name": name,
+            "gear_total": gear["total"],
+            "gear_upgrades": gear["upgrades"],
+            "signals_total": signals["total"],
+            "signals_upgrades": signals["upgrades"],
+        })
+    rows.sort(key=lambda r: r["gear_total"] + r["signals_total"], reverse=True)
+    return rows

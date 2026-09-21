@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Ресурсы — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <h1>Активность гильдии — потрачено ресурсов</h1>
+    <p class="muted"><a href="/activity">← Назад к общей ленте</a></p>
+
+    <div class="segmented-toggle">
+        <span class="muted">Период:</span>
+        <span class="segmented-toggle-options">
+            {% for key, label in period_labels.items() %}
+                {% if key == period %}
+                    <strong>{{ label }}</strong>
+                {% else %}
+                    <a href="{{ period_urls[key] }}">{{ label }}</a>
+                {% endif %}
+            {% endfor %}
+        </span>
+    </div>
+
+    {% if not rows %}
+        <p class="empty-state">Никто из гильдии не зарегистрирован (/регистрация) — считать некого.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-toolbar">
+                <input type="search" placeholder="Поиск по игроку…" data-table-search="activity-resources-table">
+            </div>
+            <div class="table-scroll">
+                <table class="data" id="activity-resources-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th class="num" data-sort="num">Деталей снаряжения</th>
+                            <th class="num" data-sort="num">Повыш. тира снаряжения</th>
+                            <th class="num" data-sort="num">Сигналов</th>
+                            <th class="num" data-sort="num">Повыш. тира реликвии</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr data-search="{{ row.name|lower }}">
+                                <td>{{ row.name }}</td>
+                                <td class="num">{% if row.gear_total > 0 %}<strong>{{ row.gear_total }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
+                                <td class="num">{{ row.gear_upgrades }}</td>
+                                <td class="num">{% if row.signals_total > 0 %}<strong>{{ row.signals_total }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
+                                <td class="num">{{ row.signals_upgrades }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <p class="muted">Точный расчёт по официальным рецептам тиров снаряжения/реликвии — не оценка.</p>
+    {% endif %}
+{% endblock %}
