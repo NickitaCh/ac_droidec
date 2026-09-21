@@ -820,6 +820,17 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
         else:
             problem.append(entry)
 
+        # _evaluate_character_player — синхронный по факту (sqlite + StatCalc-расчёты без
+        # единого реального await), при force_refresh=False (как тут). Без явной отдачи
+        # управления цикл по всему ростеру × персонажам плейта блокирует event loop бота
+        # сплошным CPU-куском на несколько секунд — за это время ЛЮБОЕ другое взаимодействие
+        # (включая повторный клик того же игрока) не успевает получить defer() в 3-секундное
+        # окно Discord и падает с "Приложение не отвечает" (жалоба NicolozZ, ас-тестовая,
+        # 2026-09-21) — тот же класс бага, что CLAUDE.md уже описывает для необёрнутых Comlink-
+        # вызовов, только тут виновник — синхронный StatCalc/sqlite, а не сеть. Тот же паттерн
+        # периодической отдачи, что уже в player_units_sync_loop (await asyncio.sleep(0.1)).
+        await asyncio.sleep(0)
+
     problem.sort(key=lambda r: (r["matched"] - r["total"], r["name"].lower()))
     compliant.sort(key=lambda r: r["name"].lower())
     no_data.sort(key=lambda r: r["name"].lower())
