@@ -83,6 +83,12 @@ def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool, skill_tie
         if old_unit is None:
             rarity = new_unit.get("currentRarity", 1)
             events.append((base_id, "unlock", "", f"{rarity}★"))
+            # игрок мог прокачать реликвию/дать зету-омикрон в тот же цикл синка, что и
+            # открытие персонажа (комлинк не хранит историю) — диффим против пустой
+            # заготовки, чтобы не терять эти события молча (gear/star тут не всплывут,
+            # diff_unit сам их не пишет без old.get(...) is not None)
+            for action_type, old_value, new_value in diff_unit({}, new_unit, skill_tier_map):
+                events.append((base_id, action_type, old_value, new_value))
             continue
         for action_type, old_value, new_value in diff_unit(old_unit, new_unit, skill_tier_map):
             events.append((base_id, action_type, old_value, new_value))
