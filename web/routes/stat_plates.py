@@ -199,7 +199,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
             elif is_mod_primary:
                 value_display = f"Основа: {_mod_primary_text(r[12], r[5])}"
             elif is_mod_set:
-                value_display = f"Сет: {_mod_set_text(r[5])}"
+                value_display = f"Сет: {_mod_set_text(r[11])}"
             elif is_compare:
                 value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}"
             else:
@@ -457,9 +457,12 @@ async def requirement_add_set(
 
     char_name = _unit_name(base_id)
     raw_text = f"{char_name} — сет «{_mod_set_text(set_id)}»"
+    # threshold_value=1.0 захардкожен (булева цель, тот же паттерн, что у Omicron), сам сет —
+    # в колонке skill_id (см. cogs/stat_requirements.py::stat_req_add_mod_set за объяснением,
+    # почему не в threshold_value — реальный баг, пойманный сквозным тестом 2026-09-21).
     database.add_stat_requirement(
-        plate_name, base_id, STAT_SET, ">=", float(set_id), priority, raw_text, comment.strip() or None,
-        user["discord_id"], guild_id=guild_id, scheme_num=_parse_scheme_form(scheme_num),
+        plate_name, base_id, STAT_SET, ">=", 1.0, priority, raw_text, comment.strip() or None,
+        user["discord_id"], guild_id=guild_id, skill_id=str(set_id), scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
