@@ -43,18 +43,28 @@ def _tier_for_level(level: int | None) -> str | None:
 
 
 def _best_registration(discord_id: str) -> dict | None:
-    """Проходит по всем активным гильдиям, ищет привязанный (через /регистрация)
-    ally_code этого discord_id и его закэшированный ранг в ростере той же
-    гильдии. Если привязок несколько (альты в разных гильдиях) — побеждает
-    более высокий tier, при равенстве — гильдия с меньшим id (тот же паттерн
-    тай-брейка, что был у старого resolve_guild_id_from_roles)."""
+    """Ищет привязанный (через /регистрация) ally_code этого discord_id и его
+    закэшированный ранг в ростере той же гильдии. Если привязок несколько (альты
+    в разных гильдиях) — побеждает более высокий tier, при равенстве — гильдия
+    с меньшим id (тот же паттерн тай-брейка, что был у старого
+    resolve_guild_id_from_roles).
+
+    Раньше — цикл по КАЖДОЙ активной гильдии (database.get_all_guild_configs()),
+    с отдельным database.get_user_registration() на каждую (N+1 отдельных
+    sqlite-соединений на КАЖДОЕ обращение к правам, то есть на каждую слэш-
+    команду/автокомплит во всей мультигильдийной системе бота) — растёт линейно
+    с числом обслуживаемых гильдий (7 на 2026-09-21, только увеличивается).
+    Заменено на один запрос database.get_registrations_for_discord_id (см. её
+    докстринг) — реальных регистраций у одного discord_id почти всегда 1,
+    редко 2 (альт), так что масштаб теперь не зависит от общего числа гильдий."""
+    registrations = database.get_registrations_for_discord_id(discord_id)
+    if not registrations:
+        return None
+    active_guild_ids = {cfg["id"] for cfg in database.get_all_guild_configs()}
     best = None
-    for cfg in database.get_all_guild_configs():
-        guild_id = cfg["id"]
-        reg = database.get_user_registration(discord_id, guild_id=guild_id)
-        if not reg:
+    for guild_id, (ally_code, _ingame_name) in registrations.items():
+        if guild_id not in active_guild_ids:
             continue
-        ally_code, _ingame_name = reg
         tier = _tier_for_level(database.get_member_level(guild_id, ally_code))
         if tier is None:
             # Зарегистрирован, но не найден в последнем ростер-кэше этой

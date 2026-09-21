@@ -2130,6 +2130,31 @@ def get_user_registration(discord_id: str, guild_id: int = 1):
     return row if row else None
 
 
+def get_registrations_for_discord_id(discord_id: str) -> dict[int, tuple[str, str]]:
+    """{guild_id: (ally_code, ingame_name)} — ОДИН запрос вместо N (по гильдии), которые
+    guild_resolver.py::_best_registration раньше делала циклом по database.get_all_guild_configs()
+    на КАЖДОЕ обращение к правам (то есть на каждую слэш-команду во ВСЕХ гильдиях бота).
+    Найдено 2026-09-21 при разборе повторяющихся "Приложение не отвечает" — при 7+
+    обслуживаемых гильдиях это N+1 отдельных sqlite3.connect()/execute()/close() синхронно
+    на каждое взаимодействие, растущее линейно с числом гильдий; масштаб самого этого
+    запроса (обычно 1 регистрация на discord_id, изредка 2 у альтов) от числа гильдий не
+    зависит. При нескольких регистрациях в одной гильдии (основной+альт) побеждает
+    is_main=1, как и get_user_registration."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT guild_id, ally_code, ingame_name FROM user_registration WHERE discord_id = ? ORDER BY is_main DESC",
+        (discord_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for guild_id, ally_code, ingame_name in rows:
+        result.setdefault(guild_id, (ally_code, ingame_name))  # первая строка на guild_id — уже is_main DESC
+    return result
+
+
 def discord_id_has_any_registration(discord_id: str) -> bool:
     """Есть ли у этого discord_id хоть одна привязка в ЛЮБОЙ гильдии, активной или
     нет — в отличие от get_user_registration(s), не фильтрует по guild_id и не
