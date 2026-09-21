@@ -25,6 +25,17 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES]
 OPERATOR_OPTIONS = [(c.name, c.value) for c in OPERATOR_CHOICES]
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
+MOD_SLOT_OPTIONS = list(MOD_SLOT_LABELS.items())
+# Для формы "сравнение с другим персонажем" — Relic не сравнивают между персонажами (см.
+# cogs/stat_requirements.py::stat_req_add_compare, тот же список там).
+COMPARE_STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
+# {slot_key: [{unit_stat, label}, ...]} — встраивается в шаблон как JSON, JS фильтрует
+# локально по выбранному слоту без похода на бэкенд (справочник маленький и статичный,
+# в отличие от omicron-skills, которые зависят от конкретного персонажа).
+MOD_PRIMARY_OPTIONS_JSON = {
+    slot: [{"unit_stat": opt["unit_stat"], "label": opt["label"]} for opt in opts]
+    for slot, opts in stat_engine.MOD_PRIMARY_OPTIONS.items()
+}
 
 
 def _fmt_value(value: float) -> str:
@@ -69,6 +80,12 @@ def _mod_primary_text(slot_key: str, unit_stat_id) -> str:
         f"#{unit_stat_id}",
     )
     return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {stat_label}"
+
+
+def _compare_req_text(stat_name: str, operator: str, compare_base_id: str) -> str:
+    """Независимая копия cogs/stat_requirements.py::_compare_req_text."""
+    stat_label = next((n for n, v in STAT_OPTIONS if v == stat_name), stat_name)
+    return f"{stat_label} {operator} {_unit_name(compare_base_id)}"
 
 
 @router.get("", response_class=HTMLResponse)
@@ -204,6 +221,9 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "operator_options": OPERATOR_OPTIONS,
         "priority_options": PRIORITY_OPTIONS,
         "priority_default": PRIORITY_REQUIRED,
+        "mod_slot_options": MOD_SLOT_OPTIONS,
+        "mod_primary_options_json": MOD_PRIMARY_OPTIONS_JSON,
+        "compare_stat_options": COMPARE_STAT_OPTIONS,
         "error": request.query_params.get("error"),
     })
 
@@ -304,6 +324,75 @@ async def requirement_add_omicron(
     database.add_stat_requirement(
         plate_name, base_id, STAT_OMICRON, ">=", 1.0, priority, raw_text, comment.strip() or None,
         user["discord_id"], guild_id=guild_id, skill_id=skill_id,
+    )
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
+@router.post("/{plate_name}/requirements/add_mod_primary", response_class=HTMLResponse)
+async def requirement_add_mod_primary(
+    plate_name: str,
+    base_id: str = Form(...),
+    mod_slot: str = Form(...),
+    unit_stat_id: int = Form(...),
+    priority: str = Form(PRIORITY_REQUIRED),
+    comment: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Веб-эквивалент /статы_требования добавить_основу (cogs/stat_requirements.py::
+    stat_req_add_mod_primary) — до 2026-09-21 такое требование можно было только увидеть
+    в списке, но не создать через веб."""
+    guild_id = user["guild_id"]
+    if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+        return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+
+    if not any(opt["unit_stat"] == unit_stat_id for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(mod_slot, [])):
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Эта основа недопустима для выбранного слота — выберите вариант из списка.'})}",
+            status_code=303,
+        )
+
+    char_name = _unit_name(base_id)
+    raw_text = f"{char_name} — основа «{_mod_primary_text(mod_slot, unit_stat_id)}»"
+    database.add_stat_requirement(
+        plate_name, base_id, STAT_MOD_PRIMARY, "=", float(unit_stat_id), priority, raw_text, comment.strip() or None,
+        user["discord_id"], guild_id=guild_id, mod_slot=mod_slot,
+    )
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
+@router.post("/{plate_name}/requirements/add_compare", response_class=HTMLResponse)
+async def requirement_add_compare(
+    plate_name: str,
+    base_id: str = Form(...),
+    stat_name: str = Form(...),
+    operator: str = Form(...),
+    compare_base_id: str = Form(...),
+    priority: str = Form(PRIORITY_REQUIRED),
+    comment: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Веб-эквивалент /статы_требования добавить_сравнение (cogs/stat_requirements.py::
+    stat_req_add_compare) — до 2026-09-21 доступно было только через Discord."""
+    guild_id = user["guild_id"]
+    if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+        return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+    if compare_base_id == base_id:
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Нельзя сравнивать персонажа с самим собой — выберите другого персонажа.'})}",
+            status_code=303,
+        )
+
+    char_name = _unit_name(base_id)
+    raw_text = f"{char_name} — {_compare_req_text(stat_name, operator, compare_base_id)}"
+    database.add_stat_requirement(
+        plate_name, base_id, stat_name, operator, 0.0, priority, raw_text, comment.strip() or None,
+        user["discord_id"], guild_id=guild_id, compare_character_key=compare_base_id,
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 

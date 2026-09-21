@@ -136,6 +136,96 @@
                 <button type="submit">Добавить</button>
             </form>
         </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Добавить требование на основу мода</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add_mod_primary" class="requirement-form" data-mod-primary-add-form>
+                <label>
+                    Персонаж
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Слот мода
+                    <select name="mod_slot" class="mod-primary-slot-select" required>
+                        {% for value, label in mod_slot_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Основа
+                    <select name="unit_stat_id" class="mod-primary-stat-select" required></select>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Добавить требование на сравнение с персонажем</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add_compare" class="requirement-form">
+                <label>
+                    Персонаж
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Стат
+                    <select name="stat_name" required>
+                        {% for label, value in compare_stat_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Оператор
+                    <select name="operator" required>
+                        {% for label, value in operator_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    С кем сравниваем
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="compare_base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
     {% endif %}
 
     {% if not characters %}
@@ -294,6 +384,34 @@
         };
 
         unitHidden.addEventListener("change", refresh);
+    });
+    </script>
+
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // Форма "Добавить требование на основу мода" — выпадающий список основ зависит от
+        // выбранного слота (stat_engine.MOD_PRIMARY_OPTIONS, справочник маленький и статичный —
+        // весь передан сюда сразу через mod_primary_options_json, без похода на бэкенд,
+        // в отличие от omicron-skills выше (те зависят от конкретного персонажа).
+        const form = document.querySelector("[data-mod-primary-add-form]");
+        if (!form) return;
+        const options = {{ mod_primary_options_json | tojson }};
+        const slotSelect = form.querySelector(".mod-primary-slot-select");
+        const statSelect = form.querySelector(".mod-primary-stat-select");
+
+        const refresh = () => {
+            const opts = options[slotSelect.value] || [];
+            statSelect.innerHTML = "";
+            opts.forEach((item) => {
+                const opt = document.createElement("option");
+                opt.value = item.unit_stat;
+                opt.textContent = item.label;
+                statSelect.appendChild(opt);
+            });
+        };
+
+        slotSelect.addEventListener("change", refresh);
+        refresh();
     });
     </script>
 
