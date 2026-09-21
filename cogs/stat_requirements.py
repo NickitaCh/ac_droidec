@@ -540,7 +540,18 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     else:
         headers = ["Стат", "Сейчас", "Норма"]
 
+    # Омикрон/основа мода/сравнение с персонажем раньше шли теми же 3-5 колонками, что и обычные
+    # статы — но их текст (название способности, слот+основа, "vs ИмяПерсонажа") сильно длиннее
+    # обычных чисел, из-за чего моноширинная таблица (_build_table подгоняет ширину колонки под
+    # САМУЮ длинную ячейку) распухала и разъезжалась на мобильном Discord (жалоба пользователя,
+    # реальный скриншот, тред "Гайд по АС Боту" 2026-09-21: "тут чет куда-то все убежало"). Эти
+    # три типа требований теперь копятся в отдельные списки строк и выводятся под таблицей
+    # обычным текстом (без моноширинной колончатости) — таблица остаётся узкой и читаемой на
+    # телефоне, а длинные названия просто переносятся как обычный текст.
     table_rows = []
+    omicron_lines = []
+    mod_primary_lines = []
+    compare_lines = []
     for row in rows:
         req_id, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key, row_scheme = row
         if active_scheme is not None and row_scheme and row_scheme != active_scheme:
@@ -562,10 +573,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             compare_char_name = _unit_display_name(compare_character_key)
             compare_unit, _ = await _get_unit_for_player(bot, ally_code, compare_character_key, force_refresh)
             if compare_unit is None:
-                table_rows.append(
-                    [f"{_stat_label(stat_name, priority)} vs {compare_char_name}", "нет данных у сравниваемого", "—", "—", "—"]
-                    if show_projection else [f"{_stat_label(stat_name, priority)} vs {compare_char_name}", "нет данных у сравниваемого", "—"]
-                )
+                suffix = "*" if priority == "optional" else ""
+                compare_lines.append(f"⚠️ {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}: нет данных у сравниваемого")
                 continue
             compare_stats = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, compare_unit)))
             compare_stats["Relic"] = stat_engine.get_current_relic_level(compare_unit)
@@ -589,8 +598,16 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         else:
             req_cell = f"{operator} {_fmt_compact(threshold)}"
         cur_val = current_values.get(lookup_key)
+        suffix = "*" if priority == "optional" else ""
         if cur_val is None or threshold is None:
-            table_rows.append([label, "нет данных", "—", "—", req_cell] if show_projection else [label, "нет данных", req_cell])
+            if is_omicron:
+                omicron_lines.append(f"⚠️ {_omicron_ability_label(skill_id)}{suffix}: нет данных")
+            elif is_mod_primary:
+                mod_primary_lines.append(f"⚠️ {MOD_SLOT_LABELS.get(mod_slot, mod_slot)}{suffix}: нет данных")
+            elif is_compare:
+                compare_lines.append(f"⚠️ {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}: нет данных")
+            else:
+                table_rows.append([label, "нет данных", "—", "—", req_cell] if show_projection else [label, "нет данных", req_cell])
             continue
         cur_ok = _compare(cur_val, operator, threshold)
         if is_mod_primary:
@@ -603,19 +620,29 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         else:
             cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
 
+        if is_omicron:
+            omicron_lines.append(f"{cur_cell} — {_omicron_ability_label(skill_id)}{suffix}")
+        elif is_mod_primary:
+            slot_label = MOD_SLOT_LABELS.get(mod_slot, mod_slot)
+            if cur_ok:
+                mod_primary_lines.append(f"{cur_cell} — {slot_label}{suffix}")
+            else:
+                req_opt = _mod_primary_option(mod_slot, threshold)
+                req_label = req_opt["label"] if req_opt else f"#{int(threshold)}"
+                mod_primary_lines.append(f"{cur_cell} — {slot_label}{suffix} (нужно: {req_label})")
+        elif is_compare:
+            compare_lines.append(f"{cur_cell} — {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}")
+
         proj_val = (projected_values.get(stat_name) if projected_values else None) if (show_projection and not is_omicron and not is_mod_primary and not is_compare and not is_relic_row) else None
 
-        if not show_projection:
+        if is_omicron or is_mod_primary or is_compare:
+            pass  # уже добавлено в свой список строк выше, в table_rows не идёт
+        elif not show_projection:
             table_rows.append([label, cur_cell, req_cell])
         else:
             needed_cell = "—"
             proj_cell = "—"
-            if is_omicron or is_mod_primary or is_compare:
-                # Разблокировка/основа мода/сравнение с другим персонажем не зависят от
-                # релика — во всех трёх колонках один и тот же статус.
-                needed_cell = cur_cell
-                proj_cell = cur_cell
-            elif not is_relic_row and proj_val is not None:
+            if not is_relic_row and proj_val is not None:
                 proj_ok = _compare(proj_val, operator, threshold)
                 proj_cell = f"{_fmt_compact(proj_val)} {'✅' if proj_ok else '❌'}"
                 # На сколько бы вырос стат к целевому релику (delta) — фиксированная величина
@@ -693,7 +720,15 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 "requirement": requirement_text,
             })
 
-    block = caption + "\n" + _build_table(headers, table_rows)
+    block = caption
+    if table_rows:
+        block += "\n" + _build_table(headers, table_rows)
+    if omicron_lines:
+        block += "\n**🧬 Омикроны:**\n" + "\n".join(omicron_lines)
+    if mod_primary_lines:
+        block += "\n**⚙️ Основы модов:**\n" + "\n".join(mod_primary_lines)
+    if compare_lines:
+        block += "\n**⚔️ Сравнение с персонажами:**\n" + "\n".join(compare_lines)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
