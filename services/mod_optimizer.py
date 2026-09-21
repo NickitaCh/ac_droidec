@@ -390,7 +390,11 @@ def _merge_thresholds(rows_by_plate: dict) -> list[dict]:
     for rows in rows_by_plate.values():
         for r in rows:
             stat_name, operator, threshold, priority = r[3], r[4], r[5], r[6]
-            if stat_name == "Relic":
+            # "Relic"/"Omicron"/"ModPrimary" и сравнение с другим персонажем (compare_character_key,
+            # r[13]) — не моддируемые числовые пороги (см. cogs/stat_requirements.py::STAT_OMICRON/
+            # STAT_MOD_PRIMARY), подбор билда модов их не касается; строковые литералы — свои,
+            # не импортируем из cogs/ (см. конвенцию в web/routes/stat_plates.py).
+            if stat_name in ("Relic", "Omicron", "ModPrimary") or (len(r) > 13 and r[13]):
                 continue
             key = (stat_name, operator)
             cur = merged.get(key)

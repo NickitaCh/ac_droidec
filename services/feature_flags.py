@@ -33,6 +33,7 @@ FEATURES: dict[str, dict] = {
     "violations": {"label": "Нарушения", "category": "Прочее"},
     "birthdays": {"label": "Дни рождения", "category": "Прочее"},
     "tasks": {"label": "Задачи на прокачку", "category": "Прочее"},
+    "tasks_mention": {"label": "Задачи — тег игрока при постановке", "category": "Прочее"},
     "datacrons": {"label": "Датакроны", "category": "Прочее"},
     "omicron": {"label": "Омикрон-объявления", "category": "Прочее"},
     "stat_requirements": {"label": "Статы и плейты", "category": "Мод-инструменты"},

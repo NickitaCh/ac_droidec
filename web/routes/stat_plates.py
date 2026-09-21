@@ -14,8 +14,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
+import stat_engine
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
-from cogs.stat_requirements import OPERATOR_CHOICES, STAT_CHOICES, STAT_OMICRON
+from cogs.stat_requirements import MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON
 from services import feature_flags
 
 router = APIRouter()
@@ -59,6 +60,17 @@ def _omicron_ability_name(skill_id: str) -> str:
     return name or skill_id
 
 
+def _mod_primary_text(slot_key: str, unit_stat_id) -> str:
+    """Независимая копия cogs/stat_requirements.py::_mod_primary_req_text (web/ не может
+    подтягивать приватные помощники cogs/, см. CLAUDE.md) — сам справочник основ на слот
+    общий, stat_engine.MOD_PRIMARY_OPTIONS."""
+    stat_label = next(
+        (opt["label"] for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if opt["unit_stat"] == unit_stat_id),
+        f"#{unit_stat_id}",
+    )
+    return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {stat_label}"
+
+
 @router.get("", response_class=HTMLResponse)
 async def plates_list(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     rows = database.get_all_stat_plates_detailed(guild_id=user["guild_id"])
@@ -97,6 +109,16 @@ async def plates_rename(plate_name: str, new_name: str = Form(...), user: dict =
     return RedirectResponse(f"/plates/{new_name}", status_code=303)
 
 
+@router.post("/{plate_name}/edit-description", response_class=HTMLResponse)
+async def plates_edit_description(
+    plate_name: str,
+    description: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    database.update_stat_plate_description(plate_name, description.strip() or None, guild_id=user["guild_id"])
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
 @router.post("/{plate_name}/delete", response_class=HTMLResponse)
 async def plates_delete(plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     database.delete_stat_plate(plate_name, guild_id=user["guild_id"])
@@ -131,12 +153,24 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         reqs = []
         for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
             is_omicron = r[3] == STAT_OMICRON
+            is_mod_primary = r[3] == STAT_MOD_PRIMARY
+            is_compare = bool(r[13])
+            if is_omicron:
+                value_display = f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован"
+            elif is_mod_primary:
+                value_display = f"Основа: {_mod_primary_text(r[12], r[5])}"
+            elif is_compare:
+                value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}"
+            else:
+                value_display = f"{r[3]} {r[4]} {_fmt_value(r[5])}"
             reqs.append({
                 "id": r[0], "stat_name": r[3], "operator": r[4], "threshold": r[5],
                 "threshold_fmt": _fmt_value(r[5]), "priority": r[6], "comment": r[8],
                 "priority_label": PRIORITY_LABELS.get(r[6], r[6]), "priority_emoji": PRIORITY_EMOJI.get(r[6], ""),
                 "is_omicron": is_omicron,
-                "value_display": f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован" if is_omicron else f"{r[3]} {r[4]} {_fmt_value(r[5])}",
+                "is_mod_primary": is_mod_primary,
+                "is_compare": is_compare,
+                "value_display": value_display,
                 "source_plate": r[1],
             })
         characters.append({"base_id": base_id, "name": _unit_name(base_id), "requirements": reqs})
@@ -289,10 +323,14 @@ async def requirement_edit(
     if not row:
         return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': f'Требование #{req_id} не найдено.'})}", status_code=303)
     _, row_plate, character_key, stat_name, cur_operator, cur_threshold, *_ = row
-    # Оператор/значение у требования на омикрон захардкожены (см. cogs/stat_requirements.py::
-    # stat_req_add_omicron) — форма для таких строк их вообще не присылает, оставляем как есть.
-    new_operator = cur_operator if stat_name == STAT_OMICRON or operator is None else operator
-    new_threshold = cur_threshold if stat_name == STAT_OMICRON or threshold is None else threshold
+    compare_character_key = row[13]
+    # Оператор/значение у требования на омикрон, на основу мода и на сравнение с другим
+    # персонажем захардкожены (см. cogs/stat_requirements.py::stat_req_add_omicron/
+    # stat_req_add_mod_primary/stat_req_add_compare) — форма для таких строк их вообще не
+    # присылает, оставляем как есть.
+    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY) or bool(compare_character_key)
+    new_operator = cur_operator if _locked or operator is None else operator
+    new_threshold = cur_threshold if _locked or threshold is None else threshold
     database.update_stat_requirement(
         req_id, row_plate, character_key, stat_name, new_operator, new_threshold, priority, comment.strip() or None, guild_id=guild_id,
     )

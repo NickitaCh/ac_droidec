@@ -68,6 +68,7 @@ SETTINGS_FIELDS = [
     ("antispam_alert_message", "Кастомный текст алерта антиспама"),
     ("antispam_timeout_minutes", "Длительность автотайм-аута при обнаружении спам-рассылки (мин.)"),
     ("tasks_log_channel_id", "Канал уведомлений о задачах на прокачку (выполнено/провалено/напоминание)"),
+    ("tasks_mention", "Тег игрока при постановке задачи включён"),
 ]
 
 # Те же поля, сгруппированные по режиму — используется только для отображения
@@ -86,7 +87,7 @@ SETTINGS_GROUPS = [
         "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
         "antispam_alert_message", "antispam_timeout_minutes",
     ]),
-    ("Задачи на прокачку", ["tasks_log_channel_id"]),
+    ("Задачи на прокачку", ["tasks_log_channel_id", "tasks_mention"]),
 ]
 _SETTINGS_LABELS = dict(SETTINGS_FIELDS)
 
@@ -237,6 +238,22 @@ class GuildSettings(commands.Cog):
     ):
         await self._set_channel_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о задачах на прокачку")
 
+    @settings_group.sub_command(
+        name="задачи_модуль",
+        description="Вкл/выкл тег игрока в объявлении о новой задаче на прокачку (запрос из GR, опционально по гильдии)",
+    )
+    async def set_tasks_module(
+        self, inter: disnake.ApplicationCommandInteraction,
+        тег_игрока: bool = commands.Param(description="Тегать игрока при постановке задачи — True включить, False выключить"),
+    ):
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        feature_flags.set_enabled(guild_id, "tasks_mention", тег_игрока, updated_by=str(inter.author.id))
+        await inter.response.send_message(
+            f"✅ Тег игрока при постановке задачи: {'✅ включён' if тег_игрока else '❌ выключен'}", ephemeral=True,
+        )
+
     @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (только супер-админ)")
     @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
     async def set_antispam_mode(
@@ -360,7 +377,7 @@ class GuildSettings(commands.Cog):
             lines = []
             for field in fields:
                 label = _SETTINGS_LABELS[field]
-                if field in ("tb_ping", "tb_plan_order"):
+                if field in ("tb_ping", "tb_plan_order", "tasks_mention"):
                     enabled = feature_flags.is_enabled(guild_id, field)
                     lines.append(f"• {label}: {'✅ да' if enabled else '❌ нет'}")
                     continue

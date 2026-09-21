@@ -502,7 +502,16 @@ class TasksCog(commands.Cog):
         warning = config_warning_text(database.get_guild_config(guild_id), "tasks")
         if warning:
             embed.add_field(name="Внимание", value=warning, inline=False)
-        await inter.edit_original_response(embed=embed)
+
+        # Тег игрока — опционально по гильдии (запрос из офицерского чата GR
+        # 2026-09-20: "хочу видеть, что игрок увидел", но не всем гильдиям это нужно —
+        # AC оставляет выключенным, GR включает себе через /настройки задачи_модуль).
+        content = None
+        if feature_flags.is_enabled(guild_id, "tasks_mention"):
+            discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
+            if discord_id:
+                content = f"<@{discord_id}>"
+        await inter.edit_original_response(content=content, embed=embed, allowed_mentions=disnake.AllowedMentions(users=True))
 
     @tasks_group.sub_command(name="отчёт", description="Прогресс по задачам — свой открыт всем, чужой и по всей гильдии — только офицерам")
     async def tasks_report(

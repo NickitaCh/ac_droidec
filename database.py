@@ -3427,6 +3427,24 @@ def _ensure_stat_requirements_table(cursor):
         cursor.execute("ALTER TABLE stat_requirements ADD COLUMN skill_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Требование "на слоте мода X стоит основа Y" (stat_name='ModPrimary', operator='=',
+        # threshold_value=unit_stat_id основы — см. cogs/stat_requirements.py::stat_req_add_mod_primary,
+        # заметка Коли в Discord-треде "Гайд по АС Боту" 2026-09-20: "проверяем, что на стрелке
+        # скорость, на треугольнике крит.урон"). mod_slot хранит форму слота (square/arrow/diamond/
+        # triangle/circle/cross, см. stat_engine.MOD_PRIMARY_OPTIONS). NULL для остальных требований.
+        cursor.execute("ALTER TABLE stat_requirements ADD COLUMN mod_slot TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Требование "стат персонажа X относительно того же стата персонажа Y" (stat_name=
+        # реальный стат типа "Speed", operator сравнивает ДВЕ живые величины, threshold_value
+        # не используется — 0.0 заглушка) — см. cogs/stat_requirements.py::
+        # stat_req_add_compare, заметка Коли 2026-09-20: "офицер быстрее Хакса в ТП на Лкайло".
+        # compare_character_key хранит base_id второго персонажа. NULL для остальных требований.
+        cursor.execute("ALTER TABLE stat_requirements ADD COLUMN compare_character_key TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_stat_req_guild_plate_char ON stat_requirements(guild_id, plate_name, character_key)"
     )
@@ -3733,6 +3751,23 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
         conn.close()
 
 
+def update_stat_plate_description(name: str, description: str, guild_id: int = 1) -> bool:
+    """Меняет заметку уже существующего плейта — раньше её можно было задать только при
+    создании (/статы_требования создать), заметка Коли в Discord-треде "Гайд по АС Боту"
+    2026-09-20: изменить описание после создания было нельзя даже в веб-UI."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plates_table(cursor)
+    cursor.execute(
+        "UPDATE stat_plates SET description = ? WHERE guild_id = ? AND name = ?",
+        (description, guild_id, name),
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
 def count_stat_requirements_by_plate(plate_name: str, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3852,15 +3887,16 @@ def get_all_stat_plates_detailed(guild_id: int = 1):
 
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
-                          created_by: str, guild_id: int = 1, skill_id: str = None) -> int:
+                          created_by: str, guild_id: int = 1, skill_id: str = None, mod_slot: str = None,
+                          compare_character_key: str = None) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO stat_requirements
-            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id, skill_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
-    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id, skill_id))
+            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id, skill_id, mod_slot, compare_character_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id, skill_id, mod_slot, compare_character_key))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -3901,7 +3937,7 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
         FROM stat_requirements WHERE id = ? AND guild_id = ?
     """, (req_id, guild_id))
     row = cursor.fetchone()
@@ -3926,14 +3962,14 @@ def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1
             if ck != character_key:
                 continue
             cursor.execute("""
-                SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
+                SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
                 FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
             """, (guild_id, leaf_plate, character_key))
             rows.extend(cursor.fetchall())
         conn.close()
         return rows
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
         FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
     """, (guild_id, plate_name, character_key))
     rows = cursor.fetchall()
@@ -4018,7 +4054,7 @@ def get_all_stat_requirements(guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
         FROM stat_requirements WHERE guild_id = ? ORDER BY plate_name, character_key, id
     """, (guild_id,))
     rows = cursor.fetchall()

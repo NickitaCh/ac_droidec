@@ -5,6 +5,13 @@
     <p><a href="/plates">← Все плейты</a></p>
     <h1>{{ plate_name }}{% if is_modular %} <span class="badge" title="Модульный плейт">🧩 модульный</span>{% endif %}</h1>
     {% if description %}<p class="muted">{{ description }}</p>{% endif %}
+    <details>
+        <summary class="link-btn">{{ "изменить описание" if description else "добавить описание" }}</summary>
+        <form method="post" action="/plates/{{ plate_name }}/edit-description" class="inline-form">
+            <input type="text" name="description" value="{{ description or '' }}" placeholder="Заметка о плейте">
+            <button type="submit">Сохранить</button>
+        </form>
+    </details>
 
     {% if error %}
         <p class="error">{{ error }}</p>
@@ -167,7 +174,7 @@
                                         <details>
                                             <summary class="link-btn">править</summary>
                                             <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                                {% if not r.is_omicron %}
+                                                {% if not r.is_omicron and not r.is_mod_primary and not r.is_compare %}
                                                     <select name="operator">
                                                         {% for label, value in operator_options %}
                                                             <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
