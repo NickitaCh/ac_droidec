@@ -16,7 +16,9 @@ from fastapi.templating import Jinja2Templates
 import database
 import stat_engine
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
-from cogs.stat_requirements import MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON
+from cogs.stat_requirements import (
+    MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON, STAT_SET, SET_CHOICES,
+)
 from services import feature_flags
 
 router = APIRouter()
@@ -26,6 +28,7 @@ STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES]
 OPERATOR_OPTIONS = [(c.name, c.value) for c in OPERATOR_CHOICES]
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
 MOD_SLOT_OPTIONS = list(MOD_SLOT_LABELS.items())
+SET_OPTIONS = [(c.name, c.value) for c in SET_CHOICES]
 # Веб-эквивалент cogs/stat_requirements.py::SCHEME_CHOICES — "" означает "общее для обеих схем"
 # (NULL в stat_requirements.scheme_num).
 SCHEME_OPTIONS = [("Обе схемы", ""), ("Схема 1", "1"), ("Схема 2", "2")]
@@ -87,6 +90,17 @@ def _mod_primary_text(slot_key: str, unit_stat_id) -> str:
         f"#{unit_stat_id}",
     )
     return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {stat_label}"
+
+
+_SET_NAME_BY_ID = {int(k): v for k, v in stat_engine.MOD_SET_IDS.items()}
+
+
+def _mod_set_text(set_id) -> str:
+    """Независимая копия cogs/stat_requirements.py::_mod_set_req_text (web/ не может
+    подтягивать приватные помощники cogs/, см. CLAUDE.md)."""
+    set_id = int(set_id)
+    pieces = stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
+    return f"{_SET_NAME_BY_ID.get(set_id, set_id)} ({pieces} шт.)"
 
 
 def _compare_req_text(stat_name: str, operator: str, compare_base_id: str) -> str:
@@ -178,11 +192,14 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
             is_omicron = r[3] == STAT_OMICRON
             is_mod_primary = r[3] == STAT_MOD_PRIMARY
+            is_mod_set = r[3] == STAT_SET
             is_compare = bool(r[13])
             if is_omicron:
                 value_display = f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован"
             elif is_mod_primary:
                 value_display = f"Основа: {_mod_primary_text(r[12], r[5])}"
+            elif is_mod_set:
+                value_display = f"Сет: {_mod_set_text(r[5])}"
             elif is_compare:
                 value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}"
             else:
@@ -193,6 +210,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 "priority_label": PRIORITY_LABELS.get(r[6], r[6]), "priority_emoji": PRIORITY_EMOJI.get(r[6], ""),
                 "is_omicron": is_omicron,
                 "is_mod_primary": is_mod_primary,
+                "is_mod_set": is_mod_set,
                 "is_compare": is_compare,
                 "value_display": value_display,
                 "source_plate": r[1],
@@ -251,6 +269,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "priority_default": PRIORITY_REQUIRED,
         "mod_slot_options": MOD_SLOT_OPTIONS,
         "mod_primary_options_json": MOD_PRIMARY_OPTIONS_JSON,
+        "set_options": SET_OPTIONS,
         "compare_stat_options": COMPARE_STAT_OPTIONS,
         "scheme_options": SCHEME_OPTIONS,
         "error": request.query_params.get("error"),
@@ -412,6 +431,39 @@ async def requirement_add_mod_primary(
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
+@router.post("/{plate_name}/requirements/add_set", response_class=HTMLResponse)
+async def requirement_add_set(
+    plate_name: str,
+    base_id: str = Form(...),
+    set_id: int = Form(...),
+    priority: str = Form(PRIORITY_REQUIRED),
+    comment: str = Form(""),
+    scheme_num: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Веб-эквивалент /статы_требования добавить_сет (cogs/stat_requirements.py::
+    stat_req_add_mod_set) — тот же справочник сетов, что в Калькуляторе (web/routes/
+    stat_builder.py), запрошено пользователем 2026-09-21."""
+    guild_id = user["guild_id"]
+    if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+        return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+    if set_id not in _SET_NAME_BY_ID:
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Выберите сет из списка.'})}", status_code=303
+        )
+
+    char_name = _unit_name(base_id)
+    raw_text = f"{char_name} — сет «{_mod_set_text(set_id)}»"
+    database.add_stat_requirement(
+        plate_name, base_id, STAT_SET, ">=", float(set_id), priority, raw_text, comment.strip() or None,
+        user["discord_id"], guild_id=guild_id, scheme_num=_parse_scheme_form(scheme_num),
+    )
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
 @router.post("/{plate_name}/requirements/add_compare", response_class=HTMLResponse)
 async def requirement_add_compare(
     plate_name: str,
@@ -464,12 +516,13 @@ async def requirement_edit(
         return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': f'Требование #{req_id} не найдено.'})}", status_code=303)
     _, row_plate, character_key, stat_name, cur_operator, cur_threshold, *_ = row
     compare_character_key = row[13]
-    # Оператор/значение у требования на омикрон, на основу мода и на сравнение с другим
-    # персонажем захардкожены (см. cogs/stat_requirements.py::stat_req_add_omicron/
-    # stat_req_add_mod_primary/stat_req_add_compare) — форма для таких строк их вообще не
-    # присылает, оставляем как есть. Схема — не захардкожена ни у одного из типов, её можно
-    # менять всегда (просто классификация строки, не влияет на оператор/значение).
-    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY) or bool(compare_character_key)
+    # Оператор/значение у требования на омикрон, на основу мода, на сет и на сравнение с
+    # другим персонажем захардкожены (см. cogs/stat_requirements.py::stat_req_add_omicron/
+    # stat_req_add_mod_primary/stat_req_add_mod_set/stat_req_add_compare) — форма для таких
+    # строк их вообще не присылает, оставляем как есть. Схема — не захардкожена ни у одного
+    # из типов, её можно менять всегда (просто классификация строки, не влияет на
+    # оператор/значение).
+    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET) or bool(compare_character_key)
     new_operator = cur_operator if _locked or operator is None else operator
     new_threshold = cur_threshold if _locked or threshold is None else threshold
     database.update_stat_requirement(

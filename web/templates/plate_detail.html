@@ -201,6 +201,49 @@
         </div>
 
         <div class="panel">
+            <div class="panel-title"><span>Добавить требование на сет модов</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add_set" class="requirement-form">
+                <label>
+                    Персонаж
+                    <div class="unit-search" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value" required>
+                        <div class="unit-search-results"></div>
+                    </div>
+                </label>
+                <label>
+                    Сет
+                    <select name="set_id" required>
+                        {% for label, value in set_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Приоритет
+                    <select name="priority" required>
+                        {% for label, value in priority_options %}
+                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Схема мод-билда
+                    <select name="scheme_num">
+                        {% for label, value in scheme_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Комментарий (необязательно)
+                    <input type="text" name="comment">
+                </label>
+                <button type="submit">Добавить</button>
+            </form>
+        </div>
+
+        <div class="panel">
             <div class="panel-title"><span>Добавить требование на сравнение с персонажем</span></div>
             <form method="post" action="/plates/{{ plate_name }}/requirements/add_compare" class="requirement-form">
                 <label>
@@ -284,7 +327,7 @@
                                 <details>
                                     <summary class="link-btn">править</summary>
                                     <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                        {% if not r.is_omicron and not r.is_mod_primary and not r.is_compare %}
+                                        {% if not r.is_omicron and not r.is_mod_primary and not r.is_mod_set and not r.is_compare %}
                                             <select name="operator">
                                                 {% for label, value in operator_options %}
                                                     <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
