@@ -107,6 +107,29 @@ OPERATOR_CHOICES = [
     disnake.OptionChoice(name="=", value="="),
 ]
 
+# Требование можно привязать к одной из двух "схем" мод-билда персонажа (обсуждение с Колей,
+# 2026-09-21: "2 карточки перса - одна в одном билде, другая в другом"; матчинг по совпавшим
+# основам, при равенстве или отсутствии данных — всегда схема 1). value="" — требование общее
+# для обеих схем (тот же смысл, что и NULL в stat_requirements.scheme_num, единственный режим
+# до этой фичи). Человекочитаемые названия схем ("Скорость"/"КД" и т.п.) — отдельно, per
+# персонаж, в stat_plate_character_schemes/схема_переименовать; тут только номер слота.
+SCHEME_CHOICES = [
+    disnake.OptionChoice(name="Обе схемы", value=""),
+    disnake.OptionChoice(name="Схема 1", value="1"),
+    disnake.OptionChoice(name="Схема 2", value="2"),
+]
+# Для /статы/статы_релик — форсирует, под какую схему проверять/пересчитывать, вместо
+# авто-определения (значение "" = авто).
+FORCE_SCHEME_CHOICES = [
+    disnake.OptionChoice(name="Авто (по фактическим модам игрока)", value=""),
+    disnake.OptionChoice(name="Схема 1", value="1"),
+    disnake.OptionChoice(name="Схема 2", value="2"),
+]
+
+
+def _parse_scheme_param(value: str | None) -> int | None:
+    return int(value) if value else None
+
 # Три сценария сравнения реального билда/модов игрока с нормой плейта — влияют и на
 # одиночный "Итог" (failed_required), и на гильдийский compliant/problem (см.
 # _evaluate_character_player/_build_guild_report). Раньше был один булев параметр
@@ -352,6 +375,41 @@ def _player_mod_primaries(unit: dict) -> dict:
     return primaries
 
 
+def _resolve_scheme(rows: list, mod_primaries: dict, forced_scheme: int | None, plate_name: str, base_id: str, guild_id: int):
+    """Возвращает (active_scheme, scheme_label, is_forced) для персонажа, у которого могут
+    быть строки с scheme_num (см. SCHEME_CHOICES выше). active_scheme=None, если у персонажа
+    схем нет вовсе — тогда фильтрация по схеме в _evaluate_character_player полностью
+    отключена (обычное поведение, как до этой фичи).
+
+    Авто-детект (forced_scheme не задан): считаем, у скольких ModPrimary-строк каждой схемы
+    реальная основа на слоте совпадает с фактической у игрока (mod_primaries — см.
+    _player_mod_primaries) — чья схема набрала больше совпадений, та и активна. Ничья или
+    отсутствие сигнала (обе схемы 0 совпадений — например, у игрока вообще не открыт ни один
+    из проверяемых слотов) — по явному решению пользователя всегда схема 1."""
+    schemes_present = any(r[14] for r in rows)
+    if not schemes_present:
+        return None, None, False
+
+    scheme_leaf_plate = next((r[1] for r in rows if r[14]), plate_name)
+    scheme_labels = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id)
+
+    if forced_scheme in (1, 2):
+        active_scheme = forced_scheme
+        is_forced = True
+    else:
+        scores = {1: 0, 2: 0}
+        for r in rows:
+            if r[3] == STAT_MOD_PRIMARY and r[14] in (1, 2):
+                actual = mod_primaries.get(r[12])
+                if actual is not None and actual == r[5]:
+                    scores[r[14]] += 1
+        active_scheme = 1 if scores[1] >= scores[2] else 2
+        is_forced = False
+
+    scheme_label = scheme_labels.get(active_scheme, f"Схема {active_scheme}")
+    return active_scheme, scheme_label, is_forced
+
+
 def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     """Общий префикс для обоих режимов расчёта: сохранённые требования персонажа в плейте,
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
@@ -367,9 +425,15 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     return rows, char_name, required_relic, comments, legend
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW):
-    """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total)
-    для одного персонажа плейта у конкретного игрока — статы берутся из его реальных модов/шмота,
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None):
+    """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total,
+    active_scheme, scheme_label) для одного персонажа плейта у конкретного игрока — статы берутся
+    из его реальных модов/шмота, прогноз на релик плейта. active_scheme/scheme_label — None,
+    если у персонажа нет строк с scheme_num вовсе (обычный случай); иначе номер (1/2) и подпись
+    схемы, которая реально использовалась для фильтрации строк — либо forced_scheme (если
+    передан), либо авто-детект по фактическим основам модов игрока (см. _resolve_scheme выше).
+    Строки чужой (неактивной) схемы полностью пропускаются — не попадают ни в таблицу, ни в
+    matched/total/failed_required.
     прогноз на релик плейта. matched/total (ВСЕ приоритеты — required+optional+useful) и
     failed_required/required_total (только priority=="required") считаются по ОДНОМУ И ТОМУ ЖЕ
     критерию — какой именно, задаёт scenario (см. SCENARIO_RAW/UP/FULL выше), чтобы гильдийская
@@ -404,11 +468,16 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     unit, updated_at = await _get_unit_for_player(bot, ally_code, base_id, force_refresh)
     if not unit:
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
-        return char_name, block, 0, 0, None, [], 0
+        return char_name, block, 0, 0, None, [], 0, None, None
 
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, unit)))
     current_values["Relic"] = current_relic
+
+    # Основы модов игрока читаются один раз тут (а не только внутри блока ModPrimary ниже) —
+    # нужны заодно и для авто-детекта активной схемы (_resolve_scheme), если у персонажа она есть.
+    mod_primaries = _player_mod_primaries(unit)
+    active_scheme, scheme_label, scheme_is_forced = _resolve_scheme(rows, mod_primaries, forced_scheme, plate_name, base_id, guild_id)
 
     # Омикрон-требования (stat_name==STAT_OMICRON) не входят в calc_final_stats — статус
     # "разблокирован" считается отдельно per skill_id (персонаж может иметь требования на
@@ -431,7 +500,6 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     # unit_stat_id той же общей _compare-логикой.
     mod_slots_needed = {row[12] for row in rows if row[3] == STAT_MOD_PRIMARY}
     if mod_slots_needed:
-        mod_primaries = _player_mod_primaries(unit)
         for slot_key in mod_slots_needed:
             actual_stat_id = mod_primaries.get(slot_key)
             if actual_stat_id is not None:
@@ -463,6 +531,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             caption += f" → цель по плейту: {target_relic}"
         else:
             caption += f" → плейт требует {target_relic} (у игрока выше)"
+    if active_scheme is not None:
+        source = "вручную" if scheme_is_forced else "авто"
+        caption += f" · Схема: {scheme_label} ({source})"
     caption += legend
     if show_projection:
         headers = ["Стат", "Сейчас", "Нужно", f"Релик {target_relic}", "Норма"]
@@ -471,7 +542,11 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
 
     table_rows = []
     for row in rows:
-        req_id, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key = row
+        req_id, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key, row_scheme = row
+        if active_scheme is not None and row_scheme and row_scheme != active_scheme:
+            # Строка другой (неактивной) схемы — полностью пропускается: не в таблице,
+            # не в matched/total, не в "Итог" (см. _resolve_scheme выше).
+            continue
         is_omicron = stat_name == STAT_OMICRON
         is_mod_primary = stat_name == STAT_MOD_PRIMARY
         is_compare = bool(compare_character_key)
@@ -622,10 +697,10 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
-    return char_name, block, matched, total, updated_at, failed_required, required_total
+    return char_name, block, matched, total, updated_at, failed_required, required_total, active_scheme, scheme_label
 
 
-async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW) -> dict:
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None) -> dict:
     """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
     ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
     персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
@@ -667,10 +742,10 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
         char_problems = []
         has_failed_required = False
         for base_id in char_keys:
-            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario)
+            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
             if result is None:
                 continue
-            char_name, _block, _matched, total, _updated_at, failed_required, required_total = result
+            char_name, _block, _matched, total, _updated_at, failed_required, required_total, _active_scheme, scheme_label = result
             rows_total += total
             required_matched = required_total - len(failed_required)
             required_total_all += required_total
@@ -682,6 +757,7 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
                     "char_name": char_name, "base_id": base_id, "matched": required_matched, "total": required_total,
                     "required_relic": required_relic_by_char.get(base_id),
                     "failed_required": failed_required,
+                    "scheme_label": scheme_label,
                 })
 
         # "Полностью соответствуют" — только по ОБЯЗАТЕЛЬНЫМ статам (failed_required,
@@ -715,7 +791,7 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
     return {"error": None, "total_players": len(roster), "compliant": compliant, "problem": problem, "no_data": no_data}
 
 
-async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1):
+async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1, forced_scheme: int | None = None):
     """Возвращает (char_name, block) — пересчёт уже заданных в плейте норм на другой релик.
     Модель — та же, что в гильдийской Google-таблице (BASESTAT*MODMULT+flat): порог на
     исходном релике раскладывается на плоскую часть (RELIC_PROJECTION_FLAT_OFFSET — роллы
@@ -725,11 +801,20 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
         projected  = base(целевой релик) × multiplier + flat
     Для статов без записи в RELIC_PROJECTION_FLAT_OFFSET (Speed, Potency, крит-статы и т.п.)
     норма не пересчитывается — как и в самой таблице, она просто переносится как есть.
+    Тут нет живого игрока, поэтому авто-детект схемы (как в _evaluate_character_player)
+    невозможен — если у персонажа есть схемы, forced_scheme выбирает какую показывать
+    (по умолчанию схема 1, чтобы не мешать строки разных билдов в одной таблице).
     Возвращает None, если для этого персонажа нет сохранённых требований в плейте."""
     loaded = _load_char_rows(plate_name, base_id, guild_id)
     if loaded is None:
         return None
     rows, char_name, required_relic, comments, legend = loaded
+    schemes_present = any(r[14] for r in rows)
+    active_scheme = (forced_scheme or 1) if schemes_present else None
+    scheme_label = None
+    if active_scheme is not None:
+        scheme_leaf_plate = next((r[1] for r in rows if r[14]), plate_name)
+        scheme_label = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id).get(active_scheme, f"Схема {active_scheme}")
 
     if required_relic is None:
         block = "⚠️ В требованиях плейта нет строки Relic — не от чего считать прибавку."
@@ -743,7 +828,9 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
     headers = ["Стат", f"Норма Р{required_relic}", f"Норма Р{target_relic}"]
     table_rows = []
     for row in rows:
-        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key = row
+        _, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key, row_scheme = row
+        if active_scheme is not None and row_scheme and row_scheme != active_scheme:
+            continue
 
         if stat_name == STAT_OMICRON:
             # Разблокировка омикрона от релика не зависит — норма не меняется между релик-колонками.
@@ -789,7 +876,8 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
         projected = tgt_val * multiplier + flat
         table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(projected)}"])
 
-    block = f"Норма пересчитана с релика {required_relic} на {target_relic} (плоская часть + пропорциональный рост базы)" + legend + "\n" + _build_table(headers, table_rows)
+    scheme_part = f" · Схема: {scheme_label}" if active_scheme is not None else ""
+    block = f"Норма пересчитана с релика {required_relic} на {target_relic} (плоская часть + пропорциональный рост базы){scheme_part}" + legend + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
@@ -933,7 +1021,7 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
     search = string.lower().strip()
     options = []
     for row in rows:
-        req_id, plate_name, character_key, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key = row
+        req_id, plate_name, character_key, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key, scheme_num = row
         char_name = _unit_display_name(character_key)
         if stat_name == STAT_OMICRON:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — омикрон «{_omicron_ability_label(skill_id)}»"
@@ -943,6 +1031,8 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — {_compare_req_text(stat_name, operator, compare_character_key)}"
         else:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} {stat_name} {operator} {_fmt_value(threshold)}"
+        if scheme_num:
+            label += f" [Схема {scheme_num}]"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=f"#{req_id}"))
     return options[:25]
@@ -1289,6 +1379,7 @@ class StatRequirementsCog(commands.Cog):
         значение: float = commands.Param(description="Пороговое значение"),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
+        схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
@@ -1312,7 +1403,8 @@ class StatRequirementsCog(commands.Cog):
         char_name = _unit_display_name(base_id)
         raw_text = f"{char_name} {стат} {оператор} {_fmt_value(значение)}"
         req_id = database.add_stat_requirement(
-            плейт, base_id, стат, оператор, значение, приоритет, raw_text, комментарий, str(inter.author.id), guild_id=guild_id
+            плейт, base_id, стат, оператор, значение, приоритет, raw_text, комментарий, str(inter.author.id),
+            guild_id=guild_id, scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
@@ -1325,6 +1417,7 @@ class StatRequirementsCog(commands.Cog):
         омикрон: str = commands.Param(description="Какой именно омикрон (если их несколько)", autocomplete=autocomplete_character_omicron_skill),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
+        схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
@@ -1355,7 +1448,7 @@ class StatRequirementsCog(commands.Cog):
         raw_text = f"{char_name} — омикрон «{ability_name}»"
         req_id = database.add_stat_requirement(
             плейт, base_id, STAT_OMICRON, ">=", 1.0, приоритет, raw_text, комментарий, str(inter.author.id),
-            guild_id=guild_id, skill_id=омикрон,
+            guild_id=guild_id, skill_id=омикрон, scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
@@ -1369,6 +1462,7 @@ class StatRequirementsCog(commands.Cog):
         основа: str = commands.Param(description="Требуемая основа для этого слота", autocomplete=autocomplete_mod_primary_for_slot),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
+        схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
@@ -1402,7 +1496,7 @@ class StatRequirementsCog(commands.Cog):
         raw_text = f"{char_name} — основа «{_mod_primary_req_text(слот, unit_stat_id)}»"
         req_id = database.add_stat_requirement(
             плейт, base_id, STAT_MOD_PRIMARY, "=", float(unit_stat_id), приоритет, raw_text, комментарий, str(inter.author.id),
-            guild_id=guild_id, mod_slot=слот,
+            guild_id=guild_id, mod_slot=слот, scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
@@ -1420,6 +1514,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж_сравнения: str = commands.Param(description="С кем сравниваем (тот же игрок, другой персонаж)", autocomplete=units_autocomplete),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
+        схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
@@ -1449,7 +1544,7 @@ class StatRequirementsCog(commands.Cog):
         raw_text = f"{char_name} — {_compare_req_text(стат, оператор, compare_base_id)}"
         req_id = database.add_stat_requirement(
             плейт, base_id, стат, оператор, 0.0, приоритет, raw_text, комментарий, str(inter.author.id),
-            guild_id=guild_id, compare_character_key=compare_base_id,
+            guild_id=guild_id, compare_character_key=compare_base_id, scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
 
@@ -1462,6 +1557,7 @@ class StatRequirementsCog(commands.Cog):
         оператор: str = commands.Param(default=None, description="Новый оператор", choices=OPERATOR_CHOICES),
         приоритет: str = commands.Param(default=None, description="Новый приоритет", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Новый комментарий"),
+        схема: str = commands.Param(default=None, description="Перепривязать к другой схеме мод-билда (не меняет остальные поля)", choices=SCHEME_CHOICES),
         удалить: bool = commands.Param(default=False, description="Удалить это требование вместо редактирования"),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
@@ -1482,7 +1578,10 @@ class StatRequirementsCog(commands.Cog):
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
-        _, plate_name, character_key, stat_name, cur_operator, cur_threshold, cur_priority, _raw_text, cur_comment, _, _, _skill_id, _mod_slot, compare_character_key = row
+        if схема is not None:
+            database.set_stat_requirement_scheme(req_id, _parse_scheme_param(схема), guild_id=guild_id)
+
+        _, plate_name, character_key, stat_name, cur_operator, cur_threshold, cur_priority, _raw_text, cur_comment, _, _, _skill_id, _mod_slot, compare_character_key, _scheme_num = row
         locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY) or bool(compare_character_key)
 
         if stat_name == STAT_OMICRON and (оператор is not None or значение is not None):
@@ -1515,7 +1614,8 @@ class StatRequirementsCog(commands.Cog):
         char_name = _unit_display_name(character_key)
         new_raw_text = _raw_text if locked else f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
         database.update_stat_requirement(req_id, plate_name, character_key, stat_name, new_operator, new_threshold, new_priority, new_comment, guild_id=guild_id)
-        await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {new_raw_text}", ephemeral=True)
+        scheme_part = f" · схема: {_parse_scheme_param(схема) or 'обе'}" if схема is not None else ""
+        await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {new_raw_text}{scheme_part}", ephemeral=True)
 
     @stat_req.sub_command(name="список", description="Показать сохранённые требования по плейту (и опционально персонажу)")
     async def stat_req_list(
@@ -1539,11 +1639,13 @@ class StatRequirementsCog(commands.Cog):
             rows = database.get_stat_requirements(плейт, base_id, guild_id=guild_id)
             if not rows:
                 continue
+            scheme_labels = database.get_character_scheme_labels(плейт, base_id, guild_id=guild_id)
             lines.append(f"## {_unit_display_name(base_id)}")
             for row in rows:
-                req_id, _, _, _, _, _, priority, raw_text, comment, _, _, _, _, _ = row
+                req_id, _, _, _, _, _, priority, raw_text, comment, _, _, _, _, _, scheme_num = row
                 comment_part = f" · _{comment}_" if comment else ""
-                lines.append(f"`#{req_id}` {PRIORITY_EMOJI.get(priority, '')} {raw_text}{comment_part}")
+                scheme_part = f" · [{scheme_labels.get(scheme_num, f'Схема {scheme_num}')}]" if scheme_num else ""
+                lines.append(f"`#{req_id}` {PRIORITY_EMOJI.get(priority, '')} {raw_text}{comment_part}{scheme_part}")
 
         embeds = _lines_to_embeds(f"📋 {плейт}", DATACRON_LIST_COLOR, lines)
         if not embeds:
@@ -1640,6 +1742,24 @@ class StatRequirementsCog(commands.Cog):
             await inter.response.send_message(f"❌ Плейт «{плейт}» не найден.", ephemeral=True)
             return
         await inter.response.send_message(f"✅ Описание плейта «{плейт}» обновлено: _{описание}_", ephemeral=True)
+
+    @stat_req.sub_command(name="схема_переименовать", description="Задать название схемы мод-билда персонажа (например «Скорость»/«КД»)")
+    async def stat_req_rename_scheme(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        плейт: str = commands.Param(description="Плейт", autocomplete=autocomplete_stat_plate),
+        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_stat_character),
+        номер: str = commands.Param(description="Какая из двух схем", choices=[disnake.OptionChoice(name="Схема 1", value="1"), disnake.OptionChoice(name="Схема 2", value="2")]),
+        название: str = commands.Param(description="Новое название схемы"),
+    ):
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+
+        base_id = _parse_bracket_id(персонаж)
+        char_name = _unit_display_name(base_id)
+        database.set_character_scheme_label(плейт, base_id, int(номер), название.strip(), guild_id=guild_id)
+        await inter.response.send_message(f"✅ Схема {номер} для «{char_name}» в «{плейт}» теперь называется «{название.strip()}».", ephemeral=True)
 
     @stat_req.sub_command(name="удалить", description="Удалить плейт целиком, либо одного персонажа из плейта (если указан)")
     async def stat_req_delete_plate(
@@ -1821,6 +1941,7 @@ class StatRequirementsCog(commands.Cog):
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
+        схема: str = commands.Param(default=None, description="Форсировать схему мод-билда вместо авто-детекта (не действует на персонажей без схем)", choices=FORCE_SCHEME_CHOICES),
     ):
         await inter.response.defer()
 
@@ -1832,6 +1953,8 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
+        forced_scheme = _parse_scheme_param(схема)
+
         char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
         if not char_keys:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
@@ -1842,7 +1965,7 @@ class StatRequirementsCog(commands.Cog):
                 await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
                 return
 
-            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий)
+            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme)
             if report["error"]:
                 await inter.edit_original_response(f"❌ {report['error']}")
                 return
@@ -1914,10 +2037,10 @@ class StatRequirementsCog(commands.Cog):
         any_char_shown = False
         failed_required_by_char = []
         for base_id in char_keys:
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий)
+            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme)
             if result is None:
                 continue
-            char_name, block, matched, total, updated_at, failed_required, _required_total = result
+            char_name, block, matched, total, updated_at, failed_required, _required_total, _active_scheme, _scheme_label = result
             any_char_shown = True
             lines.append(f"## {char_name}")
             lines.append(block)
@@ -1980,6 +2103,7 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
         персонаж: str = commands.Param(description="Персонаж из плейта", autocomplete=autocomplete_stat_character),
         релик: int = commands.Param(description="Целевой уровень реликвии", ge=0, le=10),
+        схема: str = commands.Param(default=None, description="Какую схему показывать, если у персонажа их две (нет живого игрока — по умолчанию схема 1)", choices=SCHEME_CHOICES),
     ):
         await inter.response.defer()
 
@@ -1992,7 +2116,7 @@ class StatRequirementsCog(commands.Cog):
             return
 
         base_id = _parse_bracket_id(персонаж)
-        result = await _project_character_relic(self.bot, плейт, base_id, релик, guild_id=guild_id)
+        result = await _project_character_relic(self.bot, плейт, base_id, релик, guild_id=guild_id, forced_scheme=_parse_scheme_param(схема))
         if result is None:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого персонажа в плейте.")
             return

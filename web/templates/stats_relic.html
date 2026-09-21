@@ -37,6 +37,15 @@
                     Целевой релик (0–10)
                     <input type="number" name="relic" min="0" max="10" value="{{ selected_relic if selected_relic is not none else '' }}" required>
                 </label>
+
+                <label>
+                    Схема (если у персонажа их 2 — тут нет живого игрока, авто-детект невозможен)
+                    <select name="scheme">
+                        {% for value, label in scheme_choices %}
+                            <option value="{{ value }}" {% if value == selected_scheme %}selected{% endif %}>{{ "Схема 1 (по умолчанию)" if value == "" else label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
             {% endif %}
 
             <button type="submit">{% if selected_plate %}Пересчитать{% else %}Выбрать{% endif %}</button>

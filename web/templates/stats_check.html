@@ -61,6 +61,15 @@
                         {% endfor %}
                     </select>
                 </label>
+
+                <label>
+                    Схема мод-билда (для персонажей с 2 схемами)
+                    <select name="scheme">
+                        {% for value, label in scheme_choices %}
+                            <option value="{{ value }}" {% if value == selected_scheme %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
             {% endif %}
 
             {% if selected_plate %}

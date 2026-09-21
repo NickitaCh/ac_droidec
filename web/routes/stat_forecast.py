@@ -22,6 +22,14 @@ SCENARIO_LABELS = {
     SCENARIO_FULL: "Полный подгон релика (вверх и вниз)",
 }
 
+# Форсирует схему мод-билда персонажа (см. cogs/stat_requirements.py::SCHEME_CHOICES) вместо
+# авто-детекта по фактическим модам игрока — не действует на персонажей без схем вовсе.
+SCHEME_LABELS = {"": "Авто", "1": "Схема 1", "2": "Схема 2"}
+
+
+def _parse_scheme_param(value: str) -> int | None:
+    return int(value) if value else None
+
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
@@ -51,6 +59,7 @@ async def stats_check_form(
     force_refresh: bool = False,
     action: str = "",
     scenario: str = SCENARIO_RAW,
+    scheme: str = "",
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
@@ -58,6 +67,9 @@ async def stats_check_form(
     roster = _roster_choices(guild_id)
     if scenario not in SCENARIO_LABELS:
         scenario = SCENARIO_RAW
+    if scheme not in SCHEME_LABELS:
+        scheme = ""
+    forced_scheme = _parse_scheme_param(scheme)
 
     context = {
         "user": user,
@@ -71,6 +83,8 @@ async def stats_check_form(
         "selected_scenario": scenario,
         "scenario_choices": SCENARIO_LABELS.items(),
         "scenario_label": SCENARIO_LABELS[scenario],
+        "selected_scheme": scheme,
+        "scheme_choices": SCHEME_LABELS.items(),
         "characters": [],
         "results": None,
         "guild_report": None,
@@ -114,7 +128,7 @@ async def stats_check_form(
     if not target_ally_code:
         # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
         context["guild_report"] = await stat_forecast.build_guild_report(
-            comlink, stat_calc, plate, target_chars, guild_id=guild_id, scenario=scenario,
+            comlink, stat_calc, plate, target_chars, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme,
         )
         return templates.TemplateResponse(request, "stats_check.html", context)
 
@@ -124,11 +138,11 @@ async def stats_check_form(
     for base_id in target_chars:
         outcome = await stat_forecast.evaluate_character_player(
             comlink, stat_calc, plate, base_id, target_ally_code, force_refresh, player_label, guild_id=guild_id,
-            scenario=scenario,
+            scenario=scenario, forced_scheme=forced_scheme,
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at, char_failed_required, _required_total = outcome
+        char_name, block, matched, total, updated_at, char_failed_required, _required_total, _active_scheme, _scheme_label = outcome
         results.append({
             "char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at,
         })
@@ -146,10 +160,13 @@ async def stats_relic_form(
     plate: str = "",
     character: str = "",
     relic: int | None = None,
+    scheme: str = "",
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
+    if scheme not in SCHEME_LABELS:
+        scheme = ""
 
     context = {
         "user": user,
@@ -157,6 +174,8 @@ async def stats_relic_form(
         "selected_plate": plate,
         "selected_character": character,
         "selected_relic": relic,
+        "selected_scheme": scheme,
+        "scheme_choices": SCHEME_LABELS.items(),
         "characters": [],
         "result": None,
         "loading": False,
@@ -182,7 +201,7 @@ async def stats_relic_form(
         context["loading"] = True
         return templates.TemplateResponse(request, "stats_relic.html", context)
 
-    outcome = await stat_forecast.project_character_relic(comlink, stat_calc, plate, character, relic, guild_id=guild_id)
+    outcome = await stat_forecast.project_character_relic(comlink, stat_calc, plate, character, relic, guild_id=guild_id, forced_scheme=_parse_scheme_param(scheme))
     if outcome is None:
         context["error"] = f"У персонажа {database.get_game_unit_name(character) or character} нет сохранённых требований в плейте «{plate}»."
         return templates.TemplateResponse(request, "stats_relic.html", context)

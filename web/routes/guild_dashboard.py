@@ -43,6 +43,11 @@ from web.routes.datacrons import (
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# Независимая копия web/routes/stat_forecast.py::SCHEME_LABELS (тот же принцип, что
+# MSK/COMLINK_URL дублируются по проекту, см. CLAUDE.md) — форсирует схему мод-билда
+# персонажа на карточке игрока вместо авто-детекта.
+SCHEME_LABELS = {"": "Авто", "1": "Схема 1", "2": "Схема 2"}
+
 
 def _get_comlink():
     # См. web/routes/admin.py::_get_comlink / registration.py::_get_comlink — веб-процесс
@@ -1646,7 +1651,7 @@ async def violation_add(
     return RedirectResponse(f"/violations/{ally_code}", status_code=303)
 
 
-async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: str, plate: str, force_refresh: bool) -> dict:
+async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: str, plate: str, force_refresh: bool, forced_scheme: int | None = None) -> dict:
     # Тот же расчёт, что и /stats-check?action=run с уже выбранным игроком — см.
     # web/routes/stat_forecast.py::stats_check_form, здесь просто без формы выбора игрока
     # (он и так один, из карточки) и без варианта "по одному персонажу" (всегда весь плейт).
@@ -1662,10 +1667,11 @@ async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: s
     for base_id in char_keys:
         outcome = await stat_forecast.evaluate_character_player(
             comlink, stat_calc, plate, base_id, ally_code, force_refresh, player_label, guild_id=guild_id,
+            forced_scheme=forced_scheme,
         )
         if outcome is None:
             continue
-        char_name, block, matched, total, updated_at, char_failed_required, _required_total = outcome
+        char_name, block, matched, total, updated_at, char_failed_required, _required_total, _active_scheme, _scheme_label = outcome
         results.append({"char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at})
         for item in char_failed_required:
             failed_required.append({"char_name": char_name, **item})
@@ -1695,9 +1701,13 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     else:
         selected_plate = database.get_bot_state(stats_state_key, guild_id=guild_id) or ""
     force_refresh = request.query_params.get("force_refresh") == "1"
+    selected_scheme = request.query_params.get("scheme") or ""
+    if selected_scheme not in ("", "1", "2"):
+        selected_scheme = ""
     stats_result = None
     if selected_plate:
-        stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh)
+        forced_scheme = int(selected_scheme) if selected_scheme else None
+        stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh, forced_scheme=forced_scheme)
 
     # ---- Датакроны: тот же принцип (сохранённый сезон вместо плейта). ----
     datacron_seasons = []
@@ -1740,6 +1750,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "user": user, "card": card,
         "stats_plates": stats_plates, "selected_plate": selected_plate,
         "force_refresh": force_refresh, "stats_result": stats_result,
+        "selected_scheme": selected_scheme, "scheme_choices": SCHEME_LABELS.items(),
         "datacron_seasons": datacron_seasons, "selected_season": selected_season, "datacron_result": datacron_result,
         "datacron_priority_order": DATACRON_PRIORITY_ORDER,
         "datacron_priority_labels": DATACRON_PRIORITY_LABELS,

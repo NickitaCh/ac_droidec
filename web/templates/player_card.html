@@ -173,6 +173,14 @@
                         {% endfor %}
                     </select>
                 </label>
+                <label>
+                    Схема мод-билда
+                    <select name="scheme">
+                        {% for value, label in scheme_choices %}
+                            <option value="{{ value }}" {% if selected_scheme == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
                 <label style="display: flex; align-items: center; gap: 0.4em;">
                     <input type="checkbox" name="force_refresh" value="1" {% if force_refresh %}checked{% endif %}>
                     Обновить данные из игры
@@ -180,6 +188,7 @@
                 {% if selected_season %}<input type="hidden" name="season" value="{{ selected_season }}">{% endif %}
                 <button type="submit">Проверить</button>
             </form>
+            <p class="muted" style="margin-top: -0.4em;">«Авто» — определяется по фактическим основам модов игрока; действует только на персонажей, у которых заведено 2 схемы.</p>
 
             {% if stats_result and stats_result.loading %}
                 <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — попробуйте через минуту.</p>
@@ -238,6 +247,7 @@
                 </label>
                 {% if selected_plate %}<input type="hidden" name="plate" value="{{ selected_plate }}">{% endif %}
                 {% if force_refresh %}<input type="hidden" name="force_refresh" value="1">{% endif %}
+                {% if selected_scheme %}<input type="hidden" name="scheme" value="{{ selected_scheme }}">{% endif %}
                 <button type="submit">Проверить</button>
             </form>
 

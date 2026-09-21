@@ -3445,9 +3445,39 @@ def _ensure_stat_requirements_table(cursor):
         cursor.execute("ALTER TABLE stat_requirements ADD COLUMN compare_character_key TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Привязка требования к одной из двух "схем" мод-билда персонажа (1 или 2) — для
+        # персонажей, у которых допустимо больше одного валидного билда (обсуждение с Колей,
+        # 2026-09-21: "2 карточки перса - одна в одном билде, другая в другом"). NULL — строка
+        # общая для обеих схем (так по умолчанию у всех обычных требований и у персонажей без
+        # схем вовсе — единственный существовавший режим до этой колонки). См. также
+        # stat_plate_character_schemes (человекочитаемые названия схем) и
+        # cogs/stat_requirements.py::_detect_scheme (авто-определение по фактическим основам
+        # модов игрока).
+        cursor.execute("ALTER TABLE stat_requirements ADD COLUMN scheme_num INTEGER")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_stat_req_guild_plate_char ON stat_requirements(guild_id, plate_name, character_key)"
     )
+
+
+def _ensure_stat_plate_character_schemes_table(cursor):
+    """Человекочитаемые названия схем (1/2) мод-билда персонажа внутри плейта — сама
+    привязка требования к схеме хранится в stat_requirements.scheme_num, тут только
+    подпись ("Схема 1" по умолчанию, либо своё название вроде "Скорость"/"КД"). Строка
+    появляется лениво (INSERT OR IGNORE при первом требовании с этим scheme_num) — так же,
+    как исторические плейты раньше появлялись в stat_plates только по факту использования."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_plate_character_schemes (
+            guild_id INTEGER NOT NULL DEFAULT 1,
+            plate_name TEXT NOT NULL,
+            character_key TEXT NOT NULL,
+            scheme_num INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            PRIMARY KEY (guild_id, plate_name, character_key, scheme_num)
+        )
+    """)
 
 
 def _ensure_stat_plate_character_order_table(cursor):
@@ -3742,6 +3772,11 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
             "UPDATE stat_plate_components SET source_plate = ? WHERE guild_id = ? AND source_plate = ?",
             (new_name, guild_id, old_name)
         )
+        _ensure_stat_plate_character_schemes_table(cursor)
+        cursor.execute(
+            "UPDATE stat_plate_character_schemes SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
+            (new_name, guild_id, old_name)
+        )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -3802,6 +3837,11 @@ def delete_stat_requirements_by_character(plate_name: str, character_key: str, g
         (guild_id, plate_name, character_key),
     )
     deleted = cursor.rowcount
+    _ensure_stat_plate_character_schemes_table(cursor)
+    cursor.execute(
+        "DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
+        (guild_id, plate_name, character_key),
+    )
     conn.commit()
     conn.close()
     return deleted
@@ -3826,6 +3866,8 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_plate_character_order WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     _ensure_stat_plate_components_table(cursor)
     cursor.execute("DELETE FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?", (guild_id, name))
+    _ensure_stat_plate_character_schemes_table(cursor)
+    cursor.execute("DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted
@@ -3888,19 +3930,83 @@ def get_all_stat_plates_detailed(guild_id: int = 1):
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
                           created_by: str, guild_id: int = 1, skill_id: str = None, mod_slot: str = None,
-                          compare_character_key: str = None) -> int:
+                          compare_character_key: str = None, scheme_num: int = None) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO stat_requirements
-            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id, skill_id, mod_slot, compare_character_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
-    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id, skill_id, mod_slot, compare_character_key))
+            (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, guild_id, skill_id, mod_slot, compare_character_key, scheme_num)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
+    """, (plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, guild_id, skill_id, mod_slot, compare_character_key, scheme_num))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
+    if scheme_num:
+        # Лениво заводим подпись схемы по умолчанию ("Схема N"), если для этого персонажа/
+        # плейта её ещё не было — см. _ensure_stat_plate_character_schemes_table.
+        _ensure_default_scheme_label(plate_name, character_key, scheme_num, guild_id)
     return req_id
+
+
+def _ensure_default_scheme_label(plate_name: str, character_key: str, scheme_num: int, guild_id: int = 1) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_character_schemes_table(cursor)
+    cursor.execute(
+        "INSERT OR IGNORE INTO stat_plate_character_schemes (guild_id, plate_name, character_key, scheme_num, label) VALUES (?, ?, ?, ?, ?)",
+        (guild_id, plate_name, character_key, scheme_num, f"Схема {scheme_num}"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_character_scheme_labels(plate_name: str, character_key: str, guild_id: int = 1) -> dict:
+    """{scheme_num: label} — только схемы, реально заведённые для этого (плейт, персонаж);
+    пустой словарь, если у персонажа схем нет вовсе (подавляющее большинство случаев)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_character_schemes_table(cursor)
+    cursor.execute(
+        "SELECT scheme_num, label FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
+        (guild_id, plate_name, character_key),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {scheme_num: label for scheme_num, label in rows}
+
+
+def set_character_scheme_label(plate_name: str, character_key: str, scheme_num: int, label: str, guild_id: int = 1) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_character_schemes_table(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO stat_plate_character_schemes (guild_id, plate_name, character_key, scheme_num, label) VALUES (?, ?, ?, ?, ?)",
+        (guild_id, plate_name, character_key, scheme_num, label),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_stat_requirement_scheme(req_id: int, scheme_num: int | None, guild_id: int = 1) -> bool:
+    """scheme_num=None переводит требование обратно в "общее для обеих схем" (либо просто
+    "без схем", если у персонажа схем нет вовсе)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    cursor.execute("UPDATE stat_requirements SET scheme_num = ? WHERE id = ? AND guild_id = ?", (scheme_num, req_id, guild_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    if updated and scheme_num:
+        conn2 = sqlite3.connect(DB_NAME)
+        c2 = conn2.cursor()
+        c2.execute("SELECT plate_name, character_key FROM stat_requirements WHERE id = ? AND guild_id = ?", (req_id, guild_id))
+        row = c2.fetchone()
+        conn2.close()
+        if row:
+            _ensure_default_scheme_label(row[0], row[1], scheme_num, guild_id)
+    return updated
 
 
 def update_stat_requirement(req_id: int, plate_name: str, character_key: str, stat_name: str, operator: str,
@@ -3937,7 +4043,7 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key, scheme_num
         FROM stat_requirements WHERE id = ? AND guild_id = ?
     """, (req_id, guild_id))
     row = cursor.fetchone()
@@ -3962,14 +4068,14 @@ def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1
             if ck != character_key:
                 continue
             cursor.execute("""
-                SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
+                SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key, scheme_num
                 FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
             """, (guild_id, leaf_plate, character_key))
             rows.extend(cursor.fetchall())
         conn.close()
         return rows
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key, scheme_num
         FROM stat_requirements WHERE guild_id = ? AND plate_name = ? AND character_key = ? ORDER BY id
     """, (guild_id, plate_name, character_key))
     rows = cursor.fetchall()
@@ -4054,7 +4160,7 @@ def get_all_stat_requirements(guild_id: int = 1):
     cursor = conn.cursor()
     _ensure_stat_requirements_table(cursor)
     cursor.execute("""
-        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key
+        SELECT id, plate_name, character_key, stat_name, operator, threshold_value, priority, raw_text, comment, created_by, created_at, skill_id, mod_slot, compare_character_key, scheme_num
         FROM stat_requirements WHERE guild_id = ? ORDER BY plate_name, character_key, id
     """, (guild_id,))
     rows = cursor.fetchall()

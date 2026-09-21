@@ -26,6 +26,13 @@ STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES]
 OPERATOR_OPTIONS = [(c.name, c.value) for c in OPERATOR_CHOICES]
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
 MOD_SLOT_OPTIONS = list(MOD_SLOT_LABELS.items())
+# Веб-эквивалент cogs/stat_requirements.py::SCHEME_CHOICES — "" означает "общее для обеих схем"
+# (NULL в stat_requirements.scheme_num).
+SCHEME_OPTIONS = [("Обе схемы", ""), ("Схема 1", "1"), ("Схема 2", "2")]
+
+
+def _parse_scheme_form(value: str) -> int | None:
+    return int(value) if value else None
 # Для формы "сравнение с другим персонажем" — Relic не сравнивают между персонажами (см.
 # cogs/stat_requirements.py::stat_req_add_compare, тот же список там).
 COMPARE_STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
@@ -189,8 +196,29 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 "is_compare": is_compare,
                 "value_display": value_display,
                 "source_plate": r[1],
+                "scheme_num": r[14],
+                "scheme_num_str": str(r[14]) if r[14] else "",
             })
-        characters.append({"base_id": base_id, "name": _unit_name(base_id), "requirements": reqs})
+        # Схемы мод-билда (см. cogs/stat_requirements.py::SCHEME_CHOICES) — "своя" строка
+        # (scheme_num=None) видна в обеих колонках, остальное распределяется по своей.
+        # Название схемы хранится per (leaf-плейт, персонаж) — берём leaf-плейт с первой же
+        # найденной scheme-строки (в модульном плейте почти всегда только один источник на
+        # персонажа; редкий случай двух разных источников с разными схемами тут упрощается).
+        scheme_leaf_plate = next((r["source_plate"] for r in reqs if r["scheme_num"]), plate_name)
+        scheme_labels = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id=guild_id)
+        has_schemes = any(r["scheme_num"] for r in reqs)
+        common_reqs = [r for r in reqs if not r["scheme_num"]]
+        scheme1_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 1]
+        scheme2_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 2]
+        characters.append({
+            "base_id": base_id, "name": _unit_name(base_id), "requirements": reqs,
+            "has_schemes": has_schemes,
+            "scheme_leaf_plate": scheme_leaf_plate,
+            "scheme1_label": scheme_labels.get(1, "Схема 1"),
+            "scheme2_label": scheme_labels.get(2, "Схема 2"),
+            "scheme1_reqs": scheme1_reqs,
+            "scheme2_reqs": scheme2_reqs,
+        })
     # Порядок уже задан database.get_stat_requirement_characters (сохранённый
     # drag-and-drop порядок, новые персонажи — по алфавиту следом — для обычных плейтов;
     # порядок первого появления по компонентам — для модульных) — не пересортировывать.
@@ -224,8 +252,26 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "mod_slot_options": MOD_SLOT_OPTIONS,
         "mod_primary_options_json": MOD_PRIMARY_OPTIONS_JSON,
         "compare_stat_options": COMPARE_STAT_OPTIONS,
+        "scheme_options": SCHEME_OPTIONS,
         "error": request.query_params.get("error"),
     })
+
+
+@router.post("/{plate_name}/characters/{base_id}/scheme_label", response_class=HTMLResponse)
+async def character_scheme_label_set(
+    plate_name: str,
+    base_id: str,
+    scheme_num: int = Form(...),
+    label: str = Form(...),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Веб-эквивалент /статы_требования схема_переименовать. plate_name тут — тот leaf-плейт,
+    из которого реально пришли scheme-строки персонажа (см. plate_detail::scheme_leaf_plate),
+    не обязательно тот же плейт, что в URL страницы (может быть модульный)."""
+    label = label.strip()
+    if label:
+        database.set_character_scheme_label(plate_name, base_id, scheme_num, label, guild_id=user["guild_id"])
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
 @router.get("/api/plate-characters", response_class=JSONResponse)
@@ -278,6 +324,7 @@ async def requirement_add(
     threshold: float = Form(...),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
+    scheme_num: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
@@ -291,7 +338,7 @@ async def requirement_add(
     raw_text = f"{char_name} {stat_name} {operator} {_fmt_value(threshold)}"
     database.add_stat_requirement(
         plate_name, base_id, stat_name, operator, threshold, priority, raw_text, comment.strip() or None,
-        user["discord_id"], guild_id=guild_id,
+        user["discord_id"], guild_id=guild_id, scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
@@ -303,6 +350,7 @@ async def requirement_add_omicron(
     skill_id: str = Form(...),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
+    scheme_num: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
@@ -323,7 +371,7 @@ async def requirement_add_omicron(
     raw_text = f"{char_name} — омикрон «{ability_name}»"
     database.add_stat_requirement(
         plate_name, base_id, STAT_OMICRON, ">=", 1.0, priority, raw_text, comment.strip() or None,
-        user["discord_id"], guild_id=guild_id, skill_id=skill_id,
+        user["discord_id"], guild_id=guild_id, skill_id=skill_id, scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
@@ -336,6 +384,7 @@ async def requirement_add_mod_primary(
     unit_stat_id: int = Form(...),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
+    scheme_num: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     """Веб-эквивалент /статы_требования добавить_основу (cogs/stat_requirements.py::
@@ -358,7 +407,7 @@ async def requirement_add_mod_primary(
     raw_text = f"{char_name} — основа «{_mod_primary_text(mod_slot, unit_stat_id)}»"
     database.add_stat_requirement(
         plate_name, base_id, STAT_MOD_PRIMARY, "=", float(unit_stat_id), priority, raw_text, comment.strip() or None,
-        user["discord_id"], guild_id=guild_id, mod_slot=mod_slot,
+        user["discord_id"], guild_id=guild_id, mod_slot=mod_slot, scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
@@ -372,6 +421,7 @@ async def requirement_add_compare(
     compare_base_id: str = Form(...),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
+    scheme_num: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     """Веб-эквивалент /статы_требования добавить_сравнение (cogs/stat_requirements.py::
@@ -392,7 +442,7 @@ async def requirement_add_compare(
     raw_text = f"{char_name} — {_compare_req_text(stat_name, operator, compare_base_id)}"
     database.add_stat_requirement(
         plate_name, base_id, stat_name, operator, 0.0, priority, raw_text, comment.strip() or None,
-        user["discord_id"], guild_id=guild_id, compare_character_key=compare_base_id,
+        user["discord_id"], guild_id=guild_id, compare_character_key=compare_base_id, scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
@@ -405,6 +455,7 @@ async def requirement_edit(
     threshold: float = Form(None),
     priority: str = Form(...),
     comment: str = Form(""),
+    scheme_num: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
@@ -416,13 +467,15 @@ async def requirement_edit(
     # Оператор/значение у требования на омикрон, на основу мода и на сравнение с другим
     # персонажем захардкожены (см. cogs/stat_requirements.py::stat_req_add_omicron/
     # stat_req_add_mod_primary/stat_req_add_compare) — форма для таких строк их вообще не
-    # присылает, оставляем как есть.
+    # присылает, оставляем как есть. Схема — не захардкожена ни у одного из типов, её можно
+    # менять всегда (просто классификация строки, не влияет на оператор/значение).
     _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY) or bool(compare_character_key)
     new_operator = cur_operator if _locked or operator is None else operator
     new_threshold = cur_threshold if _locked or threshold is None else threshold
     database.update_stat_requirement(
         req_id, row_plate, character_key, stat_name, new_operator, new_threshold, priority, comment.strip() or None, guild_id=guild_id,
     )
+    database.set_stat_requirement_scheme(req_id, _parse_scheme_form(scheme_num), guild_id=guild_id)
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 

@@ -97,6 +97,14 @@
                     </select>
                 </label>
                 <label>
+                    Схема мод-билда
+                    <select name="scheme_num">
+                        {% for label, value in scheme_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
                     Комментарий (необязательно)
                     <input type="text" name="comment">
                 </label>
@@ -126,6 +134,14 @@
                     <select name="priority" required>
                         {% for label, value in priority_options %}
                             <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Схема мод-билда
+                    <select name="scheme_num">
+                        {% for label, value in scheme_options %}
+                            <option value="{{ value }}">{{ label }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -165,6 +181,14 @@
                     <select name="priority" required>
                         {% for label, value in priority_options %}
                             <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Схема мод-билда
+                    <select name="scheme_num">
+                        {% for label, value in scheme_options %}
+                            <option value="{{ value }}">{{ label }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -220,6 +244,14 @@
                     </select>
                 </label>
                 <label>
+                    Схема мод-билда
+                    <select name="scheme_num">
+                        {% for label, value in scheme_options %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
                     Комментарий (необязательно)
                     <input type="text" name="comment">
                 </label>
@@ -228,11 +260,72 @@
         </div>
     {% endif %}
 
+    {% macro requirements_table(char, reqs) %}
+        <div class="table-scroll">
+            <table class="data">
+                <thead>
+                    <tr>
+                        <th>Стат</th>
+                        <th>Приоритет</th>
+                        <th>Комментарий</th>
+                        {% if is_modular %}<th>Источник</th>{% else %}<th></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in reqs %}
+                        <tr>
+                            <td>{{ r.value_display }}</td>
+                            <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                            <td>{{ r.comment or "—" }}</td>
+                            {% if is_modular %}
+                                <td><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
+                            {% else %}
+                            <td class="row-actions">
+                                <details>
+                                    <summary class="link-btn">править</summary>
+                                    <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
+                                        {% if not r.is_omicron and not r.is_mod_primary and not r.is_compare %}
+                                            <select name="operator">
+                                                {% for label, value in operator_options %}
+                                                    <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
+                                        {% endif %}
+                                        <select name="priority">
+                                            {% for label, value in priority_options %}
+                                                <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        {% if char.has_schemes %}
+                                            <select name="scheme_num" title="Схема">
+                                                {% for label, value in scheme_options %}
+                                                    <option value="{{ value }}" {% if r.scheme_num_str == value %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        {% endif %}
+                                        <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
+                                        <button type="submit">Сохранить</button>
+                                    </form>
+                                </details>
+                                <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
+                                      onsubmit="return confirm('Удалить требование «{{ r.value_display }}» для {{ char.name }}?');">
+                                    <button type="submit" class="button-danger">Удалить</button>
+                                </form>
+                            </td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endmacro %}
+
     {% if not characters %}
         <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
     {% else %}
         {% if not is_modular %}
-            <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу.</p>
+            <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу. Строки без схемы видны в обеих колонках сразу.</p>
         {% endif %}
         <div id="plate-characters-list">
         {% for char in characters %}
@@ -241,57 +334,40 @@
                     <span class="panel-title-left">{% if not is_modular %}<span class="drag-handle">⠿</span>{% endif %}<span>{{ char.name }}</span></span>
                     <span class="panel-hint">{{ char.requirements|length }} треб.</span>
                 </div>
-                <div class="table-scroll">
-                    <table class="data">
-                        <thead>
-                            <tr>
-                                <th>Стат</th>
-                                <th>Приоритет</th>
-                                <th>Комментарий</th>
-                                {% if is_modular %}<th>Источник</th>{% else %}<th></th>{% endif %}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for r in char.requirements %}
-                                <tr>
-                                    <td>{{ r.value_display }}</td>
-                                    <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
-                                    <td>{{ r.comment or "—" }}</td>
-                                    {% if is_modular %}
-                                        <td><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
-                                    {% else %}
-                                    <td class="row-actions">
-                                        <details>
-                                            <summary class="link-btn">править</summary>
-                                            <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                                {% if not r.is_omicron and not r.is_mod_primary and not r.is_compare %}
-                                                    <select name="operator">
-                                                        {% for label, value in operator_options %}
-                                                            <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                    <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
-                                                {% endif %}
-                                                <select name="priority">
-                                                    {% for label, value in priority_options %}
-                                                        <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
-                                                <button type="submit">Сохранить</button>
-                                            </form>
-                                        </details>
-                                        <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
-                                              onsubmit="return confirm('Удалить требование «{{ r.value_display }}» для {{ char.name }}?');">
-                                            <button type="submit" class="button-danger">Удалить</button>
-                                        </form>
-                                    </td>
-                                    {% endif %}
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                {% if char.has_schemes and not is_modular %}
+                    <div class="scheme-columns" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1em;">
+                        <div>
+                            <div class="panel-title" style="padding: 0 0 0.4em;">
+                                <span><strong>{{ char.scheme1_label }}</strong></span>
+                                <details style="display:inline;">
+                                    <summary class="link-btn" style="display:inline;">переименовать</summary>
+                                    <form method="post" action="/plates/{{ char.scheme_leaf_plate }}/characters/{{ char.base_id }}/scheme_label" class="inline-form">
+                                        <input type="hidden" name="scheme_num" value="1">
+                                        <input type="text" name="label" value="{{ char.scheme1_label }}" required>
+                                        <button type="submit">Сохранить</button>
+                                    </form>
+                                </details>
+                            </div>
+                            {{ requirements_table(char, char.scheme1_reqs) }}
+                        </div>
+                        <div>
+                            <div class="panel-title" style="padding: 0 0 0.4em;">
+                                <span><strong>{{ char.scheme2_label }}</strong></span>
+                                <details style="display:inline;">
+                                    <summary class="link-btn" style="display:inline;">переименовать</summary>
+                                    <form method="post" action="/plates/{{ char.scheme_leaf_plate }}/characters/{{ char.base_id }}/scheme_label" class="inline-form">
+                                        <input type="hidden" name="scheme_num" value="2">
+                                        <input type="text" name="label" value="{{ char.scheme2_label }}" required>
+                                        <button type="submit">Сохранить</button>
+                                    </form>
+                                </details>
+                            </div>
+                            {{ requirements_table(char, char.scheme2_reqs) }}
+                        </div>
+                    </div>
+                {% else %}
+                    {{ requirements_table(char, char.requirements) }}
+                {% endif %}
             </div>
         {% endfor %}
         </div>

@@ -48,26 +48,27 @@ def _bot_stand_in(comlink, stat_calc):
 
 async def evaluate_character_player(
     comlink, stat_calc, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1,
-    scenario: str = SCENARIO_RAW,
+    scenario: str = SCENARIO_RAW, forced_scheme: int | None = None,
 ):
     """Обёртка над cogs.stat_requirements._evaluate_character_player — см. её докстринг
     для формата результата (char_name, block, matched, total, updated_at, failed_required,
-    required_total) и для смысла scenario (SCENARIO_RAW/UP/FULL), либо None, если для этого
-    персонажа нет сохранённых требований в плейте."""
+    required_total, active_scheme, scheme_label), для смысла scenario (SCENARIO_RAW/UP/FULL)
+    и forced_scheme (форсирует схему мод-билда вместо авто-детекта, только для персонажей у
+    которых есть схемы), либо None, если для этого персонажа нет сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario)
+    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
 
 
-async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1):
+async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1, forced_scheme: int | None = None):
     """Обёртка над cogs.stat_requirements._project_character_relic — (char_name, block)
     либо None, если для этого персонажа нет сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id)
+    return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id, forced_scheme=forced_scheme)
 
 
-async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW) -> dict:
+async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None) -> dict:
     """Обёртка над cogs.stat_requirements._build_guild_report — см. её докстринг для формата
-    результата ({"error", "total_players", "compliant", "problem", "no_data"}) и параметра
-    scenario."""
+    результата ({"error", "total_players", "compliant", "problem", "no_data"}) и параметров
+    scenario/forced_scheme."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, scenario=scenario)
+    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
