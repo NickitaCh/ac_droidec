@@ -33,6 +33,19 @@ EQUIPMENT_DEFINITIONS_FLAG = 8
 CAMPAIGN_FLAG = 274877906944
 MATERIAL_FLAG = 16384
 SCAVENGER_CONVERSION_SET_FLAG = 268435456
+# 'RecipeDefinitions' — добыто эмпирически 2026-09-21 тем же способом, что остальные
+# *_FLAG (comlink.get_enums()["GameDataItemsEnum"]). В отличие от EQUIPMENT/MATERIAL/
+# SCAVENGER-флагов выше (узкий ответ на 1-2 ключа), этот (и RelicTierDefinitions —
+# не используется, нужных данных в нём нет, см. ниже) на живых данных отдаёт ВЕСЬ
+# каталог игры разом (как и CAMPAIGN_FLAG — тот же порядок тяжести, тот же принятый
+# риск, см. докстринг sync_equipment). Нужная часть — recipe[] с id вида
+# "relic_promotion_recipe_01".."_10": ГЛОБАЛЬНЫЙ (один на игру, не на персонажа) рецепт
+# перехода реликвии с тира N-1 на N, ingredients[] содержит "GRIND" (кредиты) + RM_xxx
+# ("данные сигнала" — то, что игроки называют "сигналами") + SCV_xxx (переработанные
+# материалы). relicDefinition/relicTierDefinition (RelicTierDefinitions-флаг) содержат
+# только бонус-статы тира, НЕ рецепт — проверено вживую, не тратить время на них снова.
+RECIPE_DEFINITIONS_FLAG = 67108864
+_RELIC_PROMOTION_RECIPE_RE = re.compile(r"^relic_promotion_recipe_(\d+)$")
 
 # Человекочитаемые названия кампаний — их всего ~16 (id из живого пробника: C00, C01D, C01L,
 # C01H, EVENTS, GUILD, C01MB, C01SP, SHIP_EVENTS, t01D..t05D, TW_EVENTS, ERA), campaign.nameKey
@@ -265,5 +278,28 @@ async def sync_equipment(comlink) -> int:
         ]
         if ingredients:
             database.set_scavenger_recipe(material_id, points_needed, ingredients)
+
+    # Рецепты повышения реликвии ("сигналы"/кредиты/переработанные материалы, см.
+    # RECIPE_DEFINITIONS_FLAG выше) — для resource_spend.py, отдельная маленькая таблица
+    # (10 тиров), не завязана на game_equipment/scavenger-таблицы этой функции напрямую.
+    try:
+        recipe_data = await asyncio.to_thread(comlink.get_game_data, items=str(RECIPE_DEFINITIONS_FLAG))
+        relic_recipes = {}
+        for r in recipe_data.get("recipe") or []:
+            m = _RELIC_PROMOTION_RECIPE_RE.match(r.get("id") or "")
+            if not m:
+                continue
+            tier = int(m.group(1))
+            ingredients = [
+                (ing.get("id"), ing.get("minQuantity"))
+                for ing in (r.get("ingredients") or [])
+                if ing.get("id") and ing.get("minQuantity")
+            ]
+            if ingredients:
+                relic_recipes[tier] = ingredients
+        if relic_recipes:
+            database.set_relic_promotion_recipe(relic_recipes)
+    except Exception as e:
+        print(f"⚠️ [Справочник] Не удалось обновить рецепты повышения реликвии: {e}")
 
     return len(equipment_to_db)

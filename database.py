@@ -1495,6 +1495,67 @@ def get_scavenger_recipe(material_base_id: str):
     return points_needed, ingredients
 
 
+def _ensure_relic_promotion_recipe_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS relic_promotion_recipe (
+            tier INTEGER NOT NULL,
+            material_id TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            PRIMARY KEY (tier, material_id)
+        )
+    """)
+
+
+def set_relic_promotion_recipe(recipes: dict[int, list[tuple[str, int]]]) -> None:
+    """Перезаписывает relic_promotion_recipe целиком: {tier: [(material_id, quantity), ...]} —
+    источник comlink RecipeDefinitions ('recipe'-коллекция), записи "relic_promotion_recipe_01"
+    .."_10" — ГЛОБАЛЬНЫЙ рецепт (одинаковый для всех персонажей, в отличие от снаряжения),
+    сколько чего уходит на переход реликвии с (tier-1) на tier: material_id — либо "GRIND"
+    (кредиты, генерик-валюта), либо base_id из game_equipment (материал коллекции material —
+    RM_xxx "данные сигнала"/SCV_xxx переработанные материалы). tier здесь — та же шкала 0-10,
+    что stat_engine.get_current_relic_level и guild_activity_events 'relic' old_value/new_value
+    (подтверждено: ровно 10 рецептов на игру, recipe_NN = переход к уровню N). Синкается вместе
+    с services/equipment_sync.py::sync_equipment (та же периодичность), не отдельным циклом."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_relic_promotion_recipe_table(cursor)
+    cursor.execute("DELETE FROM relic_promotion_recipe")
+    rows = [
+        (tier, material_id, quantity)
+        for tier, ingredients in recipes.items()
+        for material_id, quantity in ingredients
+    ]
+    if rows:
+        cursor.executemany(
+            "INSERT INTO relic_promotion_recipe (tier, material_id, quantity) VALUES (?, ?, ?)",
+            rows,
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_relic_promotion_recipe_range(tier_from_exclusive: int, tier_to_inclusive: int) -> dict[str, int]:
+    """{material_id: суммарное количество} за переход реликвии с tier_from_exclusive на
+    tier_to_inclusive (обычно несколько последовательных тиров разом — игрок мог прыгнуть
+    сразу через несколько между синками активности). Тиры <=0 или >10 просто не дают строк
+    (нет такого рецепта) — вызывающая сторона (resource_spend.py) не обязана обрезать диапазон
+    сама."""
+    if tier_to_inclusive <= tier_from_exclusive:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_relic_promotion_recipe_table(cursor)
+    cursor.execute(
+        "SELECT material_id, quantity FROM relic_promotion_recipe WHERE tier > ? AND tier <= ?",
+        (tier_from_exclusive, tier_to_inclusive),
+    )
+    result: dict[str, int] = {}
+    for material_id, quantity in cursor.fetchall():
+        result[material_id] = result.get(material_id, 0) + quantity
+    conn.close()
+    return result
+
+
 def get_game_unit_name(base_id: str) -> str | None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4913,6 +4974,75 @@ def get_all_unit_omicron_skills() -> dict:
     result = {}
     for base_id, skill_id in rows:
         result.setdefault(base_id, []).append(skill_id)
+    return result
+
+
+def _ensure_unit_gear_tier_recipe_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS unit_gear_tier_recipe (
+            base_id TEXT NOT NULL,
+            tier INTEGER NOT NULL,
+            slot_index INTEGER NOT NULL,
+            equipment_id TEXT NOT NULL,
+            PRIMARY KEY (base_id, tier, slot_index)
+        )
+    """)
+
+
+def set_unit_gear_recipes(mapping: dict) -> None:
+    """Перезаписывает unit_gear_tier_recipe целиком: {base_id: {tier: [equipment_id, ...]}} —
+    источник comlink UnitDefinitions.unitTier[].equipmentSet (см. services/units_sync.py::sync_units,
+    тот же полный фетч юнитов, что и остальной game_units-справочник, доп. запрос к Comlink не
+    нужен). slot_index — позиция в equipmentSet (0-5): один и тот же equipment_id иногда
+    встречается в одном тире дважды (подтверждено живыми данными, напр. GRANDMASTERYODA тир 11),
+    поэтому PRIMARY KEY не может быть просто (base_id, tier, equipment_id). Тир 13 (переход к
+    реликвии, comlink отдаёт заглушку "9999"×6 вместо реальных деталей) намеренно не пишется —
+    отфильтровывается на стороне sync_units, не здесь. Используется resource_spend.py для
+    точного подсчёта потраченных деталей по уже трекаемым guild_activity_events 'gear'-событиям
+    (см. [[project_activity_metric_feature]])."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_unit_gear_tier_recipe_table(cursor)
+    cursor.execute("DELETE FROM unit_gear_tier_recipe")
+    rows = [
+        (base_id, tier, i, equipment_id)
+        for base_id, tiers in mapping.items()
+        for tier, equipment_ids in tiers.items()
+        for i, equipment_id in enumerate(equipment_ids)
+    ]
+    if rows:
+        cursor.executemany(
+            "INSERT INTO unit_gear_tier_recipe (base_id, tier, slot_index, equipment_id) VALUES (?, ?, ?, ?)",
+            rows,
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_gear_recipe_items(pairs: list[tuple[str, int]]) -> dict[tuple[str, int], list[str]]:
+    """{(base_id, tier): [equipment_id, ...]} для набора (персонаж, тир) сразу одним запросом —
+    resource_spend.py собирает такие пары по всем 'gear'-событиям игрока за период, чтобы не
+    бить в БД по разу на тир. Пары без рецепта (не канонический юнит, либо тир 13) просто
+    отсутствуют в результате — вызывающая сторона это допускает."""
+    if not pairs:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_unit_gear_tier_recipe_table(cursor)
+    result: dict[tuple[str, int], list[str]] = {}
+    base_ids = list({p[0] for p in pairs})
+    placeholders = ",".join("?" for _ in base_ids)
+    cursor.execute(
+        f"SELECT base_id, tier, slot_index, equipment_id FROM unit_gear_tier_recipe "
+        f"WHERE base_id IN ({placeholders}) ORDER BY base_id, tier, slot_index",
+        base_ids,
+    )
+    wanted = set(pairs)
+    for base_id, tier, _slot_index, equipment_id in cursor.fetchall():
+        if (base_id, tier) not in wanted:
+            continue
+        result.setdefault((base_id, tier), []).append(equipment_id)
+    conn.close()
     return result
 
 

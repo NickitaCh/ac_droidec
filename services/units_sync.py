@@ -240,6 +240,7 @@ async def sync_units(comlink) -> int:
     loc_en_kv = _parse_loc(loc_en, "Loc_ENG_US.txt")
 
     units_to_db = {}
+    gear_recipes = {}
     for unit in units_list:
         if not _is_canonical_playable_unit(unit):
             continue
@@ -252,10 +253,24 @@ async def sync_units(comlink) -> int:
         unit_type = "ship" if unit.get("combatType") == 2 else "character"
         units_to_db[bid] = (name, unit_type, name_en)
 
+        # Рецепт деталей по тиру снаряжения (unitTier[].equipmentSet) — для
+        # resource_spend.py (счётчик потраченных деталей в /ресурсы). Тир 13 у comlink —
+        # заглушка "9999"×6 (переход к реликвии, реальных деталей не требует), пропускаем.
+        tiers = {}
+        for t in unit.get("unitTier") or []:
+            tier = t.get("tier")
+            equipment_set = t.get("equipmentSet")
+            if not tier or tier >= 13 or not equipment_set:
+                continue
+            tiers[tier] = equipment_set
+        if tiers:
+            gear_recipes[bid] = tiers
+
     database.upsert_game_units(units_to_db)
     # Убираем из справочника то, что осталось от синков до фильтра выше (NPC/дубли по
     # редкости) — без этого upsert (INSERT OR REPLACE) их не тронет, они просто зависнут.
     database.prune_game_units(units_to_db.keys())
+    database.set_unit_gear_recipes(gear_recipes)
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление
