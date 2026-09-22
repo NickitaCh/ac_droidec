@@ -173,18 +173,29 @@ def _percentile(sorted_values: list, pct: float) -> float:
 
 def _significant_sets(decoded_mods: list) -> tuple:
     """Сет считается значимым, если надето хотя бы минимально необходимое для бонуса
-    количество модулей этого сета (stat_engine.MOD_SET_PIECE_COUNT)."""
+    количество модулей этого сета (stat_engine.MOD_SET_PIECE_COUNT). Возвращает (set_id,
+    множитель) — множитель = во сколько раз бонус сета активен (6 модов 2-шт. сета = "х3")
+    — раньше комбо хранило только id без множителя, из-за чего "Эффективность + Здоровье"
+    не показывало, 4 Эфки + 2 ХП или наоборот (запрос пользователя 2026-09-22)."""
     counts = {}
     for d in decoded_mods:
         counts[d["set_id"]] = counts.get(d["set_id"], 0) + 1
-    significant = [sid for sid, cnt in counts.items() if cnt >= stat_engine.MOD_SET_PIECE_COUNT.get(sid, 99)]
+    significant = [
+        (sid, cnt // stat_engine.MOD_SET_PIECE_COUNT.get(sid, 99))
+        for sid, cnt in counts.items()
+        if cnt >= stat_engine.MOD_SET_PIECE_COUNT.get(sid, 99)
+    ]
     return tuple(sorted(significant))
 
 
 def _combo_label(set_ids: tuple) -> str:
     if not set_ids:
         return "— без значимого набора —"
-    return " + ".join(stat_engine.MOD_SET_IDS.get(str(sid), f"#{sid}") for sid in set_ids)
+    parts = []
+    for sid, multiplier in set_ids:
+        name = stat_engine.MOD_SET_IDS.get(str(sid), f"#{sid}")
+        parts.append(f"{name} x{multiplier}" if multiplier > 1 else name)
+    return " + ".join(parts)
 
 
 def _config_key(decoded_mods: list) -> tuple:
@@ -259,9 +270,33 @@ def _meets_threshold(delta: float, base: float, threshold: tuple) -> bool:
     return bool(base) and (delta / base) > value
 
 
-def _stat_delta_stats(deltas: list, relevant_count: int, threshold: tuple) -> dict:
+VIEWS = ("delta", "pct", "final")
+VIEW_SUFFIX = {"delta": "Δ", "pct": "%", "final": "итог"}
+
+
+def _display_sorted(pairs: list, view: str) -> list:
+    """pairs — [(delta, base), ...]. Переключатель Δ/%/Итог на странице (запрос
+    пользователя 2026-09-22, чат #ac-оф-модинг — раньше p50/p70/p90 показывали только
+    сырую дельту, из-за чего было неясно, это большая дельта от маленькой базы или
+    наоборот): "pct" — дельта как % от базы игрока, "final" — итоговый стат (база+дельта)."""
+    if view == "pct":
+        return sorted((d / b * 100) if b else 0.0 for d, b in pairs)
+    if view == "final":
+        return sorted(b + d for d, b in pairs)
+    return sorted(d for d, _b in pairs)
+
+
+def _fmt_for_view(value: float, stat_name: str, view: str) -> str:
+    if view == "pct":
+        return mod_search.fmt_value(value) + "%"
+    return _fmt_delta(value, stat_name)  # "delta" и "final" — та же единица, что и стат
+
+
+def _stat_delta_stats(deltas: list, relevant_count: int, threshold: tuple, view: str = "delta") -> dict:
     """deltas — [(delta, base), ...] по всем релевантным игрокам, у которых стат посчитан.
-    threshold — STAT_SF_THRESHOLD[stat_name], ("absolute"|"relative", значение)."""
+    threshold — STAT_SF_THRESHOLD[stat_name], ("absolute"|"relative", значение). view влияет
+    ТОЛЬКО на то, что показывается в p50/p70/p90/spread — ранг/NM/GF/CV всегда считаются по
+    сырой дельте (delta_p50/delta_p90 ниже), не зависят от выбранного представления."""
     n = len(deltas)
     if n == 0:
         return {"n": 0, "sf": None, "p50": None, "p70": None, "p90": None, "spread": None, "cv": None, "nm": None, "gf": None}
@@ -270,9 +305,13 @@ def _stat_delta_stats(deltas: list, relevant_count: int, threshold: tuple) -> di
     sf = sf_count / relevant_count if relevant_count else 0.0
 
     sorted_deltas = sorted(d for d, _b in deltas)
-    p50 = _percentile(sorted_deltas, 50)
-    p70 = _percentile(sorted_deltas, 70)
-    p90 = _percentile(sorted_deltas, 90)
+    delta_p50 = _percentile(sorted_deltas, 50)
+    delta_p90 = _percentile(sorted_deltas, 90)
+
+    display_sorted = _display_sorted(deltas, view)
+    p50 = _percentile(display_sorted, 50)
+    p70 = _percentile(display_sorted, 70)
+    p90 = _percentile(display_sorted, 90)
     spread = p90 - p50
 
     # PDF раздел 4: если SF >= 70%, CV считается по ВСЕЙ выборке релевантных игроков;
@@ -287,7 +326,7 @@ def _stat_delta_stats(deltas: list, relevant_count: int, threshold: tuple) -> di
         if mean_delta:
             cv = statistics.stdev(cv_population) / mean_delta
 
-    nm = (p50 / p90) if p90 else 0.0
+    nm = (delta_p50 / delta_p90) if delta_p90 else 0.0
     gf = sf * nm
 
     return {"n": n, "sf": sf, "p50": p50, "p70": p70, "p90": p90, "spread": spread, "cv": cv, "nm": nm, "gf": gf}
@@ -318,7 +357,9 @@ def _build_relevant(base_id: str, roster_units: list) -> tuple:
     return relevant, total_open
 
 
-def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, total_open: int) -> dict:
+def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, total_open: int, view: str = "delta") -> dict:
+    if view not in VIEWS:
+        view = "delta"
     char_name = database.get_game_unit_name(base_id) or base_id
     if not relevant:
         return {
@@ -394,14 +435,14 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
     cv_gf_pairs = []
     for stat_name, label in ANALYZED_STATS:
         deltas = [(p["delta"][stat_name], p["base"][stat_name]) for p in relevant if stat_name in p["delta"]]
-        stats = _stat_delta_stats(deltas, relevant_count, STAT_SF_THRESHOLD[stat_name])
+        stats = _stat_delta_stats(deltas, relevant_count, STAT_SF_THRESHOLD[stat_name], view=view)
         row = {"stat": stat_name, "label": label, **stats}
         if stats["n"]:
             row["sf_pct"] = f"{stats['sf'] * 100:.0f}%"
-            row["p50_fmt"] = _fmt_delta(stats["p50"], stat_name)
-            row["p70_fmt"] = _fmt_delta(stats["p70"], stat_name)
-            row["p90_fmt"] = _fmt_delta(stats["p90"], stat_name)
-            row["spread_fmt"] = _fmt_delta(stats["spread"], stat_name)
+            row["p50_fmt"] = _fmt_for_view(stats["p50"], stat_name, view)
+            row["p70_fmt"] = _fmt_for_view(stats["p70"], stat_name, view)
+            row["p90_fmt"] = _fmt_for_view(stats["p90"], stat_name, view)
+            row["spread_fmt"] = _fmt_for_view(stats["spread"], stat_name, view)
             row["cv_fmt"] = f"{stats['cv']:.2f}" if stats["cv"] is not None else "—"
             row["cv_level"] = _cv_level(stats["cv"])
             row["nm_fmt"] = f"{stats['nm']:.2f}"
@@ -440,20 +481,22 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
         members = [p for p in relevant if p["config_key"] == config_key]
         dir_stats = []
         for stat_name, label in ANALYZED_STATS:
-            deltas = sorted(m["delta"][stat_name] for m in members if stat_name in m["delta"])
-            if not deltas:
+            pairs = [(m["delta"][stat_name], m["base"][stat_name]) for m in members if stat_name in m["delta"]]
+            if not pairs:
                 continue
-            n = len(deltas)
+            deltas_only = sorted(d for d, _b in pairs)
+            n = len(deltas_only)
             cv = None
             if n >= 2:
-                mean_d = statistics.mean(deltas)
+                mean_d = statistics.mean(deltas_only)
                 if mean_d:
-                    cv = statistics.stdev(deltas) / mean_d
+                    cv = statistics.stdev(deltas_only) / mean_d
+            display_sorted = _display_sorted(pairs, view)
             dir_stats.append({
                 "label": label,
-                "p50_fmt": _fmt_delta(_percentile(deltas, 50), stat_name),
-                "p70_fmt": _fmt_delta(_percentile(deltas, 70), stat_name),
-                "p90_fmt": _fmt_delta(_percentile(deltas, 90), stat_name),
+                "p50_fmt": _fmt_for_view(_percentile(display_sorted, 50), stat_name, view),
+                "p70_fmt": _fmt_for_view(_percentile(display_sorted, 70), stat_name, view),
+                "p90_fmt": _fmt_for_view(_percentile(display_sorted, 90), stat_name, view),
                 "cv_fmt": f"{cv:.2f}" if cv is not None else "—",
             })
         sets_label, primaries_label = _config_label_parts(config_key)
@@ -480,10 +523,12 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
         "consensus_level": _consensus_level(consensus),
         "directions": directions,
         "directions_count": len(directions),
+        "view": view,
+        "view_suffix": VIEW_SUFFIX[view],
     }
 
 
-async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int = 1) -> dict:
+async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int = 1, view: str = "delta") -> dict:
     """Анализ по СВОЕЙ (обслуживаемой) гильдии — данные из уже закэшированного
     player_unit_cache, без обращений к Comlink (см. докстринг модуля)."""
     roster = database.get_all_user_mappings(guild_id)
@@ -497,10 +542,10 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
         for _discord_id, ally_code, name in roster
     ]
     relevant, total_open = _build_relevant(base_id, roster_units)
-    return _compute_report(stat_calc, base_id, target_relic, relevant, total_open)
+    return _compute_report(stat_calc, base_id, target_relic, relevant, total_open, view=view)
 
 
-async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int, guild) -> dict:
+async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int, guild, view: str = "delta") -> dict:
     """Анализ по ЧУЖОЙ гильдии (добавлено 2026-09-16, по прямому запросу пользователя —
     "чужую гильдию, а не только свою") — `guild` это services.steal_build.GuildLookupResult,
     уже отресолвленный по коду союзника/ID гильдии (см. web/routes/mod_analysis.py). В отличие
@@ -527,7 +572,7 @@ async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int,
         await asyncio.sleep(0.1)
 
     relevant, total_open = _build_relevant(base_id, roster_units)
-    report = _compute_report(stat_calc, base_id, target_relic, relevant, total_open)
+    report = _compute_report(stat_calc, base_id, target_relic, relevant, total_open, view=view)
     if report["error"] is None:
         report["guild_name"] = guild.guild_name
         report["swgoh_guild_id"] = guild.swgoh_guild_id

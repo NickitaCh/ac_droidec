@@ -10,6 +10,7 @@ GET с query-параметрами (как /mod-search, /steal-build) — ре�
 и бьёт по Comlink живьём, как /steal-build."""
 
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -25,6 +26,15 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 DEFAULT_RELIC = "9"
+
+
+def _view_urls(character: str, relic_raw: str, guild_ref: str) -> dict:
+    """Ссылки переключателя Δ/%/Итог (запрос пользователя 2026-09-22) — обычный GET-реюз
+    страницы с другим view, тот же паттерн, что segmented-toggle в activity.html и др."""
+    base_params = {"character": character, "relic": relic_raw}
+    if guild_ref:
+        base_params["guild_ref"] = guild_ref
+    return {v: "/mod-analysis?" + urlencode({**base_params, "view": v}) for v in mod_analysis.VIEWS}
 
 
 def _get_comlink():
@@ -55,6 +65,9 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
     character = qp.get("character", "")
     relic_raw = qp.get("relic", DEFAULT_RELIC)
     guild_ref = qp.get("guild_ref", "").strip()
+    view = qp.get("view", "delta")
+    if view not in mod_analysis.VIEWS:
+        view = "delta"
 
     history_id = qp.get("history_id")
     if history_id:
@@ -105,15 +118,16 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
             context["error"] = lookup.error
             return templates.TemplateResponse(request, "mod_analysis.html", context)
         guild_name_for_history = lookup.guild_name
-        report = await mod_analysis.build_report_live(comlink, stat_calc, character, relic, lookup)
+        report = await mod_analysis.build_report_live(comlink, stat_calc, character, relic, lookup, view=view)
     else:
-        report = await mod_analysis.build_report(stat_calc, character, relic, guild_id=guild_id)
+        report = await mod_analysis.build_report(stat_calc, character, relic, guild_id=guild_id, view=view)
 
     if report["error"]:
         context["error"] = report["error"]
         return templates.TemplateResponse(request, "mod_analysis.html", context)
 
     context["result"] = report
+    context["view_urls"] = _view_urls(character, relic_raw, guild_ref)
 
     database.add_mod_analysis_history(
         character, relic, user["discord_id"], guild_id=guild_id,

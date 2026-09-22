@@ -103,12 +103,25 @@
                     <span>Характеристики</span>
                     <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модов на релике {{ result.target_relic }}</span>
                 </div>
+                <div class="segmented-toggle" style="margin-bottom: .5em;">
+                    <span class="muted">Показывать:</span>
+                    <span class="segmented-toggle-options">
+                        {% for v, vlabel in (("delta", "Дельта"), ("pct", "% от базы"), ("final", "Итоговый стат")) %}
+                            {% if v == result.view %}
+                                <strong>{{ vlabel }}</strong>
+                            {% else %}
+                                <a href="{{ view_urls[v] }}">{{ vlabel }}</a>
+                            {% endif %}
+                        {% endfor %}
+                    </span>
+                    <span class="muted" style="margin-left: .5em;">(влияет и на таблицы направлений ниже)</span>
+                </div>
                 <div class="table-scroll">
                     <table class="data">
                         <thead>
                             <tr>
                                 <th>Ранг</th><th>Характеристика</th><th>SF</th>
-                                <th>p50(Δ)</th><th>p70(Δ)</th><th>p90(Δ)</th><th>Разброс</th>
+                                <th>p50({{ result.view_suffix }})</th><th>p70({{ result.view_suffix }})</th><th>p90({{ result.view_suffix }})</th><th>Разброс</th>
                                 <th>CV</th><th>NM</th><th>GF</th>
                             </tr>
                         </thead>
@@ -160,7 +173,7 @@
                             </div>
                             <div class="table-scroll">
                                 <table class="data">
-                                    <thead><tr><th>Характеристика</th><th>p50(Δ)</th><th>p70(Δ)</th><th>p90(Δ)</th><th>CV</th></tr></thead>
+                                    <thead><tr><th>Характеристика</th><th>p50({{ result.view_suffix }})</th><th>p70({{ result.view_suffix }})</th><th>p90({{ result.view_suffix }})</th><th>CV</th></tr></thead>
                                     <tbody>
                                         {% for s in d.stats %}
                                             <tr><td>{{ s.label }}</td><td>{{ s.p50_fmt }}</td><td>{{ s.p70_fmt }}</td><td>{{ s.p90_fmt }}</td><td>{{ s.cv_fmt }}</td></tr>
