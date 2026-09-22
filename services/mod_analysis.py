@@ -9,9 +9,11 @@
 (database.get_player_units_bulk), без живых обращений к Comlink — тот же приём, что
 services/mod_search.py (поиск по 50-90 игрокам не должен бить по Comlink на каждый вызов
 страницы). Для ЧУЖОЙ гильдии (build_report_live, добавлено 2026-09-16 — код союзника/ID любой
-другой гильдии на /mod-analysis) кэша нет, участников приходится тянуть живым Comlink по
-одному, как services/steal_build.py. Обе ветки считают модель по общей паре
-_build_relevant/_compute_report, чтобы сама модель анализа не дублировалась.
+другой гильдии на /mod-analysis) участников приходится тянуть живым Comlink по одному, как
+services/steal_build.py. Обе ветки считают модель по общей паре _build_relevant/
+_compute_player_deltas+_aggregate_report, чтобы сама модель анализа не дублировалась;
+результат _compute_player_deltas (дорогая часть) дополнительно кэшируется в _REPORT_CACHE
+(см. её докстринг) — переключатель Δ/%/Итог (view) бьёт только по дешёвой _aggregate_report.
 
 Модель (см. PDF, раздел "Порядок расчётов"):
 1. Фильтр релевантных игроков — см. _relevant_unit.
@@ -45,10 +47,42 @@ _build_relevant/_compute_report, чтобы сама модель анализа
 import asyncio
 import math
 import statistics
+import time
 
 import database
 import stat_engine
 from services import mod_search
+
+# Кэш дорогой части отчёта (project_unit_relic + calc_final_stats/calc_base_stats на КАЖДОГО
+# релевантного игрока — 50-90 игроков x 2 StatCalc-вызова) отдельно от дешёвой агрегации/
+# форматирования под view. Раньше переключатель Δ/%/Итог (web/routes/mod_analysis.py,
+# _view_urls) делал обычный GET той же страницы — это гоняло ВСЮ модель заново, включая
+# этот цикл, только чтобы поменять представление уже посчитанных чисел (жалоба пользователя
+# 2026-09-22: "тыкнул на другой режим отображения, и он секунд 30 крутит... по идее всю базу
+# на конкретный запрос он и так должен иметь"). Ключ — (scope, base_id, target_relic), НЕ
+# включает view. TTL — не бессрочно: player_unit_cache/состав гильдии меняются (часовой
+# ресинк роста, см. CLAUDE.md про ViolationsCog), и это веб-процесс, который не перезапускается
+# часто, так что без TTL кэш реально бы протух и рос без границ.
+_REPORT_CACHE: dict = {}
+_CACHE_TTL_SECONDS = 15 * 60
+_CACHE_MAX_ENTRIES = 100
+
+
+def _cache_get(key):
+    entry = _REPORT_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, relevant, total_open, extra = entry
+    if time.monotonic() - ts > _CACHE_TTL_SECONDS:
+        _REPORT_CACHE.pop(key, None)
+        return None
+    return relevant, total_open, extra
+
+
+def _cache_put(key, relevant, total_open, extra=None):
+    if len(_REPORT_CACHE) >= _CACHE_MAX_ENTRIES:
+        _REPORT_CACHE.pop(next(iter(_REPORT_CACHE)), None)  # вытеснить самый старый (dict упорядочен по вставке)
+    _REPORT_CACHE[key] = (time.monotonic(), relevant, total_open, extra or {})
 
 # Флекс-слоты — форма, где primary реально варьируется (stat_engine.MOD_PRIMARY_OPTIONS
 # даёт больше одного варианта); Квадрат/Ромб всегда несут ровно один фиксированный primary —
@@ -357,16 +391,11 @@ def _build_relevant(base_id: str, roster_units: list) -> tuple:
     return relevant, total_open
 
 
-def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, total_open: int, view: str = "delta") -> dict:
-    if view not in VIEWS:
-        view = "delta"
-    char_name = database.get_game_unit_name(base_id) or base_id
-    if not relevant:
-        return {
-            "error": None, "char_name": char_name, "target_relic": target_relic,
-            "total_open": total_open, "relevant_count": 0,
-        }
-
+def _compute_player_deltas(stat_calc, target_relic: int, relevant: list) -> None:
+    """Дорогая часть отчёта — мутирует каждый relevant[i] полями final/base/delta.
+    project_unit_relic + calc_final_stats + calc_base_stats на КАЖДОГО релевантного игрока —
+    вынесено из _aggregate_report, чтобы результат можно было закэшировать (_REPORT_CACHE) и
+    не пересчитывать при одной только смене view (см. докстринг кэша выше)."""
     for p in relevant:
         projected = stat_engine.project_unit_relic(p["unit"], target_relic)
         final_values = stat_engine.calc_final_stats(stat_calc, projected)
@@ -388,6 +417,21 @@ def _compute_report(stat_calc, base_id: str, target_relic: int, relevant: list, 
         p["final"] = final_values
         p["base"] = base_by_stat
         p["delta"] = delta_by_stat
+
+
+def _aggregate_report(base_id: str, target_relic: int, relevant: list, total_open: int, view: str = "delta") -> dict:
+    """Дешёвая часть — сеты/основы/статистика по дельте/направления/консенсус, целиком на
+    уже посчитанных relevant[i]["final"/"base"/"delta"] (см. _compute_player_deltas). Только
+    эта функция знает про view — переключатель Δ/%/Итог должен звать ТОЛЬКО её, не пересчитывая
+    per-player StatCalc заново."""
+    if view not in VIEWS:
+        view = "delta"
+    char_name = database.get_game_unit_name(base_id) or base_id
+    if not relevant:
+        return {
+            "error": None, "char_name": char_name, "target_relic": target_relic,
+            "total_open": total_open, "relevant_count": 0,
+        }
 
     relevant_count = len(relevant)
     avg_relic = statistics.mean(p["current_relic"] for p in relevant)
@@ -535,14 +579,22 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
     if not roster:
         return {"error": "Никто из гильдии не зарегистрирован (/регистрация) — анализировать некого."}
 
-    ally_codes = [ac for _discord_id, ac, _name in roster]
-    units_by_ally = database.get_player_units_bulk(ally_codes)
-    roster_units = [
-        (ally_code, name, units_by_ally.get(ally_code, {}).get(base_id))
-        for _discord_id, ally_code, name in roster
-    ]
-    relevant, total_open = _build_relevant(base_id, roster_units)
-    return _compute_report(stat_calc, base_id, target_relic, relevant, total_open, view=view)
+    cache_key = ("own", guild_id, base_id, target_relic)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        relevant, total_open, _extra = cached
+    else:
+        ally_codes = [ac for _discord_id, ac, _name in roster]
+        units_by_ally = database.get_player_units_bulk(ally_codes)
+        roster_units = [
+            (ally_code, name, units_by_ally.get(ally_code, {}).get(base_id))
+            for _discord_id, ally_code, name in roster
+        ]
+        relevant, total_open = _build_relevant(base_id, roster_units)
+        _compute_player_deltas(stat_calc, target_relic, relevant)
+        _cache_put(cache_key, relevant, total_open)
+
+    return _aggregate_report(base_id, target_relic, relevant, total_open, view=view)
 
 
 async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int, guild, view: str = "delta") -> dict:
@@ -555,24 +607,33 @@ async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int,
     if not guild.members:
         return {"error": f"В гильдии «{guild.guild_name}» нет участников."}
 
-    roster_units = []
-    fetch_errors = 0
-    for player_id, player_name in guild.members:
-        try:
-            player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
-        except Exception:
-            fetch_errors += 1
-            continue
-        roster = player_data.get("rosterUnit") or player_data.get("roster") or []
-        unit = next(
-            (u for u in roster if (u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]) == base_id),
-            None,
-        )
-        roster_units.append((player_id, player_name, unit))
-        await asyncio.sleep(0.1)
+    cache_key = ("live", guild.swgoh_guild_id, base_id, target_relic)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        relevant, total_open, extra = cached
+        fetch_errors = extra.get("fetch_errors", 0)
+    else:
+        roster_units = []
+        fetch_errors = 0
+        for player_id, player_name in guild.members:
+            try:
+                player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
+            except Exception:
+                fetch_errors += 1
+                continue
+            roster = player_data.get("rosterUnit") or player_data.get("roster") or []
+            unit = next(
+                (u for u in roster if (u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]) == base_id),
+                None,
+            )
+            roster_units.append((player_id, player_name, unit))
+            await asyncio.sleep(0.1)
 
-    relevant, total_open = _build_relevant(base_id, roster_units)
-    report = _compute_report(stat_calc, base_id, target_relic, relevant, total_open, view=view)
+        relevant, total_open = _build_relevant(base_id, roster_units)
+        _compute_player_deltas(stat_calc, target_relic, relevant)
+        _cache_put(cache_key, relevant, total_open, extra={"fetch_errors": fetch_errors})
+
+    report = _aggregate_report(base_id, target_relic, relevant, total_open, view=view)
     if report["error"] is None:
         report["guild_name"] = guild.guild_name
         report["swgoh_guild_id"] = guild.swgoh_guild_id

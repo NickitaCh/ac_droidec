@@ -129,10 +129,18 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
     context["result"] = report
     context["view_urls"] = _view_urls(character, relic_raw, guild_ref)
 
-    database.add_mod_analysis_history(
-        character, relic, user["discord_id"], guild_id=guild_id,
-        guild_ref=guild_ref or None, guild_name=guild_name_for_history,
-    )
+    # Не плодить дубли в "Истории" при простом переключении Δ/%/Итог (тот же GET той же
+    # страницы, что и обычный пересчёт, см. _view_urls) — сравниваем с последней записью по
+    # этому персонажу/гильдии, а не только по guild_id, иначе повторный клик по любому виду
+    # (view) на неизменных персонаже/релике/guild_ref бесполезно двигал бы историю и вытеснял
+    # реально другие прошлые запуски (запрос пользователя 2026-09-22, тот же тред).
+    last = database.get_mod_analysis_history(guild_id=guild_id, limit=1)
+    is_same_as_last = bool(last) and last[0][1] == character and str(last[0][2]) == str(relic) and (last[0][5] or "") == (guild_ref or "")
+    if not is_same_as_last:
+        database.add_mod_analysis_history(
+            character, relic, user["discord_id"], guild_id=guild_id,
+            guild_ref=guild_ref or None, guild_name=guild_name_for_history,
+        )
     context["history"] = _history_rows(guild_id)
 
     return templates.TemplateResponse(request, "mod_analysis.html", context)
