@@ -941,6 +941,7 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 }
 .th-help:hover .th-help-bubble, .th-help:focus-visible .th-help-bubble { display: block; }
 .th-help--right .th-help-bubble { left: auto; right: 0; transform: none; }
+.th-help-bubble strong { display: block; margin-bottom: 0.2em; color: var(--fg); }
 .muted { color: var(--fg-muted); }
 /* ---- Компактный сегментированный тумблер (напр. размер страницы на /activity внутри
    игрока) — узкая группа-таблетка вместо .table-toolbar (у него justify-content:
