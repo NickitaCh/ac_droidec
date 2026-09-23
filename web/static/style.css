@@ -906,6 +906,41 @@ table.data .dc-level-col {
    rowspan несовместим с JS-сортировкой таблицы, которая просто переставляет <tr>). ---- */
 table.data tbody tr.omicron-subrow { background: color-mix(in srgb, var(--fg) 1%, transparent); }
 table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4em; }
+/* ---- Всплывающие подсказки у заголовков таблиц (/mod-analysis: p50/p70/p90/
+   Разброс/CV/NM/GF) — CSS-only, без JS. Пузырь позиционируется от заголовка
+   (position:relative на th-help), а не от th (который ещё и position:sticky) —
+   иначе сложнее контролировать. th само не sticky-конфликтует, т.к. пузырь
+   абсолютный внутри inline-обёртки, а не меняет поток заголовка. Раскрывается
+   вниз, а не вверх/поповер вбок — при overflow-x:auto на .table-scroll
+   overflow-y тоже неявно становится auto (см. .row-actions выше), но пузырь
+   остаётся в пределах высоты таблицы, поэтому не обрезается. Крайняя правая
+   колонка (GF) прижимает пузырь к правому краю, чтобы не вылезал за
+   .table-scroll вправо и не обрезался горизонтальным скроллом. ---- */
+.th-help { position: relative; display: inline-block; border-bottom: 1px dotted var(--fg-muted); cursor: help; }
+.th-help-bubble {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0.5em;
+    width: max-content;
+    max-width: 16em;
+    padding: 0.6em 0.8em;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    font-size: 0.85em;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    z-index: 20;
+}
+.th-help:hover .th-help-bubble, .th-help:focus-visible .th-help-bubble { display: block; }
+.th-help--right .th-help-bubble { left: auto; right: 0; transform: none; }
 .muted { color: var(--fg-muted); }
 /* ---- Компактный сегментированный тумблер (напр. размер страницы на /activity внутри
    игрока) — узкая группа-таблетка вместо .table-toolbar (у него justify-content:

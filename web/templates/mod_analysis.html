@@ -121,8 +121,13 @@
                         <thead>
                             <tr>
                                 <th>Ранг</th><th>Характеристика</th><th>SF</th>
-                                <th>p50({{ result.view_suffix }})</th><th>p70({{ result.view_suffix }})</th><th>p90({{ result.view_suffix }})</th><th>Разброс</th>
-                                <th>CV</th><th>NM</th><th>GF</th>
+                                <th><span class="th-help" tabindex="0">p50({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p50 (медиана) — ориентир среднего модинга (~50% игроков).</span></span></th>
+                                <th><span class="th-help" tabindex="0">p70({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p70 — ориентир хорошего модинга (лучше, чем у 70% игроков).</span></span></th>
+                                <th><span class="th-help" tabindex="0">p90({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p90 — ориентир топ-модинга (лучше, чем у 90% игроков).</span></span></th>
+                                <th><span class="th-help" tabindex="0">Разброс<span class="th-help-bubble">Разница между топовым (p90) и средним (p50) модингом.</span></span></th>
+                                <th><span class="th-help" tabindex="0">CV<span class="th-help-bubble">Коэффициент вариации — чем ниже значение, тем более согласованно делается упор на эту характеристику.</span></span></th>
+                                <th><span class="th-help" tabindex="0">NM<span class="th-help-bubble">Нормализованная медиана — чем выше значение, тем меньше разница между средним и топовым игроком.</span></span></th>
+                                <th><span class="th-help th-help--right" tabindex="0">GF<span class="th-help-bubble">Фокус гильдии — итоговый показатель упора в характеристику. Чем выше значение, тем сильнее упор.</span></span></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -173,7 +178,15 @@
                             </div>
                             <div class="table-scroll">
                                 <table class="data">
-                                    <thead><tr><th>Характеристика</th><th>p50({{ result.view_suffix }})</th><th>p70({{ result.view_suffix }})</th><th>p90({{ result.view_suffix }})</th><th>CV</th></tr></thead>
+                                    <thead>
+                                        <tr>
+                                            <th>Характеристика</th>
+                                            <th><span class="th-help" tabindex="0">p50({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p50 (медиана) — ориентир среднего модинга (~50% игроков).</span></span></th>
+                                            <th><span class="th-help" tabindex="0">p70({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p70 — ориентир хорошего модинга (лучше, чем у 70% игроков).</span></span></th>
+                                            <th><span class="th-help" tabindex="0">p90({{ result.view_suffix }})<span class="th-help-bubble">Перцентиль p90 — ориентир топ-модинга (лучше, чем у 90% игроков).</span></span></th>
+                                            <th><span class="th-help th-help--right" tabindex="0">CV<span class="th-help-bubble">Коэффициент вариации — чем ниже значение, тем более согласованно делается упор на эту характеристику.</span></span></th>
+                                        </tr>
+                                    </thead>
                                     <tbody>
                                         {% for s in d.stats %}
                                             <tr><td>{{ s.label }}</td><td>{{ s.p50_fmt }}</td><td>{{ s.p70_fmt }}</td><td>{{ s.p90_fmt }}</td><td>{{ s.cv_fmt }}</td></tr>
