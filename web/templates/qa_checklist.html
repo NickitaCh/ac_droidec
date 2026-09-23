@@ -13,39 +13,54 @@
         </label>
     </div>
 
-    <div class="panel">
-        <div class="table-scroll">
-            <table class="data">
-                <thead>
-                    <tr>
-                        <th>Страница</th>
-                        <th>Ссылка</th>
-                        <th>Проверено</th>
-                        <th>Кем / когда</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in rows %}
-                        <tr>
-                            <td>{{ row.name }}</td>
-                            <td><a href="{{ row.path }}" target="_blank" rel="noopener">{{ row.path }}</a></td>
-                            <td>
-                                <form method="post" action="/qa-checklist/{{ row.key }}/toggle" class="inline-form" onsubmit="qaFillName(this)">
-                                    <input type="hidden" name="checked_by">
-                                    <input type="checkbox" onchange="this.form.requestSubmit()" {% if row.checked %}checked{% endif %}>
-                                </form>
-                            </td>
-                            <td>
-                                {% if row.checked_by %}
-                                    <span class="muted" style="font-size: 0.85em;">{{ row.checked_by }} · {{ row.checked_at }}</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+    {% for group_key, group_label in groups %}
+        {% set group_rows = rows|selectattr("group", "equalto", group_key)|list %}
+        {% if group_rows %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>{{ group_label }}</span>
+                    <span class="panel-hint">{{ group_rows|selectattr("checked")|list|length }} / {{ group_rows|length }}</span>
+                </div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>Страница</th>
+                                <th>Ссылка</th>
+                                <th>Проверено</th>
+                                <th>Кем / когда</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in group_rows %}
+                                <tr>
+                                    <td>{{ row.name }}</td>
+                                    <td>
+                                        {% if "{" in row.path %}
+                                            <span class="muted">{{ row.path }}</span>
+                                        {% else %}
+                                            <a href="{{ row.path }}" target="_blank" rel="noopener">{{ row.path }}</a>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <form method="post" action="/qa-checklist/{{ row.key }}/toggle" class="inline-form" onsubmit="qaFillName(this)">
+                                            <input type="hidden" name="checked_by">
+                                            <input type="checkbox" onchange="this.form.requestSubmit()" {% if row.checked %}checked{% endif %}>
+                                        </form>
+                                    </td>
+                                    <td>
+                                        {% if row.checked_by %}
+                                            <span class="muted" style="font-size: 0.85em;">{{ row.checked_by }} · {{ row.checked_at }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+    {% endfor %}
 
     <script>
         (function () {
