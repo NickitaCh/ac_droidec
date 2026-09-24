@@ -78,14 +78,15 @@ def _tasks_summary(guild_id: int, limit: int = 8):
     (COMPLETED/FAILED старше database.TASK_ARCHIVE_AFTER_DAYS дней) в счётчики не входят —
     тот же фильтр "текущих" задач, что на /tasks."""
     rows = database.get_all_tasks(guild_id)
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    names_by_code = database.get_player_names(guild_id)
+    departed_codes = set(database.get_departed_players(guild_id))
     unit_names = database.get_game_unit_names([r[2] for r in rows])
 
     counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
     open_rows = []
     for (task_id, ally_code, base_id, target_type, target_value, deadline, status, _batch_id,
          _initial_value, _current_value, in_progress, _created_by, resolved_at) in rows:
-        if database.is_task_archived(resolved_at):
+        if database.is_task_archived(resolved_at, status) or ally_code in departed_codes:
             continue
         counts[status] = counts.get(status, 0) + 1
         if status in ("ACTIVE", "FAILED"):

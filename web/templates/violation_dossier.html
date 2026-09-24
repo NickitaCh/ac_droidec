@@ -4,6 +4,9 @@
 {% block content %}
     <p><a href="/violations">← Все нарушения</a></p>
     <h1>Досье: {{ player_name }}</h1>
+    {% if departed_at %}
+        <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ departed_at }}.</p>
+    {% endif %}
 
     {% if error %}
         <p class="error">{{ error }}</p>

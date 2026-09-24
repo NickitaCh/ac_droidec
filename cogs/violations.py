@@ -191,6 +191,7 @@ class ViolationsCog(commands.Cog):
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
                 database.sync_guild_roster(gid, temp_roster_data)
+                await self._resolve_departed_names(gid, gname)
 
                 hybrid_cache = HybridCache(new_cache)
                 self.bot.guild_roster_caches[gid] = hybrid_cache
@@ -234,6 +235,20 @@ class ViolationsCog(commands.Cog):
                     type=disnake.ActivityType.watching,
                     name="Следит за игроками AC"
                 ))
+
+    async def _resolve_departed_names(self, gid: int, gname: str):
+        """Выбывшие, чьё имя не нашлось ни в прошлом составе, ни в /регистрации (обычно
+        ушедшие ещё до появления архива выбывших) — добираем имя из Comlink, по несколько
+        за проход, чтобы не растягивать синк ростера."""
+        for ally_code in database.get_departed_without_name(gid, limit=10):
+            try:
+                prof = await asyncio.to_thread(self.bot.comlink.get_player, allycode=ally_code)
+                name = prof.get("name")
+                if name:
+                    database.set_departed_player_name(gid, ally_code, name)
+            except Exception as e:
+                print(f"⚠️ [{gname}] Не удалось узнать имя выбывшего {ally_code}: {e!r}")
+            await asyncio.sleep(0.1)
 
     @update_roster_cache.before_loop
     async def before_loop(self):

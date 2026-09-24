@@ -20,10 +20,14 @@
     </div>
 
     <p>
+        {% set departed_q = "departed=1" if show_departed else "" %}
         {% if show_all %}
-            <a href="/violations">Показать только с нарушениями за 90 дней</a>
+            <a href="/violations{% if departed_q %}?{{ departed_q }}{% endif %}">Показать только с нарушениями за 90 дней</a>
         {% else %}
-            <a href="/violations?all=1">Показать весь состав</a>
+            <a href="/violations?all=1{% if departed_q %}&{{ departed_q }}{% endif %}">Показать весь состав</a>
+        {% endif %}
+        {% if departed_count %}
+            · <a href="/violations?{% if show_all %}all=1&{% endif %}departed={{ '0' if show_departed else '1' }}">{% if show_departed %}Скрыть выбывших из гильдии{% else %}Показать выбывших из гильдии ({{ departed_count }}){% endif %}</a>
         {% endif %}
     </p>
 
@@ -88,7 +92,9 @@
                                 <td class="num">{{ row.recent_total }}</td>
                                 <td class="num">{{ row.lifetime_total }}</td>
                                 <td>
-                                    {% if row.flagged %}
+                                    {% if row.departed %}
+                                        <span class="badge badge-neutral">выбыл</span>
+                                    {% elif row.flagged %}
                                         <span class="badge badge-danger">🚨 порог</span>
                                     {% elif row.recent_total > 0 %}
                                         <span class="badge badge-neutral">есть нарушения</span>

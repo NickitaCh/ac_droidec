@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import sqlite3
 
 DB_NAME = "guild_management.db"
@@ -1725,10 +1726,13 @@ def update_task_progress(task_id: int, current_value: str, in_progress: bool) ->
     conn.close()
 
 
-def is_task_archived(resolved_at: str | None) -> bool:
+def is_task_archived(resolved_at: str | None, status: str | None = None) -> bool:
     """resolved_at старше TASK_ARCHIVE_AFTER_DAYS дней — задача уходит из "текущего"
     списка (веб /tasks, /задачи отчёт) в архив. ACTIVE-задачи (resolved_at is None)
-    никогда не архивные."""
+    никогда не архивные. LEFT (игрок выбыл из гильдии, см. mark_players_departed) —
+    в архиве сразу, без выдержки."""
+    if status == "LEFT":
+        return True
     if not resolved_at:
         return False
     try:
@@ -1959,15 +1963,18 @@ def sync_guild_roster(guild_id: int, roster_rows):
     раз не отдал allyCode/playerName (см. get_roster_by_player_id). Используется 15-минутным
     рефрешем ростер-кэша (ViolationsCog.update_roster_cache) — не трогает другие гильдии.
 
-    Заодно архивирует ленту активности (guild_activity_events) тех, кто пропал из свежего
-    состава по сравнению с предыдущим — сразу, а не по истечении какого-то срока (запрос
-    пользователя: не засорять /activity историей выбывших) — и возвращает из архива тех,
-    кто внезапно снова появился (вернулся в гильдию)."""
+    Заодно переводит в архив тех, кого нет в свежем составе (departed_players + архив
+    активности/задач, см. mark_players_departed) — сразу, а не по истечении срока, — и
+    возвращает из архива тех, кто снова появился (вернулся в гильдию). Кандидаты в выбывшие —
+    не только пропавшие с прошлого синка, но и любые ally_code с данными в этой гильдии
+    (нарушения/задачи/активность/взводы), которых нет в составе: так подбираются и те, кто
+    ушёл ДО появления этого механизма, и те, чей уход пришёлся на проход, пропущенный
+    защитой от сбоя Comlink ниже."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("SELECT DISTINCT ally_code FROM user_mapping WHERE guild_id = ?", (guild_id,))
-    previous_codes = {r[0] for r in cursor.fetchall()}
+    cursor.execute("SELECT ally_code, ingame_name, comlink_player_id FROM user_mapping WHERE guild_id = ?", (guild_id,))
+    previous = {code: (name, pid) for code, name, pid in cursor.fetchall()}
     cursor.execute("DELETE FROM user_mapping WHERE guild_id = ?", (guild_id,))
     cursor.executemany(
         "INSERT OR REPLACE INTO user_mapping (guild_id, discord_id, ally_code, ingame_name, member_level, comlink_player_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1976,24 +1983,28 @@ def sync_guild_roster(guild_id: int, roster_rows):
     )
     conn.commit()
     conn.close()
+    _remember_player_names(guild_id, [(row[1], row[2]) for row in roster_rows])
 
     new_codes = {row[1] for row in roster_rows}
-    departed = previous_codes - new_codes
+    departed = set(previous) - new_codes
     # Защита от глюка Comlink (см. память "Comlink зануленный ростер-участник") — если
     # разом "выбыла" подозрительно большая доля прежнего состава, это вероятнее сбой
     # данных, чем реальный массовый уход, — не архивируем в этом проходе (user_mapping
-    # выше уже обновлён как обычно, это влияет только на activity-архивацию), следующий
-    # штатный синк (15 минут) подтвердит уход реальными данными.
-    suspicious = previous_codes and len(departed) / len(previous_codes) > 0.3
-    if departed and not suspicious:
-        archive_activity_for_ally_codes(guild_id, departed)
-    elif suspicious:
-        print(f"⚠️ [Ростер] guild_id={guild_id}: {len(departed)}/{len(previous_codes)} игроков "
-              f"пропали из ростера за один синк — похоже на сбой Comlink, activity НЕ архивируется в этом проходе")
+    # выше уже обновлён как обычно, это влияет только на архивацию). Реальный уход
+    # подтвердит следующий штатный синк — выбывшие подхватятся через
+    # _player_data_ally_codes, даже если в previous того прохода их уже не будет.
+    suspicious = previous and len(departed) / len(previous) > 0.3
+    if suspicious:
+        print(f"⚠️ [Ростер] guild_id={guild_id}: {len(departed)}/{len(previous)} игроков "
+              f"пропали из ростера за один синк — похоже на сбой Comlink, архивация пропущена в этом проходе")
+    elif new_codes:
+        candidates = (departed | _player_data_ally_codes(guild_id)) - new_codes
+        mark_players_departed(guild_id, [
+            (code, previous.get(code, (None, None))[0], previous.get(code, (None, None))[1])
+            for code in candidates if is_valid_ally_code(code)
+        ])
     if new_codes:
-        # unarchive сам фильтрует WHERE archived_at IS NOT NULL — безопасно передать
-        # весь текущий состав, а не только пересечение с previous_codes.
-        unarchive_activity_for_ally_codes(guild_id, new_codes)
+        restore_returned_players(guild_id, new_codes)
 
 
 def get_roster_by_player_id(guild_id: int) -> dict:
@@ -5532,7 +5543,7 @@ def get_guild_activity_player_type_counts(guild_id: int, date_from: str | None =
     return rows
 
 
-def get_guild_activity_player_codes(guild_id: int) -> list:
+def get_guild_activity_player_codes(guild_id: int, include_archived: bool = False) -> list:
     """Все ally_code, у которых есть хотя бы одно НЕархивное событие активности в этой
     гильдии — независимо от лимита/фильтра get_guild_activity_events, чтобы список для
     фильтра на веб-странице не схлопывался до одного игрока при уже применённом фильтре.
@@ -5542,7 +5553,8 @@ def get_guild_activity_player_codes(guild_id: int) -> list:
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
     cursor.execute(
-        "SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ? AND archived_at IS NULL",
+        "SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ?"
+        + ("" if include_archived else " AND archived_at IS NULL"),
         (guild_id,)
     )
     rows = [r[0] for r in cursor.fetchall()]
@@ -5592,6 +5604,219 @@ def unarchive_activity_for_ally_codes(guild_id: int, ally_codes) -> int:
     conn.commit()
     conn.close()
     return affected
+
+
+# =====================================================================
+# ВЫБЫВШИЕ ИЗ ГИЛЬДИИ ИГРОКИ — архив вместо потери имени. user_mapping — зеркало ТЕКУЩЕГО
+# состава (sync_guild_roster перезаписывает его целиком), поэтому после кика имя игрока
+# отовсюду пропадало, и в нарушениях/задачах/активности/взводах оставался голый ally_code.
+# departed_players хранит последнее известное имя + дату ухода; get_player_names — единая
+# точка резолва ally_code -> имя (текущий состав, затем выбывшие, затем /регистрация).
+# Регулярно обновляемые данные выбывшего уходят в архив (активность — archived_at, задачи —
+# статус LEFT, нарушения — скрываются по departed_players), статичные (история ТБ и т.п.)
+# просто продолжают показываться с именем.
+# =====================================================================
+ALLY_CODE_RE = re.compile(r"^[1-9]{9}$")
+
+
+def is_valid_ally_code(code) -> bool:
+    """SWGOH-код союзника — ровно 9 цифр без нулей. Отсекает резервный playerId, который
+    update_roster_cache пишет вместо кода, если Comlink не отдал allyCode."""
+    return bool(code) and bool(ALLY_CODE_RE.match(str(code)))
+
+
+def _ensure_departed_players_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS departed_players (
+            guild_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            ingame_name TEXT,
+            comlink_player_id TEXT,
+            departed_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, ally_code)
+        )
+    """)
+    # Собственный commit — иначе read-only вызывающие откатили бы CREATE вместе со своей
+    # незакоммиченной транзакцией (см. _ensure_user_registration_table).
+    cursor.connection.commit()
+
+
+def _ensure_known_player_names_table(cursor):
+    # Последнее известное имя по каждому ally_code, когда-либо бывшему в составе — не
+    # зависит от того, в какой проход синка игрок "выбыл" (при сбое Comlink архивация
+    # откладывается, а user_mapping к следующему проходу уже без него).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS known_player_names (
+            guild_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            ingame_name TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, ally_code)
+        )
+    """)
+    cursor.connection.commit()
+
+
+def _remember_player_names(guild_id: int, pairs) -> None:
+    rows = [(guild_id, code, name) for code, name in pairs if is_valid_ally_code(code) and name]
+    if not rows:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_known_player_names_table(cursor)
+    cursor.executemany(
+        "INSERT INTO known_player_names (guild_id, ally_code, ingame_name, updated_at) VALUES (?, ?, ?, datetime('now')) "
+        "ON CONFLICT(guild_id, ally_code) DO UPDATE SET ingame_name = excluded.ingame_name, updated_at = excluded.updated_at",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def _player_data_ally_codes(guild_id: int) -> set:
+    """Все ally_code, по которым в этой гильдии есть данные, завязанные на игрока."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    codes = set()
+    for table in ("position_warns", "tasks", "guild_activity_events", "tb_platoon_assignments"):
+        try:
+            cursor.execute(f"SELECT DISTINCT ally_code FROM {table} WHERE guild_id = ?", (guild_id,))
+            codes.update(r[0] for r in cursor.fetchall() if r[0])
+        except sqlite3.OperationalError:
+            pass  # таблица ещё не создана (лениво создаётся своим _ensure_*)
+    conn.close()
+    return codes
+
+
+def mark_players_departed(guild_id: int, players) -> int:
+    """players — [(ally_code, ingame_name|None, comlink_player_id|None), ...]. Записывает их
+    в departed_players (дата ухода фиксируется при первой записи и дальше не меняется),
+    архивирует активность и переводит АКТИВНЫЕ задачи в статус LEFT (аудит/напоминания
+    их больше не трогают — они смотрят только на ACTIVE). Безопасно вызывать повторно с
+    теми же кодами. Имя, если не передано, берётся из /регистрации; если нет и там —
+    остаётся NULL до set_departed_player_name (Comlink-резолв в cogs/violations.py).
+    Порядок источников имени: переданное -> known_player_names -> /регистрация.
+    Возвращает число новых записей."""
+    players = [p for p in players if p[0]]
+    if not players:
+        return 0
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    _ensure_known_player_names_table(cursor)
+    _ensure_user_registration_table(cursor)
+    cursor.execute("SELECT ally_code, ingame_name FROM user_registration WHERE guild_id = ?", (guild_id,))
+    fallback_names = {code: name for code, name in cursor.fetchall() if name}
+    cursor.execute("SELECT ally_code, ingame_name FROM known_player_names WHERE guild_id = ?", (guild_id,))
+    fallback_names.update({code: name for code, name in cursor.fetchall() if name})
+    cursor.execute("SELECT ally_code FROM departed_players WHERE guild_id = ?", (guild_id,))
+    already = {r[0] for r in cursor.fetchall()}
+    new_rows = [
+        (guild_id, code, name or fallback_names.get(code), pid)
+        for code, name, pid in players if code not in already
+    ]
+    cursor.executemany(
+        "INSERT INTO departed_players (guild_id, ally_code, ingame_name, comlink_player_id, departed_at) "
+        "VALUES (?, ?, ?, ?, datetime('now'))",
+        new_rows,
+    )
+    cursor.executemany(
+        "UPDATE tasks SET status = 'LEFT', resolved_at = datetime('now') "
+        "WHERE guild_id = ? AND ally_code = ? AND status = 'ACTIVE'",
+        [(guild_id, code) for code, _, _ in players],
+    )
+    conn.commit()
+    conn.close()
+    archive_activity_for_ally_codes(guild_id, [code for code, _, _ in players])
+    if new_rows:
+        print(f"📦 [Ростер] guild_id={guild_id}: в архив выбывших — "
+              + ", ".join(f"{name or '?'} ({code})" for _, code, name, _ in new_rows))
+    return len(new_rows)
+
+
+def restore_returned_players(guild_id: int, ally_codes) -> None:
+    """Обратная операция для вернувшихся в гильдию: убирает из departed_players,
+    возвращает активность из архива и задачи LEFT -> ACTIVE (просроченные закроет
+    ближайший tasks_audit_loop как обычно). Безопасно передавать весь текущий состав."""
+    ally_codes = {c for c in ally_codes if c}
+    if not ally_codes:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    cursor.execute("SELECT ally_code FROM departed_players WHERE guild_id = ?", (guild_id,))
+    returned = [r[0] for r in cursor.fetchall() if r[0] in ally_codes]
+    if returned:
+        cursor.executemany("DELETE FROM departed_players WHERE guild_id = ? AND ally_code = ?",
+                           [(guild_id, c) for c in returned])
+        cursor.executemany(
+            "UPDATE tasks SET status = 'ACTIVE', resolved_at = NULL "
+            "WHERE guild_id = ? AND ally_code = ? AND status = 'LEFT'",
+            [(guild_id, c) for c in returned],
+        )
+        conn.commit()
+        print(f"↩️ [Ростер] guild_id={guild_id}: вернулись в гильдию — {', '.join(returned)}")
+    conn.close()
+    # unarchive сам фильтрует WHERE archived_at IS NOT NULL — безопасно передать весь состав.
+    unarchive_activity_for_ally_codes(guild_id, ally_codes)
+
+
+def get_departed_players(guild_id: int) -> dict:
+    """{ally_code: (ingame_name|None, departed_at)} — все выбывшие из этой гильдии."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    cursor.execute("SELECT ally_code, ingame_name, departed_at FROM departed_players WHERE guild_id = ?", (guild_id,))
+    rows = {code: (name, departed_at) for code, name, departed_at in cursor.fetchall()}
+    conn.close()
+    return rows
+
+
+def get_departed_without_name(guild_id: int, limit: int = 10) -> list:
+    """ally_code выбывших, чьё имя не удалось восстановить из прошлого состава/регистрации."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    cursor.execute(
+        "SELECT ally_code FROM departed_players WHERE guild_id = ? AND (ingame_name IS NULL OR ingame_name = '') LIMIT ?",
+        (guild_id, limit),
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def set_departed_player_name(guild_id: int, ally_code: str, ingame_name: str) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    cursor.execute("UPDATE departed_players SET ingame_name = ? WHERE guild_id = ? AND ally_code = ?",
+                   (ingame_name, guild_id, ally_code))
+    conn.commit()
+    conn.close()
+
+
+def get_player_names(guild_id: int) -> dict:
+    """{ally_code: имя} для ВСЕХ известных игроков гильдии — текущий состав, выбывшие
+    (последнее известное имя) и /регистрация / known_player_names как резерв. Использовать везде, где
+    ally_code из сохранённых данных (нарушения, задачи, активность, взводы) превращается в
+    имя для показа — get_all_user_mappings знает только тех, кто в гильдии прямо сейчас."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_departed_players_table(cursor)
+    _ensure_known_player_names_table(cursor)
+    _ensure_user_registration_table(cursor)
+    names = {}
+    cursor.execute("SELECT ally_code, ingame_name FROM user_registration WHERE guild_id = ?", (guild_id,))
+    names.update({code: name for code, name in cursor.fetchall() if name})
+    cursor.execute("SELECT ally_code, ingame_name FROM known_player_names WHERE guild_id = ?", (guild_id,))
+    names.update({code: name for code, name in cursor.fetchall() if name})
+    cursor.execute("SELECT ally_code, ingame_name FROM departed_players WHERE guild_id = ?", (guild_id,))
+    names.update({code: name for code, name in cursor.fetchall() if name})
+    cursor.execute("SELECT ally_code, ingame_name FROM user_mapping WHERE guild_id = ?", (guild_id,))
+    names.update({code: name for code, name in cursor.fetchall() if name})
+    conn.close()
+    return names
 
 
 # =====================================================================

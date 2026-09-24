@@ -159,6 +159,8 @@ class TasksCog(commands.Cog):
             return "✅", "Выполнено"
         if status == "FAILED":
             return "❌", "Провалено"
+        if status == "LEFT":
+            return "📦", "Игрок выбыл"
         if in_progress:
             return "🟡", "В работе"
         return "🔵", "Назначено"
@@ -537,15 +539,19 @@ class TasksCog(commands.Cog):
             # database.TASK_ARCHIVE_AFTER_DAYS дней (архивные не выводятся, см. пункт
             # "Архив" из Discord-треда "Гайд по АС Боту"). Провальные включены
             # намеренно — Ricardo: "Включая провальные".
+            departed_codes = set(database.get_departed_players(guild_id))
             rows = [
                 r for r in database.get_all_tasks(guild_id)
-                if r[6] in ("ACTIVE", "FAILED") and not database.is_task_archived(r[12])
+                if r[6] in ("ACTIVE", "FAILED") and not database.is_task_archived(r[12], r[6])
+                and r[1] not in departed_codes
             ]
             if not rows:
                 await inter.edit_original_response("🎉 Активных или проваленных задач нет — все чисто.")
                 return
 
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
+            # get_player_names, а не ростер-кэш — кэш знает только текущий состав, при
+            # любом расхождении вместо имени показывался бы ally_code.
+            names = database.get_player_names(guild_id)
             by_player = {}
             for row in rows:
                 ally_code, status = row[1], row[6]
@@ -553,7 +559,7 @@ class TasksCog(commands.Cog):
 
             lines = []
             for ally_code, statuses in sorted(by_player.items(), key=lambda kv: -len(kv[1])):
-                name = cache.get(ally_code, ally_code)
+                name = names.get(ally_code, ally_code)
                 parts = []
                 active_n = statuses.count("ACTIVE")
                 failed_n = statuses.count("FAILED")
@@ -587,7 +593,7 @@ class TasksCog(commands.Cog):
                     await inter.edit_original_response("❌ Просмотр чужих задач доступен только офицерам.")
                     return
 
-        rows = [r for r in database.get_tasks_for_ally(ally_code, guild_id=guild_id) if not database.is_task_archived(r[11])]
+        rows = [r for r in database.get_tasks_for_ally(ally_code, guild_id=guild_id) if not database.is_task_archived(r[11], r[6])]
         if not rows:
             await inter.edit_original_response(f"У игрока **{игрок}** нет текущих задач.")
             return

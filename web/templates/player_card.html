@@ -5,7 +5,9 @@
     <p><a href="/">← Состав гильдии</a></p>
     <h1>
         {{ card.player_name }}
-        {% if card.rank_label == "ГМ" %}
+        {% if card.departed_at %}
+            <span class="badge badge-neutral">выбыл</span>
+        {% elif card.rank_label == "ГМ" %}
             <span class="badge badge-warn">{{ card.rank_label }}</span>
         {% elif card.rank_label == "Офицер" %}
             <span class="badge badge-ok">{{ card.rank_label }}</span>
@@ -25,12 +27,19 @@
             · 🎂 {{ card.birthday_label }}
         {% endif %}
     </p>
+    {% if card.departed_at %}
+        <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ card.departed_at }}. Данные больше не обновляются.</p>
+    {% endif %}
 
     <div class="dashboard-grid">
         <div class="widget">
             <div class="widget-header">
                 <h2>📋 Задачи</h2>
-                <span class="muted">{{ card.current_tasks|length }} текущих · {{ card.archived_tasks_count }} в архиве</span>
+                {% if card.departed_at %}
+                    <span class="muted">{{ card.current_tasks|length }} в архиве</span>
+                {% else %}
+                    <span class="muted">{{ card.current_tasks|length }} текущих · {{ card.archived_tasks_count }} в архиве</span>
+                {% endif %}
             </div>
             {% if not card.current_tasks %}
                 <p class="widget-empty">Нет текущих задач.</p>
@@ -140,6 +149,7 @@
             <p><a href="{{ card.tb_player_url }}">→ Подробно по фазам/планетам</a></p>
         </div>
 
+        {% if not card.departed_at %}
         <div class="widget">
             <div class="widget-header">
                 <h2>🧬 Омикроны</h2>
@@ -157,7 +167,9 @@
             {% endif %}
             <p><a href="{{ card.omicron_report_url }}">→ Полный отчёт</a></p>
         </div>
+        {% endif %}
 
+        {% if not card.departed_at %}
         <div class="wc-wide widget-cols-even">
         <div class="widget">
             <div class="widget-header">
@@ -322,5 +334,6 @@
             {% endif %}
         </div>
         </div>
+        {% endif %}
     </div>
 {% endblock %}

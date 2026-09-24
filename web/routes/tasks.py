@@ -33,7 +33,7 @@ TARGET_TYPE_OPTIONS = [
 ]
 TARGET_TYPE_LABELS = dict(TARGET_TYPE_OPTIONS)
 
-STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger"}
+STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger", "LEFT": "badge-neutral"}
 
 
 def _status_label(status: str, in_progress) -> str:
@@ -45,6 +45,8 @@ def _status_label(status: str, in_progress) -> str:
         return "Выполнено"
     if status == "FAILED":
         return "Провалено"
+    if status == "LEFT":
+        return "Игрок выбыл"
     return "В работе" if in_progress else "Назначено"
 
 
@@ -194,7 +196,11 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     view = request.query_params.get("view", "flat")
 
     rows = database.get_all_tasks(guild_id)
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    # Имена — включая выбывших из гильдии (их задачи в архиве со статусом LEFT), а список
+    # для выбора игрока в формах — только текущий состав.
+    names_by_code = database.get_player_names(guild_id)
+    roster_names = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    departed_codes = set(database.get_departed_players(guild_id))
     unit_names = database.get_game_unit_names([r[2] for r in rows])
     creator_ids = {r[11] for r in rows if r[11]}
     creator_names = {cid: (database.get_username_for_discord_id(cid) or cid) for cid in creator_ids}
@@ -212,7 +218,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             "progress": _progress_label(initial_value, current_value),
             "created_by_name": creator_names.get(created_by, "—"),
             "batch_id": batch_id,
-            "archived": database.is_task_archived(resolved_at),
+            "archived": database.is_task_archived(resolved_at, status) or ally_code in departed_codes,
             "resolved_at_text": _format_resolved_at(resolved_at),
         }
         for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
@@ -267,7 +273,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             p["tasks"].sort(key=lambda t: t["deadline"])
         players_view = sorted(by_player.values(), key=lambda p: (-len(p["tasks"]), p["name"].lower()))
 
-    roster = sorted(names_by_code.items(), key=lambda kv: kv[1].lower())
+    roster = sorted(roster_names.items(), key=lambda kv: kv[1].lower())
 
     prefill = {
         "ally_code": request.query_params.get("prefill_ally", ""),

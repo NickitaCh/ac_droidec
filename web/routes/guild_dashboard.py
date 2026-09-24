@@ -462,7 +462,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
     name_to_base_id = database.resolve_unit_display_names(list(unit_names_this_round)) if unit_names_this_round else {}
     mappings = database.get_all_user_mappings(guild_id)
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
-    player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
+    player_name_by_ally = _player_labels(guild_id)
     base_ids = sorted({bid for bid in name_to_base_id.values() if bid})
     # Корабли не имеют реликвии (см. tb_platoon_engine.SHIP_MIN_STARS) — донат-требование
     # для них 7★, не порог реликвии этапа.
@@ -892,7 +892,7 @@ async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends
 
     mappings = database.get_all_user_mappings(guild_id)
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
-    player_name_by_ally = {ally_code: name for _discord_id, ally_code, name in mappings}
+    player_name_by_ally = _player_labels(guild_id)
 
     unit_types = database.get_unit_types([base_id]) if base_id else {}
     is_ship = unit_types.get(base_id) == "ship"
@@ -1134,6 +1134,16 @@ async def omicrons_report(request: Request, user: dict = Depends(feature_flags.r
         "skill_filter_options": skill_filter_options,
         "modes": modes,
     })
+
+
+def _player_labels(guild_id: int) -> dict:
+    """{ally_code: имя} для отображения сохранённых назначений — выбывший из гильдии
+    помечается, чтобы офицер видел, что слот надо переназначить."""
+    names = database.get_player_names(guild_id)
+    for code in database.get_departed_players(guild_id):
+        if code in names:
+            names[code] = f"{names[code]} (выбыл)"
+    return names
 
 
 @router.get("/omicrons/report/{name}", response_class=HTMLResponse)
@@ -1442,7 +1452,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         ) if selected_date else []
         page_date_label = dashboard_data.friendly_activity_date_label(selected_date)
 
-    players = dashboard_data.get_guild_activity_players(guild_id)
+    players = dashboard_data.get_guild_activity_players(guild_id, include_archived=show_departed)
     grouped = dashboard_data.group_activity(rows)
     sync_status = dashboard_data.get_activity_sync_status(guild_id)
     sync_status_text = _sync_status_text(sync_status)
@@ -1637,13 +1647,17 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
 @router.get("/violations", response_class=HTMLResponse)
 async def violations(request: Request, user: dict = Depends(feature_flags.require_feature("violations"))):
     show_all = request.query_params.get("all") == "1"
-    rows = dashboard_data.get_violations_overview(user["guild_id"], include_zero=show_all)
-    top_offenders = [r for r in rows if r.recent_total > 0][:8]
+    show_departed = request.query_params.get("departed") == "1"
+    rows = dashboard_data.get_violations_overview(user["guild_id"], include_zero=show_all,
+                                                  include_departed=show_departed)
+    top_offenders = [r for r in rows if r.recent_total > 0 and not r.departed][:8]
     max_recent = top_offenders[0].recent_total if top_offenders else 0
     return templates.TemplateResponse(request, "violations.html", {
         "user": user,
         "rows": rows,
         "show_all": show_all,
+        "show_departed": show_departed,
+        "departed_count": len(database.get_departed_players(user["guild_id"])),
         "n_limit": dashboard_data.N_LIMIT,
         "top_offenders": top_offenders,
         "max_recent": max_recent,
@@ -1772,7 +1786,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     if selected_scheme not in ("", "1", "2"):
         selected_scheme = ""
     stats_result = None
-    if selected_plate:
+    if selected_plate and not card.departed_at:
         forced_scheme = int(selected_scheme) if selected_scheme else None
         stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh, forced_scheme=forced_scheme)
 
@@ -1785,7 +1799,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     else:
         selected_season = database.get_bot_state(datacron_state_key, guild_id=guild_id) or ""
     datacron_result = None
-    catalog = await _safe_datacron_catalog()
+    catalog = await _safe_datacron_catalog() if not card.departed_at else None
     if catalog:
         datacron_seasons = [
             {"set_id": sid, "display_name": data["display_name"]}
@@ -1802,7 +1816,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
 
     # ---- Омикроны: чисто по кэшу (get_player_units), без Comlink — всегда считаем,
     # даже если приоритет гильдии ещё не настроен (тогда просто пустой список + подсказка). ----
-    omicron_missing = omicron_priority.missing_omicrons_for_player(ally_code, guild_id)
+    omicron_missing = omicron_priority.missing_omicrons_for_player(ally_code, guild_id) if not card.departed_at else []
     has_omicron_priority = bool(database.get_guild_omicron_priority(guild_id))
 
     # ---- ТБ: прогресс/просадка от ТБ к ТБ — переиспользуем гильдийский расчёт
@@ -1831,8 +1845,8 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
 @router.get("/violations/{ally_code}", response_class=HTMLResponse)
 async def violation_dossier(request: Request, ally_code: str, user: dict = Depends(feature_flags.require_feature("violations"))):
     guild_id = user["guild_id"]
-    names_by_code = {code: name for _discord_id, code, name in database.get_all_user_mappings(guild_id)}
-    player_name = names_by_code.get(ally_code, ally_code)
+    player_name = database.get_player_names(guild_id).get(ally_code, ally_code)
+    departed = database.get_departed_players(guild_id).get(ally_code)
 
     rows = database.get_player_warns(ally_code, guild_id=guild_id)
     three_months_ago = datetime.now() - timedelta(days=90)
@@ -1855,6 +1869,7 @@ async def violation_dossier(request: Request, ally_code: str, user: dict = Depen
         "user": user,
         "ally_code": ally_code,
         "player_name": player_name,
+        "departed_at": dashboard_data._format_utc_date(departed[1]) if departed else None,
         "entries": entries,
         "recent_count": recent_count,
         "lifetime_count": len(entries),

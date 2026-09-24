@@ -98,7 +98,7 @@ def get_roster(guild_id: int) -> list[RosterRow]:
 # вместо дублирования этой логики здесь карточка просто ссылается на готовые страницы с
 # предзаполненным игроком.
 
-TASK_STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger"}
+TASK_STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger", "LEFT": "badge-neutral"}
 
 
 def _task_status_label(status: str, in_progress) -> str:
@@ -109,6 +109,8 @@ def _task_status_label(status: str, in_progress) -> str:
         return "Выполнено"
     if status == "FAILED":
         return "Провалено"
+    if status == "LEFT":
+        return "Игрок выбыл"
     return "В работе" if in_progress else "Назначено"
 
 
@@ -162,15 +164,24 @@ class PlayerCard:
     omicron_report_url: str
     activity_url: str
     violations_url: str
+    departed_at: str | None = None  # "ДД.ММ.ГГГГ" — игрок выбыл, карточка архивная (без живых проверок)
 
 
 def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
     mappings = database.get_all_user_mappings_with_rank(guild_id)  # (ally_code, ingame_name, member_level)
     hit = next((m for m in mappings if m[0] == ally_code), None)
+    departed_at = None
     if hit is None:
-        return None
+        # Выбывший из гильдии — карточка остаётся доступной как архив (последнее известное
+        # имя, задачи/нарушения/активность как были), но без живых проверок.
+        departed = database.get_departed_players(guild_id).get(ally_code)
+        if departed is None:
+            return None
+        departed_name, departed_raw = departed
+        hit = (ally_code, departed_name or database.get_player_names(guild_id).get(ally_code), None)
+        departed_at = _format_utc_date(departed_raw)
     _, ingame_name, member_level = hit
-    ingame_name = ingame_name or "?"
+    ingame_name = ingame_name or ally_code
 
     # is_main — намеренно только основной аккаунт для карточки-шапки (Discord/ДР
     # привязаны к человеку, а не к конкретному альту), тот же принцип, что в
@@ -194,7 +205,9 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
     archived_tasks_count = 0
     for (task_id, _ally_code, base_id, target_type, target_value, deadline, status,
          initial_value, current_value, in_progress, _created_by, resolved_at) in task_rows:
-        if database.is_task_archived(resolved_at):
+        # У выбывшего все задачи архивные (LEFT) — показываем их как есть, иначе
+        # архивная карточка всегда была бы с пустым блоком задач.
+        if database.is_task_archived(resolved_at, status) and departed_at is None:
             archived_tasks_count += 1
             continue
         current_tasks.append(PlayerCardTask(
@@ -207,13 +220,14 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
             deadline=deadline,
         ))
 
-    violations_overview = get_violations_overview(guild_id, include_zero=True)
+    violations_overview = get_violations_overview(guild_id, include_zero=True, include_departed=True)
     violation_row = next((v for v in violations_overview if v.ally_code == ally_code), None)
     violations_recent_count = violation_row.recent_total if violation_row else 0
     violations_lifetime_count = violation_row.lifetime_total if violation_row else 0
 
     date_from_30d = (datetime.now(MSK).date() - timedelta(days=30)).isoformat()
-    type_counts = database.get_guild_activity_type_counts(guild_id, ally_code=ally_code, date_from=date_from_30d)
+    type_counts = database.get_guild_activity_type_counts(guild_id, ally_code=ally_code, date_from=date_from_30d,
+                                                          include_archived=departed_at is not None)
     activity_counts = [
         (ACTIVITY_ACTION_LABELS.get(action_type, action_type), count, ACTIVITY_ACTION_CLASSES.get(action_type, "neutral"))
         for action_type, count in sorted(type_counts, key=lambda r: -r[1])
@@ -236,9 +250,21 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
         activity_total_30d=activity_total_30d,
         tb_player_url=f"/tb/player/{quote(ingame_name)}",
         omicron_report_url=f"/omicrons/report/{quote(ingame_name)}",
-        activity_url=f"/activity?player={quote(ally_code)}",
+        activity_url=f"/activity?player={quote(ally_code)}" + ("&departed=1" if departed_at else ""),
         violations_url=f"/violations/{quote(ally_code)}",
+        departed_at=departed_at,
     )
+
+
+def _format_utc_date(raw: str | None) -> str | None:
+    """'YYYY-MM-DD HH:MM:SS' (SQLite datetime('now'), наивный UTC) -> 'ДД.ММ.ГГГГ' по МСК."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(MSK)
+    except ValueError:
+        return raw
+    return dt.strftime("%d.%m.%Y")
 
 
 @dataclass
@@ -790,10 +816,15 @@ class ViolationRow:
     recent_total: int
     lifetime_total: int
     flagged: bool  # recent_total >= N_LIMIT
+    departed: bool = False  # игрок выбыл из гильдии (архив)
 
 
-def get_violations_overview(guild_id: int, include_zero: bool = False) -> list[ViolationRow]:
-    roster_names = {ally_code: name for _, ally_code, name in database.get_all_user_mappings(guild_id)}
+def get_violations_overview(guild_id: int, include_zero: bool = False,
+                            include_departed: bool = False) -> list[ViolationRow]:
+    """Выбывшие из гильдии по умолчанию не показываются (их нарушения — архив, досье
+    по-прежнему открывается по ссылке) — include_departed=True возвращает их с departed=True."""
+    names = database.get_player_names(guild_id)
+    departed_codes = set(database.get_departed_players(guild_id))
     all_warns = database.get_all_warns(guild_id)  # [(ally_code, category, date_str), ...] — все, без даты-фильтра
 
     three_months_ago = datetime.now() - timedelta(days=90)
@@ -813,13 +844,17 @@ def get_violations_overview(guild_id: int, include_zero: bool = False) -> list[V
         recent_total = sum(entry["recent"].values())
         if not include_zero and recent_total == 0:
             continue
+        is_departed = ally_code in departed_codes
+        if is_departed and not include_departed:
+            continue
         rows.append(ViolationRow(
             ally_code=ally_code,
-            name=roster_names.get(ally_code, ally_code),
+            name=names.get(ally_code, ally_code),
             counts_recent=entry["recent"],
             recent_total=recent_total,
             lifetime_total=entry["lifetime"],
             flagged=recent_total >= N_LIMIT,
+            departed=is_departed,
         ))
 
     rows.sort(key=lambda r: r.recent_total, reverse=True)
@@ -872,10 +907,9 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type:
                         limit: int = 500, offset: int = 0,
                         date_from: str | None = None, date_to: str | None = None,
                         include_archived: bool = False) -> list[ActivityEventRow]:
-    # names_by_code — не только по текущему составу (get_all_user_mappings уже это и есть),
-    # а именно поэтому для АРХИВНОГО (выбывшего) игрока имя тут может не найтись — см.
-    # ally_code-фолбэк в player_name= ниже, чтобы строка не превращалась в "?".
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    # get_player_names, а не get_all_user_mappings — у АРХИВНОГО (выбывшего) игрока иначе
+    # вместо имени показывался бы голый ally_code.
+    names_by_code = database.get_player_names(guild_id)
     rows = database.get_guild_activity_events(guild_id, ally_code=ally_code, action_type=action_type,
                                                 limit=limit, offset=offset,
                                                 date_from=date_from, date_to=date_to,
@@ -942,12 +976,12 @@ def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
     return sorted(labeled.items(), key=lambda kv: kv[1], reverse=True)
 
 
-def get_guild_activity_players(guild_id: int) -> list:
+def get_guild_activity_players(guild_id: int, include_archived: bool = False) -> list:
     """[(ally_code, name), ...] по ВСЕМ игрокам с активностью в этой гильдии — не зависит
     от текущего фильтра/лимита get_guild_activity, иначе выбор игрока в выпадающем списке
     на веб-странице схлопывал бы сам список до одного уже выбранного игрока."""
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-    codes = database.get_guild_activity_player_codes(guild_id)
+    names_by_code = database.get_player_names(guild_id)
+    codes = database.get_guild_activity_player_codes(guild_id, include_archived=include_archived)
     return sorted(((c, names_by_code.get(c, c)) for c in codes), key=lambda p: p[1].lower())
 
 
@@ -956,7 +990,7 @@ def get_guild_activity_player_stats(guild_id: int, date_from: str | None = None)
     сводная матрица игрок×тип для /activity/players, отсортирована по total по убыванию.
     Включает игроков без событий за период (counts пустой/total=0) — иначе строка человека
     молча пропадала бы из таблицы при переключении на короткий период."""
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    names_by_code = database.get_player_names(guild_id)
     all_codes = database.get_guild_activity_player_codes(guild_id)
     triples = database.get_guild_activity_player_type_counts(guild_id, date_from=date_from)
 
