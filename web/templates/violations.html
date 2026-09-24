@@ -8,31 +8,39 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
-    <div class="stats-grid">
-        <div class="stat-tile">
-            <div class="stat-value">{{ rows|length }}</div>
-            <div class="stat-label">{{ "Игроков в списке" if show_all else "С нарушениями за 90 дней" }}</div>
+    {% if departed_count or show_departed %}
+        <div class="segmented-toggle">
+            <div class="segmented-toggle-options">
+                {% if show_departed %}<a href="/violations">Текущий состав</a><strong>Выбывшие ({{ departed_count }})</strong>{% else %}<strong>Текущий состав</strong><a href="/violations?departed=1">Выбывшие ({{ departed_count }})</a>{% endif %}
+            </div>
         </div>
-        <div class="stat-tile {% if rows|selectattr('flagged')|list|length > 0 %}status-danger{% endif %}">
-            <div class="stat-value">{{ rows|selectattr("flagged")|list|length }}</div>
-            <div class="stat-label">🚨 На пороге ({{ n_limit }}+ за 90 дней)</div>
-        </div>
-    </div>
+    {% endif %}
 
-    <p>
-        {% set departed_q = "departed=1" if show_departed else "" %}
-        {% if show_all %}
-            <a href="/violations{% if departed_q %}?{{ departed_q }}{% endif %}">Показать только с нарушениями за 90 дней</a>
-        {% else %}
-            <a href="/violations?all=1{% if departed_q %}&{{ departed_q }}{% endif %}">Показать весь состав</a>
-        {% endif %}
-        {% if departed_count %}
-            · <a href="/violations?{% if show_all %}all=1&{% endif %}departed={{ '0' if show_departed else '1' }}">{% if show_departed %}Скрыть выбывших из гильдии{% else %}Показать выбывших из гильдии ({{ departed_count }}){% endif %}</a>
-        {% endif %}
-    </p>
+    {% if show_departed %}
+        <p class="muted">Архив нарушений игроков, выбывших из гильдии. При возвращении игрока в гильдию он снова появится в текущем составе.</p>
+    {% else %}
+        <div class="stats-grid">
+            <div class="stat-tile">
+                <div class="stat-value">{{ rows|length }}</div>
+                <div class="stat-label">{{ "Игроков в списке" if show_all else "С нарушениями за 90 дней" }}</div>
+            </div>
+            <div class="stat-tile {% if rows|selectattr('flagged')|list|length > 0 %}status-danger{% endif %}">
+                <div class="stat-value">{{ rows|selectattr("flagged")|list|length }}</div>
+                <div class="stat-label">🚨 На пороге ({{ n_limit }}+ за 90 дней)</div>
+            </div>
+        </div>
+
+        <p>
+            {% if show_all %}
+                <a href="/violations">Показать только с нарушениями за 90 дней</a>
+            {% else %}
+                <a href="/violations?all=1">Показать весь состав</a>
+            {% endif %}
+        </p>
+    {% endif %}
 
     {% if not rows %}
-        <p class="empty-state">😇 Нарушений за последние 90 дней не найдено.</p>
+        <p class="empty-state">{% if show_departed %}У выбывших игроков нарушений нет.{% else %}😇 Нарушений за последние 90 дней не найдено.{% endif %}</p>
     {% else %}
         {% if top_offenders %}
             <div class="panel">

@@ -5420,9 +5420,17 @@ def mark_activity_event_announced(event_id: int) -> None:
     conn.close()
 
 
+def _archived_clause(include_archived: bool | str) -> str:
+    """include_archived: False — только текущий состав, True — все, "only" — только
+    выбывшие (отдельная вкладка «Выбывшие» на /activity)."""
+    if include_archived == "only":
+        return "archived_at IS NOT NULL"
+    return "1=1" if include_archived else "archived_at IS NULL"
+
+
 def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, action_type: str | None,
                                        date_from: str | None, date_to: str | None,
-                                       include_archived: bool = False):
+                                       include_archived: bool | str = False):
     """Общий WHERE для get_guild_activity_events/get_guild_activity_events_count — чтобы
     подсчёт страниц (COUNT) и сама выборка (SELECT ... LIMIT/OFFSET) всегда фильтровали
     одинаково, иначе номера страниц разъедутся с реальным числом строк.
@@ -5444,15 +5452,14 @@ def _guild_activity_events_filter_sql(guild_id: int, ally_code: str | None, acti
     if date_to:
         clauses.append("event_date <= ?")
         params.append(date_to)
-    if not include_archived:
-        clauses.append("archived_at IS NULL")
+    clauses.append(_archived_clause(include_archived))
     return " AND ".join(clauses), params
 
 
 def get_guild_activity_events(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                                limit: int = 300, offset: int = 0,
                                date_from: str | None = None, date_to: str | None = None,
-                               include_archived: bool = False):
+                               include_archived: bool | str = False):
     """Возвращает [(ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at), ...],
     новые сначала (по id, что совпадает с порядком скрапинга — самые свежие странице 1 вставляются первыми).
     date_from/date_to — включительно, формат event_date (YYYY-MM-DD)."""
@@ -5473,7 +5480,7 @@ def get_guild_activity_events(guild_id: int, ally_code: str | None = None, actio
 
 def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                                      date_from: str | None = None, date_to: str | None = None,
-                                     include_archived: bool = False) -> int:
+                                     include_archived: bool | str = False) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
@@ -5487,7 +5494,7 @@ def get_guild_activity_events_count(guild_id: int, ally_code: str | None = None,
 
 def get_guild_activity_distinct_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                                        date_from: str | None = None, date_to: str | None = None,
-                                       include_archived: bool = False) -> list[str]:
+                                       include_archived: bool | str = False) -> list[str]:
     """Отсортированные по убыванию (свежие первыми) даты, в которые по текущему фильтру
     есть хоть одно событие — основа постраничной навигации на /activity "1 страница = 1 день"
     (см. web/routes/guild_dashboard.py::activity)."""
@@ -5507,7 +5514,7 @@ def get_guild_activity_distinct_dates(guild_id: int, ally_code: str | None = Non
 
 def get_guild_activity_type_counts(guild_id: int, ally_code: str | None = None,
                                     date_from: str | None = None, date_to: str | None = None,
-                                    include_archived: bool = False):
+                                    include_archived: bool | str = False):
     """[(action_type, count), ...] по игроку/периоду, БЕЗ фильтра по типу события —
     это данные для панели "по типу изменения", которая должна показывать полную картину
     независимо от того, каким типом сейчас отфильтрована сама лента."""
@@ -5543,7 +5550,7 @@ def get_guild_activity_player_type_counts(guild_id: int, date_from: str | None =
     return rows
 
 
-def get_guild_activity_player_codes(guild_id: int, include_archived: bool = False) -> list:
+def get_guild_activity_player_codes(guild_id: int, include_archived: bool | str = False) -> list:
     """Все ally_code, у которых есть хотя бы одно НЕархивное событие активности в этой
     гильдии — независимо от лимита/фильтра get_guild_activity_events, чтобы список для
     фильтра на веб-странице не схлопывался до одного игрока при уже применённом фильтре.
@@ -5553,8 +5560,8 @@ def get_guild_activity_player_codes(guild_id: int, include_archived: bool = Fals
     cursor = conn.cursor()
     _ensure_guild_activity_events_table(cursor)
     cursor.execute(
-        "SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ?"
-        + ("" if include_archived else " AND archived_at IS NULL"),
+        "SELECT DISTINCT ally_code FROM guild_activity_events WHERE guild_id = ? AND "
+        + _archived_clause(include_archived),
         (guild_id,)
     )
     rows = [r[0] for r in cursor.fetchall()]

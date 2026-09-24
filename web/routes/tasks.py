@@ -218,7 +218,8 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             "progress": _progress_label(initial_value, current_value),
             "created_by_name": creator_names.get(created_by, "—"),
             "batch_id": batch_id,
-            "archived": database.is_task_archived(resolved_at, status) or ally_code in departed_codes,
+            "archived": database.is_task_archived(resolved_at, status),
+            "departed": ally_code in departed_codes,
             "resolved_at_text": _format_resolved_at(resolved_at),
         }
         for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
@@ -228,10 +229,14 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     # "Архив" — отдельная вкладка (COMPLETED/FAILED старше database.TASK_ARCHIVE_AFTER_DAYS
     # дней); везде остальное ("Список"/"По игрокам") — только текущие задачи, как и в
     # отчётах бота (см. Discord-тред "Гайд по АС Боту", пункт "Архив").
-    if view == "archive":
-        scope = [t for t in all_ctx if t["archived"]]
+    # Задачи выбывших из гильдии — своя вкладка "Выбывшие" (только они, любой статус),
+    # ни в текущих, ни в "Архиве" их нет.
+    if view == "departed":
+        scope = [t for t in all_ctx if t["departed"]]
+    elif view == "archive":
+        scope = [t for t in all_ctx if t["archived"] and not t["departed"]]
     else:
-        scope = [t for t in all_ctx if not t["archived"]]
+        scope = [t for t in all_ctx if not t["archived"] and not t["departed"]]
 
     counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
     for t in scope:
@@ -302,6 +307,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "warn": request.query_params.get("warn"),
         "synced": request.query_params.get("synced"),
         "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
+        "departed_count": len({t["ally_code"] for t in all_ctx if t["departed"]}),
         "config_warning": config_warning_html(database.get_guild_config(guild_id), "tasks"),
     })
 

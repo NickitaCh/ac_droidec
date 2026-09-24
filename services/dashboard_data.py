@@ -820,9 +820,10 @@ class ViolationRow:
 
 
 def get_violations_overview(guild_id: int, include_zero: bool = False,
-                            include_departed: bool = False) -> list[ViolationRow]:
+                            include_departed: bool | str = False) -> list[ViolationRow]:
     """Выбывшие из гильдии по умолчанию не показываются (их нарушения — архив, досье
-    по-прежнему открывается по ссылке) — include_departed=True возвращает их с departed=True."""
+    по-прежнему открывается по ссылке) — include_departed=True возвращает их с departed=True,
+    "only" — только выбывших (вкладка «Выбывшие» на /violations)."""
     names = database.get_player_names(guild_id)
     departed_codes = set(database.get_departed_players(guild_id))
     all_warns = database.get_all_warns(guild_id)  # [(ally_code, category, date_str), ...] — все, без даты-фильтра
@@ -846,6 +847,8 @@ def get_violations_overview(guild_id: int, include_zero: bool = False,
             continue
         is_departed = ally_code in departed_codes
         if is_departed and not include_departed:
+            continue
+        if include_departed == "only" and not is_departed:
             continue
         rows.append(ViolationRow(
             ally_code=ally_code,
@@ -906,7 +909,7 @@ class ActivityEventRow:
 def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                         limit: int = 500, offset: int = 0,
                         date_from: str | None = None, date_to: str | None = None,
-                        include_archived: bool = False) -> list[ActivityEventRow]:
+                        include_archived: bool | str = False) -> list[ActivityEventRow]:
     # get_player_names, а не get_all_user_mappings — у АРХИВНОГО (выбывшего) игрока иначе
     # вместо имени показывался бы голый ally_code.
     names_by_code = database.get_player_names(guild_id)
@@ -946,7 +949,7 @@ def get_guild_activity(guild_id: int, ally_code: str | None = None, action_type:
 
 def get_guild_activity_count(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                               date_from: str | None = None, date_to: str | None = None,
-                              include_archived: bool = False) -> int:
+                              include_archived: bool | str = False) -> int:
     """Общее число событий по текущему фильтру (без учёта limit/offset) — для пагинации."""
     return database.get_guild_activity_events_count(guild_id, ally_code=ally_code, action_type=action_type,
                                                       date_from=date_from, date_to=date_to,
@@ -955,7 +958,7 @@ def get_guild_activity_count(guild_id: int, ally_code: str | None = None, action
 
 def get_guild_activity_dates(guild_id: int, ally_code: str | None = None, action_type: str | None = None,
                               date_from: str | None = None, date_to: str | None = None,
-                              include_archived: bool = False) -> list[str]:
+                              include_archived: bool | str = False) -> list[str]:
     return database.get_guild_activity_distinct_dates(guild_id, ally_code=ally_code, action_type=action_type,
                                                         date_from=date_from, date_to=date_to,
                                                         include_archived=include_archived)
@@ -963,7 +966,7 @@ def get_guild_activity_dates(guild_id: int, ally_code: str | None = None, action
 
 def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
                                   date_from: str | None = None, date_to: str | None = None,
-                                  include_archived: bool = False) -> list:
+                                  include_archived: bool | str = False) -> list:
     """[(action_label, count), ...] отсортировано по убыванию — намеренно игнорирует фильтр
     по типу события (см. get_guild_activity_type_counts), иначе выбор одного типа в фильтре
     ленты схлопывал бы эту панель до единственного столбика."""
@@ -976,7 +979,7 @@ def get_guild_activity_breakdown(guild_id: int, ally_code: str | None = None,
     return sorted(labeled.items(), key=lambda kv: kv[1], reverse=True)
 
 
-def get_guild_activity_players(guild_id: int, include_archived: bool = False) -> list:
+def get_guild_activity_players(guild_id: int, include_archived: bool | str = False) -> list:
     """[(ally_code, name), ...] по ВСЕМ игрокам с активностью в этой гильдии — не зависит
     от текущего фильтра/лимита get_guild_activity, иначе выбор игрока в выпадающем списке
     на веб-странице схлопывал бы сам список до одного уже выбранного игрока."""

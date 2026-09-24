@@ -158,10 +158,15 @@
                 {% if view == "flat" or not view %}<strong>Список</strong>{% else %}<a href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% endif %}
                 {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
                 {% if view == "archive" %}<strong>Архив</strong>{% else %}<a href="/tasks?view=archive{% if status_filter %}&status={{ status_filter }}{% endif %}">Архив</a>{% endif %}
+                {% if departed_count or view == "departed" %}
+                    {% if view == "departed" %}<strong>Выбывшие ({{ departed_count }})</strong>{% else %}<a href="/tasks?view=departed">Выбывшие ({{ departed_count }})</a>{% endif %}
+                {% endif %}
             </div>
         </div>
         {% if view == "archive" %}
             <p class="muted">Задачи, завершённые или проваленные более {{ archive_after_days }} дней назад — не влияют на счётчики и отчёты бота.</p>
+        {% elif view == "departed" %}
+            <p class="muted">Задачи игроков, выбывших из гильдии. При возвращении игрока активные задачи восстановятся.</p>
         {% endif %}
 
         {% if view == "players" %}
@@ -189,7 +194,7 @@
             {% endif %}
         {% else %}
             {% if not tasks %}
-                <p class="empty-state">{% if view == "archive" %}Архив пуст.{% else %}Задач пока нет.{% endif %}</p>
+                <p class="empty-state">{% if view in ("archive", "departed") %}Архив пуст.{% else %}Задач пока нет.{% endif %}</p>
             {% else %}
                 <div class="table-scroll">
                     <table class="data" id="tasks-table">

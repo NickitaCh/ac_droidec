@@ -1394,16 +1394,16 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     if period not in ACTIVITY_PERIOD_DAYS:
         period = ""
     date_from = _period_to_date_from(period)
-    # Выбывшие из гильдии игроки архивируются автоматически (sync_guild_roster) и по
-    # умолчанию скрыты отовсюду в этом роуте — ?departed=1 временно их возвращает
-    # (тот же паттерн, что show_all у /violations).
+    # Выбывшие из гильдии игроки архивируются автоматически (sync_guild_roster) и живут
+    # на отдельной вкладке «Выбывшие» (?departed=1) — там ТОЛЬКО они, в основной ленте их нет.
     show_departed = request.query_params.get("departed") == "1"
+    archived_scope = "only" if show_departed else False
 
     # "Событий по фильтру/всего" на плашке наверху — суммарно по всему фильтру, не по одному
     # дню, иначе цифра скакала бы при перелистывании страниц.
     total_count = dashboard_data.get_guild_activity_count(
         guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
-        include_archived=show_departed,
+        include_archived=archived_scope,
     )
 
     page_date_label = None
@@ -1427,7 +1427,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         rows = dashboard_data.get_guild_activity(
             guild_id, ally_code=player_filter, action_type=action_type_filter,
             limit=page_size, offset=(page - 1) * page_size, date_from=date_from,
-            include_archived=show_departed,
+            include_archived=archived_scope,
         )
     else:
         # Список дат, за которые вообще есть события по фильтру (без учёта страницы) — сама
@@ -1435,7 +1435,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         # показывает все события за N-й по свежести день, а не N-ю полусотню строк.
         activity_dates = dashboard_data.get_guild_activity_dates(
             guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
-            include_archived=show_departed,
+            include_archived=archived_scope,
         )
         total_pages = max(1, len(activity_dates))
         try:
@@ -1448,11 +1448,11 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         rows = dashboard_data.get_guild_activity(
             guild_id, ally_code=player_filter, action_type=action_type_filter,
             limit=ACTIVITY_DAY_ROW_LIMIT, date_from=selected_date, date_to=selected_date,
-            include_archived=show_departed,
+            include_archived=archived_scope,
         ) if selected_date else []
         page_date_label = dashboard_data.friendly_activity_date_label(selected_date)
 
-    players = dashboard_data.get_guild_activity_players(guild_id, include_archived=show_departed)
+    players = dashboard_data.get_guild_activity_players(guild_id, include_archived=archived_scope)
     grouped = dashboard_data.group_activity(rows)
     sync_status = dashboard_data.get_activity_sync_status(guild_id)
     sync_status_text = _sync_status_text(sync_status)
@@ -1460,7 +1460,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     # Панель "по типу изменения" — по всему фильтру (игрок/период), не по одной странице,
     # иначе бары скакали бы при перелистывании и не отражали реальную картину.
     breakdown_rows = dashboard_data.get_guild_activity_breakdown(
-        guild_id, ally_code=player_filter, date_from=date_from, include_archived=show_departed,
+        guild_id, ally_code=player_filter, date_from=date_from, include_archived=archived_scope,
     )
     max_breakdown = breakdown_rows[0][1] if breakdown_rows else 0
 
@@ -1490,7 +1490,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "action_types": dashboard_data.ACTIVITY_ACTION_LABELS.items(),
         "period": period,
         "show_departed": show_departed,
-        "toggle_departed_url": f"/activity?{urlencode({**base_params, 'departed': '0' if show_departed else '1'})}",
+        "departed_count": len(database.get_guild_activity_player_codes(guild_id, include_archived="only")),
         "breakdown_rows": breakdown_rows,
         "max_breakdown": max_breakdown,
         "sync_status": sync_status_text,
@@ -1503,7 +1503,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "page_size_urls": page_size_urls,
         "prev_page_url": f"/activity?{urlencode({**base_params, 'page': page - 1})}" if page > 1 else None,
         "next_page_url": f"/activity?{urlencode({**base_params, 'page': page + 1})}" if page < total_pages else None,
-        "reset_url": "/activity",
+        "reset_url": "/activity?departed=1" if show_departed else "/activity",
     })
 
 
@@ -1648,8 +1648,10 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
 async def violations(request: Request, user: dict = Depends(feature_flags.require_feature("violations"))):
     show_all = request.query_params.get("all") == "1"
     show_departed = request.query_params.get("departed") == "1"
-    rows = dashboard_data.get_violations_overview(user["guild_id"], include_zero=show_all,
-                                                  include_departed=show_departed)
+    # Вкладка «Выбывшие» — только они и все целиком (нарушения за 90 дней у давно ушедших
+    # обычно нулевые, фильтр show_all там не имеет смысла).
+    rows = dashboard_data.get_violations_overview(user["guild_id"], include_zero=show_all or show_departed,
+                                                  include_departed="only" if show_departed else False)
     top_offenders = [r for r in rows if r.recent_total > 0 and not r.departed][:8]
     max_recent = top_offenders[0].recent_total if top_offenders else 0
     return templates.TemplateResponse(request, "violations.html", {
@@ -1657,7 +1659,8 @@ async def violations(request: Request, user: dict = Depends(feature_flags.requir
         "rows": rows,
         "show_all": show_all,
         "show_departed": show_departed,
-        "departed_count": len(database.get_departed_players(user["guild_id"])),
+        "departed_count": len(rows) if show_departed else len(dashboard_data.get_violations_overview(
+            user["guild_id"], include_zero=True, include_departed="only")),
         "n_limit": dashboard_data.N_LIMIT,
         "top_offenders": top_offenders,
         "max_recent": max_recent,

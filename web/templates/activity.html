@@ -35,7 +35,17 @@
         {% endif %}
     </div>
 
-    {% if not players %}
+    {% if departed_count or show_departed %}
+        <div class="segmented-toggle">
+            <div class="segmented-toggle-options">
+                {% if show_departed %}<a href="/activity">Текущий состав</a><strong>Выбывшие ({{ departed_count }})</strong>{% else %}<strong>Текущий состав</strong><a href="/activity?departed=1">Выбывшие ({{ departed_count }})</a>{% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if not players and show_departed %}
+        <p class="empty-state">Выбывших из гильдии игроков с активностью нет.</p>
+    {% elif not players %}
         <p class="empty-state">Данных пока нет — активность считается по разнице между снимками ростера (раз в {{ sync_status.sync_hours_text }}), так что первое событие появится не раньше второго цикла синхронизации после регистрации игроков. Либо нажми «Обновить сейчас» выше.</p>
     {% else %}
         <div class="stats-grid">
@@ -95,7 +105,6 @@
             {% if player_filter or action_type_filter or period %}
                 <a href="{{ reset_url }}">Сбросить фильтр</a>
             {% endif %}
-            <a href="{{ toggle_departed_url }}">{% if show_departed %}Скрыть выбывших из гильдии{% else %}Показать выбывших из гильдии{% endif %}</a>
         </form>
 
         {% if player_filter %}
