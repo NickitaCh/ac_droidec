@@ -17,7 +17,7 @@ import database
 import stat_engine
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
 from cogs.stat_requirements import (
-    MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON, STAT_SET, SET_CHOICES,
+    COMPARE_OPERATOR_CHOICES, COMPARE_OPERATORS, MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON, STAT_SET, SET_CHOICES,
 )
 from services import feature_flags
 
@@ -26,6 +26,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES]
 OPERATOR_OPTIONS = [(c.name, c.value) for c in OPERATOR_CHOICES]
+COMPARE_OPERATOR_OPTIONS = [(c.name, c.value) for c in COMPARE_OPERATOR_CHOICES]
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
 MOD_SLOT_OPTIONS = list(MOD_SLOT_LABELS.items())
 SET_OPTIONS = [(c.name, c.value) for c in SET_CHOICES]
@@ -103,10 +104,18 @@ def _mod_set_text(set_id) -> str:
     return f"{_SET_NAME_BY_ID.get(set_id, set_id)} ({pieces} шт.)"
 
 
-def _compare_req_text(stat_name: str, operator: str, compare_base_id: str) -> str:
+def _compare_offset_text(operator: str, offset: float) -> str:
+    """Независимая копия cogs/stat_requirements.py::_compare_offset_text: отрыв хранится
+    неотрицательным, направление — из оператора (</<= — минус, остальные — плюс)."""
+    if not offset:
+        return ""
+    return f" {'−' if operator in ('<', '<=') else '+'} {_fmt_value(offset)}"
+
+
+def _compare_req_text(stat_name: str, operator: str, compare_base_id: str, offset: float = 0.0) -> str:
     """Независимая копия cogs/stat_requirements.py::_compare_req_text."""
     stat_label = next((n for n, v in STAT_OPTIONS if v == stat_name), stat_name)
-    return f"{stat_label} {operator} {_unit_name(compare_base_id)}"
+    return f"{stat_label} {operator} {_unit_name(compare_base_id)}{_compare_offset_text(operator, offset)}"
 
 
 @router.get("", response_class=HTMLResponse)
@@ -201,7 +210,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
             elif is_mod_set:
                 value_display = f"Сет: {_mod_set_text(r[11])}"
             elif is_compare:
-                value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}"
+                value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}{_compare_offset_text(r[4], r[5])}"
             else:
                 value_display = f"{r[3]} {r[4]} {_fmt_value(r[5])}"
             reqs.append({
@@ -265,6 +274,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "req_count": req_count,
         "stat_options": STAT_OPTIONS,
         "operator_options": OPERATOR_OPTIONS,
+        "compare_operator_options": COMPARE_OPERATOR_OPTIONS,
         "priority_options": PRIORITY_OPTIONS,
         "priority_default": PRIORITY_REQUIRED,
         "mod_slot_options": MOD_SLOT_OPTIONS,
@@ -474,6 +484,7 @@ async def requirement_add_compare(
     stat_name: str = Form(...),
     operator: str = Form(...),
     compare_base_id: str = Form(...),
+    offset: float = Form(0.0),
     priority: str = Form(PRIORITY_REQUIRED),
     comment: str = Form(""),
     scheme_num: str = Form(""),
@@ -493,10 +504,16 @@ async def requirement_add_compare(
             status_code=303,
         )
 
+    if operator not in COMPARE_OPERATORS or offset < 0:
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Некорректный оператор или отрицательный отрыв — направление задаётся оператором.'})}",
+            status_code=303,
+        )
+
     char_name = _unit_name(base_id)
-    raw_text = f"{char_name} — {_compare_req_text(stat_name, operator, compare_base_id)}"
+    raw_text = f"{char_name} — {_compare_req_text(stat_name, operator, compare_base_id, offset)}"
     database.add_stat_requirement(
-        plate_name, base_id, stat_name, operator, 0.0, priority, raw_text, comment.strip() or None,
+        plate_name, base_id, stat_name, operator, offset, priority, raw_text, comment.strip() or None,
         user["discord_id"], guild_id=guild_id, compare_character_key=compare_base_id, scheme_num=_parse_scheme_form(scheme_num),
     )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
@@ -519,13 +536,19 @@ async def requirement_edit(
         return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': f'Требование #{req_id} не найдено.'})}", status_code=303)
     _, row_plate, character_key, stat_name, cur_operator, cur_threshold, *_ = row
     compare_character_key = row[13]
-    # Оператор/значение у требования на омикрон, на основу мода, на сет и на сравнение с
-    # другим персонажем захардкожены (см. cogs/stat_requirements.py::stat_req_add_omicron/
-    # stat_req_add_mod_primary/stat_req_add_mod_set/stat_req_add_compare) — форма для таких
-    # строк их вообще не присылает, оставляем как есть. Схема — не захардкожена ни у одного
+    # Оператор/значение у требования на омикрон, на основу мода и на сет захардкожены (см.
+    # cogs/stat_requirements.py::stat_req_add_omicron/stat_req_add_mod_primary/
+    # stat_req_add_mod_set) — форма для таких строк их вообще не присылает, оставляем как
+    # есть. У сравнения с персонажем оператор (включая строгие >/<) и отрыв редактируемы. Схема — не захардкожена ни у одного
     # из типов, её можно менять всегда (просто классификация строки, не влияет на
     # оператор/значение).
-    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET) or bool(compare_character_key)
+    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET)
+    allowed_ops = COMPARE_OPERATORS if compare_character_key else {c.value for c in OPERATOR_CHOICES}
+    if not _locked and ((operator is not None and operator not in allowed_ops)
+                        or (compare_character_key and threshold is not None and threshold < 0)):
+        return RedirectResponse(
+            f"/plates/{plate_name}?{urlencode({'error': 'Некорректный оператор или значение.'})}", status_code=303,
+        )
     new_operator = cur_operator if _locked or operator is None else operator
     new_threshold = cur_threshold if _locked or threshold is None else threshold
     database.update_stat_requirement(

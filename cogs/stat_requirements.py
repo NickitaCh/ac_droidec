@@ -124,6 +124,17 @@ OPERATOR_CHOICES = [
     disnake.OptionChoice(name="<=", value="<="),
     disnake.OptionChoice(name="=", value="="),
 ]
+# Для сравнения с другим персонажем — плюс строгие > и < ("офицер быстрее Хакса на +51":
+# стат > стат_сравниваемого + 51). Для обычных числовых порогов строгие операторы не
+# заводили — там порог и так задаётся числом, ">= N+1" покрывает то же самое.
+COMPARE_OPERATOR_CHOICES = [
+    disnake.OptionChoice(name=">", value=">"),
+    disnake.OptionChoice(name=">=", value=">="),
+    disnake.OptionChoice(name="<", value="<"),
+    disnake.OptionChoice(name="<=", value="<="),
+    disnake.OptionChoice(name="=", value="="),
+]
+COMPARE_OPERATORS = {c.value for c in COMPARE_OPERATOR_CHOICES}
 
 # Требование можно привязать к одной из двух "схем" мод-билда персонажа (обсуждение с Колей,
 # 2026-09-21: "2 карточки перса - одна в одном билде, другая в другом"; матчинг по совпавшим
@@ -264,6 +275,10 @@ def _compare(current: float, operator: str, threshold: float) -> bool:
         return current >= threshold
     if operator == "<=":
         return current <= threshold
+    if operator == ">":
+        return current > threshold
+    if operator == "<":
+        return current < threshold
     if operator == "=":
         return current == threshold
     return False
@@ -384,8 +399,25 @@ def _compare_label(stat_name: str, compare_character_key: str, priority: str) ->
     return f"{label}*" if priority == "optional" else label
 
 
-def _compare_req_text(stat_name: str, operator: str, compare_character_key: str) -> str:
-    return f"{_stat_label(stat_name, '')} {operator} {_unit_display_name(compare_character_key)}"
+def _compare_offset_sign(operator: str) -> int:
+    """Отрыв ("на сколько") у сравнения с персонажем хранится в threshold_value как
+    неотрицательное число, направление берётся из оператора: для >/>=/= — стат сравниваемого
+    ПЛЮС отрыв ("быстрее на 51"), для </<= — МИНУС ("медленнее на 20")."""
+    return -1 if operator in ("<", "<=") else 1
+
+
+def _compare_threshold(other_value: float, operator: str, offset: float) -> float:
+    return other_value + _compare_offset_sign(operator) * (offset or 0.0)
+
+
+def _compare_offset_text(operator: str, offset: float) -> str:
+    if not offset:
+        return ""
+    return f" {'−' if _compare_offset_sign(operator) < 0 else '+'} {_fmt_value(offset)}"
+
+
+def _compare_req_text(stat_name: str, operator: str, compare_character_key: str, offset: float = 0.0) -> str:
+    return f"{_stat_label(stat_name, '')} {operator} {_unit_display_name(compare_character_key)}{_compare_offset_text(operator, offset)}"
 
 
 def _player_mod_primaries(unit: dict) -> dict:
@@ -651,9 +683,10 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         compare_char_name = None
         if is_compare:
             # Сравнение с другим персонажем ТОГО ЖЕ игрока — заметка Коли 2026-09-20:
-            # "офицер быстрее Хакса в ТП на Лкайло". threshold_value в строке — заглушка
-            # (не используется), реальный порог — живой текущий стат compare-персонажа,
-            # подставляется сюда и дальше течёт по той же общей логике _compare/сценариев,
+            # "офицер быстрее Хакса в ТП на Лкайло". threshold_value в строке — отрыв
+            # ("на сколько", 0 = просто сравнение; знак берётся из оператора, см.
+            # _compare_offset_sign), реальный порог — живой текущий стат compare-персонажа
+            # плюс/минус отрыв, подставляется сюда и дальше течёт по той же общей логике _compare/сценариев,
             # что и обычный числовой порог.
             compare_char_name = _unit_display_name(compare_character_key)
             compare_unit, _ = await _get_unit_for_player(bot, ally_code, compare_character_key, force_refresh)
@@ -663,7 +696,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 continue
             compare_stats = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, compare_unit)))
             compare_stats["Relic"] = stat_engine.get_current_relic_level(compare_unit)
-            threshold = compare_stats.get(stat_name)
+            compare_offset = threshold or 0.0
+            compare_value = compare_stats.get(stat_name)
+            threshold = None if compare_value is None else _compare_threshold(compare_value, operator, compare_offset)
 
         if is_mod_primary:
             label = _mod_primary_label(mod_slot, priority)
@@ -682,7 +717,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             else stat_name
         )
         if is_compare:
-            req_cell = f"{operator} {compare_char_name}"
+            req_cell = f"{operator} {compare_char_name}{_compare_offset_text(operator, compare_offset)}"
         elif is_mod_primary:
             req_cell = _mod_primary_req_text(mod_slot, threshold)
         elif is_omicron:
@@ -714,7 +749,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         elif is_mod_set:
             cur_cell = "Надет ✅" if cur_ok else "Не надет ❌"
         elif is_compare:
-            cur_cell = f"{_fmt_compact(cur_val)} vs {_fmt_compact(threshold)} {'✅' if cur_ok else '❌'}"
+            cur_cell = f"{_fmt_compact(cur_val)} vs {_fmt_compact(compare_value)}{_compare_offset_text(operator, compare_offset)} {'✅' if cur_ok else '❌'}"
         else:
             cur_cell = f"{_fmt_compact(cur_val)} {'✅' if cur_ok else '❌'}"
 
@@ -731,7 +766,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         elif is_mod_set:
             mod_set_lines.append(f"{cur_cell} — {_mod_set_req_text(skill_id)}{suffix}")
         elif is_compare:
-            compare_lines.append(f"{cur_cell} — {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}")
+            compare_lines.append(f"{cur_cell} — {_stat_label(stat_name, '')} {operator} {compare_char_name}{_compare_offset_text(operator, compare_offset)}{suffix}")
 
         proj_val = (projected_values.get(stat_name) if projected_values else None) if (show_projection and not is_omicron and not is_mod_primary and not is_mod_set and not is_compare and not is_relic_row) else None
 
@@ -1006,7 +1041,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
             # Сравнение с другим персонажем не проецируется на релик — оба живых значения
             # берутся как есть в момент проверки, норма не меняется между релик-колонками.
             label = _compare_label(stat_name, compare_character_key, priority)
-            cell = _compare_req_text(stat_name, operator, compare_character_key)
+            cell = _compare_req_text(stat_name, operator, compare_character_key, threshold)
             table_rows.append([label, cell, cell])
             continue
 
@@ -1186,7 +1221,7 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
         elif stat_name == STAT_SET:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — сет «{_mod_set_req_text(skill_id)}»"
         elif compare_character_key:
-            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — {_compare_req_text(stat_name, operator, compare_character_key)}"
+            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — {_compare_req_text(stat_name, operator, compare_character_key, threshold)}"
         else:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} {stat_name} {operator} {_fmt_value(threshold)}"
         if scheme_num:
@@ -1736,8 +1771,9 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт (как в HotUtils, например AC_ALL)", autocomplete=autocomplete_stat_plate),
         персонаж: str = commands.Param(description="Персонаж, к которому относится требование", autocomplete=units_autocomplete),
         стат: str = commands.Param(description="Какой стат сравниваем", choices=[c for c in STAT_CHOICES if c.value != "Relic"]),
-        оператор: str = commands.Param(description="Оператор сравнения (стат персонажа ОПЕРАТОР стат сравниваемого)", choices=OPERATOR_CHOICES),
+        оператор: str = commands.Param(description="Оператор сравнения (стат персонажа ОПЕРАТОР стат сравниваемого)", choices=COMPARE_OPERATOR_CHOICES),
         персонаж_сравнения: str = commands.Param(description="С кем сравниваем (тот же игрок, другой персонаж)", autocomplete=units_autocomplete),
+        на_сколько: float = commands.Param(default=0.0, ge=0, description="Отрыв: для >/>= — на сколько больше, для </<= — на сколько меньше (0 — просто сравнение)"),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
         схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
@@ -1767,9 +1803,9 @@ class StatRequirementsCog(commands.Cog):
             return
 
         char_name = _unit_display_name(base_id)
-        raw_text = f"{char_name} — {_compare_req_text(стат, оператор, compare_base_id)}"
+        raw_text = f"{char_name} — {_compare_req_text(стат, оператор, compare_base_id, на_сколько)}"
         req_id = database.add_stat_requirement(
-            плейт, base_id, стат, оператор, 0.0, приоритет, raw_text, комментарий, str(inter.author.id),
+            плейт, base_id, стат, оператор, на_сколько, приоритет, raw_text, комментарий, str(inter.author.id),
             guild_id=guild_id, compare_character_key=compare_base_id, scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)
@@ -1779,8 +1815,8 @@ class StatRequirementsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         id: str = commands.Param(description="Требование для изменения", autocomplete=autocomplete_stat_req_id),
-        значение: float = commands.Param(default=None, description="Новое пороговое значение"),
-        оператор: str = commands.Param(default=None, description="Новый оператор", choices=OPERATOR_CHOICES),
+        значение: float = commands.Param(default=None, description="Новое пороговое значение (у сравнения с персонажем — отрыв «на сколько»)"),
+        оператор: str = commands.Param(default=None, description="Новый оператор (> и < — только для сравнения с персонажем)", choices=COMPARE_OPERATOR_CHOICES),
         приоритет: str = commands.Param(default=None, description="Новый приоритет", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Новый комментарий"),
         схема: str = commands.Param(default=None, description="Перепривязать к другой схеме мод-билда (не меняет остальные поля)", choices=SCHEME_CHOICES),
@@ -1808,7 +1844,7 @@ class StatRequirementsCog(commands.Cog):
             database.set_stat_requirement_scheme(req_id, _parse_scheme_param(схема), guild_id=guild_id)
 
         _, plate_name, character_key, stat_name, cur_operator, cur_threshold, cur_priority, _raw_text, cur_comment, _, _, _skill_id, _mod_slot, compare_character_key, _scheme_num = row
-        locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET) or bool(compare_character_key)
+        locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET)
 
         if stat_name == STAT_OMICRON and (оператор is not None or значение is not None):
             await inter.response.send_message(
@@ -1833,10 +1869,16 @@ class StatRequirementsCog(commands.Cog):
             )
             return
 
-        if compare_character_key and (оператор is not None or значение is not None):
+        if not compare_character_key and оператор in (">", "<"):
             await inter.response.send_message(
-                "❌ У требования на сравнение с другим персонажем нельзя менять оператор/значение — доступны только "
-                "приоритет и комментарий. Чтобы сменить стат/сравниваемого персонажа, удалите это требование и добавьте новое.",
+                "❌ Строгие > и < доступны только у требования на сравнение с персонажем — для числового порога используйте >= / <=.",
+                ephemeral=True,
+            )
+            return
+
+        if compare_character_key and значение is not None and значение < 0:
+            await inter.response.send_message(
+                "❌ Отрыв не может быть отрицательным — направление задаётся оператором (> — больше, < — меньше).",
                 ephemeral=True,
             )
             return
@@ -1846,7 +1888,10 @@ class StatRequirementsCog(commands.Cog):
         new_priority = приоритет if приоритет is not None else cur_priority
         new_comment = комментарий if комментарий is not None else cur_comment
         char_name = _unit_display_name(character_key)
-        new_raw_text = _raw_text if locked else f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
+        if compare_character_key:
+            new_raw_text = f"{char_name} — {_compare_req_text(stat_name, new_operator, compare_character_key, new_threshold)}"
+        else:
+            new_raw_text = _raw_text if locked else f"{char_name} {stat_name} {new_operator} {_fmt_value(new_threshold)}"
         database.update_stat_requirement(req_id, plate_name, character_key, stat_name, new_operator, new_threshold, new_priority, new_comment, guild_id=guild_id)
         scheme_part = f" · схема: {_parse_scheme_param(схема) or 'обе'}" if схема is not None else ""
         await inter.response.send_message(f"✅ Требование #{req_id} обновлено: {new_raw_text}{scheme_part}", ephemeral=True)

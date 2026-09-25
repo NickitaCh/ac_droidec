@@ -265,7 +265,7 @@
                 <label>
                     Оператор
                     <select name="operator" required>
-                        {% for label, value in operator_options %}
+                        {% for label, value in compare_operator_options %}
                             <option value="{{ value }}">{{ label }}</option>
                         {% endfor %}
                     </select>
@@ -277,6 +277,10 @@
                         <input type="hidden" name="compare_base_id" class="unit-search-value" required>
                         <div class="unit-search-results"></div>
                     </div>
+                </label>
+                <label>
+                    На сколько
+                    <input type="number" name="offset" step="any" min="0" value="0" title="Для > и >= — на сколько больше, для < и <= — на сколько меньше">
                 </label>
                 <label>
                     Приоритет
@@ -327,7 +331,14 @@
                                 <details>
                                     <summary class="link-btn">править</summary>
                                     <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                        {% if not r.is_omicron and not r.is_mod_primary and not r.is_mod_set and not r.is_compare %}
+                                        {% if r.is_compare %}
+                                            <select name="operator">
+                                                {% for label, value in compare_operator_options %}
+                                                    <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="number" name="threshold" step="any" min="0" value="{{ r.threshold }}" title="На сколько" required>
+                                        {% elif not r.is_omicron and not r.is_mod_primary and not r.is_mod_set %}
                                             <select name="operator">
                                                 {% for label, value in operator_options %}
                                                     <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
