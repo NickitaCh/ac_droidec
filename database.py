@@ -153,6 +153,13 @@ def init_db():
         cursor.execute("ALTER TABLE game_units ADD COLUMN has_omicron INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Имя текстуры портрета (Comlink units[].thumbnailName, напр. "tex.charui_vader") —
+        # из base_id его не вывести. Веб отдаёт портрет через /unit-img/<base_id>
+        # (web/routes/unit_images.py), скачивая и кэшируя картинку по этому имени.
+        cursor.execute("ALTER TABLE game_units ADD COLUMN thumbnail_name TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # 4b. Справочник снаряжения/релик-материалов (детали) — тот же глобальный,
     #     не привязанный к guild_id принцип, что и game_units. Заполняется/обновляется
@@ -1355,6 +1362,28 @@ def resolve_unit_display_names(names: list[str]) -> dict[str, str | None]:
             by_name.setdefault(name_en.lower(), base_id)
 
     return {name: by_name.get(name.lower()) for name in names}
+
+
+def set_unit_thumbnails(thumbnails: dict):
+    """thumbnails: {base_id: thumbnail_name}. Отдельным UPDATE после upsert_game_units —
+    тот делает INSERT OR REPLACE и затирает все колонки, которых нет в его кортеже."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.executemany("UPDATE game_units SET thumbnail_name = ? WHERE base_id = ?",
+                       [(name, base_id) for base_id, name in thumbnails.items()])
+    conn.commit()
+    conn.close()
+
+
+def get_unit_thumbnail(base_id: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        row = conn.execute("SELECT thumbnail_name FROM game_units WHERE base_id = ?", (base_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return None  # колонку ещё не добавил init_db бота (веб стартовал раньше миграции)
+    finally:
+        conn.close()
+    return row[0] if row else None
 
 
 # =====================================================================

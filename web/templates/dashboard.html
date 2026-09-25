@@ -7,73 +7,113 @@
     {% endif %}
 
     {% if not user %}
-        <div class="landing-page">
-        <section class="landing-hero">
-            <h1>AC Droidec</h1>
-            <p class="landing-tagline">Бот и веб-дашборд для управления гильдией Star Wars: Galaxy of Heroes.</p>
-        </section>
+        {# Портреты — статика в static/img/game/portraits (скачаны с CDN swgoh.gg), сторона
+           силы задаёт цвет кольца. #}
+        {% set hero_units = [
+            ("vader", "dark"), ("luke_jml", "light"), ("sidious", "dark"), ("rey_tros", "light"),
+            ("maul", "dark"), ("ahsoka", "light"), ("thrawn", "dark"), ("jedirevan", "light"),
+            ("kyloren", "dark"), ("calkestis", "light"), ("darthmalak", "dark"), ("mandalorian", "neutral"),
+            ("grievous", "dark"), ("han", "light"), ("darthbane", "dark"), ("bobafett", "neutral"),
+            ("dooku", "dark"), ("jabbathehutt", "neutral"),
+        ] %}
+        <div class="lp">
+            <section class="lp-hero">
+                <div class="lp-hero-text">
+                    <p class="lp-eyebrow">Star Wars: Galaxy of Heroes</p>
+                    <h1>AC Droidec</h1>
+                    <p class="lp-lead">Бот для Discord и веб-дашборд для офицеров гильдии: ТБ и ВГ, прокачка, моды, датакроны и дисциплина — в одном месте.</p>
+                    <div class="lp-cta">
+                        <a class="button lp-button-primary" href="/login">Войти через Discord</a>
+                        <a class="button lp-button-ghost" href="/subscribe">Подключить гильдию</a>
+                    </div>
+                    <p class="lp-alt-login">Нет Discord? <a href="/login/password">Вход по логину и паролю</a></p>
+                </div>
+                <div class="lp-roster" aria-hidden="true">
+                    {% for name, side in hero_units %}
+                        <span class="unit-portrait unit-portrait-{{ side }}"><img src="/static/img/game/portraits/{{ name }}.webp" alt="" loading="lazy" width="128" height="128"></span>
+                    {% endfor %}
+                </div>
+            </section>
 
-        <section class="landing-features">
-            <div class="landing-feature">
-                <span class="landing-feature-icon">⚔️</span>
-                <div>
-                    <strong>ТБ и ВГ</strong>
-                    <p class="muted">Отчёты по Территориальным Битвам и Войнам гильдий, история и графики очков.</p>
-                </div>
-            </div>
-            <div class="landing-feature">
-                <span class="landing-feature-icon">🎯</span>
-                <div>
-                    <strong>Задачи</strong>
-                    <p class="muted">Требования по прокачке участников с дедлайнами и отслеживанием прогресса.</p>
-                </div>
-            </div>
-            <div class="landing-feature">
-                <span class="landing-feature-icon">📈</span>
-                <div>
-                    <strong>Активность</strong>
-                    <p class="muted">Кто и что прокачал — гир, релики, звёзды, зеты и омикроны по всей гильдии.</p>
-                </div>
-            </div>
-            <div class="landing-feature">
-                <span class="landing-feature-icon">🔮</span>
-                <div>
-                    <strong>Датакроны</strong>
-                    <p class="muted">Требования по датакронам и автоматическая сверка с ростером игроков.</p>
-                </div>
-            </div>
-        </section>
+            <section class="lp-features">
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-relic">
+                        <span class="unit-portrait unit-portrait-dark"><img src="/static/img/game/portraits/thrawn.webp" alt="" loading="lazy"></span>
+                    </div>
+                    <h3>ТБ и ВГ</h3>
+                    <p>Отчёты по Территориальным битвам и войнам, звёзды и очки по каждому игроку, сравнение с прошлыми битвами, взводы и ордера.</p>
+                </article>
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-gear">
+                        <img class="lp-gear-frame" src="/static/img/game/frames/gear-g12.webp" alt="">
+                        <span class="unit-portrait"><img src="/static/img/game/portraits/luke_jml.webp" alt="" loading="lazy"></span>
+                    </div>
+                    <h3>Задачи на прокачку</h3>
+                    <p>Цели по звёздам, гиру и реликам с дедлайнами. Бот сам проверяет прогресс и напоминает в Discord.</p>
+                </article>
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-badges">
+                        <img src="/static/img/game/badges/zeta.png" alt="">
+                        <img src="/static/img/game/badges/omicron.png" alt="">
+                    </div>
+                    <h3>Активность гильдии</h3>
+                    <p>Кто что прокачал: гир, релики, звёзды, зеты и омикроны. Лента событий и статистика по каждому игроку.</p>
+                </article>
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-mods">
+                        <span class="mod-icon mod-icon-gold mod-shape-arrow" style="--set: url(/static/img/game/sets/set-4.webp)"></span>
+                        <span class="mod-icon mod-shape-circle" style="--set: url(/static/img/game/sets/set-6.webp)"></span>
+                        <span class="mod-icon mod-icon-gold mod-shape-cross" style="--set: url(/static/img/game/sets/set-1.webp)"></span>
+                    </div>
+                    <h3>Моды и статы</h3>
+                    <p>Плейты гильдии, калькулятор, поиск модов по всему составу и анализ модинга с рекомендациями.</p>
+                </article>
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-datacron">
+                        <span class="unit-portrait"><img src="/static/img/game/portraits/sidious.webp" alt="" loading="lazy"></span>
+                    </div>
+                    <h3>Датакроны</h3>
+                    <p>Требования по датакронам на сезон и автоматическая сверка с ростером каждого игрока.</p>
+                </article>
+                <article class="lp-feature">
+                    <div class="lp-feature-art lp-art-roles">
+                        <img src="/static/img/game/roles/tank.png" alt="">
+                        <img src="/static/img/game/roles/attacker.png" alt="">
+                        <img src="/static/img/game/roles/support.png" alt="">
+                        <img src="/static/img/game/roles/healer.png" alt="">
+                    </div>
+                    <h3>Дисциплина и состав</h3>
+                    <p>Нарушения, дни рождения, регистрация участников и доступ по игровому рангу — без ручной возни с ролями.</p>
+                </article>
+            </section>
 
-        <section class="landing-pricing">
-            <h2>Подключение гильдии</h2>
-            <div class="pricing-grid">
-                <div class="pricing-card">
-                    <div class="pricing-card-price">500 ₽</div>
-                    <div class="pricing-card-period">в месяц</div>
+            <section class="lp-pricing">
+                <div class="lp-pricing-text">
+                    <h2>Подключение гильдии</h2>
+                    <ul class="lp-meta">
+                        <li>Доступ открывается автоматически в течение минуты после оплаты</li>
+                        <li>Оплата картой на странице <a href="/subscribe">Подписка</a> (нужен вход через Discord)</li>
+                        <li><a href="/oferta">Публичная оферта</a></li>
+                        <li>Уже подключили бота? <a href="/start">Начало работы</a> · <a href="/commands">Документация</a></li>
+                    </ul>
                 </div>
-                <div class="pricing-card">
-                    <div class="pricing-card-price">5000 ₽</div>
-                    <div class="pricing-card-period">в год</div>
+                <div class="lp-pricing-cards">
+                    <div class="pricing-card">
+                        <div class="pricing-card-price">500 ₽</div>
+                        <div class="pricing-card-period">в месяц</div>
+                    </div>
+                    <div class="pricing-card pricing-card-accent">
+                        <div class="pricing-card-price">5000 ₽</div>
+                        <div class="pricing-card-period">в год</div>
+                    </div>
+                    <div class="lp-pricing-actions">
+                        <a class="button" href="/subscribe">Подключить и оплатить</a>
+                        {% if bot_invite_url %}
+                            <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">Пригласить бота на сервер</a>
+                        {% endif %}
+                    </div>
                 </div>
-            </div>
-            <p class="landing-cta">
-                <a class="button" href="/subscribe">💳 Подключить и оплатить</a>
-                {% if bot_invite_url %}
-                    <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">➕ Пригласить бота на сервер</a>
-                {% endif %}
-            </p>
-            <ul class="landing-meta">
-                <li>Доступ открывается автоматически в течение минуты после оплаты</li>
-                <li>Оплата картой на странице <a href="/subscribe">Подписка</a> (нужен вход через Discord)</li>
-                <li><a href="/oferta">Публичная оферта</a></li>
-                <li>Уже подключили бота? <a href="/start">Начало работы</a> · <a href="/commands">Документация</a></li>
-            </ul>
-        </section>
-
-        <section class="landing-login">
-            <a class="button" href="/login">Войти через Discord</a>
-            <p class="muted" style="margin-top: 0.5em;">Нет доступа к Discord? <a href="/login/password">Войти по логину и паролю</a>.</p>
-        </section>
+            </section>
         </div>
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
@@ -82,7 +122,51 @@
         <h1>Привет, {{ user.username }}</h1>
         <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>
     {% else %}
-        <h1>{{ guild_cfg.name }}</h1>
+        {% set tb_last = widgets.tb_report.chart_bars[-1] if widgets.tb_report and widgets.tb_report.chart_bars else none %}
+        {% set tw_period = widgets.tw_stats.periods[0] if widgets.tw_stats and widgets.tw_stats.periods else none %}
+        <section class="dash-hero">
+            <div class="dash-hero-top">
+                <div>
+                    <p class="dash-hero-eyebrow">Гильдия</p>
+                    <h1>{{ guild_cfg.name }}</h1>
+                </div>
+                <div class="dash-hero-sync">
+                    <span>
+                        {% if widgets.sync_status.last_sync_text %}
+                            Обновлено {{ widgets.sync_status.last_sync_text }}
+                        {% else %}
+                            Кэш активности ещё не наполнялся
+                        {% endif %}
+                        {% if widgets.sync_status.next_auto_text %}<br><span class="dash-hero-sync-next">автообновление {{ widgets.sync_status.next_auto_text }}</span>{% endif %}
+                    </span>
+                    <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Синкаю…';">
+                        <button type="submit">Обновить сейчас</button>
+                    </form>
+                </div>
+            </div>
+            <div class="dash-kpis">
+                <div class="dash-kpi">
+                    <span class="dash-kpi-value">{{ widgets.roster_rows|length }}</span>
+                    <span class="dash-kpi-label">игроков в составе</span>
+                </div>
+                <div class="dash-kpi">
+                    <span class="dash-kpi-value">{{ widgets.registered_count }}<span class="dash-kpi-of">/{{ widgets.roster_rows|length }}</span></span>
+                    <span class="dash-kpi-label">привязали Discord</span>
+                </div>
+                <a class="dash-kpi" href="/tb">
+                    <span class="dash-kpi-value">{{ tb_last[3] if tb_last else "—" }}{% if tb_last and tb_last[5] %} <span class="dash-kpi-delta {{ tb_last[6] }}">{{ tb_last[5] }}</span>{% endif %}</span>
+                    <span class="dash-kpi-label">очков в последней ТБ{% if tb_last and tb_last[7] is not none %} · {{ tb_last[7] }} ⭐{% endif %}</span>
+                </a>
+                <a class="dash-kpi" href="/tw">
+                    <span class="dash-kpi-value">{% if tw_period and tw_period.winrate is not none %}{{ tw_period.winrate }}%{% else %}—{% endif %}</span>
+                    <span class="dash-kpi-label">винрейт ВГ{% if tw_period %} · {{ tw_period.label }}{% endif %}</span>
+                </a>
+                <a class="dash-kpi" href="/tasks">
+                    <span class="dash-kpi-value">{{ widgets.tasks_summary.counts.ACTIVE }}{% if widgets.tasks_summary.counts.FAILED %} <span class="dash-kpi-delta down">{{ widgets.tasks_summary.counts.FAILED }} провалено</span>{% endif %}</span>
+                    <span class="dash-kpi-label">задач в работе</span>
+                </a>
+            </div>
+        </section>
 
         {% if config_missing %}
             <p class="config-warning">
@@ -94,37 +178,20 @@
             </p>
         {% endif %}
 
-        <div class="panel">
-            <div class="sync-status">
-                <div>
-                    {% if widgets.sync_status.last_sync_text %}
-                        Обновлено: <strong>{{ widgets.sync_status.last_sync_text }}</strong>
-                    {% else %}
-                        Кэш активности ещё не наполнялся
-                    {% endif %}
-                    {% if widgets.sync_status.next_auto_text %}
-                        &nbsp;·&nbsp;автообновление {{ widgets.sync_status.next_auto_text }}
-                    {% endif %}
-                </div>
-                <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Синкаю…';">
-                    <button type="submit">🔄 Обновить сейчас</button>
-                </form>
-            </div>
-            {% if synced_now is not none %}
-                <p class="empty-state" style="margin-top: 0.75em; padding: 0;">
-                    {% if synced_now|int > 0 %}
-                        Готово — добавлено {{ synced_now }} новых событий.
-                    {% else %}
-                        Готово — новых изменений не найдено.
-                    {% endif %}
-                </p>
-            {% endif %}
-        </div>
+        {% if synced_now is not none %}
+            <p class="dash-flash">
+                {% if synced_now|int > 0 %}
+                    Готово — добавлено {{ synced_now }} новых событий.
+                {% else %}
+                    Готово — новых изменений не найдено.
+                {% endif %}
+            </p>
+        {% endif %}
 
         <div class="dashboard-grid">
             <div class="widget widget-roster">
                 <div class="widget-header">
-                    <h2>👥 Состав гильдии</h2>
+                    <h2>Состав гильдии</h2>
                     <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
                 </div>
                 {% if link_error %}
@@ -182,7 +249,7 @@
             <div class="widget-secondary">
             <div class="widget">
                 <div class="widget-header">
-                    <h2>📈 Последняя активность</h2>
+                    <h2>Последняя активность</h2>
                     <a class="widget-link" href="/activity">Вся активность →</a>
                 </div>
                 {% if not widgets.activity_rows %}
@@ -190,8 +257,12 @@
                 {% else %}
                     <div class="table-scroll">
                         {% for row in widgets.activity_rows %}
-                            <div class="activity-event-row">
-                                <span class="activity-unit-name">{{ row.player_name }} · {{ row.unit_name }}</span>
+                            <div class="activity-event-row activity-event-row-portrait">
+                                <span class="unit-portrait unit-portrait-sm unit-portrait-{{ row.action_class }}"><img src="/unit-img/{{ row.base_id }}" alt="" loading="lazy" width="128" height="128"></span>
+                                <span class="activity-event-main">
+                                    <span class="activity-unit-name">{{ row.unit_name }}</span>
+                                    <span class="activity-player">{{ row.player_name }}</span>
+                                </span>
                                 <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
                                 <span class="activity-change">
                                     {% if row.old_value %}
@@ -211,7 +282,7 @@
             <div class="widget-cols">
                 <div class="widget wc-r1c1">
                     <div class="widget-header">
-                        <h2>🎂 Ближайшие дни рождения</h2>
+                        <h2>Ближайшие дни рождения</h2>
                         <a class="widget-link" href="/birthdays">Весь список →</a>
                     </div>
                     {% if not widgets.birthdays %}
@@ -235,7 +306,7 @@
                 <div class="widget-stack wc-r1c2">
                     <div class="widget">
                         <div class="widget-header">
-                            <h2>🚨 Топ нарушителей (90 дней)</h2>
+                            <h2>Топ нарушителей (90 дней)</h2>
                             <a class="widget-link" href="/violations">Все нарушения →</a>
                         </div>
                         {% if not widgets.top_violators %}
@@ -257,7 +328,7 @@
 
                     <div class="widget">
                         <div class="widget-header">
-                            <h2>🔮 Активные сезоны датакронов</h2>
+                            <h2>Активные сезоны датакронов</h2>
                             <a class="widget-link" href="/datacrons">Все сезоны →</a>
                         </div>
                         {% if not widgets.datacron_seasons %}
@@ -289,7 +360,7 @@
 
                 <div class="widget wc-wide">
                     <div class="widget-header">
-                        <h2>⚔️ Очки территории — ТБ</h2>
+                        <h2>Очки территории — ТБ</h2>
                         <a class="widget-link" href="/tb">Подробный отчёт →</a>
                     </div>
                     {% if not widgets.tb_report or widgets.tb_report.event_totals|length < 2 %}
@@ -334,7 +405,7 @@
 
                 <div class="widget wc-wide">
                     <div class="widget-header">
-                        <h2>🛡️ Территориальные войны</h2>
+                        <h2>Территориальные войны</h2>
                         <a class="widget-link" href="/tw">Вся история →</a>
                     </div>
                     {% if widgets.tw_stats %}
@@ -387,7 +458,7 @@
 
                 <div class="widget wc-wide">
                     <div class="widget-header">
-                        <h2>🎯 Задачи на прокачку</h2>
+                        <h2>Задачи на прокачку</h2>
                         <a class="widget-link" href="/tasks">Все задачи →</a>
                     </div>
                     <div class="mini-stats">
@@ -422,7 +493,7 @@
                                     {% for r in widgets.tasks_summary.rows %}
                                         <tr>
                                             <td>{{ r.player_name }}</td>
-                                            <td>{{ r.unit_name }}</td>
+                                            <td><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ r.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ r.unit_name }}</span></td>
                                             <td>{{ r.target_label }}</td>
                                             <td class="num">{{ r.deadline }}</td>
                                             <td>

@@ -92,6 +92,7 @@ def _tasks_summary(guild_id: int, limit: int = 8):
         if status in ("ACTIVE", "FAILED"):
             open_rows.append({
                 "player_name": names_by_code.get(ally_code, ally_code),
+                "base_id": base_id,
                 "unit_name": unit_names.get(base_id) or base_id,
                 "target_label": _task_target_label(target_type, target_value),
                 "deadline": deadline,

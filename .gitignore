@@ -15,3 +15,5 @@ web/static/datacron_translations.json
 .vscode/
 .idea/
 Thumbs.db
+# Кэш портретов юнитов (web/routes/unit_images.py), качается с CDN по требованию
+cache/

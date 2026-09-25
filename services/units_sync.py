@@ -240,6 +240,7 @@ async def sync_units(comlink) -> int:
     loc_en_kv = _parse_loc(loc_en, "Loc_ENG_US.txt")
 
     units_to_db = {}
+    thumbnails = {}
     gear_recipes = {}
     for unit in units_list:
         if not _is_canonical_playable_unit(unit):
@@ -252,6 +253,8 @@ async def sync_units(comlink) -> int:
         name_en = loc_en_kv.get(name_key, name_key)
         unit_type = "ship" if unit.get("combatType") == 2 else "character"
         units_to_db[bid] = (name, unit_type, name_en)
+        if unit.get("thumbnailName"):
+            thumbnails[bid] = unit["thumbnailName"]
 
         # Рецепт деталей по тиру снаряжения (unitTier[].equipmentSet) — для
         # resource_spend.py (счётчик потраченных деталей в /ресурсы). Тир 13 у comlink —
@@ -270,6 +273,7 @@ async def sync_units(comlink) -> int:
     # Убираем из справочника то, что осталось от синков до фильтра выше (NPC/дубли по
     # редкости) — без этого upsert (INSERT OR REPLACE) их не тронет, они просто зависнут.
     database.prune_game_units(units_to_db.keys())
+    database.set_unit_thumbnails(thumbnails)
     database.set_unit_gear_recipes(gear_recipes)
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
