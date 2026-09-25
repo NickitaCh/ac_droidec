@@ -2021,3 +2021,20 @@ label.checkbox .mod-icon { vertical-align: middle; }
    (overflow) их обрезало у левого края. Отступ под кольцо. */
 .activity-event-row-portrait, .activity-event-row-card { padding-left: 4px; padding-right: 2px; }
 .table-scroll .unit-cell { padding-left: 2px; }
+/* Баннер на всех страницах: ссылка «назад», вложенные элементы на тёмном фоне */
+.page-hero-back {
+    display: inline-block;
+    margin-bottom: 0.6rem;
+    font-size: 0.85rem;
+    color: var(--hero-fg-secondary);
+    text-decoration: none;
+}
+.page-hero-back:hover { color: var(--hero-fg); text-decoration: underline; }
+.page-hero .muted { color: var(--hero-fg-muted); }
+.page-hero code { background: rgba(255, 255, 255, 0.1); color: var(--hero-fg); padding: 0.1em 0.35em; border-radius: 4px; }
+.page-hero-lead strong { color: var(--hero-fg); }
+/* Текстовые значения KPI («2 победы подряд») переносятся, а не вылезают из плитки */
+.hero-kpi-value { white-space: normal; overflow-wrap: anywhere; }
+.page-hero + .config-warning, .page-hero + p.error { margin-top: 0; }
+/* Страницы на всю ширину, но сплошной текст — не длиннее ~90 символов в строке */
+main.wide > p, main.wide > ul, main.wide > ol, main.wide.docs-page h2 + p { max-width: 62em; }

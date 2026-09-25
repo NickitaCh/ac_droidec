@@ -2,8 +2,15 @@
 {% block title %}{{ player_name }} — Нарушения — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/violations">← Все нарушения</a></p>
-    <h1>Досье: {{ player_name }}</h1>
+    <section class="page-hero page-hero-dark">
+        <a class="page-hero-back" href="/violations">← Все нарушения</a>
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Дисциплина</p>
+                <h1>Досье: {{ player_name }}</h1>
+            </div>
+        </div>
+    </section>
     {% if departed_at %}
         <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ departed_at }}.</p>
     {% endif %}

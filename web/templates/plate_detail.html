@@ -2,8 +2,15 @@
 {% block title %}{{ plate_name }} — Плейты — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/plates">← Все плейты</a></p>
-    <h1>{{ plate_name }}{% if is_modular %} <span class="badge" title="Модульный плейт">🧩 модульный</span>{% endif %}</h1>
+    <section class="page-hero">
+        <a class="page-hero-back" href="/plates">← Все плейты</a>
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Моды и статы</p>
+                <h1>{{ plate_name }}{% if is_modular %} <span class="badge" title="Модульный плейт">🧩 модульный</span>{% endif %}</h1>
+            </div>
+        </div>
+    </section>
     {% if description %}<p class="muted">{{ description }}</p>{% endif %}
     <details>
         <summary class="link-btn">{{ "изменить описание" if description else "добавить описание" }}</summary>

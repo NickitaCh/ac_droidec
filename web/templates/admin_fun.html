@@ -2,8 +2,15 @@
 {% block title %}Фан — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Шуточные фичи</h1>
-    <p class="muted">Включаются/выключаются только супер-админом. Список пока небольшой — новые приколы появляются здесь же и в /фан без правок этой страницы.</p>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Шуточные фичи</h1>
+                <p class="page-hero-lead">Включаются/выключаются только супер-админом. Список пока небольшой — новые приколы появляются здесь же и в /фан без правок этой страницы.</p>
+            </div>
+        </div>
+    </section>
 
     {% if not actions %}
         <p class="empty-state">— пока ничего нет —</p>

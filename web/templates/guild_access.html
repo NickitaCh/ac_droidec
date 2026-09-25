@@ -2,12 +2,15 @@
 {% block title %}Ручной доступ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Ручной доступ к боту</h1>
-    <p class="muted">
-        Для участников вашей гильдии, которых бот не резолвит по игровому рангу (например живут в другом
-        Discord-аккаунте, не в основном ростере) — доступ действует только в рамках вашей гильдии.
-        В Discord то же самое делает <code>/грант</code>.
-    </p>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Управление гильдией</p>
+                <h1>Ручной доступ к боту</h1>
+                <p class="page-hero-lead">Для участников вашей гильдии, которых бот не резолвит по игровому рангу (например живут в другом Discord-аккаунте, не в основном ростере) — доступ действует только в рамках вашей гильдии. В Discord то же самое делает <code>/грант</code>.</p>
+            </div>
+        </div>
+    </section>
 
     {% if error %}
         <p class="error">{{ error }}</p>

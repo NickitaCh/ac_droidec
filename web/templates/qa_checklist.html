@@ -2,8 +2,15 @@
 {% block title %}QA-чеклист — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>QA-чеклист страниц</h1>
-    <p class="muted">Отмечайте страницу, когда прошлись по ней и она выглядит/работает нормально. Отметки видны всем, кто заходит сюда — обновляются сразу.</p>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>QA-чеклист страниц</h1>
+                <p class="page-hero-lead">Отмечайте страницу, когда прошлись по ней и она выглядит/работает нормально. Отметки видны всем, кто заходит сюда — обновляются сразу.</p>
+            </div>
+        </div>
+    </section>
     <p class="muted">Проверено: <strong>{{ checked_count }} / {{ total }}</strong></p>
 
     <div class="panel" style="max-width: 24em;">

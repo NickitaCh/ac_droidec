@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Подписка — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Подписка на бота</h1>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Подписка</p>
+                <h1>Подписка на бота</h1>
+            </div>
+        </div>
+    </section>
 
     {% if error %}
         <p class="error">{{ error }}</p>

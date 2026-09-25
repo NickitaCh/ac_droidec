@@ -3,12 +3,16 @@
 {% block title %}Отчёт по омикронам — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/omicrons/priority">← Приоритет и требования</a></p>
-    <h1>Кому пора ставить омикроны</h1>
-    <p class="muted">
-        Игроки, у которых уже выполнены все требования (см. <a href="/omicrons/priority">приоритет и требования</a>)
-        для хотя бы одного омикрона из списка приоритета, но он ещё не поставлен.
-    </p>
+    <section class="page-hero page-hero-dark">
+        <a class="page-hero-back" href="/omicrons/priority">← Приоритет и требования</a>
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Омикроны</p>
+                <h1>Кому пора ставить омикроны</h1>
+                <p class="page-hero-lead">Игроки, у которых уже выполнены все требования (см. <a href="/omicrons/priority">приоритет и требования</a>) для хотя бы одного омикрона из списка приоритета, но он ещё не поставлен.</p>
+            </div>
+        </div>
+    </section>
 
     {% if not has_priority %}
         <p class="empty-state">Список приоритета омикронов пуст — <a href="/omicrons/priority">задайте порядок</a>, чтобы отчёт заработал.</p>

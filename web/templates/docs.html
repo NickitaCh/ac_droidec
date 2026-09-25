@@ -1,12 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Документация — AC Droidec{% endblock %}
-{% block main_class %}docs-page{% endblock %}
+{% block main_class %}wide docs-page{% endblock %}
 {% block content %}
-    <h1>Документация по командам</h1>
-    <p class="muted">
-        Все команды бота (<code>/</code> в Discord), сгруппированные по разделам. Новичкам — сначала
-        <a href="/start">Начало работы</a>.
-    </p>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Справка</p>
+                <h1>Документация по командам</h1>
+                <p class="page-hero-lead">Все команды бота (<code>/</code> в Discord), сгруппированные по разделам. Новичкам — сначала <a href="/start">Начало работы</a>.</p>
+            </div>
+        </div>
+    </section>
 
     <p class="docs-legend">
         {% for key, (label, css_class) in access_labels.items() %}

@@ -2,8 +2,15 @@
 {% block title %}Дни рождения — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Дни рождения</h1>
-    <p class="muted">Ежедневное поздравление и выдача роли именинника (06:00 МСК) со снятием в полночь по-прежнему делает бот автоматически — здесь только редактируется сам список дат.</p>
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Состав гильдии</p>
+                <h1>Дни рождения</h1>
+                <p class="page-hero-lead">Ежедневное поздравление и выдача роли именинника (06:00 МСК) со снятием в полночь по-прежнему делает бот автоматически — здесь только редактируется сам список дат.</p>
+            </div>
+        </div>
+    </section>
 
     {% if config_warning %}
         <p class="config-warning">{{ config_warning|safe }}</p>

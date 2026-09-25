@@ -2,8 +2,15 @@
 {% block title %}Рассылка взводов — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Рассылка взводов в личку</h1>
-    <p class="muted"><a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ round_num }}">← Назад к конструктору взводов</a></p>
+    <section class="page-hero page-hero-dark">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Территориальные битвы</p>
+                <h1>Рассылка взводов в личку</h1>
+                <p class="page-hero-lead"><a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ round_num }}">← Назад к конструктору взводов</a></p>
+            </div>
+        </div>
+    </section>
 
     {% if error %}
         <p class="error">{{ error }}</p>

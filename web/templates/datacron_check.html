@@ -2,9 +2,16 @@
 {% block title %}Проверка датакронов — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/datacrons">← Все сезоны</a></p>
-    <h1>Проверка датакронов</h1>
-    <p class="muted">Сверяет реальные датакроны игрока (или всей гильдии) с сохранёнными требованиями сезона. Данные по игроку запрашиваются у Comlink живьём — это не мгновенно.</p>
+    <section class="page-hero">
+        <a class="page-hero-back" href="/datacrons">← Все сезоны</a>
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Датакроны</p>
+                <h1>Проверка датакронов</h1>
+                <p class="page-hero-lead">Сверяет реальные датакроны игрока (или всей гильдии) с сохранёнными требованиями сезона. Данные по игроку запрашиваются у Comlink живьём — это не мгновенно.</p>
+            </div>
+        </div>
+    </section>
 
     {% if error %}
         <p class="error">{{ error }}</p>

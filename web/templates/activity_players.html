@@ -2,8 +2,15 @@
 {% block title %}Статистика по игрокам — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Активность гильдии — по игрокам</h1>
-    <p class="muted"><a href="/activity">← Назад к общей ленте</a></p>
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Прокачка гильдии</p>
+                <h1>Активность гильдии — по игрокам</h1>
+                <p class="page-hero-lead"><a href="/activity">← Назад к общей ленте</a></p>
+            </div>
+        </div>
+    </section>
 
     <form method="get" action="/activity/players" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
         <select name="period" onchange="this.form.submit()">

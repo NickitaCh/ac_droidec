@@ -2,8 +2,15 @@
 {% block title %}{{ display_name }} — Датакроны — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/datacrons">← Все сезоны</a></p>
-    <h1>{{ display_name }} <span class="muted">[{{ set_id }}]</span></h1>
+    <section class="page-hero">
+        <a class="page-hero-back" href="/datacrons">← Все сезоны</a>
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Датакроны</p>
+                <h1>{{ display_name }} <span class="muted">[{{ set_id }}]</span></h1>
+            </div>
+        </div>
+    </section>
 
     {% if error %}
         <p class="error">{{ error }}</p>
