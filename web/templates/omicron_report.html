@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_game.html" as game %}
 {% block title %}Отчёт по омикронам — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -89,7 +90,7 @@
                                 <td class="num">{{ row.missing|length }}</td>
                                 <td>
                                     {% for m in row.missing[:3] %}
-                                        <span class="badge badge-neutral">{{ m.unit_name }}{% if m.skill_name %} — {{ m.skill_name }}{% endif %}</span>
+                                        <span class="badge badge-neutral badge-unit">{% if m.base_id %}{{ game.portrait(m.base_id, "xs") }}{% endif %}{{ m.unit_name }}{% if m.skill_name %} — {{ m.skill_name }}{% endif %}</span>
                                     {% endfor %}
                                     {% if row.missing|length > 3 %}
                                         <span class="muted">и ещё {{ row.missing|length - 3 }}</span>

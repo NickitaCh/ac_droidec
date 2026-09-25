@@ -1,16 +1,10 @@
 {% extends "base.html" %}
+{% import "_tb.html" as tbui %}
+{% import "_game.html" as game %}
 {% block title %}Взводы ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Конструктор взводов ТБ</h1>
-    <div class="segmented-toggle">
-        <div class="segmented-toggle-options">
-            <a href="/tb">Отчёт</a>
-            <a href="/tb/plan">План планет</a>
-            <a href="/tb/order-plans">Планы ордера</a>
-            <strong>Взводы</strong>
-        </div>
-    </div>
+    {{ tbui.tb_hero("Конструктор взводов", "platoons") }}
     <p class="muted"><a href="/tb/platoons/filters">Фильтры автозаполнения →</a></p>
     <p class="muted">
         Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
@@ -156,7 +150,7 @@
                         {% for item in pl.entries %}
                             <li class="platoon-slot{% if item.carried_over %} platoon-slot-carried{% endif %}">
                                 <a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ selected_round_num }}#{{ item.anchor }}">
-                                    <strong>{{ item.planet }}</strong> — операция {{ item.operation }} — {{ item.unit }}
+                                    <strong>{{ item.planet }}</strong> — операция {{ item.operation }} — <span class="unit-cell">{% if item.base_id %}{{ game.portrait(item.base_id, "xs") }}{% endif %}{{ item.unit }}</span>
                                 </a>
                                 {% if item.carried_over %}
                                     <span class="badge badge-neutral" title="Назначено на этапе {{ item.assigned_round_num }}">🔒 этап {{ item.assigned_round_num }}</span>
@@ -258,7 +252,7 @@
                                                         class="platoon-slot{% if slot.carried_over %} platoon-slot-carried{% elif not slot.assigned_ally_code %} platoon-slot-empty{% endif %}">
                                                         <details>
                                                             <summary>
-                                                                <span class="platoon-slot-unit">{{ slot.unit }}</span>
+                                                                <span class="platoon-slot-unit">{% if slot.base_id %}{{ game.portrait(slot.base_id, "xs") }}{% endif %}{{ slot.unit }}</span>
                                                                 {% if slot.carried_over %}
                                                                     <span class="badge badge-neutral" title="Назначено на этапе {{ slot.assigned_round_num }} — уже учтено, менять здесь не нужно">🔒 {{ slot.assigned_name }}</span>
                                                                 {% elif slot.assigned_name %}

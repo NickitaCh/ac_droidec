@@ -2,38 +2,58 @@
 {% block title %}Активность гильдии — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Активность гильдии</h1>
-    <p class="muted"><a href="/activity/players">Статистика по игрокам →</a> · <a href="/activity/resources">Потрачено ресурсов →</a></p>
-
-    <div class="panel">
-        <div class="sync-status">
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
             <div>
-                {% if sync_status.last_sync_text %}
-                    Обновлено: <strong>{{ sync_status.last_sync_text }}</strong>
-                {% else %}
-                    Кэш ростера ещё не наполнялся
-                {% endif %}
-                {% if sync_status.next_auto_text %}
-                    &nbsp;·&nbsp;автообновление {{ sync_status.next_auto_text }}
-                {% endif %}
+                <p class="page-hero-eyebrow">Прокачка гильдии</p>
+                <h1>Активность</h1>
+                <p class="page-hero-links"><a href="/activity/players">Статистика по игрокам →</a> · <a href="/activity/resources">Потрачено ресурсов →</a></p>
             </div>
-            <form method="post" action="/activity/sync">
-                <input type="hidden" name="player" value="{{ player_filter or '' }}">
-                <input type="hidden" name="action_type" value="{{ action_type_filter or '' }}">
-                <input type="hidden" name="period" value="{{ period }}">
-                <button type="submit">🔄 Обновить сейчас</button>
-            </form>
+            <div class="page-hero-sync">
+                <span>
+                    {% if sync_status.last_sync_text %}
+                        Обновлено {{ sync_status.last_sync_text }}
+                    {% else %}
+                        Кэш ростера ещё не наполнялся
+                    {% endif %}
+                    {% if sync_status.next_auto_text %}<br><span class="page-hero-sync-next">автообновление {{ sync_status.next_auto_text }}</span>{% endif %}
+                </span>
+                <form method="post" action="/activity/sync">
+                    <input type="hidden" name="player" value="{{ player_filter or '' }}">
+                    <input type="hidden" name="action_type" value="{{ action_type_filter or '' }}">
+                    <input type="hidden" name="period" value="{{ period }}">
+                    <button type="submit">Обновить сейчас</button>
+                </form>
+            </div>
         </div>
-        {% if synced_now is not none %}
-            <p class="empty-state" style="margin-top: 0.75em; padding: 0;">
-                {% if synced_now|int > 0 %}
-                    Готово — добавлено {{ synced_now }} новых событий.
-                {% else %}
-                    Готово — новых изменений не найдено.
-                {% endif %}
-            </p>
+        {% if players %}
+            <div class="hero-kpis">
+                <div class="hero-kpi">
+                    <span class="hero-kpi-value">{{ total_count }}</span>
+                    <span class="hero-kpi-label">{{ "событий по фильтру" if (player_filter or action_type_filter or period) else "событий всего" }}</span>
+                </div>
+                <div class="hero-kpi">
+                    <span class="hero-kpi-value">{{ players|length }}</span>
+                    <span class="hero-kpi-label">игроков</span>
+                </div>
+                {% for label, count in breakdown_rows[:3] %}
+                    <div class="hero-kpi">
+                        <span class="hero-kpi-value">{{ count }}</span>
+                        <span class="hero-kpi-label">{{ label|lower }}</span>
+                    </div>
+                {% endfor %}
+            </div>
         {% endif %}
-    </div>
+    </section>
+    {% if synced_now is not none %}
+        <p class="dash-flash">
+            {% if synced_now|int > 0 %}
+                Готово — добавлено {{ synced_now }} новых событий.
+            {% else %}
+                Готово — новых изменений не найдено.
+            {% endif %}
+        </p>
+    {% endif %}
 
     {% if departed_count or show_departed %}
         <div class="segmented-toggle">
@@ -48,17 +68,6 @@
     {% elif not players %}
         <p class="empty-state">Данных пока нет — активность считается по разнице между снимками ростера (раз в {{ sync_status.sync_hours_text }}), так что первое событие появится не раньше второго цикла синхронизации после регистрации игроков. Либо нажми «Обновить сейчас» выше.</p>
     {% else %}
-        <div class="stats-grid">
-            <div class="stat-tile">
-                <div class="stat-value">{{ total_count }}</div>
-                <div class="stat-label">{{ "Событий по фильтру" if (player_filter or action_type_filter or period) else "Событий всего" }}</div>
-            </div>
-            <div class="stat-tile">
-                <div class="stat-value">{{ players|length }}</div>
-                <div class="stat-label">Игроков</div>
-            </div>
-        </div>
-
         {% if breakdown_rows %}
             <div class="panel">
                 <div class="panel-title"><span>По типу изменения</span></div>
@@ -136,17 +145,22 @@
                             <div class="activity-player-card">
                                 <div class="activity-player-name">{{ player.player_name }}</div>
                                 {% for row in player.rows %}
-                                    <div class="activity-event-row" data-search="{{ (player.player_name ~ ' ' ~ row.unit_name)|lower }}">
-                                        <span class="activity-unit-name">{{ row.unit_name }}</span>
-                                        <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
-                                        <span class="activity-change">
-                                            {% if row.old_value %}
-                                                <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
-                                            {% elif row.skill_url %}
-                                                <strong><a href="{{ row.skill_url }}" target="_blank" rel="noopener">{{ row.new_value }}</a></strong>
-                                            {% else %}
-                                                <strong>{{ row.new_value }}</strong>
-                                            {% endif %}
+                                    <div class="activity-event-row activity-event-row-card" data-search="{{ (player.player_name ~ ' ' ~ row.unit_name)|lower }}">
+                                        <span class="unit-portrait unit-portrait-sm unit-portrait-{{ row.action_class }}"><img src="/unit-img/{{ row.base_id }}" alt="" loading="lazy" width="128" height="128"></span>
+                                        <span class="activity-event-main">
+                                            <span class="activity-unit-name">{{ row.unit_name }}</span>
+                                            <span class="activity-event-meta">
+                                                <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
+                                                <span class="activity-change">
+                                                    {% if row.old_value %}
+                                                        <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
+                                                    {% elif row.skill_url %}
+                                                        <strong><a href="{{ row.skill_url }}" target="_blank" rel="noopener">{{ row.new_value }}</a></strong>
+                                                    {% else %}
+                                                        <strong>{{ row.new_value }}</strong>
+                                                    {% endif %}
+                                                </span>
+                                            </span>
                                         </span>
                                     </div>
                                 {% endfor %}

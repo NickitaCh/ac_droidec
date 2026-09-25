@@ -143,6 +143,7 @@ class PlayerCardTask:
     status_badge: str
     progress: str
     deadline: str
+    base_id: str = ""
 
 
 @dataclass
@@ -218,6 +219,7 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
             status_badge=TASK_STATUS_BADGE.get(status, "badge-neutral"),
             progress=_task_progress_label(initial_value, current_value),
             deadline=deadline,
+            base_id=base_id,
         ))
 
     violations_overview = get_violations_overview(guild_id, include_zero=True, include_departed=True)

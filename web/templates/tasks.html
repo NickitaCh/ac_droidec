@@ -2,8 +2,20 @@
 {% block title %}Задачи — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Задачи на прокачку</h1>
-    <p class="muted">Статус задачи (ACTIVE → COMPLETED/FAILED) обновляется автоматически ботом раз в час по данным Comlink — веб-страница создаёт, редактирует и удаляет задачи, дедлайны и уведомления сама не проверяет (см. /настройки задачи_канал в Discord и время рассылки на /settings).</p>
+    <section class="page-hero page-hero-dark">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Прокачка гильдии</p>
+                <h1>Задачи</h1>
+                <p class="page-hero-lead">Статус (в работе → выполнено/провалено) бот проверяет раз в час по данным игры. Уведомления о дедлайнах — в канал из /настройки задачи_канал, время рассылки — на <a href="/settings">Настройках</a>.</p>
+            </div>
+        </div>
+        <div class="hero-kpis">
+            <a class="hero-kpi" href="/tasks?status=ACTIVE&view={{ view }}"><span class="hero-kpi-value">{{ counts.ACTIVE }}</span><span class="hero-kpi-label">в работе</span></a>
+            <a class="hero-kpi{% if counts.FAILED %} hero-kpi-danger{% endif %}" href="/tasks?status=FAILED&view={{ view }}"><span class="hero-kpi-value">{{ counts.FAILED }}</span><span class="hero-kpi-label">провалено</span></a>
+            <a class="hero-kpi hero-kpi-good" href="/tasks?status=COMPLETED&view={{ view }}"><span class="hero-kpi-value">{{ counts.COMPLETED }}</span><span class="hero-kpi-label">выполнено</span></a>
+        </div>
+    </section>
 
     {% if config_warning %}
         <p class="config-warning">{{ config_warning|safe }}</p>
@@ -21,12 +33,6 @@
     {% if synced %}
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
-
-    <div class="stats-grid">
-        <div class="stat-tile"><div class="stat-value">{{ counts.ACTIVE }}</div><div class="stat-label">В работе</div></div>
-        <div class="stat-tile status-danger"><div class="stat-value">{{ counts.FAILED }}</div><div class="stat-label">Провалено</div></div>
-        <div class="stat-tile"><div class="stat-value">{{ counts.COMPLETED }}</div><div class="stat-label">Выполнено</div></div>
-    </div>
 
     <div class="panel" style="max-width: 32em;">
         <div class="panel-title"><span>Новая задача — один игрок</span></div>
@@ -183,7 +189,7 @@
                                     <td>{{ p.tasks|selectattr("status", "equalto", "ACTIVE")|list|length }} / {{ p.tasks|selectattr("status", "equalto", "FAILED")|list|length }}</td>
                                     <td>
                                         {% for t in p.tasks %}
-                                            <span class="badge {{ t.status_badge }}">{{ t.unit_name }} — {{ t.target_label }}</span>
+                                            <span class="badge {{ t.status_badge }} badge-unit">{% if t.base_id %}<span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ t.base_id }}" alt="" loading="lazy"></span>{% endif %}{{ t.unit_name }} — {{ t.target_label }}</span>
                                         {% endfor %}
                                     </td>
                                 </tr>
@@ -214,7 +220,7 @@
                             {% for t in tasks %}
                                 <tr data-search="{{ t.player_name|lower }}">
                                     <td>{{ t.player_name }}</td>
-                                    <td>{{ t.unit_name }}</td>
+                                    <td><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ t.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ t.unit_name }}</span></td>
                                     <td>{{ t.target_label }}</td>
                                     <td>{{ t.progress }}</td>
                                     <td>{{ t.deadline }}</td>

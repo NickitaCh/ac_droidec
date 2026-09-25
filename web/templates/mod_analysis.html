@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_game.html" as game %}
 {% block title %}Анализ модинга — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 
@@ -90,7 +91,7 @@
                             {% for slot in result.top_primaries_by_slot %}
                                 {% for row in slot.rows %}
                                     <tr>
-                                        {% if loop.first %}<td rowspan="{{ slot.rows|length }}">{{ slot.slot_label }}</td>{% endif %}
+                                        {% if loop.first %}<td rowspan="{{ slot.rows|length }}"><span class="mod-cell">{{ game.mod_icon(slot.slot_key, none, 6) }}{{ slot.slot_label }}</span></td>{% endif %}
                                         <td>{{ row.name }}</td><td>{{ row.count }}</td><td>{{ row.freq_pct }}</td>
                                     </tr>
                                 {% endfor %}

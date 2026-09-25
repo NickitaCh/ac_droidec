@@ -1,0 +1,17 @@
+{# Шапка раздела ТБ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
+{% macro tb_hero(title, active) -%}
+<section class="page-hero page-hero-dark">
+    <div class="page-hero-top">
+        <div>
+            <p class="page-hero-eyebrow">Территориальные битвы</p>
+            <h1>{{ title }}</h1>
+        </div>
+    </div>
+    <nav class="hero-tabs">
+        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/plan", "plan", "План планет"), ("/tb/order-plans", "orders", "Планы ордера"), ("/tb/platoons", "platoons", "Взводы")] %}
+            {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
+        {% endfor %}
+    </nav>
+    {% if caller %}{{ caller() }}{% endif %}
+</section>
+{%- endmacro %}

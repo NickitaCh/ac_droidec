@@ -92,7 +92,7 @@ def _decode_stat(stat_block) -> dict | None:
 
 
 def decode_mod(mod: dict) -> dict | None:
-    """Сырой equippedStatMod -> {set_id, rarity, level, slot_key, slot_label,
+    """Сырой equippedStatMod -> {set_id, rarity, level, tier (1-5 = E..A), slot_key, slot_label,
     primary: decoded_stat|None, secondaries: [decoded_stat, ...]}. None — мод без
     definitionId/нечитаемый (повреждённые данные, не должно встречаться, но не роняем поиск)."""
     definition_id = mod.get("definitionId")
@@ -124,7 +124,7 @@ def decode_mod(mod: dict) -> dict | None:
             )
 
     return {
-        "set_id": set_id, "rarity": rarity, "level": mod.get("level"),
+        "set_id": set_id, "rarity": rarity, "level": mod.get("level"), "tier": mod.get("tier"),
         "slot_key": slot_key, "slot_label": SLOT_KEY_TO_LABEL.get(slot_key, f"#{slot_id}"),
         "primary": primary, "secondaries": secondaries,
     }

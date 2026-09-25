@@ -568,6 +568,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
                 slots.append({
                     "index": slot_index,
                     "unit": unit_name,
+                    "base_id": base_id,
                     "owners": slot_owners,
                     "unit_excluded": unit_excluded,
                     "assigned_name": player_name_by_ally.get(assignment["ally_code"], assignment["ally_code"]) if assignment else None,
@@ -640,6 +641,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
                     "planet": pblock["name"],
                     "operation": op["number"],
                     "unit": slot["unit"],
+                    "base_id": slot["base_id"],
                     "carried_over": slot["carried_over"],
                     "assigned_round_num": slot["assigned_round_num"],
                     "anchor": slot["anchor"],

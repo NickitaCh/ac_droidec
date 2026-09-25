@@ -1,32 +1,40 @@
 {% extends "base.html" %}
+{% import "_game.html" as game %}
 {% block title %}{{ card.player_name }} — Карточка игрока — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <p><a href="/">← Состав гильдии</a></p>
-    <h1>
-        {{ card.player_name }}
-        {% if card.departed_at %}
-            <span class="badge badge-neutral">выбыл</span>
-        {% elif card.rank_label == "ГМ" %}
-            <span class="badge badge-warn">{{ card.rank_label }}</span>
-        {% elif card.rank_label == "Офицер" %}
-            <span class="badge badge-ok">{{ card.rank_label }}</span>
-        {% else %}
-            <span class="badge badge-neutral">{{ card.rank_label }}</span>
-        {% endif %}
-    </h1>
-    <p class="muted">
-        Код союзника: <code>{{ card.ally_code }}</code>
-        · <a href="{{ card.swgoh_gg_url }}" target="_blank" rel="noopener">↗ swgoh.gg</a>
-        {% if card.discord_id %}
-            · Discord: {{ card.discord_username or card.discord_id }}
-        {% else %}
-            · Discord не привязан
-        {% endif %}
-        {% if card.birthday_label %}
-            · 🎂 {{ card.birthday_label }}
-        {% endif %}
-    </p>
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Карточка игрока</p>
+                <h1>
+                    {{ card.player_name }}
+                    {% if card.departed_at %}
+                        <span class="badge badge-neutral">выбыл</span>
+                    {% elif card.rank_label == "ГМ" %}
+                        <span class="badge badge-warn">{{ card.rank_label }}</span>
+                    {% elif card.rank_label == "Офицер" %}
+                        <span class="badge badge-ok">{{ card.rank_label }}</span>
+                    {% else %}
+                        <span class="badge badge-neutral">{{ card.rank_label }}</span>
+                    {% endif %}
+                </h1>
+                <p class="page-hero-links">
+                    Код союзника: <strong>{{ card.ally_code }}</strong>
+                    · <a href="{{ card.swgoh_gg_url }}" target="_blank" rel="noopener">↗ swgoh.gg</a>
+                    {% if card.discord_id %}
+                        · Discord: {{ card.discord_username or card.discord_id }}
+                    {% else %}
+                        · Discord не привязан
+                    {% endif %}
+                    {% if card.birthday_label %}
+                        · 🎂 {{ card.birthday_label }}
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+    </section>
     {% if card.departed_at %}
         <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ card.departed_at }}. Данные больше не обновляются.</p>
     {% endif %}
@@ -58,7 +66,7 @@
                         <tbody>
                             {% for t in card.current_tasks %}
                                 <tr>
-                                    <td>{{ t.unit_name }}</td>
+                                    <td>{% if t.base_id %}{{ game.unit(t.base_id, t.unit_name) }}{% else %}{{ t.unit_name }}{% endif %}</td>
                                     <td>{{ t.target_label }}</td>
                                     <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
                                     <td>{{ t.progress }}</td>
@@ -159,9 +167,9 @@
             {% elif not omicron_missing %}
                 <p class="widget-empty">✅ Нет готовых, но ещё не поставленных омикронов.</p>
             {% else %}
-                <ul style="margin: 0; padding-left: 1.2em;">
+                <ul class="unit-list">
                     {% for m in omicron_missing %}
-                        <li style="margin-bottom: 0.3em;">{{ m.unit_name }} — {{ m.skill_name }}</li>
+                        <li class="unit-list-item">{{ game.portrait(m.base_id, "xs") }}<span>{{ m.unit_name }} — {{ m.skill_name }}</span></li>
                     {% endfor %}
                 </ul>
             {% endif %}

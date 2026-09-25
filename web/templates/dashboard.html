@@ -124,46 +124,46 @@
     {% else %}
         {% set tb_last = widgets.tb_report.chart_bars[-1] if widgets.tb_report and widgets.tb_report.chart_bars else none %}
         {% set tw_period = widgets.tw_stats.periods[0] if widgets.tw_stats and widgets.tw_stats.periods else none %}
-        <section class="dash-hero">
-            <div class="dash-hero-top">
+        <section class="page-hero">
+            <div class="page-hero-top">
                 <div>
-                    <p class="dash-hero-eyebrow">Гильдия</p>
+                    <p class="page-hero-eyebrow">Гильдия</p>
                     <h1>{{ guild_cfg.name }}</h1>
                 </div>
-                <div class="dash-hero-sync">
+                <div class="page-hero-sync">
                     <span>
                         {% if widgets.sync_status.last_sync_text %}
                             Обновлено {{ widgets.sync_status.last_sync_text }}
                         {% else %}
                             Кэш активности ещё не наполнялся
                         {% endif %}
-                        {% if widgets.sync_status.next_auto_text %}<br><span class="dash-hero-sync-next">автообновление {{ widgets.sync_status.next_auto_text }}</span>{% endif %}
+                        {% if widgets.sync_status.next_auto_text %}<br><span class="page-hero-sync-next">автообновление {{ widgets.sync_status.next_auto_text }}</span>{% endif %}
                     </span>
                     <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Синкаю…';">
                         <button type="submit">Обновить сейчас</button>
                     </form>
                 </div>
             </div>
-            <div class="dash-kpis">
-                <div class="dash-kpi">
-                    <span class="dash-kpi-value">{{ widgets.roster_rows|length }}</span>
-                    <span class="dash-kpi-label">игроков в составе</span>
+            <div class="hero-kpis">
+                <div class="hero-kpi">
+                    <span class="hero-kpi-value">{{ widgets.roster_rows|length }}</span>
+                    <span class="hero-kpi-label">игроков в составе</span>
                 </div>
-                <div class="dash-kpi">
-                    <span class="dash-kpi-value">{{ widgets.registered_count }}<span class="dash-kpi-of">/{{ widgets.roster_rows|length }}</span></span>
-                    <span class="dash-kpi-label">привязали Discord</span>
+                <div class="hero-kpi">
+                    <span class="hero-kpi-value">{{ widgets.registered_count }}<span class="hero-kpi-of">/{{ widgets.roster_rows|length }}</span></span>
+                    <span class="hero-kpi-label">привязали Discord</span>
                 </div>
-                <a class="dash-kpi" href="/tb">
-                    <span class="dash-kpi-value">{{ tb_last[3] if tb_last else "—" }}{% if tb_last and tb_last[5] %} <span class="dash-kpi-delta {{ tb_last[6] }}">{{ tb_last[5] }}</span>{% endif %}</span>
-                    <span class="dash-kpi-label">очков в последней ТБ{% if tb_last and tb_last[7] is not none %} · {{ tb_last[7] }} ⭐{% endif %}</span>
+                <a class="hero-kpi" href="/tb">
+                    <span class="hero-kpi-value">{{ tb_last[3] if tb_last else "—" }}{% if tb_last and tb_last[5] %} <span class="hero-kpi-delta {{ tb_last[6] }}">{{ tb_last[5] }}</span>{% endif %}</span>
+                    <span class="hero-kpi-label">очков в последней ТБ{% if tb_last and tb_last[7] is not none %} · {{ tb_last[7] }} ⭐{% endif %}</span>
                 </a>
-                <a class="dash-kpi" href="/tw">
-                    <span class="dash-kpi-value">{% if tw_period and tw_period.winrate is not none %}{{ tw_period.winrate }}%{% else %}—{% endif %}</span>
-                    <span class="dash-kpi-label">винрейт ВГ{% if tw_period %} · {{ tw_period.label }}{% endif %}</span>
+                <a class="hero-kpi" href="/tw">
+                    <span class="hero-kpi-value">{% if tw_period and tw_period.winrate is not none %}{{ tw_period.winrate }}%{% else %}—{% endif %}</span>
+                    <span class="hero-kpi-label">винрейт ВГ{% if tw_period %} · {{ tw_period.label }}{% endif %}</span>
                 </a>
-                <a class="dash-kpi" href="/tasks">
-                    <span class="dash-kpi-value">{{ widgets.tasks_summary.counts.ACTIVE }}{% if widgets.tasks_summary.counts.FAILED %} <span class="dash-kpi-delta down">{{ widgets.tasks_summary.counts.FAILED }} провалено</span>{% endif %}</span>
-                    <span class="dash-kpi-label">задач в работе</span>
+                <a class="hero-kpi" href="/tasks">
+                    <span class="hero-kpi-value">{{ widgets.tasks_summary.counts.ACTIVE }}{% if widgets.tasks_summary.counts.FAILED %} <span class="hero-kpi-delta down">{{ widgets.tasks_summary.counts.FAILED }} провалено</span>{% endif %}</span>
+                    <span class="hero-kpi-label">задач в работе</span>
                 </a>
             </div>
         </section>

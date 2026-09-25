@@ -2,39 +2,32 @@
 {% block title %}ВГ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Территориальные войны</h1>
-    <p class="muted">Только гильдийский уровень — Comlink не отдаёт разбивку по игрокам для ВГ (в отличие от ТБ).</p>
+    <section class="page-hero page-hero-dark">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Территориальные войны</p>
+                <h1>История ВГ</h1>
+                <p class="page-hero-lead">Только гильдийский уровень — Comlink не отдаёт разбивку по игрокам для ВГ (в отличие от ТБ).</p>
+            </div>
+        </div>
+        {% if rows %}
+        <div class="hero-kpis">
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ rows|length }}</span><span class="hero-kpi-label">сохранено ВГ</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ wins }}<span class="hero-kpi-of">/{{ rows|length }}</span></span><span class="hero-kpi-label">побед из показанных</span></div>
+            {% if tw_stats %}
+                {% for period in tw_stats.periods %}
+                    <div class="hero-kpi"><span class="hero-kpi-value">{% if period.winrate is not none %}{{ period.winrate }}%{% else %}—{% endif %}</span><span class="hero-kpi-label">винрейт: {{ period.label }} ({{ period.wins }}/{{ period.total }})</span></div>
+                {% endfor %}
+                <div class="hero-kpi{% if tw_stats.streak_class == 'ok' %} hero-kpi-good{% elif tw_stats.streak_class == 'danger' %} hero-kpi-danger{% endif %}"><span class="hero-kpi-value">{{ tw_stats.streak_label }}</span><span class="hero-kpi-label">текущая серия</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value">{% if tw_stats.avg_margin is not none %}{{ "{:+,}".format(tw_stats.avg_margin).replace(",", " ") }}{% else %}—{% endif %}</span><span class="hero-kpi-label">средняя разница в очках</span></div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
 
     {% if not rows %}
         <p class="empty-state">История ВГ пока пуста — бот сохраняет её из данных Comlink каждые 5 минут, первая запись появится после ближайшего опроса.</p>
     {% else %}
-        <div class="stats-grid">
-            <div class="stat-tile">
-                <div class="stat-value">{{ rows|length }}</div>
-                <div class="stat-label">Сохранено ВГ</div>
-            </div>
-            <div class="stat-tile">
-                <div class="stat-value">{{ wins }} / {{ rows|length }}</div>
-                <div class="stat-label">Побед (из показанных)</div>
-            </div>
-            {% if tw_stats %}
-                {% for period in tw_stats.periods %}
-                    <div class="stat-tile">
-                        <div class="stat-value">{% if period.winrate is not none %}{{ period.winrate }}%{% else %}—{% endif %}</div>
-                        <div class="stat-label">Винрейт: {{ period.label }} ({{ period.wins }}/{{ period.total }})</div>
-                    </div>
-                {% endfor %}
-                <div class="stat-tile status-{{ tw_stats.streak_class }}">
-                    <div class="stat-value">{{ tw_stats.streak_label }}</div>
-                    <div class="stat-label">Текущая серия</div>
-                </div>
-                <div class="stat-tile">
-                    <div class="stat-value">{% if tw_stats.avg_margin is not none %}{{ "{:+,}".format(tw_stats.avg_margin).replace(",", " ") }}{% else %}—{% endif %}</div>
-                    <div class="stat-label">Средняя разница в очках</div>
-                </div>
-            {% endif %}
-        </div>
-
         <div class="panel">
             <div class="table-scroll">
                 <table class="data">

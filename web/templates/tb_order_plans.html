@@ -1,15 +1,8 @@
 {% extends "base.html" %}
+{% import "_tb.html" as tbui %}
 {% block title %}Планы ордера ТБ — AC Droidec{% endblock %}
 {% block content %}
-    <h1>Планы ордера ТБ</h1>
-    <div class="segmented-toggle">
-        <div class="segmented-toggle-options">
-            <a href="/tb">Отчёт</a>
-            <a href="/tb/plan">План планет</a>
-            <strong>Планы ордера</strong>
-            <a href="/tb/platoons">Взводы</a>
-        </div>
-    </div>
+    {{ tbui.tb_hero("Планы ордера", "orders") }}
     <p class="muted">
         Именованные ветки с готовым ордером на 6 этапов. Активный план — тот, из которого
         бот ежедневно постит нужный этап в канал плана ТБ (см. <a href="/settings">настройки</a>,

@@ -139,7 +139,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 items.forEach((item, i) => {
                     const el = document.createElement("div");
                     el.className = "unit-search-result" + (i === activeIndex ? " active" : "");
-                    el.textContent = item[labelField];
+                    // Юниты (значение — base_id) — с портретом из /unit-img.
+                    if (valueField === "base_id" && item.base_id) {
+                        const pic = document.createElement("span");
+                        pic.className = "unit-portrait unit-portrait-xs";
+                        const img = document.createElement("img");
+                        img.src = `/unit-img/${encodeURIComponent(item.base_id)}`;
+                        img.alt = "";
+                        img.loading = "lazy";
+                        pic.appendChild(img);
+                        el.appendChild(pic);
+                        el.classList.add("unit-search-result-unit");
+                    }
+                    el.appendChild(document.createTextNode(item[labelField]));
                     el.addEventListener("mousedown", (e) => { e.preventDefault(); select(item); });
                     results.appendChild(el);
                 });

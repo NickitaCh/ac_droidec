@@ -1,39 +1,23 @@
 {% extends "base.html" %}
+{% import "_tb.html" as tbui %}
 {% block title %}ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <h1>Территориальные битвы</h1>
-    <div class="segmented-toggle">
-        <div class="segmented-toggle-options">
-            <strong>Отчёт</strong>
-            <a href="/tb/plan">План планет</a>
-            <a href="/tb/order-plans">Планы ордера</a>
-            <a href="/tb/platoons">Взводы</a>
-        </div>
-    </div>
 
     {% if not report %}
+        {{ tbui.tb_hero("Отчёт по ТБ", "report") }}
         <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
     {% else %}
         {% set latest_event = report.events[-1] %}
-        <div class="stats-grid">
-            <div class="stat-tile">
-                <div class="stat-value">{{ latest_event[1][:10] }}</div>
-                <div class="stat-label">Дата последней ТБ</div>
+        {% set regressed = report.history|selectattr("regressed")|list|length %}
+        {% call tbui.tb_hero("Отчёт по ТБ", "report") %}
+            <div class="hero-kpis">
+                <div class="hero-kpi"><span class="hero-kpi-value">{{ latest_event[1][:10] }}</span><span class="hero-kpi-label">последняя ТБ</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value">{{ report.latest_participant_count }}</span><span class="hero-kpi-label">участников</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value" title="{{ report.latest_points_total }}">{% set pts = report.latest_points_total %}{% if pts is number and pts >= 1000000000 %}{{ "%.2f"|format(pts / 1000000000) }}B{% elif pts is number and pts >= 1000000 %}{{ "%.1f"|format(pts / 1000000) }}M{% else %}{{ pts }}{% endif %}</span><span class="hero-kpi-label">очков территории всего</span></div>
+                <div class="hero-kpi{% if regressed %} hero-kpi-danger{% endif %}"><span class="hero-kpi-value">{{ regressed }}</span><span class="hero-kpi-label">🚨 просадка vs среднего</span></div>
             </div>
-            <div class="stat-tile">
-                <div class="stat-value">{{ report.latest_participant_count }}</div>
-                <div class="stat-label">Участников</div>
-            </div>
-            <div class="stat-tile">
-                <div class="stat-value">{{ report.latest_points_total }}</div>
-                <div class="stat-label">Очков территории всего</div>
-            </div>
-            <div class="stat-tile {% if report.history|selectattr('regressed')|list|length > 0 %}status-danger{% endif %}">
-                <div class="stat-value">{{ report.history|selectattr("regressed")|list|length }}</div>
-                <div class="stat-label">🚨 просадка vs среднего</div>
-            </div>
-        </div>
+        {% endcall %}
 
         {% if report.event_totals|length > 1 %}
             <div class="panel">

@@ -138,7 +138,12 @@ def _mod_row(m: dict, char_names: dict) -> dict:
     ) or "—"
     set_name = stat_engine.MOD_SET_IDS.get(str(decoded["set_id"]), f"#{decoded['set_id']}")
     return {
+        "base_id": m["base_id"],
         "char_name": char_names.get(m["base_id"], m["base_id"]),
+        "slot_key": decoded["slot_key"],
+        "set_id": decoded["set_id"],
+        "rarity": decoded["rarity"],
+        "tier": decoded.get("tier"),
         "slot_label": decoded["slot_label"],
         "set_name": set_name,
         "primary": primary_txt,

@@ -472,7 +472,7 @@ def _aggregate_report(base_id: str, target_relic: int, relevant: list, total_ope
             for sid, cnt in sorted(bucket.items(), key=lambda kv: kv[1], reverse=True)[:3]
         ]
         if rows:
-            top_primaries_by_slot.append({"slot_label": slot_label, "rows": rows})
+            top_primaries_by_slot.append({"slot_key": slot_key, "slot_label": slot_label, "rows": rows})
 
     # --- Статистика по дельте на характеристику ---
     stat_rows = []

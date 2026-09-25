@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_game.html" as game %}
 {% block title %}Поиск модов — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 
@@ -22,7 +23,7 @@
                 <span>Сет — не отмечено ни одного = любой</span>
                 <div class="checkbox-grid">
                     {% for set_id, name in set_choices %}
-                        <label class="checkbox"><input type="checkbox" name="set_id" value="{{ set_id }}" {% if set_id in selected_set_ids %}checked{% endif %}> {{ name }}</label>
+                        <label class="checkbox"><input type="checkbox" name="set_id" value="{{ set_id }}" {% if set_id in selected_set_ids %}checked{% endif %}> {{ game.set_icon(set_id) }} {{ name }}</label>
                     {% endfor %}
                 </div>
             </div>
@@ -31,7 +32,7 @@
                 <span>Слот — не отмечено ни одного = любой</span>
                 <div class="checkbox-grid">
                     {% for key, label in slot_choices %}
-                        <label class="checkbox"><input type="checkbox" name="slot_key" value="{{ key }}" {% if key in selected_slot_keys %}checked{% endif %}> {{ label }}</label>
+                        <label class="checkbox"><input type="checkbox" name="slot_key" value="{{ key }}" {% if key in selected_slot_keys %}checked{% endif %}> {{ game.mod_icon(key, none, 6, size="1.6em") }} {{ label }}</label>
                     {% endfor %}
                 </div>
             </div>
@@ -123,9 +124,9 @@
                         <tbody>
                             {% for row in list_result.rows %}
                                 <tr>
-                                    <td>{{ row.char_name }}</td>
-                                    <td>{{ row.slot_label }}</td>
-                                    <td>{{ row.set_name }}</td>
+                                    <td>{{ game.unit(row.base_id, row.char_name) }}</td>
+                                    <td><span class="mod-cell">{{ game.mod_icon(row.slot_key, row.set_id, row.rarity, row.tier) }}{{ row.slot_label }}</span></td>
+                                    <td>{{ game.set_icon(row.set_id) }} {{ row.set_name }}</td>
                                     <td>{{ row.primary }}</td>
                                     <td>{{ row.secondaries }}</td>
                                 </tr>
@@ -165,9 +166,9 @@
                             <tbody>
                                 {% for row in p.rows %}
                                     <tr>
-                                        <td>{{ row.char_name }}</td>
-                                        <td>{{ row.slot_label }}</td>
-                                        <td>{{ row.set_name }}</td>
+                                        <td>{{ game.unit(row.base_id, row.char_name) }}</td>
+                                        <td><span class="mod-cell">{{ game.mod_icon(row.slot_key, row.set_id, row.rarity, row.tier) }}{{ row.slot_label }}</span></td>
+                                        <td>{{ game.set_icon(row.set_id) }} {{ row.set_name }}</td>
                                         <td>{{ row.primary }}</td>
                                         <td>{{ row.secondaries }}</td>
                                     </tr>

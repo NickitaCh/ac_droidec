@@ -1,0 +1,22 @@
+{# Игровая графика — общие макросы. Подключение: {% import "_game.html" as game %} #}
+
+{# Портрет юнита (/unit-img/<base_id>). size: "" | "sm" | "xs"; ring: light/dark/neutral или action_class активности. #}
+{% macro portrait(base_id, size="", ring="") -%}
+<span class="unit-portrait{% if size %} unit-portrait-{{ size }}{% endif %}{% if ring %} unit-portrait-{{ ring }}{% endif %}"><img src="/unit-img/{{ base_id }}" alt="" loading="lazy" width="128" height="128"></span>
+{%- endmacro %}
+
+{# Портрет + имя в одну строку (ячейки таблиц). #}
+{% macro unit(base_id, name, size="xs") -%}
+<span class="unit-cell">{{ portrait(base_id, size) }}{{ name }}</span>
+{%- endmacro %}
+
+{# Иконка мода: форма слота + эмблема сета. set_id 1-8 (Здоровье..Стойкость), rarity 6 — золотая
+   рамка, tier 1-5 (E..A) — цвет эмблемы, как в игре. #}
+{% macro mod_icon(slot_key, set_id, rarity=5, tier=5, size="") -%}
+{% if slot_key %}<span class="mod-icon mod-shape-{{ slot_key }}{% if rarity and rarity|int >= 6 %} mod-icon-gold{% endif %} mod-tier-{{ tier or 5 }}{% if not set_id %} mod-icon-noset{% endif %}"{% if set_id or size %} style="{% if set_id %}--set: url(/static/img/game/sets/set-{{ set_id }}.webp);{% endif %}{% if size %} --size: {{ size }}{% endif %}"{% endif %}></span>{% endif %}
+{%- endmacro %}
+
+{# Эмблема сета отдельно (списки сетов, фильтры). #}
+{% macro set_icon(set_id, size="1.2em") -%}
+<span class="mod-set-icon" style="--set: url(/static/img/game/sets/set-{{ set_id }}.webp); --size: {{ size }}"></span>
+{%- endmacro %}
