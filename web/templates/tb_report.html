@@ -9,7 +9,7 @@
         <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
     {% else %}
         {% set latest_event = report.events[-1] %}
-        {% set regressed = report.history|selectattr("regressed")|list|length %}
+        {% set regressed = report.history|rejectattr("departed")|selectattr("regressed")|list|length %}
         {% call tbui.tb_hero("Отчёт по ТБ", "report") %}
             <div class="hero-kpis">
                 <div class="hero-kpi"><span class="hero-kpi-value">{{ latest_event[1][:10] }}</span><span class="hero-kpi-label">последняя ТБ</span></div>
@@ -107,7 +107,15 @@
         </div>
 
         {% if report.events|length > 1 %}
-            <h2>История по игрокам (последние {{ report.events|length }} ТБ)</h2>
+            <h2 id="tb-history">История по игрокам (последние {{ report.events|length }} ТБ)</h2>
+            {% if departed_count or show_departed %}
+                {% set ev_q = "event_id=" ~ report.selected_event_id ~ "&" if not report.is_latest_selected else "" %}
+                <div class="segmented-toggle">
+                    <div class="segmented-toggle-options">
+                        {% if show_departed %}<a href="/tb?{{ ev_q }}#tb-history">Текущий состав</a><strong>Выбывшие ({{ departed_count }})</strong>{% else %}<strong>Текущий состав</strong><a href="/tb?{{ ev_q }}departed=1#tb-history">Выбывшие ({{ departed_count }})</a>{% endif %}
+                    </div>
+                </div>
+            {% endif %}
             <p class="muted">🚨 — последняя ТБ ниже среднего за 3 предыдущих (очки территории / ОЗ попытки / волны БЗ). Спарклайн — динамика очков территории по сохранённым ТБ. Ссылка «подробно» под спарклайном открывает конкретную ТБ по фазам и планетам.</p>
             <div class="panel">
                 <div class="table-toolbar">
@@ -124,7 +132,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for row in report.history %}
+                            {% for row in history_rows %}
                                 <tr data-search="{{ row.name|lower }}">
                                     <td><a href="/tb/player/{{ row.name | urlencode }}">{{ row.name }}</a></td>
                                     <td>

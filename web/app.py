@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,12 +21,12 @@ from starlette.middleware.sessions import SessionMiddleware
 
 load_dotenv()
 
-from web import auth
+from web import audit, auth
 from web.routes import admin, birthdays, dashboard, datacrons, guild_dashboard, mod_analysis, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="AC Droidec")
+app = FastAPI(title="AC Droidec", dependencies=[Depends(audit.capture_request)])
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -54,6 +54,7 @@ if not session_secret:
     # иначе сессии (в т.ч. факт логина) не переживут перезапуск процесса.
     session_secret = "dev-insecure-secret-change-me"
     print("⚠️ [web] WEB_SESSION_SECRET не задан — использую небезопасный dev-секрет")
+app.add_middleware(audit.AuditMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=session_secret)
 
 static_dir = BASE_DIR / "static"

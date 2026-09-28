@@ -290,6 +290,7 @@ class TbHistoryRow:
     sparkline_last_xy: tuple | None = None  # (x, y) последней точки — для точки-маркера
     sparkline_hits: list = field(default_factory=list)  # [(x, y, completed_at, value), ...] — hover-точки со значениями
     last_value: int | None = None
+    departed: bool = False  # уже не в составе гильдии — в «Истории по игрокам» уходит на вкладку «Выбывшие»
 
 
 @dataclass
@@ -452,6 +453,17 @@ def get_tb_report(guild_id: int, event_id: int | None = None) -> TbReport | None
         _, rows = member_id_rows
         return rows.get(latest_event_id).summary if latest_event_id in rows else -1
 
+    # Выбывшие: member_id — это Comlink playerId, сверяем с текущим составом (user_mapping).
+    # Фолбэк по имени — на случай строк состава без comlink_player_id. Пустой состав
+    # (нет данных) — никого не прячем, иначе вся таблица "уехала" бы в архив.
+    roster_by_pid = database.get_roster_by_player_id(guild_id)
+    roster_names = database.get_roster_name_set(guild_id)
+
+    def _is_departed(member_id, name):
+        if not roster_names:
+            return False
+        return member_id not in roster_by_pid and name.strip().lower() not in roster_names
+
     history = []
     for member_id, rows in sorted(by_member.items(), key=latest_summary, reverse=True):
         name = rows[latest_event_id].name if latest_event_id in rows else next(iter(rows.values())).name
@@ -469,6 +481,7 @@ def get_tb_report(guild_id: int, event_id: int | None = None) -> TbReport | None
             sparkline_last_xy=spark_coords[-1] if spark_coords else None,
             sparkline_hits=sparkline_hits,
             last_value=ordered_values[-1] if ordered_values else None,
+            departed=_is_departed(member_id, name),
         ))
 
     event_totals = [(completed_at, totals_by_event[eid]) for eid, completed_at in events]

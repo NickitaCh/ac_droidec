@@ -22,6 +22,7 @@ from services.guild_admin import (
     remove_web_credential,
     set_web_credential_password,
 )
+from web import audit
 from web.deps import require_super_admin
 
 router = APIRouter()
@@ -203,6 +204,48 @@ async def access_log_page(request: Request, user: dict = Depends(require_super_a
     return templates.TemplateResponse(request, "admin_access_log.html", {
         "user": user,
         "entries": database.get_web_access_log(limit=200),
+    })
+
+
+AUDIT_PAGE_SIZE = 100
+
+
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request, user: dict = Depends(require_super_admin)):
+    """Аудит действий офицеров/админов: веб (web/audit.py) + команды бота (main.py)."""
+    qp = request.query_params
+
+    def _int(name):
+        raw = qp.get(name, "")
+        return int(raw) if raw.lstrip("-").isdigit() else None
+
+    guild_id = _int("guild_id")
+    source = qp.get("source") if qp.get("source") in ("web", "bot") else None
+    actor = qp.get("actor") or None
+    query = (qp.get("q") or "").strip() or None
+    page = max(_int("page") or 1, 1)
+
+    entries, total = database.get_audit_log(
+        guild_id=guild_id, source=source, actor=actor, query=query,
+        limit=AUDIT_PAGE_SIZE, offset=(page - 1) * AUDIT_PAGE_SIZE,
+    )
+    for e in entries:
+        path = e["action"].split(" ", 1)[-1]
+        e["section"] = audit.section_for(path) if e["source"] == "web" else "Бот"
+
+    filters = {k: v for k, v in (("guild_id", guild_id), ("source", source), ("actor", actor), ("q", query)) if v is not None}
+    pages = max((total + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE, 1)
+    return templates.TemplateResponse(request, "admin_audit.html", {
+        "user": user,
+        "entries": entries,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "prev_url": f"/admin/audit?{urlencode({**filters, 'page': page - 1})}" if page > 1 else None,
+        "next_url": f"/admin/audit?{urlencode({**filters, 'page': page + 1})}" if page < pages else None,
+        "filters": filters,
+        "guild_options": [{"id": g["id"], "name": g["name"]} for g in database.get_all_guild_configs(active_only=False)],
+        "actor_options": database.get_audit_actors(),
     })
 
 

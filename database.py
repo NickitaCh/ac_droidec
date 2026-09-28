@@ -869,6 +869,117 @@ def get_web_access_log(limit: int = 200) -> list:
     ]
 
 # =====================================================================
+# АУДИТ ДЕЙСТВИЙ ОФИЦЕРОВ/АДМИНОВ: кто что менял — в вебе (любой не-GET запрос,
+# web/audit.py) и в боте (слэш-команды, main.py::on_slash_command_completion).
+# Пишем только tier=officer и супер-админов. Страница — /admin/audit (супер-админы).
+# details — JSON параметров (пароли/токены вырезаны на стороне вызывающего).
+# Храним AUDIT_KEEP_DAYS дней, чистка — попутно при записи.
+# =====================================================================
+AUDIT_KEEP_DAYS = 180
+
+
+def _ensure_audit_log_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            guild_id INTEGER,
+            actor_discord_id TEXT,
+            actor_name TEXT,
+            is_super_admin INTEGER NOT NULL DEFAULT 0,
+            action TEXT NOT NULL,
+            details TEXT,
+            status TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_guild ON audit_log (guild_id, id)")
+    cursor.connection.commit()
+
+
+def log_audit(source: str, action: str, *, guild_id: int | None, actor_discord_id: str | None,
+              actor_name: str | None, is_super_admin: bool, details: dict | None = None,
+              status: str | None = None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_audit_log_table(cursor)
+    cursor.execute("""
+        INSERT INTO audit_log (created_at, source, guild_id, actor_discord_id, actor_name, is_super_admin, action, details, status)
+        VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (source, guild_id, str(actor_discord_id) if actor_discord_id else None, actor_name, int(bool(is_super_admin)),
+          action, json.dumps(details, ensure_ascii=False) if details else None, status))
+    if cursor.lastrowid % 500 == 0:
+        cursor.execute("DELETE FROM audit_log WHERE created_at < datetime('now', ?)", (f"-{AUDIT_KEEP_DAYS} days",))
+    conn.commit()
+    conn.close()
+
+
+def get_audit_log(*, guild_id: int | None = None, source: str | None = None, actor: str | None = None,
+                  query: str | None = None, limit: int = 100, offset: int = 0) -> tuple[list, int]:
+    """(строки, всего_по_фильтру). guild_id=0 — записи без гильдии. created_at_msk — МСК (UTC+3)."""
+    where, params = [], []
+    if guild_id is not None:
+        if guild_id == 0:
+            where.append("a.guild_id IS NULL")
+        else:
+            where.append("a.guild_id = ?")
+            params.append(guild_id)
+    if source:
+        where.append("a.source = ?")
+        params.append(source)
+    if actor:
+        where.append("a.actor_discord_id = ?")
+        params.append(actor)
+    if query:
+        where.append("(a.action LIKE ? OR a.details LIKE ? OR a.actor_name LIKE ?)")
+        params += [f"%{query}%"] * 3
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_audit_log_table(cursor)
+    cursor.execute(f"SELECT COUNT(*) FROM audit_log a {where_sql}", params)
+    total = cursor.fetchone()[0]
+    cursor.execute(f"""
+        SELECT a.id, datetime(a.created_at, '+3 hours'), a.source, a.guild_id, g.name, a.actor_discord_id,
+               a.actor_name, a.is_super_admin, a.action, a.details, a.status
+        FROM audit_log a
+        LEFT JOIN guilds g ON g.id = a.guild_id
+        {where_sql}
+        ORDER BY a.id DESC
+        LIMIT ? OFFSET ?
+    """, params + [limit, offset])
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        try:
+            details = json.loads(r[9]) if r[9] else {}
+        except ValueError:
+            details = {"raw": r[9]}
+        result.append({
+            "id": r[0], "created_at_msk": r[1], "source": r[2], "guild_id": r[3], "guild_name": r[4],
+            "actor_discord_id": r[5], "actor_name": r[6], "is_super_admin": bool(r[7]),
+            "action": r[8], "details": details, "status": r[10],
+        })
+    return result, total
+
+
+def get_audit_actors() -> list:
+    """[(discord_id, последнее известное имя), ...] — для фильтра по автору."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_audit_log_table(cursor)
+    cursor.execute("""
+        SELECT actor_discord_id, actor_name FROM audit_log
+        WHERE id IN (SELECT MAX(id) FROM audit_log WHERE actor_discord_id IS NOT NULL GROUP BY actor_discord_id)
+        ORDER BY actor_name COLLATE NOCASE
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+# =====================================================================
 # ЛОГИН/ПАРОЛЬ ДЛЯ ВЕБ-ДАШБОРДА: второй способ входа рядом с Discord OAuth
 # (web/routes/password_auth.py) — заведён для офицеров, которым Discord
 # недоступен (блокировки РФ). Учётка ВСЕГДА привязана к discord_id — права
@@ -2049,6 +2160,17 @@ def get_roster_by_player_id(guild_id: int) -> dict:
     rows = {pid: (ally_code, ingame_name) for pid, ally_code, ingame_name in cursor.fetchall()}
     conn.close()
     return rows
+
+
+def get_roster_name_set(guild_id: int) -> set:
+    """Имена текущего состава guild_id (strip+lower) — для сверки "ещё в гильдии?" там,
+    где на руках только имя/Comlink playerId (история ТБ)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ingame_name FROM user_mapping WHERE guild_id = ? AND ingame_name IS NOT NULL", (guild_id,))
+    names = {name.strip().lower() for (name,) in cursor.fetchall() if name}
+    conn.close()
+    return names
 
 
 def get_member_level(guild_id: int, ally_code: str) -> int | None:

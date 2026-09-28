@@ -1071,6 +1071,12 @@ class GuildEvents(commands.Cog):
             await inter.edit_original_message("Нет сохранённых данных игроков для сравнения.")
             return
 
+        # Выбывших из гильдии в сводке за несколько ТБ не показываем (как и на вебе /tb).
+        roster_pids = set(database.get_roster_by_player_id(guild_id))
+        roster_names = database.get_roster_name_set(guild_id)
+        if roster_names:
+            summary_rows = [r for r in summary_rows if r[1] in roster_pids or r[2].strip().lower() in roster_names]
+
         report = self._format_tb_compare_table(events, summary_rows)
         title = f"📊 Сравнение по ТБ (последние {len(events)}: " + ", ".join(e[1][:10] for e in events) + ")"
         await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")

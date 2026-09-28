@@ -280,6 +280,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "mod_slot_options": MOD_SLOT_OPTIONS,
         "mod_primary_options_json": MOD_PRIMARY_OPTIONS_JSON,
         "set_options": SET_OPTIONS,
+        "mod_grid_slots": [(slot, MOD_SLOT_LABELS[slot], MOD_PRIMARY_OPTIONS_JSON[slot]) for slot in MOD_GRID_SLOTS],
         "compare_stat_options": COMPARE_STAT_OPTIONS,
         "scheme_options": SCHEME_OPTIONS,
         "error": request.query_params.get("error"),
@@ -438,6 +439,76 @@ async def requirement_add_mod_primary(
         plate_name, base_id, STAT_MOD_PRIMARY, "=", float(unit_stat_id), priority, raw_text, comment.strip() or None,
         user["discord_id"], guild_id=guild_id, mod_slot=mod_slot, scheme_num=_parse_scheme_form(scheme_num),
     )
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
+# Слоты с выбором основы (квадрат/ромб — единственная основа, выбирать нечего).
+MOD_GRID_SLOTS = ("arrow", "triangle", "circle", "cross")
+
+
+@router.post("/{plate_name}/requirements/add_mods", response_class=HTMLResponse)
+async def requirement_add_mods(
+    request: Request,
+    plate_name: str,
+    base_id: str = Form(...),
+    priority: str = Form(PRIORITY_REQUIRED),
+    comment: str = Form(""),
+    scheme_num: str = Form(""),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    """Сетка «основы + сеты» (в стиле HotUtils): за один сабмит — основы на любые из
+    4 слотов (поля primary_<slot>) и любые сеты (set_id, повторяется). Каждая выбранная
+    клетка — отдельное требование, как если бы их добавили по одному. Основа на слот,
+    уже заданная в этом плейте/схеме, заменяется; такой же сет второй раз не добавляется."""
+    guild_id = user["guild_id"]
+    if plate_name not in database.get_all_stat_requirement_plates(guild_id=guild_id):
+        return RedirectResponse(f"/plates?{urlencode({'error': f'Плейт «{plate_name}» не найден.'})}", status_code=303)
+    if database.is_stat_plate_modular(plate_name, guild_id=guild_id):
+        error = "Это модульный плейт — требования добавляются через подключение других плейтов, а не напрямую."
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+
+    form = await request.form()
+    primaries = {}
+    for slot in MOD_GRID_SLOTS:
+        raw = (form.get(f"primary_{slot}") or "").strip()
+        if not raw:
+            continue
+        if not raw.isdigit() or not any(opt["unit_stat"] == int(raw) for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot, [])):
+            return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': 'Недопустимая основа для слота.'})}", status_code=303)
+        primaries[slot] = int(raw)
+    set_ids = []
+    for raw in form.getlist("set_id"):
+        if not str(raw).isdigit() or int(raw) not in _SET_NAME_BY_ID:
+            return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': 'Выберите сет из списка.'})}", status_code=303)
+        if int(raw) not in set_ids:
+            set_ids.append(int(raw))
+    if not primaries and not set_ids:
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': 'Отметьте хотя бы одну основу или сет.'})}", status_code=303)
+
+    scheme = _parse_scheme_form(scheme_num)
+    existing = [r for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id) if r[14] == scheme]
+    char_name = _unit_name(base_id)
+    comment_value = comment.strip() or None
+    for slot, unit_stat_id in primaries.items():
+        same_slot = [r for r in existing if r[3] == STAT_MOD_PRIMARY and r[12] == slot]
+        if any(int(r[5]) == unit_stat_id for r in same_slot):
+            continue
+        for r in same_slot:
+            database.delete_stat_requirement(r[0], guild_id=guild_id)
+        database.add_stat_requirement(
+            plate_name, base_id, STAT_MOD_PRIMARY, "=", float(unit_stat_id), priority,
+            f"{char_name} — основа «{_mod_primary_text(slot, unit_stat_id)}»", comment_value,
+            user["discord_id"], guild_id=guild_id, mod_slot=slot, scheme_num=scheme,
+        )
+    existing_sets = {r[11] for r in existing if r[3] == STAT_SET}
+    for set_id in set_ids:
+        if str(set_id) in existing_sets:
+            continue
+        database.add_stat_requirement(
+            plate_name, base_id, STAT_SET, ">=", 1.0, priority,
+            f"{char_name} — сет «{_mod_set_text(set_id)}»", comment_value,
+            user["discord_id"], guild_id=guild_id, skill_id=str(set_id), scheme_num=scheme,
+        )
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 

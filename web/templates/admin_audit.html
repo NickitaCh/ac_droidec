@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Аудит действий — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Аудит действий</h1>
+                <p class="page-hero-lead">Что меняли офицеры и админы: веб-панель (любое сохранение/удаление) и команды бота. Время — МСК. Хранится 180 дней. Найдено: {{ total }}.</p>
+            </div>
+        </div>
+    </section>
+
+    <form method="get" action="/admin/audit" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+        <select name="guild_id" onchange="this.form.submit()">
+            <option value="">Все гильдии</option>
+            {% for g in guild_options %}
+                <option value="{{ g.id }}" {% if filters.guild_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+            {% endfor %}
+            <option value="0" {% if filters.guild_id == 0 %}selected{% endif %}>Без гильдии</option>
+        </select>
+        <select name="source" onchange="this.form.submit()">
+            <option value="">Веб и бот</option>
+            <option value="web" {% if filters.source == "web" %}selected{% endif %}>Только веб</option>
+            <option value="bot" {% if filters.source == "bot" %}selected{% endif %}>Только бот</option>
+        </select>
+        <select name="actor" onchange="this.form.submit()">
+            <option value="">Все авторы</option>
+            {% for discord_id, name in actor_options %}
+                <option value="{{ discord_id }}" {% if filters.actor == discord_id %}selected{% endif %}>{{ name or discord_id }}</option>
+            {% endfor %}
+        </select>
+        <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="Действие, параметр, имя…">
+        <button type="submit" class="btn">Найти</button>
+        {% if filters %}<a href="/admin/audit" class="link-btn">сбросить</a>{% endif %}
+    </form>
+
+    {% if not entries %}
+        <p class="empty-state">Записей нет.</p>
+    {% else %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data audit-table">
+                    <thead>
+                        <tr>
+                            <th>Когда (МСК)</th>
+                            <th>Кто</th>
+                            <th>Гильдия</th>
+                            <th>Где</th>
+                            <th>Действие</th>
+                            <th>Параметры</th>
+                            <th>Итог</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for e in entries %}
+                            <tr>
+                                <td class="nowrap">{{ e.created_at_msk }}</td>
+                                <td>
+                                    <a href="/admin/audit?actor={{ e.actor_discord_id }}">{{ e.actor_name or e.actor_discord_id or "—" }}</a>
+                                    {% if e.is_super_admin %}<span title="супер-админ">👑</span>{% endif %}
+                                </td>
+                                <td>{{ e.guild_name or "—" }}</td>
+                                <td><span class="badge badge-neutral">{{ "🤖" if e.source == "bot" else "🌐" }} {{ e.section }}</span></td>
+                                <td><code>{{ e.action }}</code></td>
+                                <td class="audit-details">
+                                    {% for k, v in e.details|dictsort %}
+                                        <div><span class="muted">{{ k }}:</span> {{ v }}</div>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    {% set st = e.status or "" %}
+                                    {% if st == "ok" or st.startswith("2") or st.startswith("3") %}
+                                        <span class="badge badge-ok">{{ "ок" if st == "ok" else st }}</span>
+                                    {% elif st %}
+                                        <span class="badge badge-danger">{{ st }}</span>
+                                    {% else %}—{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% if pages > 1 %}
+            <div class="table-toolbar" style="justify-content: center; gap: 1em;">
+                {% if prev_url %}<a href="{{ prev_url }}" class="link-btn">← новее</a>{% endif %}
+                <span class="muted">стр. {{ page }} из {{ pages }}</span>
+                {% if next_url %}<a href="{{ next_url }}" class="link-btn">старее →</a>{% endif %}
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

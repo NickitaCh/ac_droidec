@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_game.html" as game %}
 {% block title %}{{ plate_name }} — Плейты — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -161,9 +162,9 @@
         </div>
 
         <div class="panel">
-            <div class="panel-title"><span>Добавить требование на основу мода</span></div>
-            <form method="post" action="/plates/{{ plate_name }}/requirements/add_mod_primary" class="requirement-form" data-mod-primary-add-form>
-                <label>
+            <div class="panel-title"><span>Моды: основы и сеты</span><span class="panel-hint">отметьте нужное — каждая клетка станет требованием</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/add_mods" class="mod-grid-form" data-mod-grid-form>
+                <label class="mod-grid-unit">
                     Персонаж
                     <div class="unit-search" data-unit-search>
                         <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
@@ -171,82 +172,52 @@
                         <div class="unit-search-results"></div>
                     </div>
                 </label>
-                <label>
-                    Слот мода
-                    <select name="mod_slot" class="mod-primary-slot-select" required>
-                        {% for value, label in mod_slot_options %}
-                            <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Основа
-                    <select name="unit_stat_id" class="mod-primary-stat-select" required></select>
-                </label>
-                <label>
-                    Приоритет
-                    <select name="priority" required>
-                        {% for label, value in priority_options %}
-                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Схема мод-билда
-                    <select name="scheme_num">
-                        {% for label, value in scheme_options %}
-                            <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Комментарий (необязательно)
-                    <input type="text" name="comment">
-                </label>
-                <button type="submit">Добавить</button>
-            </form>
-        </div>
 
-        <div class="panel">
-            <div class="panel-title"><span>Добавить требование на сет модов</span></div>
-            <form method="post" action="/plates/{{ plate_name }}/requirements/add_set" class="requirement-form">
-                <label>
-                    Персонаж
-                    <div class="unit-search" data-unit-search>
-                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
-                        <input type="hidden" name="base_id" class="unit-search-value" required>
-                        <div class="unit-search-results"></div>
-                    </div>
-                </label>
-                <label>
-                    Сет
-                    <select name="set_id" required>
-                        {% for label, value in set_options %}
-                            <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Приоритет
-                    <select name="priority" required>
-                        {% for label, value in priority_options %}
-                            <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Схема мод-билда
-                    <select name="scheme_num">
-                        {% for label, value in scheme_options %}
-                            <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Комментарий (необязательно)
-                    <input type="text" name="comment">
-                </label>
-                <button type="submit">Добавить</button>
+                <div class="mod-grid-section-title">Основы</div>
+                <div class="mod-grid-slots">
+                    {% for slot, slot_label, opts in mod_grid_slots %}
+                        <div class="mod-grid-slot">
+                            <span class="mod-grid-slot-icon" title="{{ slot_label }}">{{ game.mod_icon(slot, none, size="1.9em") }}</span>
+                            <div class="chip-group" role="radiogroup" aria-label="{{ slot_label }}">
+                                <label class="chip chip-muted"><input type="radio" name="primary_{{ slot }}" value="" checked><span>любая</span></label>
+                                {% for o in opts %}
+                                    <label class="chip" title="{{ o.label }}"><input type="radio" name="primary_{{ slot }}" value="{{ o.unit_stat }}"><span>{{ o.label.split(" +")[0] }}</span></label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mod-grid-section-title">Сеты</div>
+                <div class="chip-group mod-grid-sets">
+                    {% for label, value in set_options %}
+                        <label class="chip chip-set" title="{{ label }}"><input type="checkbox" name="set_id" value="{{ value }}">{{ game.set_icon(value, size="1.6em") }}<span>{{ label }}</span></label>
+                    {% endfor %}
+                </div>
+
+                <div class="requirement-form mod-grid-footer">
+                    <label>
+                        Приоритет
+                        <select name="priority" required>
+                            {% for label, value in priority_options %}
+                                <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        Схема мод-билда
+                        <select name="scheme_num">
+                            {% for label, value in scheme_options %}
+                                <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        Комментарий (необязательно)
+                        <input type="text" name="comment">
+                    </label>
+                    <button type="submit" data-mod-grid-submit disabled>Добавить</button>
+                </div>
             </form>
         </div>
 
@@ -526,28 +497,16 @@
 
     <script>
     document.addEventListener("DOMContentLoaded", () => {
-        // Форма "Добавить требование на основу мода" — выпадающий список основ зависит от
-        // выбранного слота (stat_engine.MOD_PRIMARY_OPTIONS, справочник маленький и статичный —
-        // весь передан сюда сразу через mod_primary_options_json, без похода на бэкенд,
-        // в отличие от omicron-skills выше (те зависят от конкретного персонажа).
-        const form = document.querySelector("[data-mod-primary-add-form]");
+        // Сетка «основы + сеты»: счётчик выбранного на кнопке, пока ничего не отмечено — кнопка неактивна.
+        const form = document.querySelector("[data-mod-grid-form]");
         if (!form) return;
-        const options = {{ mod_primary_options_json | tojson }};
-        const slotSelect = form.querySelector(".mod-primary-slot-select");
-        const statSelect = form.querySelector(".mod-primary-stat-select");
-
+        const btn = form.querySelector("[data-mod-grid-submit]");
         const refresh = () => {
-            const opts = options[slotSelect.value] || [];
-            statSelect.innerHTML = "";
-            opts.forEach((item) => {
-                const opt = document.createElement("option");
-                opt.value = item.unit_stat;
-                opt.textContent = item.label;
-                statSelect.appendChild(opt);
-            });
+            const n = form.querySelectorAll('.mod-grid-slots input[type=radio]:checked:not([value=""]), .mod-grid-sets input:checked').length;
+            btn.disabled = n === 0;
+            btn.textContent = n ? `Добавить (${n})` : "Добавить";
         };
-
-        slotSelect.addEventListener("change", refresh);
+        form.addEventListener("change", refresh);
         refresh();
     });
     </script>

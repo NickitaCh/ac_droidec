@@ -156,9 +156,17 @@ async def tb_report(request: Request, user: dict = Depends(feature_flags.require
     report = dashboard_data.get_tb_report(user["guild_id"], event_id=_parse_event_id(request))
     max_summary = report.latest[0].summary if report and report.latest else 0
     max_trend_total = max((t for _, t in report.event_totals), default=0) if report else 0
+    # Выбывшие игроки остаются в разрезе конкретной ТБ, но из «Истории по игрокам»
+    # (сводка за несколько ТБ) уезжают на отдельную вкладку ?departed=1.
+    show_departed = request.query_params.get("departed") == "1"
+    history_rows = [r for r in report.history if r.departed == show_departed] if report else []
+    departed_count = sum(1 for r in report.history if r.departed) if report else 0
     return templates.TemplateResponse(request, "tb_report.html", {
         "user": user,
         "report": report,
+        "show_departed": show_departed,
+        "history_rows": history_rows,
+        "departed_count": departed_count,
         "max_summary": max_summary,
         "max_trend_total": max_trend_total,
     })

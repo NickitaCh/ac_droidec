@@ -348,10 +348,31 @@ async def on_slash_command_completion(inter: disnake.ApplicationCommandInteracti
     # guild_id — тот же резолв по игровому рангу, что и в правах доступа (не
     # inter.guild_id — тот привязан к Discord-серверу, а не к SWGOH-гильдии, и None
     # в ЛС), чтобы статистику можно было посмотреть по гильдии отдельно.
+    access = guild_resolver.resolve_access(inter.author)
     database.log_command_usage(
         inter.application_command.qualified_name,
-        guild_id=guild_resolver.resolve_guild_id(inter.author),
+        guild_id=access["guild_id"],
     )
+    # Аудит (/admin/audit): команды офицеров/супер-админов вместе с параметрами.
+    if access["tier"] == "officer" or access["is_super_admin"]:
+        try:
+            details = {k: _audit_option_value(v) for k, v in (inter.filled_options or {}).items()}
+            details["где"] = inter.guild.name if inter.guild else ("ЛС" if inter.guild_id is None else str(inter.guild_id))
+            database.log_audit(
+                "bot", "/" + inter.application_command.qualified_name,
+                guild_id=access["guild_id"], actor_discord_id=str(inter.author.id),
+                actor_name=getattr(inter.author, "display_name", None) or inter.author.name,
+                is_super_admin=access["is_super_admin"], details=details, status="ok",
+            )
+        except Exception as e:
+            print(f"⚠️ [audit] не удалось записать команду: {e}")
+
+
+def _audit_option_value(value) -> str:
+    # Member/Role/Channel — по имени, а не repr объекта.
+    name = getattr(value, "display_name", None) or getattr(value, "name", None)
+    text = f"{name} ({value.id})" if name and hasattr(value, "id") else str(value)
+    return text if len(text) <= 300 else text[:300] + "…"
 
 def _access_denied_message(inter: disnake.ApplicationCommandInteraction, tier: str | None) -> str:
     """Короткий онбординг вместо голого "доступа нет" — объясняет конкретно ПОЧЕМУ
