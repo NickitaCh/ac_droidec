@@ -394,7 +394,7 @@ def _merge_thresholds(rows_by_plate: dict) -> list[dict]:
             # r[13]) — не моддируемые числовые пороги (см. cogs/stat_requirements.py::STAT_OMICRON/
             # STAT_MOD_PRIMARY), подбор билда модов их не касается; строковые литералы — свои,
             # не импортируем из cogs/ (см. конвенцию в web/routes/stat_plates.py).
-            if stat_name in ("Relic", "Omicron", "ModPrimary") or (len(r) > 13 and r[13]):
+            if stat_name in ("Relic", "Omicron", "ModPrimary", "ModSet", "ModSetAny", "ModSetOnly") or (len(r) > 13 and r[13]):
                 continue
             key = (stat_name, operator)
             cur = merged.get(key)

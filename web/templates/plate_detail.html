@@ -191,13 +191,13 @@
                         {% for slot, slot_label, opts in mod_grid_slots %}
                             <div class="mod-grid-slot{% if opts|length == 1 %} is-fixed{% endif %}">
                                 <div class="mod-grid-slot-head">{{ game.mod_icon(slot, none, size="2.2em") }}<span>{{ slot_label }}</span></div>
-                                <div class="chip-group" role="radiogroup" aria-label="{{ slot_label }}">
+                                <div class="chip-group" role="group" aria-label="{{ slot_label }}" data-primary-group>
                                     {% if opts|length == 1 %}
                                         <span class="chip chip-fixed" title="{{ opts[0].label }} — у этого слота одна основа">{{ opts[0].label.split(" +")[0] }}</span>
                                     {% else %}
-                                        <label class="chip chip-muted"><input type="radio" name="primary_{{ slot }}" value="" checked><span>любая</span></label>
+                                        <label class="chip chip-muted"><input type="checkbox" data-primary-any checked><span>любая</span></label>
                                         {% for o in opts %}
-                                            <label class="chip" title="{{ o.label }}"><input type="radio" name="primary_{{ slot }}" value="{{ o.unit_stat }}"><span>{{ o.label.split(" +")[0] }}</span></label>
+                                            <label class="chip" title="{{ o.label }}"><input type="checkbox" name="primary_{{ slot }}" value="{{ o.unit_stat }}"><span>{{ o.label.split(" +")[0] }}</span></label>
                                         {% endfor %}
                                     {% endif %}
                                 </div>
@@ -229,6 +229,17 @@
                             </div>
                         {% endfor %}
                     </div>
+                    {% for field, title in [("set_any", "Хотя бы один из"), ("set_only", "Только эти сеты")] %}
+                        <div class="mod-set-list">
+                            <span class="mod-set-list-title">{{ title }}</span>
+                            <div class="chip-group" role="group" aria-label="{{ title }}">
+                                {% for st in set_grid %}
+                                    <label class="chip" title="{{ st.name }}"><input type="checkbox" name="{{ field }}" value="{{ st.set_id }}">{{ game.set_icon(st.set_id, size="1.2em") }}<span>{{ st.name }}</span></label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                    <p class="muted mod-grid-hint">Несколько основ на слоте — подходит любая из них.</p>
 
                     <div class="requirement-form mod-grid-footer">
                         <label>
@@ -324,6 +335,7 @@
                         <span class="mod-loadout-label{% if lo.over %} is-over{% endif %}">{% for st in lo.sets %}{{ st.name }}{% if st.count > 1 %} ×{{ st.count }}{% endif %}{% if not loop.last %} + {% endif %}{% endfor %} · {{ lo.used }}/6</span>
                     </div>
                 {% endif %}
+                {% for text in lo.set_lists %}<span class="mod-loadout-label">Сеты {{ text }}</span>{% endfor %}
                 {% if lo.primaries %}
                     <div class="mod-loadout-primaries">
                         {% for slot, slot_label, label in lo.primaries %}<span class="mod-loadout-primary" title="{{ slot_label }}">{{ game.mod_icon(slot, none, size="1.3em") }}{{ label }}</span>{% endfor %}
@@ -365,7 +377,7 @@
                                                 {% endfor %}
                                             </select>
                                             <input type="number" name="threshold" step="any" min="0" value="{{ r.threshold }}" title="На сколько" required>
-                                        {% elif not r.is_omicron and not r.is_mod_primary and not r.is_mod_set %}
+                                        {% elif not r.is_omicron and not r.is_mod_primary and not r.is_mod_set and not r.is_mod_set_list %}
                                             <select name="operator">
                                                 {% for label, value in operator_options %}
                                                     <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
@@ -592,6 +604,18 @@
 
         const setCount = (card, n) => { card.querySelector("input").value = String(n); };
 
+        // «любая» горит, когда на слоте не выбрано ни одной основы; клик по ней снимает выбор.
+        const syncAny = (group) => {
+            const any = group.querySelector("[data-primary-any]");
+            if (any) any.checked = !group.querySelector('input[name^="primary_"]:checked');
+        };
+        form.querySelectorAll("[data-primary-group]").forEach((group) => group.addEventListener("change", (e) => {
+            if (e.target.matches("[data-primary-any]")) {
+                group.querySelectorAll('input[name^="primary_"]').forEach((i) => { i.checked = false; });
+            }
+            syncAny(group);
+        }));
+
         const lock = (text) => {
             body.disabled = true;
             hint.textContent = text;
@@ -606,11 +630,13 @@
                 const resp = await fetch(url);
                 if (!resp.ok) throw new Error(resp.status);
                 const cfg = await resp.json();
-                form.querySelectorAll('.mod-grid-slots input[type=radio]').forEach((r) => {
-                    const slot = r.name.replace("primary_", "");
-                    const want = cfg.primaries[slot];
-                    r.checked = want === undefined ? r.value === "" : r.value === String(want);
+                form.querySelectorAll('.mod-grid-slots input[name^="primary_"]').forEach((r) => {
+                    const want = cfg.primaries[r.name.replace("primary_", "")] || [];
+                    r.checked = want.map(String).includes(r.value);
                 });
+                form.querySelectorAll("[data-primary-group]").forEach(syncAny);
+                form.querySelectorAll('input[name="set_any"]').forEach((c) => { c.checked = (cfg.sets_any || []).map(String).includes(c.value); });
+                form.querySelectorAll('input[name="set_only"]').forEach((c) => { c.checked = (cfg.sets_only || []).map(String).includes(c.value); });
                 cards.forEach((c) => setCount(c, cfg.sets[c.dataset.setId] || 0));
                 shared = cfg.shared_sets || {};
                 body.disabled = false;

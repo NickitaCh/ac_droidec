@@ -17,7 +17,8 @@ import database
 import stat_engine
 from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
 from cogs.stat_requirements import (
-    COMPARE_OPERATOR_CHOICES, COMPARE_OPERATORS, MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON, STAT_SET, SET_CHOICES,
+    COMPARE_OPERATOR_CHOICES, COMPARE_OPERATORS, MOD_REQ_STATS, MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON,
+    STAT_SET, STAT_SET_ANY, STAT_SET_ONLY, SET_CHOICES, mod_primary_allowed, parse_id_list,
 )
 from services import feature_flags
 
@@ -82,15 +83,15 @@ def _omicron_ability_name(skill_id: str) -> str:
     return name or skill_id
 
 
-def _mod_primary_text(slot_key: str, unit_stat_id) -> str:
+def _mod_primary_text(slot_key: str, unit_stat_id, skill_id=None) -> str:
     """Независимая копия cogs/stat_requirements.py::_mod_primary_req_text (web/ не может
     подтягивать приватные помощники cogs/, см. CLAUDE.md) — сам справочник основ на слот
-    общий, stat_engine.MOD_PRIMARY_OPTIONS."""
-    stat_label = next(
-        (opt["label"] for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if opt["unit_stat"] == unit_stat_id),
-        f"#{unit_stat_id}",
-    )
-    return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {stat_label}"
+    общий, stat_engine.MOD_PRIMARY_OPTIONS. Несколько допустимых основ — через «или»."""
+    labels = [
+        next((opt["label"] for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if opt["unit_stat"] == stat_id), f"#{stat_id}")
+        for stat_id in mod_primary_allowed(unit_stat_id, skill_id)
+    ]
+    return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {' или '.join(labels)}"
 
 
 _SET_NAME_BY_ID = {int(k): v for k, v in stat_engine.MOD_SET_IDS.items()}
@@ -105,6 +106,11 @@ def _mod_set_text(set_id, sets_count=1) -> str:
     pieces = stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
     times = f" ×{count}" if count > 1 else ""
     return f"{_SET_NAME_BY_ID.get(set_id, set_id)}{times} ({pieces * count} мод.)"
+
+
+def _set_list_text(stat_name: str, skill_id) -> str:
+    names = " / ".join(str(_SET_NAME_BY_ID.get(sid, sid)) for sid in parse_id_list(skill_id))
+    return f"{'один из' if stat_name == STAT_SET_ANY else 'только'}: {names}"
 
 
 # Игровой порядок 6 слотов (квадрат/ромб — единственная основа, выбирать нечего).
@@ -122,7 +128,8 @@ def _mod_loadout(reqs: list) -> dict | None:
     нет ни сетов, ни основ."""
     sets = [(int(r["skill_id"]), max(int(r["threshold"] or 1), 1)) for r in reqs if r["is_mod_set"]]
     primaries = {r["mod_slot"]: r["primary_label"] for r in reqs if r["is_mod_primary"]}
-    if not sets and not primaries:
+    set_lists = [_set_list_text(r["stat_name"], r["skill_id"]) for r in reqs if r["is_mod_set_list"]]
+    if not sets and not primaries and not set_lists:
         return None
     cells = []
     for set_id, count in sets:
@@ -133,14 +140,18 @@ def _mod_loadout(reqs: list) -> dict | None:
         "used": used,
         "over": used > MOD_TOTAL_SLOTS,
         "sets": [{"set_id": sid, "count": c, "name": _SET_NAME_BY_ID.get(sid, sid)} for sid, c in sets],
+        "set_lists": set_lists,
         "primaries": [(slot, MOD_SLOT_LABELS[slot], primaries[slot]) for slot in MOD_SLOT_ORDER if slot in primaries],
     }
 
 
-def _mod_primary_label_only(slot_key: str, unit_stat_id) -> str:
-    """"Speed" из "Speed +32" — короткая подпись основы для сводки сборки."""
-    label = next((o["label"] for o in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if o["unit_stat"] == int(unit_stat_id)), f"#{unit_stat_id}")
-    return label.split(" +")[0]
+def _mod_primary_label_only(slot_key: str, unit_stat_id, skill_id=None) -> str:
+    """"Speed" из "Speed +32" — короткая подпись основы для сводки сборки ("Health / Protection",
+    если допустимых основ несколько)."""
+    return " / ".join(
+        next((o["label"] for o in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if o["unit_stat"] == stat_id), f"#{stat_id}").split(" +")[0]
+        for stat_id in mod_primary_allowed(unit_stat_id, skill_id)
+    )
 
 
 def _compare_offset_text(operator: str, offset: float) -> str:
@@ -241,13 +252,16 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
             is_omicron = r[3] == STAT_OMICRON
             is_mod_primary = r[3] == STAT_MOD_PRIMARY
             is_mod_set = r[3] == STAT_SET
+            is_mod_set_list = r[3] in (STAT_SET_ANY, STAT_SET_ONLY)
             is_compare = bool(r[13])
             if is_omicron:
                 value_display = f"Омикрон: {_omicron_ability_name(r[11])} — разблокирован"
             elif is_mod_primary:
-                value_display = f"Основа: {_mod_primary_text(r[12], r[5])}"
+                value_display = f"Основа: {_mod_primary_text(r[12], r[5], r[11])}"
             elif is_mod_set:
                 value_display = f"Сет: {_mod_set_text(r[11], r[5])}"
+            elif is_mod_set_list:
+                value_display = f"Сеты: {_set_list_text(r[3], r[11])}"
             elif is_compare:
                 value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}{_compare_offset_text(r[4], r[5])}"
             else:
@@ -259,10 +273,11 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 "is_omicron": is_omicron,
                 "is_mod_primary": is_mod_primary,
                 "is_mod_set": is_mod_set,
+                "is_mod_set_list": is_mod_set_list,
                 "is_compare": is_compare,
                 "value_display": value_display,
                 "skill_id": r[11], "mod_slot": r[12],
-                "primary_label": _mod_primary_label_only(r[12], r[5]) if is_mod_primary else None,
+                "primary_label": _mod_primary_label_only(r[12], r[5], r[11]) if is_mod_primary else None,
                 "source_plate": r[1],
                 "scheme_num": r[14],
                 "scheme_num_str": str(r[14]) if r[14] else "",
@@ -507,12 +522,19 @@ def _mod_config(plate_name: str, base_id: str, scheme: int | None, guild_id: int
         return {int(r[11]): max(int(r[5] or 1), 1) for r in rows if r[3] == STAT_SET and r[14] == scheme_value}
 
     mine = [r for r in rows if r[14] == scheme]
-    primaries = {r[12]: int(r[5]) for r in mine if r[3] == STAT_MOD_PRIMARY}
+    primaries = {r[12]: mod_primary_allowed(r[5], r[11]) for r in mine if r[3] == STAT_MOD_PRIMARY}
     if scheme is None:
         shared = max((_sets(1), _sets(2)), key=lambda d: sum(_set_pieces(k, v) for k, v in d.items()))
     else:
         shared = _sets(None)
-    return {"primaries": primaries, "sets": _sets(scheme), "shared_sets": shared}
+
+    def _set_list(stat_name):
+        return next((parse_id_list(r[11]) for r in mine if r[3] == stat_name), [])
+
+    return {
+        "primaries": primaries, "sets": _sets(scheme), "shared_sets": shared,
+        "sets_any": _set_list(STAT_SET_ANY), "sets_only": _set_list(STAT_SET_ONLY),
+    }
 
 
 @router.get("/{plate_name}/api/mod-config", response_class=JSONResponse)
@@ -525,6 +547,8 @@ async def mod_config_api(
         "primaries": cfg["primaries"],
         "sets": {str(k): v for k, v in cfg["sets"].items()},
         "shared_sets": {str(k): v for k, v in cfg["shared_sets"].items()},
+        "sets_any": cfg["sets_any"],
+        "sets_only": cfg["sets_only"],
     }
 
 
@@ -539,8 +563,9 @@ async def requirement_save_mods(
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     """Сетка «основы + сеты» (в стиле HotUtils) — сохраняет ЦЕЛИКОМ сборку персонажа для
-    выбранной схемы: primary_<slot> ("" = без требования) и set_<id> = число комплектов
-    (0 = без требования). Форма предзаполняется текущей сборкой (/api/mod-config), поэтому
+    выбранной схемы: primary_<slot> (несколько значений = «любая из», ни одного = без
+    требования), set_<id> = число комплектов (0 = без требования), set_any/set_only — списки
+    сетов «хотя бы один из»/«только эти» (ModSetAny/ModSetOnly). Форма предзаполняется текущей сборкой (/api/mod-config), поэтому
     снятый выбор = удалить требование. Неизменённые строки не трогаем (их приоритет и
     комментарий сохраняются), новые/изменённые — с приоритетом и комментарием из формы.
     Сеты в сумме (вместе с shared_sets) не могут занять больше 6 модулей."""
@@ -555,12 +580,27 @@ async def requirement_save_mods(
     form = await request.form()
     primaries = {}
     for slot in MOD_GRID_SLOTS:
-        raw = (form.get(f"primary_{slot}") or "").strip()
-        if not raw:
-            continue
-        if not raw.isdigit() or not any(opt["unit_stat"] == int(raw) for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot, [])):
-            return RedirectResponse(f"{back}?{urlencode({'error': 'Недопустимая основа для слота.'})}", status_code=303)
-        primaries[slot] = int(raw)
+        picked = []
+        for raw in form.getlist(f"primary_{slot}"):
+            raw = (raw or "").strip()
+            if not raw:
+                continue
+            if not raw.isdigit() or not any(opt["unit_stat"] == int(raw) for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot, [])):
+                return RedirectResponse(f"{back}?{urlencode({'error': 'Недопустимая основа для слота.'})}", status_code=303)
+            if int(raw) not in picked:
+                picked.append(int(raw))
+        if picked:
+            primaries[slot] = picked
+    set_lists = {}
+    for stat_name, field in ((STAT_SET_ANY, "set_any"), (STAT_SET_ONLY, "set_only")):
+        ids = []
+        for raw in form.getlist(field):
+            if not str(raw).isdigit() or int(raw) not in _SET_NAME_BY_ID:
+                return RedirectResponse(f"{back}?{urlencode({'error': 'Выберите сет из списка.'})}", status_code=303)
+            if int(raw) not in ids:
+                ids.append(int(raw))
+        if ids:
+            set_lists[stat_name] = ids
     sets = {}
     for set_id in _SET_NAME_BY_ID:
         raw = (form.get(f"set_{set_id}") or "0").strip()
@@ -583,15 +623,16 @@ async def requirement_save_mods(
     for slot in MOD_GRID_SLOTS:
         want = primaries.get(slot)
         existing = [r for r in rows if r[3] == STAT_MOD_PRIMARY and r[12] == slot]
-        keep = next((r for r in existing if want is not None and int(r[5]) == want), None)
+        keep = next((r for r in existing if want is not None and set(mod_primary_allowed(r[5], r[11])) == set(want)), None)
         for r in existing:
             if r is not keep:
                 database.delete_stat_requirement(r[0], guild_id=guild_id)
         if want is not None and keep is None:
+            skill_id = ",".join(map(str, want)) if len(want) > 1 else None
             database.add_stat_requirement(
-                plate_name, base_id, STAT_MOD_PRIMARY, "=", float(want), priority,
-                f"{char_name} — основа «{_mod_primary_text(slot, want)}»", comment_value,
-                user["discord_id"], guild_id=guild_id, mod_slot=slot, scheme_num=scheme,
+                plate_name, base_id, STAT_MOD_PRIMARY, "=", float(want[0]), priority,
+                f"{char_name} — основа «{_mod_primary_text(slot, want[0], skill_id)}»", comment_value,
+                user["discord_id"], guild_id=guild_id, mod_slot=slot, skill_id=skill_id, scheme_num=scheme,
             )
 
     for set_id in _SET_NAME_BY_ID:
@@ -606,6 +647,21 @@ async def requirement_save_mods(
                 plate_name, base_id, STAT_SET, ">=", float(want), priority,
                 f"{char_name} — сет «{_mod_set_text(set_id, want)}»", comment_value,
                 user["discord_id"], guild_id=guild_id, skill_id=str(set_id), scheme_num=scheme,
+            )
+
+    for stat_name in (STAT_SET_ANY, STAT_SET_ONLY):
+        want = set_lists.get(stat_name)
+        existing = [r for r in rows if r[3] == stat_name]
+        keep = next((r for r in existing if want is not None and set(parse_id_list(r[11])) == set(want)), None)
+        for r in existing:
+            if r is not keep:
+                database.delete_stat_requirement(r[0], guild_id=guild_id)
+        if want is not None and keep is None:
+            skill_id = ",".join(map(str, want))
+            database.add_stat_requirement(
+                plate_name, base_id, stat_name, ">=", 1.0, priority,
+                f"{char_name} — сеты «{_set_list_text(stat_name, skill_id)}»", comment_value,
+                user["discord_id"], guild_id=guild_id, skill_id=skill_id, scheme_num=scheme,
             )
     return RedirectResponse(back, status_code=303)
 
@@ -711,7 +767,7 @@ async def requirement_edit(
     # есть. У сравнения с персонажем оператор (включая строгие >/<) и отрыв редактируемы. Схема — не захардкожена ни у одного
     # из типов, её можно менять всегда (просто классификация строки, не влияет на
     # оператор/значение).
-    _locked = stat_name in (STAT_OMICRON, STAT_MOD_PRIMARY, STAT_SET)
+    _locked = stat_name in (STAT_OMICRON,) + MOD_REQ_STATS
     allowed_ops = COMPARE_OPERATORS if compare_character_key else {c.value for c in OPERATOR_CHOICES}
     if not _locked and ((operator is not None and operator not in allowed_ops)
                         or (compare_character_key and threshold is not None and threshold < 0)):
