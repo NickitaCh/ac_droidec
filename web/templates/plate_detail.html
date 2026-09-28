@@ -162,62 +162,90 @@
         </div>
 
         <div class="panel">
-            <div class="panel-title"><span>Моды: основы и сеты</span><span class="panel-hint">отметьте нужное — каждая клетка станет требованием</span></div>
-            <form method="post" action="/plates/{{ plate_name }}/requirements/add_mods" class="mod-grid-form" data-mod-grid-form>
-                <label class="mod-grid-unit">
-                    Персонаж
-                    <div class="unit-search" data-unit-search>
-                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
-                        <input type="hidden" name="base_id" class="unit-search-value" required>
-                        <div class="unit-search-results"></div>
-                    </div>
-                </label>
-
-                <div class="mod-grid-section-title">Основы</div>
-                <div class="mod-grid-slots">
-                    {% for slot, slot_label, opts in mod_grid_slots %}
-                        <div class="mod-grid-slot">
-                            <span class="mod-grid-slot-icon" title="{{ slot_label }}">{{ game.mod_icon(slot, none, size="1.9em") }}</span>
-                            <div class="chip-group" role="radiogroup" aria-label="{{ slot_label }}">
-                                <label class="chip chip-muted"><input type="radio" name="primary_{{ slot }}" value="" checked><span>любая</span></label>
-                                {% for o in opts %}
-                                    <label class="chip" title="{{ o.label }}"><input type="radio" name="primary_{{ slot }}" value="{{ o.unit_stat }}"><span>{{ o.label.split(" +")[0] }}</span></label>
-                                {% endfor %}
-                            </div>
+            <div class="panel-title"><span>Моды: основы и сеты</span><span class="panel-hint">сборка персонажа — 6 модулей</span></div>
+            <form method="post" action="/plates/{{ plate_name }}/requirements/save_mods" class="mod-grid-form" data-mod-grid-form
+                  data-config-url="/plates/{{ plate_name | urlencode }}/api/mod-config">
+                <div class="mod-grid-head">
+                    <label class="mod-grid-unit">
+                        Персонаж
+                        <div class="unit-search" data-unit-search>
+                            <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off" required>
+                            <input type="hidden" name="base_id" class="unit-search-value" required>
+                            <div class="unit-search-results"></div>
                         </div>
-                    {% endfor %}
-                </div>
-
-                <div class="mod-grid-section-title">Сеты</div>
-                <div class="chip-group mod-grid-sets">
-                    {% for label, value in set_options %}
-                        <label class="chip chip-set" title="{{ label }}"><input type="checkbox" name="set_id" value="{{ value }}">{{ game.set_icon(value, size="1.6em") }}<span>{{ label }}</span></label>
-                    {% endfor %}
-                </div>
-
-                <div class="requirement-form mod-grid-footer">
-                    <label>
-                        Приоритет
-                        <select name="priority" required>
-                            {% for label, value in priority_options %}
-                                <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
                     </label>
                     <label>
                         Схема мод-билда
-                        <select name="scheme_num">
+                        <select name="scheme_num" data-mod-grid-scheme>
                             {% for label, value in scheme_options %}
                                 <option value="{{ value }}">{{ label }}</option>
                             {% endfor %}
                         </select>
                     </label>
-                    <label>
-                        Комментарий (необязательно)
-                        <input type="text" name="comment">
-                    </label>
-                    <button type="submit" data-mod-grid-submit disabled>Добавить</button>
                 </div>
+                <p class="muted mod-grid-hint" data-mod-grid-hint>Выберите персонажа — подтянется его текущая сборка в этом плейте.</p>
+
+                <fieldset class="mod-grid-body" data-mod-grid-body disabled>
+                    <div class="mod-grid-section-title">Основы</div>
+                    <div class="mod-grid-slots">
+                        {% for slot, slot_label, opts in mod_grid_slots %}
+                            <div class="mod-grid-slot{% if opts|length == 1 %} is-fixed{% endif %}">
+                                <div class="mod-grid-slot-head">{{ game.mod_icon(slot, none, size="2.2em") }}<span>{{ slot_label }}</span></div>
+                                <div class="chip-group" role="radiogroup" aria-label="{{ slot_label }}">
+                                    {% if opts|length == 1 %}
+                                        <span class="chip chip-fixed" title="{{ opts[0].label }} — у этого слота одна основа">{{ opts[0].label.split(" +")[0] }}</span>
+                                    {% else %}
+                                        <label class="chip chip-muted"><input type="radio" name="primary_{{ slot }}" value="" checked><span>любая</span></label>
+                                        {% for o in opts %}
+                                            <label class="chip" title="{{ o.label }}"><input type="radio" name="primary_{{ slot }}" value="{{ o.unit_stat }}"><span>{{ o.label.split(" +")[0] }}</span></label>
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mod-grid-section-title">Сеты</div>
+                    <div class="mod-budget" data-mod-budget>
+                        <div class="mod-budget-cells" data-mod-budget-cells>
+                            {% for i in range(6) %}<span class="mod-budget-cell"></span>{% endfor %}
+                        </div>
+                        <span class="mod-budget-label" data-mod-budget-label>0 / 6 модулей</span>
+                    </div>
+                    <div class="mod-set-grid">
+                        {% for st in set_grid %}
+                            <div class="mod-set-card" data-set-id="{{ st.set_id }}" data-pieces="{{ st.pieces }}" data-max="{{ st.max_count }}">
+                                {{ game.set_icon(st.set_id, size="1.8em") }}
+                                <div class="mod-set-card-text">
+                                    <span class="mod-set-card-name" title="{{ st.name }}">{{ st.name }}</span>
+                                    <span class="muted">{{ st.pieces }} модуля</span>
+                                </div>
+                                <div class="stepper">
+                                    <button type="button" class="stepper-btn" data-step="-1" aria-label="Меньше">−</button>
+                                    <input type="hidden" name="set_{{ st.set_id }}" value="0">
+                                    <span class="stepper-value" data-set-count>0</span>
+                                    <button type="button" class="stepper-btn" data-step="1" aria-label="Больше">+</button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="requirement-form mod-grid-footer">
+                        <label>
+                            Приоритет новых требований
+                            <select name="priority" required>
+                                {% for label, value in priority_options %}
+                                    <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            Комментарий (необязательно)
+                            <input type="text" name="comment">
+                        </label>
+                        <button type="submit">Сохранить сборку</button>
+                    </div>
+                </fieldset>
             </form>
         </div>
 
@@ -285,7 +313,28 @@
         </div>
     {% endif %}
 
-    {% macro requirements_table(char, reqs) %}
+    {% macro mod_loadout(lo) %}
+        {% if lo %}
+            <div class="mod-loadout">
+                {% if lo.cells|select|list %}
+                    <div class="mod-loadout-sets" title="Сеты: {% for st in lo.sets %}{{ st.name }}{% if st.count > 1 %} ×{{ st.count }}{% endif %}{% if not loop.last %} + {% endif %}{% endfor %}">
+                        <span class="mod-budget-cells">
+                            {% for cell in lo.cells %}<span class="mod-budget-cell{% if cell %} filled{% endif %}">{% if cell %}{{ game.set_icon(cell, size="1.2em") }}{% endif %}</span>{% endfor %}
+                        </span>
+                        <span class="mod-loadout-label{% if lo.over %} is-over{% endif %}">{% for st in lo.sets %}{{ st.name }}{% if st.count > 1 %} ×{{ st.count }}{% endif %}{% if not loop.last %} + {% endif %}{% endfor %} · {{ lo.used }}/6</span>
+                    </div>
+                {% endif %}
+                {% if lo.primaries %}
+                    <div class="mod-loadout-primaries">
+                        {% for slot, slot_label, label in lo.primaries %}<span class="mod-loadout-primary" title="{{ slot_label }}">{{ game.mod_icon(slot, none, size="1.3em") }}{{ label }}</span>{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% endmacro %}
+
+    {% macro requirements_table(char, reqs, loadout=none) %}
+        {{ mod_loadout(loadout) }}
         <div class="table-scroll">
             <table class="data">
                 <thead>
@@ -380,7 +429,7 @@
                                     </form>
                                 </details>
                             </div>
-                            {{ requirements_table(char, char.scheme1_reqs) }}
+                            {{ requirements_table(char, char.scheme1_reqs, char.scheme1_loadout) }}
                         </div>
                         <div>
                             <div class="panel-title" style="padding: 0 0 0.4em;">
@@ -394,11 +443,11 @@
                                     </form>
                                 </details>
                             </div>
-                            {{ requirements_table(char, char.scheme2_reqs) }}
+                            {{ requirements_table(char, char.scheme2_reqs, char.scheme2_loadout) }}
                         </div>
                     </div>
                 {% else %}
-                    {{ requirements_table(char, char.requirements) }}
+                    {{ requirements_table(char, char.requirements, char.loadout) }}
                 {% endif %}
             </div>
         {% endfor %}
@@ -497,17 +546,91 @@
 
     <script>
     document.addEventListener("DOMContentLoaded", () => {
-        // Сетка «основы + сеты»: счётчик выбранного на кнопке, пока ничего не отмечено — кнопка неактивна.
+        // Сетка «основы + сеты»: при выборе персонажа/схемы подтягивает текущую сборку
+        // (/api/mod-config) — форма всегда отражает то, что уже сохранено, сабмит сохраняет
+        // её целиком. Полоска из 6 ячеек показывает, сколько модулей заняли сеты; «+» у сета
+        // гаснет, если следующий комплект не влезает. shared — сеты из другой схемы
+        // («обе схемы» при правке схемы 1/2), тоже занимают модули, показаны приглушённо.
         const form = document.querySelector("[data-mod-grid-form]");
         if (!form) return;
-        const btn = form.querySelector("[data-mod-grid-submit]");
-        const refresh = () => {
-            const n = form.querySelectorAll('.mod-grid-slots input[type=radio]:checked:not([value=""]), .mod-grid-sets input:checked').length;
-            btn.disabled = n === 0;
-            btn.textContent = n ? `Добавить (${n})` : "Добавить";
+        const body = form.querySelector("[data-mod-grid-body]");
+        const hint = form.querySelector("[data-mod-grid-hint]");
+        const baseInput = form.querySelector(".unit-search-value");
+        const textInput = form.querySelector(".unit-search-input");
+        const schemeSelect = form.querySelector("[data-mod-grid-scheme]");
+        const cards = [...form.querySelectorAll(".mod-set-card")];
+        const cellsBox = form.querySelector("[data-mod-budget-cells]");
+        const budgetLabel = form.querySelector("[data-mod-budget-label]");
+        let shared = {};
+
+        const setIconHtml = (id, extra) =>
+            `<span class="mod-budget-cell filled ${extra}"><span class="mod-set-icon" style="--set: url(/static/img/game/sets/set-${id}.webp); --size: 1.3em"></span></span>`;
+        const pieces = (card) => Number(card.dataset.pieces);
+        const count = (card) => Number(card.querySelector("input").value);
+
+        const render = () => {
+            const own = cards.flatMap((c) => Array(count(c) * pieces(c)).fill(c.dataset.setId));
+            const other = Object.entries(shared).flatMap(([id, n]) => {
+                const card = cards.find((c) => c.dataset.setId === id);
+                return Array(n * (card ? pieces(card) : 2)).fill(id);
+            });
+            const used = own.length + other.length;
+            const html = own.map((id) => setIconHtml(id, "")).concat(other.map((id) => setIconHtml(id, "shared")));
+            while (html.length < 6) html.push('<span class="mod-budget-cell"></span>');
+            cellsBox.innerHTML = html.join("");
+            budgetLabel.textContent = `${used} / 6 модулей` + (other.length ? ` (${other.length} — из другой схемы)` : "");
+            budgetLabel.classList.toggle("is-full", used === 6);
+            budgetLabel.classList.toggle("is-over", used > 6);
+            cards.forEach((c) => {
+                const n = count(c);
+                c.querySelector("[data-set-count]").textContent = n ? `×${n}` : "—";
+                c.classList.toggle("is-active", n > 0);
+                c.querySelector('[data-step="-1"]').disabled = n === 0;
+                c.querySelector('[data-step="1"]').disabled = n >= Number(c.dataset.max) || used + pieces(c) > 6;
+            });
         };
-        form.addEventListener("change", refresh);
-        refresh();
+
+        const setCount = (card, n) => { card.querySelector("input").value = String(n); };
+
+        const lock = (text) => {
+            body.disabled = true;
+            hint.textContent = text;
+            hint.hidden = false;
+        };
+
+        const load = async () => {
+            if (!baseInput.value) { lock("Выберите персонажа — подтянется его текущая сборка в этом плейте."); return; }
+            lock("Загружаю сборку…");
+            try {
+                const url = `${form.dataset.configUrl}?base_id=${encodeURIComponent(baseInput.value)}&scheme_num=${encodeURIComponent(schemeSelect.value)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(resp.status);
+                const cfg = await resp.json();
+                form.querySelectorAll('.mod-grid-slots input[type=radio]').forEach((r) => {
+                    const slot = r.name.replace("primary_", "");
+                    const want = cfg.primaries[slot];
+                    r.checked = want === undefined ? r.value === "" : r.value === String(want);
+                });
+                cards.forEach((c) => setCount(c, cfg.sets[c.dataset.setId] || 0));
+                shared = cfg.shared_sets || {};
+                body.disabled = false;
+                hint.hidden = true;
+                render();
+            } catch (e) {
+                lock("Не удалось загрузить сборку — обновите страницу.");
+            }
+        };
+
+        cards.forEach((c) => c.addEventListener("click", (e) => {
+            const btn = e.target.closest("[data-step]");
+            if (!btn || btn.disabled) return;
+            setCount(c, Math.max(0, count(c) + Number(btn.dataset.step)));
+            render();
+        }));
+        baseInput.addEventListener("change", load);
+        schemeSelect.addEventListener("change", load);
+        textInput.addEventListener("input", () => lock("Выберите персонажа из списка."));
+        render();
     });
     </script>
 

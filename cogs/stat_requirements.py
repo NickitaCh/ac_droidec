@@ -449,10 +449,20 @@ def _mod_set_label(set_id, priority: str) -> str:
     return f"{label}*" if priority == "optional" else label
 
 
-def _mod_set_req_text(set_id) -> str:
+def _mod_set_req_text(set_id, sets_count=1) -> str:
+    """"Health ×2 (4 мода)" — sets_count комплектов (threshold_value у ModSet-строки,
+    исторически всегда 1.0), в скобках — сколько модулей из 6 это занимает."""
     set_id = int(set_id)
+    count = max(int(sets_count or 1), 1)
     pieces = stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
-    return f"{_SET_NAME_BY_ID.get(set_id, set_id)} ({pieces} шт.)"
+    name = _SET_NAME_BY_ID.get(set_id, set_id)
+    times = f" ×{count}" if count > 1 else ""
+    return f"{name}{times} ({pieces * count} мод.)"
+
+
+def _complete_sets(mod_set_counts: dict, set_id: int) -> int:
+    """Сколько полных комплектов сета set_id надето (2 шт. Health ×4 модуля = 2)."""
+    return mod_set_counts.get(set_id, 0) // stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
 
 
 def _resolve_scheme(rows: list, mod_primaries: dict, mod_set_counts: dict, forced_scheme: int | None,
@@ -487,9 +497,7 @@ def _resolve_scheme(rows: list, mod_primaries: dict, mod_set_counts: dict, force
         set_scores = {1: 0, 2: 0}
         for r in rows:
             if r[3] == STAT_SET and r[14] in (1, 2):
-                set_id = int(r[11])
-                required_pieces = stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
-                if mod_set_counts.get(set_id, 0) >= required_pieces:
+                if _complete_sets(mod_set_counts, int(r[11])) >= max(int(r[5] or 1), 1):
                     set_scores[r[14]] += 1
 
         if set_scores[1] != set_scores[2]:
@@ -613,12 +621,12 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     # сравнение оператором ">=" с захардкоженным threshold_value=1.0 (тот же паттерн, что у
     # Omicron) — САМ set_id хранится в колонке skill_id (не в threshold_value, который тут
     # всегда 1.0 — булева цель, а не "какой сет"), см. stat_req_add_mod_set.
+    # С 2026-09-28 значение — ЧИСЛО полных комплектов (а не 0/1), threshold_value — сколько
+    # комплектов нужно (Health ×2 = 4 модуля); старые строки с 1.0 сравниваются как раньше.
     set_ids_needed = {int(row[11]) for row in rows if row[3] == STAT_SET}
     if set_ids_needed:
         for set_id in set_ids_needed:
-            required_pieces = stat_engine.MOD_SET_PIECE_COUNT.get(set_id, 2)
-            has_set = mod_set_counts.get(set_id, 0) >= required_pieces
-            current_values[f"ModSet:{set_id}"] = 1.0 if has_set else 0.0
+            current_values[f"ModSet:{set_id}"] = float(_complete_sets(mod_set_counts, set_id))
 
     # Показываем прогноз не только вверх (у игрока релик ниже требуемого), но и вниз
     # (у игрока уже выше — интересно, каким был бы стат ровно на уровне плейта).
@@ -723,7 +731,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         elif is_omicron:
             req_cell = "разблокирован"
         elif is_mod_set:
-            req_cell = "надет"
+            req_cell = "надет" if (threshold or 1) <= 1 else f"×{int(threshold)}"
         else:
             req_cell = f"{operator} {_fmt_compact(threshold)}"
         cur_val = current_values.get(lookup_key)
@@ -746,6 +754,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             cur_cell = f"{actual_opt['label'] if actual_opt else f'#{int(cur_val)}'} {'✅' if cur_ok else '❌'}"
         elif is_omicron:
             cur_cell = "Есть ✅" if cur_ok else "Нет ❌"
+        elif is_mod_set and (threshold or 1) > 1:
+            cur_cell = f"{int(cur_val)} из {int(threshold)} {'✅' if cur_ok else '❌'}"
         elif is_mod_set:
             cur_cell = "Надет ✅" if cur_ok else "Не надет ❌"
         elif is_compare:
@@ -764,7 +774,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 req_label = req_opt["label"] if req_opt else f"#{int(threshold)}"
                 mod_primary_lines.append(f"{cur_cell} — {slot_label}{suffix} (нужно: {req_label})")
         elif is_mod_set:
-            mod_set_lines.append(f"{cur_cell} — {_mod_set_req_text(skill_id)}{suffix}")
+            mod_set_lines.append(f"{cur_cell} — {_mod_set_req_text(skill_id, threshold)}{suffix}")
         elif is_compare:
             compare_lines.append(f"{cur_cell} — {_stat_label(stat_name, '')} {operator} {compare_char_name}{_compare_offset_text(operator, compare_offset)}{suffix}")
 
@@ -846,7 +856,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             actual_opt = _mod_primary_option(mod_slot, cur_val) if is_mod_primary else None
             current_text = (
                 "не разблокирован" if is_omicron
-                else "не надет" if is_mod_set
+                else (f"надето {int(cur_val or 0)} из {int(threshold)}" if (threshold or 1) > 1 else "не надет") if is_mod_set
                 else (actual_opt["label"] if actual_opt else "другая основа") if is_mod_primary
                 else _fmt_compact(cur_val)
             )
@@ -1033,7 +1043,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
         if stat_name == STAT_SET:
             # Надетый сет от релика не зависит — норма не меняется между релик-колонками.
             label = _mod_set_label(skill_id, priority)
-            cell = _mod_set_req_text(skill_id)
+            cell = _mod_set_req_text(skill_id, threshold)
             table_rows.append([label, cell, cell])
             continue
 
@@ -1219,7 +1229,7 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
         elif stat_name == STAT_MOD_PRIMARY:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — основа «{_mod_primary_req_text(mod_slot, threshold)}»"
         elif stat_name == STAT_SET:
-            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — сет «{_mod_set_req_text(skill_id)}»"
+            label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — сет «{_mod_set_req_text(skill_id, threshold)}»"
         elif compare_character_key:
             label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] {plate_name}: {char_name} — {_compare_req_text(stat_name, operator, compare_character_key, threshold)}"
         else:
@@ -1729,6 +1739,7 @@ class StatRequirementsCog(commands.Cog):
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         комментарий: str = commands.Param(default=None, description="Заметка"),
         схема: str = commands.Param(default=None, description="Только для одной из двух схем мод-билда персонажа (если не задано — общее для обеих)", choices=SCHEME_CHOICES),
+        комплектов: int = commands.Param(default=1, ge=1, le=3, description="Сколько комплектов сета (Health ×2 = 4 модуля). 4-модульный сет — только 1"),
     ):
         guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
         if guild_id is None:
@@ -1748,15 +1759,22 @@ class StatRequirementsCog(commands.Cog):
             )
             return
 
+        pieces = stat_engine.MOD_SET_PIECE_COUNT.get(int(сет), 2)
+        if pieces * комплектов > 6:
+            await inter.response.send_message(
+                f"❌ {комплектов} × {pieces} модулей не влезает в 6 слотов персонажа.", ephemeral=True,
+            )
+            return
+
         base_id = _parse_bracket_id(персонаж)
         char_name = _unit_display_name(base_id)
-        raw_text = f"{char_name} — сет «{_mod_set_req_text(сет)}»"
+        raw_text = f"{char_name} — сет «{_mod_set_req_text(сет, комплектов)}»"
         # threshold_value=1.0 захардкожен (булева цель "надет/не надет", тот же паттерн, что у
         # Omicron), а САМ сет — в колонке skill_id, а не в threshold_value (см. докстринг блока
         # ModSet в _evaluate_character_player выше — конфликт "какой сет" vs "булева цель
         # сравнения" был реальным багом, пойманным сквозным тестом на живых данных 2026-09-21).
         req_id = database.add_stat_requirement(
-            плейт, base_id, STAT_SET, ">=", 1.0, приоритет, raw_text, комментарий, str(inter.author.id),
+            плейт, base_id, STAT_SET, ">=", float(комплектов), приоритет, raw_text, комментарий, str(inter.author.id),
             guild_id=guild_id, skill_id=str(сет), scheme_num=_parse_scheme_param(схема),
         )
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {raw_text}", ephemeral=True)

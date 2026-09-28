@@ -2046,11 +2046,16 @@ main.wide > p, main.wide > ul, main.wide > ol, main.wide.docs-page h2 + p { max-
 
 /* Плейты: сетка «основы + сеты» (в стиле HotUtils) */
 .mod-grid-form { display: flex; flex-direction: column; gap: 0.8em; max-width: none; }
-.mod-grid-unit { max-width: 28em; }
-.mod-grid-section-title { font-weight: 600; font-size: 0.9em; color: var(--fg-secondary); margin-top: 0.3em; }
-.mod-grid-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(22em, 1fr)); gap: 0.6em 1.4em; }
-.mod-grid-slot { display: flex; align-items: center; gap: 0.6em; min-width: 0; }
-.mod-grid-slot-icon { flex: 0 0 auto; display: inline-flex; }
+.mod-grid-head { display: flex; flex-wrap: wrap; gap: 1em; align-items: flex-end; justify-content: center; }
+.mod-grid-head > label { flex: 0 1 24em; }
+.mod-grid-hint { text-align: center; margin: 0; }
+.mod-grid-body { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.8em; }
+.mod-grid-body:disabled { opacity: 0.45; }
+.mod-grid-section-title { font-weight: 600; font-size: 0.9em; color: var(--fg-secondary); text-align: center; margin-top: 0.4em; }
+.mod-grid-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7em; max-width: 64em; width: 100%; margin: 0 auto; }
+.mod-grid-slot { display: flex; flex-direction: column; align-items: center; gap: 0.45em; padding: 0.7em 0.6em; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.mod-grid-slot-head { display: flex; flex-direction: column; align-items: center; gap: 0.2em; font-size: 0.85em; color: var(--fg-secondary); }
+.mod-grid-slot .chip-group { justify-content: center; }
 .chip-group { display: flex; flex-wrap: wrap; gap: 0.3em; min-width: 0; }
 .chip { position: relative; display: inline-flex; flex-direction: row; align-items: center; gap: 0.35em; padding: 0.25em 0.6em; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--fg); font-size: 0.85em; cursor: pointer; user-select: none; line-height: 1.3; }
 .chip input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
@@ -2059,6 +2064,32 @@ main.wide > p, main.wide > ul, main.wide > ol, main.wide.docs-page h2 + p { max-
 .chip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .chip-muted { color: var(--fg-muted); }
 .chip-muted:has(input:checked) { background: var(--surface-2); border-color: var(--border-strong); color: var(--fg-secondary); }
-.chip-set { padding: 0.2em 0.55em 0.2em 0.3em; }
-.mod-grid-footer { display: flex; margin-top: 0.4em; }
-@media (max-width: 600px) { .mod-grid-slots { grid-template-columns: 1fr; } .mod-grid-slot { align-items: flex-start; } }
+.chip-fixed { cursor: default; color: var(--fg-secondary); border-style: dashed; }
+.chip-fixed:hover { background: var(--surface); }
+.mod-budget { display: flex; flex-direction: column; align-items: center; gap: 0.35em; }
+.mod-budget-cells { display: inline-flex; gap: 0.25em; }
+.mod-budget-cell { width: 1.9em; height: 1.9em; border: 1px dashed var(--border-strong); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
+.mod-budget-cell.filled { border-style: solid; border-color: var(--accent); background: var(--surface-2); }
+.mod-budget-cell.shared { border-color: var(--border-strong); opacity: 0.55; }
+.mod-budget-label { font-size: 0.85em; color: var(--fg-secondary); }
+.mod-budget-label.is-full { color: var(--status-good); }
+.mod-budget-label.is-over, .mod-loadout-label.is-over { color: var(--error); }
+.mod-set-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5em; max-width: 64em; width: 100%; margin: 0 auto; }
+.mod-set-card { display: flex; align-items: center; gap: 0.5em; padding: 0.45em 0.6em; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.mod-set-card.is-active { border-color: var(--accent); }
+.mod-set-card-text { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 0.85em; line-height: 1.25; }
+.mod-set-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepper { display: inline-flex; align-items: center; gap: 0.2em; }
+.stepper-btn { width: 1.8em; height: 1.8em; padding: 0; border-radius: 6px; font-size: 1em; line-height: 1; }
+.stepper-btn:disabled { opacity: 0.35; cursor: default; }
+.stepper-value { min-width: 1.8em; text-align: center; font-weight: 600; font-size: 0.9em; }
+.mod-grid-footer { display: flex; margin: 0.4em auto 0; max-width: 64em; width: 100%; }
+/* Сводка сборки над таблицей требований персонажа */
+.mod-loadout { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 1.2em; margin: 0 0 0.6em; }
+.mod-loadout-sets { display: inline-flex; align-items: center; gap: 0.5em; }
+.mod-loadout .mod-budget-cell { width: 1.5em; height: 1.5em; }
+.mod-loadout-label { font-size: 0.85em; color: var(--fg-secondary); }
+.mod-loadout-primaries { display: inline-flex; flex-wrap: wrap; gap: 0.3em 0.8em; font-size: 0.85em; }
+.mod-loadout-primary { display: inline-flex; align-items: center; gap: 0.3em; }
+@media (max-width: 900px) { .mod-grid-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mod-set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .mod-grid-slots, .mod-set-grid { grid-template-columns: 1fr; } }
