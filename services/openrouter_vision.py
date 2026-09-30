@@ -29,6 +29,16 @@ import requests
 import database
 
 OPENROUTER_VISION_MODEL = "minimax/minimax-m3:free"
+# Текстовые задачи (черновики сокращений ДК) — свой список моделей по порядку: free-модели
+# на OpenRouter периодически исчезают (minimax-m3:free пропала к 2026-09-30 — 404) или
+# отвечают 429 из-за общего пула — тогда пробуем следующую. Первая проверена 2026-09-30 на
+# реальных бонусах сезона 34 (19/19 валидный JSON, ~75 с); две другие в тот момент
+# отдавали 429, качество на них не сравнивалось.
+OPENROUTER_TEXT_MODELS = (
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
+    "qwen/qwen3.8-27b:free",
+)
 OPENROUTER_DAILY_REQUEST_LIMIT = 50
 
 # Повтор при 429 — подтверждено вживую 2026-09-04: реальный запрос от пользователя словил
@@ -60,6 +70,31 @@ def call_vision_json(image_bytes: bytes, mime_type: str, api_key: str, prompt: s
         "response_format": {"type": "json_object"},
         "temperature": 0,
     }
+    return _post_json_completion(request_json, api_key, timeout=60)
+
+
+def call_text_json(prompt: str, api_key: str, timeout: int = 150, models=OPENROUTER_TEXT_MODELS) -> dict:
+    """То же без картинки — для текстовых задач (напр. черновики сокращений бонусов
+    датакронов, services/datacron_shorts.py). Тот же суточный счётчик запросов.
+    На 404/429 от модели переходит к следующей из models."""
+    last_error = None
+    for model in models:
+        request_json = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+        }
+        try:
+            return _post_json_completion(request_json, api_key, timeout=timeout)
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code not in (404, 429):
+                raise
+            last_error = e
+    raise last_error
+
+
+def _post_json_completion(request_json: dict, api_key: str, timeout: int) -> dict:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     response = None
@@ -68,7 +103,7 @@ def call_vision_json(image_bytes: bytes, mime_type: str, api_key: str, prompt: s
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=request_json,
-            timeout=60,
+            timeout=timeout,
         )
         if response.status_code != 429 or attempt == len(_RETRY_BACKOFF_SECONDS):
             break

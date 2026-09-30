@@ -30,7 +30,7 @@
         </div>
     </div>
 
-    <p><a href="/datacrons/check?season={{ set_id }}">Проверить игрока/гильдию по этому сезону →</a></p>
+    <p><a href="/datacrons/check?season={{ set_id }}">Проверить игрока/гильдию по этому сезону →</a>{% if user.is_super_admin %} · <a href="/admin/datacron-shorts?season={{ set_id }}">Сокращения бонусов</a>{% endif %}</p>
 
     <div class="panel">
         <div class="panel-title"><span>Добавить обычное требование</span></div>
@@ -46,6 +46,10 @@
                         <option value="{{ value }}" {% if value == priority_default %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
+            </label>
+            <label>
+                Сколько таких ДК нужно
+                <input type="number" name="quantity" value="1" min="1" max="{{ max_quantity }}" required>
             </label>
             {% for lvl in (3, 6, 9) %}
                 <label>
@@ -83,7 +87,7 @@
             </label>
             <button type="submit">Добавить</button>
         </form>
-        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
+        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования. «Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
     </div>
 
     {% if not base_reqs %}
@@ -99,6 +103,7 @@
                             <th class="dc-level-col">3 уровень</th>
                             <th class="dc-level-col">6 уровень</th>
                             <th class="dc-level-col">9 уровень</th>
+                            <th>Кол-во</th>
                             <th>Приоритет</th>
                             <th>Статы</th>
                             <th>Мин. % статов</th>
@@ -113,6 +118,7 @@
                                 <td class="dc-level-col">{{ r.level3_label }}</td>
                                 <td class="dc-level-col">{{ r.level6_label }}</td>
                                 <td class="dc-level-col">{{ r.level9_label }}</td>
+                                <td>{{ r.quantity }}</td>
                                 <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
                                 <td>{{ r.stats or "—" }}</td>
                                 <td>
@@ -131,6 +137,9 @@
                                                     <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
                                                 {% endfor %}
                                             </select>
+                                            <label>Кол-во ДК
+                                                <input type="number" name="quantity" value="{{ r.quantity }}" min="1" max="{{ max_quantity }}" required>
+                                            </label>
                                             <input type="text" name="stats" value="{{ r.stats or '' }}" placeholder="Статы">
                                             <fieldset class="stat-req-fieldset">
                                                 <legend>Мин. % статов (полная замена при сохранении)</legend>

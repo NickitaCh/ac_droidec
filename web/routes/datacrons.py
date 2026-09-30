@@ -27,6 +27,7 @@ import guild_resolver
 from cogs.datacron_requirements import (
     DATACRON_ANY,
     DATACRON_ANY_LABEL,
+    DATACRON_MAX_QUANTITY,
     DATACRON_MAX_STAT_REQUIREMENTS,
     DATACRON_NONE,
     DATACRON_NONE_LABEL,
@@ -36,7 +37,7 @@ from cogs.datacron_requirements import (
     PRIORITY_LABELS,
     PRIORITY_ORDER,
     PRIORITY_REQUIRED,
-    _check_requirement_stats,
+    _evaluate_base_requirement,
     _extract_player_base_datacrons,
     _extract_player_focused_datacrons,
     _focused_char_label,
@@ -236,10 +237,10 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
     stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
     base_reqs = []
     for row in base_rows:
-        req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority, stats = row
+        req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority, stats, quantity = row
         stat_reqs = stats_by_req.get(req_id, [])
         base_reqs.append({
-            "id": req_id, "pack": pack,
+            "id": req_id, "pack": pack, "quantity": quantity or 1,
             "level3": l3, "level6": l6, "level9": l9,
             "level3_label": _level_label(season_data["level3"], l3),
             "level6_label": _level_label(season_data["level6"], l6),
@@ -281,6 +282,7 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
         "datacron_none_label": DATACRON_NONE_LABEL,
         "stat_options": STAT_OPTIONS,
         "stat_slots": range(1, DATACRON_MAX_STAT_REQUIREMENTS + 1),
+        "max_quantity": DATACRON_MAX_QUANTITY,
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
     })
@@ -294,6 +296,7 @@ async def add_base_requirement(
     set_id: int,
     pack: str = Form(""),
     priority: str = Form(PRIORITY_REQUIRED),
+    quantity: int = Form(1),
     level3: str = Form(DATACRON_NONE),
     level6: str = Form(DATACRON_NONE),
     level9: str = Form(DATACRON_NONE),
@@ -315,13 +318,15 @@ async def add_base_requirement(
             return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из подсказок.")
     if level3 == DATACRON_NONE and level6 == DATACRON_NONE and level9 == DATACRON_NONE:
         return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).")
+    if not 1 <= quantity <= DATACRON_MAX_QUANTITY:
+        return _redirect_season(set_id, error=f"Количество — от 1 до {DATACRON_MAX_QUANTITY}.")
     stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
     if stat_error:
         return _redirect_season(set_id, error=stat_error)
 
     req_id = database.add_datacron_requirement(
         set_id, pack.strip() or None, level3, level6, level9, comment.strip() or None,
-        user["discord_id"], priority, guild_id=guild_id, stats=stats.strip() or None,
+        user["discord_id"], priority, guild_id=guild_id, stats=stats.strip() or None, quantity=quantity,
     )
     if stat_pairs:
         database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)
@@ -365,7 +370,7 @@ async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str =
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
-    _, row_set_id, pack, l3, l6, l9, comment, _, _, priority, stats = row
+    _, row_set_id, pack, l3, l6, l9, comment, _, _, priority, stats, quantity = row
 
     catalog = await _safe_catalog()
     if value in (DATACRON_ANY, DATACRON_NONE) or not _is_valid_level_value(catalog, row_set_id, level, value):
@@ -387,7 +392,7 @@ async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str =
     else:
         new_l9 = new_value
 
-    database.update_datacron_requirement(req_id, row_set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats)
+    database.update_datacron_requirement(req_id, row_set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats, quantity=quantity)
     return _redirect_season(set_id, notice=f"Требование #{req_id} дополнено альтернативой.")
 
 
@@ -400,6 +405,7 @@ async def edit_base_requirement(
     req_id: int,
     pack: str = Form(""),
     priority: str = Form(...),
+    quantity: int = Form(1),
     stats: str = Form(""),
     stat1: str = Form(""), value1: float = Form(None),
     stat2: str = Form(""), value2: float = Form(None),
@@ -413,11 +419,13 @@ async def edit_base_requirement(
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
-    _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority, _cur_stats = row
+    _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority, _cur_stats, _cur_quantity = row
+    if not 1 <= quantity <= DATACRON_MAX_QUANTITY:
+        return _redirect_season(set_id, error=f"Количество — от 1 до {DATACRON_MAX_QUANTITY}.")
     stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
     if stat_error:
         return _redirect_season(set_id, error=stat_error)
-    database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id, stats=stats.strip() or None)
+    database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id, stats=stats.strip() or None, quantity=quantity)
     database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)  # полная замена (веб = не патч-семантика)
     return _redirect_season(set_id, notice=f"Требование #{req_id} обновлено.")
 
@@ -518,29 +526,29 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
         owned = _extract_player_base_datacrons(player, set_id)
         pairs = _match_requirements(requirements, owned)
         stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
-        for req, match in pairs:
-            req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
+        for req, matches in pairs:
+            req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats, _quantity = req
+            evaluation = _evaluate_base_requirement(req, matches, stats_by_req.get(req_id))
             closed = []
-            if match:
-                m = match["levels"]
+            if matches and evaluation["quantity"] == 1:
+                m = matches[0]["levels"]
                 closed = [level_label(n, m[n]) for n in (3, 6, 9) if m[n]]
-            stat_reqs = stats_by_req.get(req_id)
-            stat_checks = _check_requirement_stats(stat_reqs, match["stats"] if match else {}) if stat_reqs else []
             stat_checks_labeled = [
-                {"label": DATACRON_STAT_LABELS.get(sid, str(sid)), "min_value": min_v, "actual": actual, "ok": ok}
-                for sid, min_v, actual, ok in stat_checks
-            ]
+                dict(c, label=DATACRON_STAT_LABELS.get(c["stat_id"], str(c["stat_id"])))
+                for c in evaluation["stat_checks"]
+            ] if matches else []
             bucket = rows_by_priority.get(priority, rows_by_priority[PRIORITY_REQUIRED])
             bucket.append({
                 "kind": "base", "pack": pack,
                 "l3": level_label(3, l3), "l6": level_label(6, l6), "l9": level_label(9, l9),
-                "comment": comment, "stats": stats, "matched": bool(match), "closed": closed,
+                "comment": comment, "stats": stats, "matched": evaluation["matched"], "closed": closed,
+                "quantity": evaluation["quantity"], "found": evaluation["found"],
                 "stat_checks": stat_checks_labeled,
-                "stat_warning": bool(match) and any(not c["ok"] for c in stat_checks_labeled),
+                "stat_warning": evaluation["stat_warning"],
             })
             tb = totals.get(priority, totals[PRIORITY_REQUIRED])
             tb["total"] += 1
-            if match:
+            if evaluation["matched"]:
                 tb["matched"] += 1
 
     if focused_requirements:

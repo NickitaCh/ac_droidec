@@ -57,6 +57,7 @@ DATACRON_STAT_LABELS = {
     56: "Защита",
 }
 DATACRON_MAX_STAT_REQUIREMENTS = 5
+DATACRON_MAX_QUANTITY = 20
 
 DATACRON_LIST_COLOR = 0x3498DB
 DATACRON_CHECK_COLOR_FULL = 0x2ECC71
@@ -246,13 +247,18 @@ def _resolve_ability_desc(ability_id: str, loc_kv: dict):
     return loc_kv.get(key) if key else None
 
 
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«\"(])")
+
+
 def _auto_shorten(text: str, limit: int = 200) -> str:
     """Фоллбэк-сокращение для способностей без ручной записи в ABILITY_SHORT_OVERRIDES
     (например, будущих сезонов) — берёт первое предложение вместо обрыва посреди текста."""
     text = text.strip()
     if len(text) <= limit:
         return text
-    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    # Конец предложения — только если дальше идёт заглавная буква/кавычка: иначе
+    # сокращения вроде «макс. защиту» или «осн. способность» рвали текст на полуслове.
+    first_sentence = _SENTENCE_END_RE.split(text, maxsplit=1)[0]
     if len(first_sentence) <= limit:
         return first_sentence
     return first_sentence[:limit].rstrip(" ,;:") + "…"
@@ -283,16 +289,55 @@ def _clean_ability_text(text: str) -> str:
     return text.replace("\\n\\n", " ").replace("\\n", " ")
 
 
-def _build_ability_desc(ability_id: str, target_rule: str, loc_kv: dict, target_label: str) -> str:
-    template = ABILITY_SHORT_OVERRIDES.get(ability_id)
-    if template is None:
-        desc = _resolve_ability_desc(ability_id, loc_kv)
-        if desc is None:
-            return ability_id
-        template = _auto_shorten(_clean_ability_text(desc))
-    if "{0}" in template:
-        template = template.replace("{0}", target_label)
-    return template
+ABILITY_SHORT_SOURCE_CUSTOM = "custom"    # правка на /admin/datacron-shorts (таблица datacron_ability_shorts)
+ABILITY_SHORT_SOURCE_BUILTIN = "builtin"  # ABILITY_SHORT_OVERRIDES выше
+ABILITY_SHORT_SOURCE_AUTO = "auto"        # _auto_shorten от полного игрового текста
+
+
+def _ability_short_template(ability_id: str, full_template, custom_shorts: dict):
+    """(шаблон с "{0}", источник). Приоритет: ручная правка из БД → встроенный словарь →
+    автосокращение полного текста (или сам ability_id, если текста нет в локализации)."""
+    if custom_shorts.get(ability_id):
+        return custom_shorts[ability_id], ABILITY_SHORT_SOURCE_CUSTOM
+    if ability_id in ABILITY_SHORT_OVERRIDES:
+        return ABILITY_SHORT_OVERRIDES[ability_id], ABILITY_SHORT_SOURCE_BUILTIN
+    if full_template is None:
+        return ability_id, ABILITY_SHORT_SOURCE_AUTO
+    return _auto_shorten(full_template), ABILITY_SHORT_SOURCE_AUTO
+
+
+def _fill_target(template: str, target_label: str) -> str:
+    return template.replace("{0}", target_label) if "{0}" in template else template
+
+
+def _apply_ability_labels(catalog: dict, custom_shorts: dict, version: str = "") -> dict:
+    """(Пере)собирает подписи бонусов level3/6/9 — [(ability_id, "Ветка: текст"), ...] —
+    из сырых записей каталога. Вызывается при построении каталога и при смене версии
+    сокращений (refresh_catalog_shorts), без повторного похода в Comlink."""
+    for season in catalog["seasons"].values():
+        abilities = season["abilities"]
+        for level in DATACRON_LEVELS:
+            by_branch = {}
+            for branch_label, ability_id in season["entries"][level]:
+                template, _src = _ability_short_template(ability_id, abilities[ability_id]["full"], custom_shorts)
+                by_branch.setdefault(branch_label, {})[ability_id] = f"{branch_label}: {_fill_target(template, branch_label)}"
+            flat = []
+            for branch_label in sorted(by_branch.keys()):
+                flat.extend(sorted(by_branch[branch_label].items(), key=lambda kv: kv[1]))
+            season[f"level{level}"] = flat
+    catalog["shorts_version"] = version
+    return catalog
+
+
+def refresh_catalog_shorts(catalog):
+    """Пересобирает подписи, если сокращения правили после построения каталога.
+    Дёшево (одно чтение bot_state) — можно звать на каждое обращение к каталогу."""
+    if not catalog:
+        return catalog
+    version = database.get_datacron_shorts_version()
+    if catalog.get("shorts_version") != version:
+        _apply_ability_labels(catalog, database.get_datacron_ability_shorts(), version)
+    return catalog
 
 
 async def _fetch_datacron_cache(comlink) -> dict:
@@ -316,9 +361,10 @@ async def _fetch_datacron_cache(comlink) -> dict:
             "display_name": loc_kv.get(dset.get("displayName", ""), f"Сезон {set_id}"),
             # branch_label -> {ability_id: label}; группировка по фракции/роли/персонажу,
             # чтобы все варианты одной ветки (напр. все "Танк") шли подряд в списке.
-            "level3": {},
-            "level6": {},
-            "level9": {},
+            # (branch_label, ability_id) по уровням — сырьё для _apply_ability_labels.
+            "entries": {level: [] for level in DATACRON_LEVELS},
+            # ability_id -> {"level", "full" (полный текст с "{0}"), "branches"}.
+            "abilities": {},
             "focused": {},  # character_key -> (label, max_tier)
         }
 
@@ -344,7 +390,6 @@ async def _fetch_datacron_cache(comlink) -> dict:
             level = tier.get("id")
             if level not in DATACRON_LEVELS:
                 continue
-            level_key = f"level{level}"
             for affix_set_id in tier.get("affixTemplateSetId", []):
                 affix_set = affix_sets.get(affix_set_id)
                 if not affix_set:
@@ -360,27 +405,37 @@ async def _fetch_datacron_cache(comlink) -> dict:
                     else ""
                 )
                 branch_label = _resolve_target_label(branch_key, loc_kv) if branch_key else affix_set_id
-                branch_bucket = seasons[set_id][level_key].setdefault(branch_label, {})
+                season = seasons[set_id]
                 for affix in affixes:
                     ability_id = affix.get("abilityId")
                     if not ability_id:
                         continue
-                    desc = _build_ability_desc(ability_id, affix.get("targetRule", ""), loc_kv, branch_label)
-                    branch_bucket[ability_id] = f"{branch_label}: {desc}"
+                    if (branch_label, ability_id) not in season["entries"][level]:
+                        season["entries"][level].append((branch_label, ability_id))
+                    info = season["abilities"].get(ability_id)
+                    if info is None:
+                        desc = _resolve_ability_desc(ability_id, loc_kv)
+                        info = season["abilities"][ability_id] = {
+                            "level": level,
+                            "full": _clean_ability_text(desc) if desc is not None else None,
+                            "branches": [],
+                        }
+                    if branch_label not in info["branches"]:
+                        info["branches"].append(branch_label)
 
     result_seasons = {}
     for set_id, data in seasons.items():
-        result_seasons[set_id] = {"display_name": data["display_name"]}
-        for level_key in ("level3", "level6", "level9"):
-            flat = []
-            for branch_label in sorted(data[level_key].keys()):
-                flat.extend(sorted(data[level_key][branch_label].items(), key=lambda kv: kv[1]))
-            result_seasons[set_id][level_key] = flat
+        result_seasons[set_id] = {
+            "display_name": data["display_name"],
+            "entries": data["entries"],
+            "abilities": data["abilities"],
+        }
         result_seasons[set_id]["focused"] = sorted(
             [(char_key, label, max_tier) for char_key, (label, max_tier) in data["focused"].items()],
             key=lambda t: t[1],
         )
-    return {"seasons": result_seasons}
+    catalog = {"seasons": result_seasons}
+    return _apply_ability_labels(catalog, database.get_datacron_ability_shorts(), database.get_datacron_shorts_version())
 
 
 # =====================================================================
@@ -554,13 +609,17 @@ def _level_label(level_options, value) -> str:
     return value
 
 
-def _format_requirement_summary(set_id, l3, l6, l9, cache, pack=None) -> str:
+def _quantity_suffix(quantity) -> str:
+    return f" ×{quantity}" if quantity and quantity > 1 else ""
+
+
+def _format_requirement_summary(set_id, l3, l6, l9, cache, pack=None, quantity=1) -> str:
     season_data = cache["seasons"].get(set_id) if cache else None
     l3_label = _level_label(season_data["level3"] if season_data else [], l3)
     l6_label = _level_label(season_data["level6"] if season_data else [], l6)
     l9_label = _level_label(season_data["level9"] if season_data else [], l9)
     pack_prefix = f"{pack}: " if pack else ""
-    return f"{_season_label(cache, set_id)}: {pack_prefix}{l3_label} → {l6_label} → {l9_label}"
+    return f"{_season_label(cache, set_id)}: {pack_prefix}{l3_label} → {l6_label} → {l9_label}{_quantity_suffix(quantity)}"
 
 
 def _focused_char_label(cache, set_id, character_key) -> str:
@@ -634,12 +693,18 @@ def _parse_stat_pair_params(pairs):
 # Построение красиво оформленных embed'ов для /дк_требования список и проверить —
 # группировка по приоритету (заголовок-разделитель + по одному полю на требование).
 # =====================================================================
+_FALLBACK_NAME_DESC_LIMIT = 50
+
+
 def _branch_fallback_name(l3_label, l6_label, l9_label) -> str:
-    # Без указанного "отряда" используем название ветки (до ": ") как заголовок поля —
-    # так у "Полезные" (без отряда) отображается что-то осмысленное, а не пустота.
+    # Без указанного "отряда" используем ветку (до ": ") + начало её бонуса как заголовок
+    # поля: одна ветка без бонуса давала три одинаковых «Светлая сторона» подряд.
     for label in (l6_label, l3_label, l9_label):
         if label and label != "-" and ": " in label:
-            return label.split(": ", 1)[0]
+            branch, desc = label.split(": ", 1)
+            if len(desc) > _FALLBACK_NAME_DESC_LIMIT:
+                desc = desc[:_FALLBACK_NAME_DESC_LIMIT].rstrip(" ,.;:") + "…"
+            return f"{branch} · {desc}"
     return "Без отряда"
 
 
@@ -659,8 +724,8 @@ def _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats=None, 
     return lines
 
 
-def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment, stats=None, stat_reqs=None):
-    name = pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)
+def _base_requirement_field(pack, l3_label, l6_label, l9_label, comment, stats=None, stat_reqs=None, quantity=1):
+    name = (pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)) + _quantity_suffix(quantity)
     value = "\n".join(_requirement_value_lines(l3_label, l6_label, l9_label, comment, stats, stat_reqs)) or "​"
     return name, value
 
@@ -673,23 +738,27 @@ def _focused_requirement_field(pack, char_label, required_level, comment):
     return name, "\n".join(lines)
 
 
-def _base_check_field(pack, l3_label, l6_label, l9_label, comment, matched, closed_levels, stats=None, stat_checks=None):
-    # ⚠️ вместо ✅ — способности закрыты, но хотя бы один стат ниже требуемого порога
-    # (мягкая проверка: не блокирует засчитывание требования, только рекомендация).
+def _base_check_field(pack, l3_label, l6_label, l9_label, comment, evaluation, closed_levels, stats=None):
+    """evaluation — результат _evaluate_base_requirement. ⚠️ вместо ✅ — способности
+    закрыты, но хотя бы один стат ниже порога (мягкая проверка, только рекомендация)."""
+    matched = evaluation["matched"]
+    quantity = evaluation["quantity"]
     if not matched:
         status = "❌"
-    elif stat_checks and not all(ok for *_rest, ok in stat_checks):
+    elif evaluation["stat_warning"]:
         status = "⚠️"
     else:
         status = "✅"
-    name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}"
+    name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}{_quantity_suffix(quantity)}"
     lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)
-    if matched and closed_levels:
+    if quantity > 1:
+        lines.append(f"📦 Подходящих ДК: {evaluation['found']}/{quantity}")
+    elif matched and closed_levels:
         closed_parts = [v for v in closed_levels if v != "—"]
         lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
-    if matched and stat_checks:
-        for stat_id, min_value, actual, ok in stat_checks:
-            lines.append(_format_stat_check_line(stat_id, min_value, actual, ok))
+    if evaluation["found"]:
+        for check in evaluation["stat_checks"]:
+            lines.append(_format_stat_check_line(check))
     return name, "\n".join(lines) or "​"
 
 
@@ -773,11 +842,11 @@ def _match_counts(player_json, set_id, requirements, focused_requirements) -> di
     if requirements:
         owned = _extract_player_base_datacrons(player_json, set_id)
         pairs = _match_requirements(requirements, owned)
-        for req, match in pairs:
+        for req, matches in pairs:
             priority = req[9]
             bucket = counts.get(priority, counts[PRIORITY_REQUIRED])
             bucket["total"] += 1
-            if match:
+            if len(matches) >= _req_quantity(req):
                 bucket["matched"] += 1
     if focused_requirements:
         owned_focused = _extract_player_focused_datacrons(player_json, set_id)
@@ -854,26 +923,96 @@ def _requirement_specificity(row) -> int:
     return sum(v not in (DATACRON_ANY, DATACRON_NONE) for v in (l3, l6, l9))
 
 
+def _req_quantity(row) -> int:
+    """Сколько разных ДК нужно под требование (колонка quantity, 12-я в строке)."""
+    try:
+        return max(1, int(row[11] or 1)) if len(row) > 11 else 1
+    except (TypeError, ValueError):
+        return 1
+
+
+_PRIORITY_RANK = {p: i for i, p in enumerate(PRIORITY_ORDER)}
+
+
 def _match_requirements(requirements, owned_datacrons):
-    """Жадный подбор: сначала самые конкретные требования, каждый ДК занимает не больше одного слота."""
-    sorted_reqs = sorted(requirements, key=lambda r: (-_requirement_specificity(r), r[0]))
-    used_ids = set()
-    pairs = []
-    for req in sorted_reqs:
+    """Подбор ДК под требования без пересечений: каждый ДК закрывает не больше одного
+    слота, требование с quantity=N — это N слотов. Максимальное паросочетание (алгоритм
+    Куна), а не жадный проход: жадный мог отдать ДК требованию, которому подошёл бы и
+    другой ДК, и «уронить» соседнее требование, хотя расклад без потерь существует
+    (особенно с альтернативами «ИЛИ» и количествами).
+
+    Слоты обрабатываются по приоритету (Обязательно → По желанию → Полезные), затем
+    от более конкретных к менее. Увеличивающая цепочка Куна никогда не освобождает уже
+    занятый слот, поэтому сначала закрывается максимум обязательных, и только потом
+    остаток ДК идёт в менее важные требования.
+
+    Возвращает [(req, [ДК, ...]), ...] в порядке id требования; len(список) <= quantity."""
+    order = sorted(
+        range(len(requirements)),
+        key=lambda i: (_PRIORITY_RANK.get(requirements[i][9], 0), -_requirement_specificity(requirements[i]), requirements[i][0]),
+    )
+    fits = []
+    for req in requirements:
         _, _, _, l3, l6, l9, *_rest = req
-        match = None
-        for dc in owned_datacrons:
-            if dc["id"] in used_ids:
+        fits.append([
+            j for j, dc in enumerate(owned_datacrons)
+            if _level_matches(l3, dc["levels"][3]) and _level_matches(l6, dc["levels"][6]) and _level_matches(l9, dc["levels"][9])
+        ])
+
+    slot_req = []
+    for i in order:
+        slot_req.extend([i] * _req_quantity(requirements[i]))
+
+    dc_slot = {}  # индекс ДК -> индекс слота
+
+    def try_assign(slot, seen):
+        for j in fits[slot_req[slot]]:
+            if j in seen:
                 continue
-            levels = dc["levels"]
-            if (_level_matches(l3, levels[3]) and _level_matches(l6, levels[6]) and _level_matches(l9, levels[9])):
-                match = dc
-                break
-        if match:
-            used_ids.add(match["id"])
-        pairs.append((req, match))
+            seen.add(j)
+            if j not in dc_slot or try_assign(dc_slot[j], seen):
+                dc_slot[j] = slot
+                return True
+        return False
+
+    for slot in range(len(slot_req)):
+        try_assign(slot, set())
+
+    matches = {i: [] for i in range(len(requirements))}
+    for j in sorted(dc_slot, key=lambda j: dc_slot[j]):
+        matches[slot_req[dc_slot[j]]].append(owned_datacrons[j])
+    pairs = [(requirements[i], matches[i]) for i in range(len(requirements))]
     pairs.sort(key=lambda p: p[0][0])
     return pairs
+
+
+def _evaluate_base_requirement(req, matches, stat_reqs):
+    """Итог по одному обычному требованию для отображения (бот и веб). stat_checks:
+    [{"stat_id", "min_value", "ok", "actual", "ok_count", "checked"}, ...] — при quantity=1
+    значимо actual (стат единственного ДК), при quantity>1 — ok_count/checked по всем
+    подобранным ДК."""
+    quantity = _req_quantity(req)
+    found = len(matches)
+    stat_checks = []
+    for stat_id, min_value in stat_reqs or []:
+        results = [_check_requirement_stats([(stat_id, min_value)], dc["stats"])[0] for dc in matches]
+        ok_count = sum(1 for *_r, ok in results if ok)
+        stat_checks.append({
+            "stat_id": stat_id,
+            "min_value": min_value,
+            "ok": bool(results) and ok_count == len(results),
+            "actual": results[0][2] if quantity == 1 and results else None,
+            "ok_count": ok_count,
+            "checked": len(results),
+            "multi": quantity > 1,
+        })
+    return {
+        "quantity": quantity,
+        "found": found,
+        "matched": found >= quantity,
+        "stat_checks": stat_checks,
+        "stat_warning": found >= quantity and any(not c["ok"] for c in stat_checks),
+    }
 
 
 def _check_requirement_stats(stat_requirements, actual_stats):
@@ -892,11 +1031,14 @@ def _format_stat_requirement_line(stat_id, min_value) -> str:
     return f"{label} ≥{min_value:g}%"
 
 
-def _format_stat_check_line(stat_id, min_value, actual, ok) -> str:
-    label = DATACRON_STAT_LABELS.get(stat_id, f"стат {stat_id}")
-    icon = "✅" if ok else "⚠️"
+def _format_stat_check_line(check) -> str:
+    label = DATACRON_STAT_LABELS.get(check["stat_id"], f"стат {check['stat_id']}")
+    icon = "✅" if check["ok"] else "⚠️"
+    if check["multi"]:
+        return f"{icon} {label} ≥{check['min_value']:g}%: {check['ok_count']}/{check['checked']} ДК"
+    actual = check["actual"]
     actual_str = f"{actual:.2f}%" if actual is not None else "нет такого стата"
-    return f"{icon} {label}: {actual_str} (нужно ≥{min_value:g}%)"
+    return f"{icon} {label}: {actual_str} (нужно ≥{check['min_value']:g}%)"
 
 
 # =====================================================================
@@ -1027,8 +1169,8 @@ async def autocomplete_datacron_req_id(inter: disnake.ApplicationCommandInteract
     search = string.lower().strip()
     options = []
     for row in base_rows:
-        req_id, set_id, pack, l3, l6, l9, comment, created_by, created_at, priority, stats = row
-        label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] — {_format_requirement_summary(set_id, l3, l6, l9, cache, pack=pack)}"
+        req_id, set_id, pack, l3, l6, l9, comment, created_by, created_at, priority, stats, quantity = row
+        label = f"#{req_id} [{PRIORITY_LABELS.get(priority, priority)}] — {_format_requirement_summary(set_id, l3, l6, l9, cache, pack=pack, quantity=quantity)}"
         if not search or search in label.lower():
             options.append(disnake.OptionChoice(name=label[:100], value=f"#{req_id}"))
     for row in focused_rows:
@@ -1071,9 +1213,24 @@ class DatacronRequirementsCog(commands.Cog):
         if not hasattr(bot, "datacron_cache"):
             bot.datacron_cache = None
         self.datacron_cache_loop.start()
+        self.datacron_shorts_loop.start()
 
     def cog_unload(self):
         self.datacron_cache_loop.cancel()
+        self.datacron_shorts_loop.cancel()
+
+    @tasks.loop(minutes=1)
+    async def datacron_shorts_loop(self):
+        # Сокращения бонусов правятся в вебе (/admin/datacron-shorts) — подхватываем без
+        # ожидания 12-часового пересбора каталога. Исключение не должно убить loop навсегда.
+        try:
+            refresh_catalog_shorts(self.bot.datacron_cache)
+        except Exception as e:
+            print(f"⚠️ [ДК] Не удалось обновить сокращения бонусов: {e}")
+
+    @datacron_shorts_loop.before_loop
+    async def _before_datacron_shorts_loop(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(hours=12)
     async def datacron_cache_loop(self):
@@ -1121,6 +1278,7 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон датакрона", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=PRIORITY_REQUIRED, description="Приоритет требования", choices=PRIORITY_CHOICES),
         отряд: str = commands.Param(default=None, description="На какой отряд/персонажа этот датакрон (справочно, не проверяется)"),
+        количество: int = commands.Param(default=1, description="Сколько разных ДК с такими бонусами нужно (без пересечений с другими требованиями)", ge=1, le=DATACRON_MAX_QUANTITY),
         уровень3: str = commands.Param(default=DATACRON_NONE, description="Бонус 3 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level3),
         уровень6: str = commands.Param(default=DATACRON_NONE, description="Бонус 6 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level6),
         уровень9: str = commands.Param(default=DATACRON_NONE, description="Бонус 9 уровня (если подходит несколько — потом /дк_требования добавить_альтернативу)", autocomplete=autocomplete_datacron_level9),
@@ -1160,10 +1318,10 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message(stat_error, ephemeral=True)
             return
 
-        req_id = database.add_datacron_requirement(set_id, отряд, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id, stats=статы)
+        req_id = database.add_datacron_requirement(set_id, отряд, уровень3, уровень6, уровень9, комментарий, str(inter.author.id), приоритет, guild_id=guild_id, stats=статы, quantity=количество)
         if stat_pairs:
             database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)
-        summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=отряд)
+        summary = _format_requirement_summary(set_id, уровень3, уровень6, уровень9, self.bot.datacron_cache, pack=отряд, quantity=количество)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS[приоритет]}] добавлено: {summary}", ephemeral=True)
 
     @datacron_req.sub_command(
@@ -1190,7 +1348,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message(f"❌ Требование #{req_id} не найдено.", ephemeral=True)
             return
 
-        _, set_id, pack, l3, l6, l9, comment, _, _, priority, stats = row
+        _, set_id, pack, l3, l6, l9, comment, _, _, priority, stats, quantity = row
         current = {3: l3, 6: l6, 9: l9}.get(уровень, DATACRON_NONE)
         if not _is_valid_level_value(self.bot.datacron_cache, set_id, уровень, вариант):
             await inter.response.send_message("❌ Некорректный вариант — выберите из списка автодополнения, не вводите текст вручную.", ephemeral=True)
@@ -1212,8 +1370,8 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             new_l9 = new_value
 
-        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats)
-        summary = _format_requirement_summary(set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=pack)
+        database.update_datacron_requirement(req_id, set_id, pack, new_l3, new_l6, new_l9, comment, priority, guild_id=guild_id, stats=stats, quantity=quantity)
+        summary = _format_requirement_summary(set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=pack, quantity=quantity)
         await inter.response.send_message(f"✅ Требование #{req_id} дополнено: {summary}", ephemeral=True)
 
     @datacron_req.sub_command(name="добавить_спец", description="Добавить требование к фокусному (спец.) датакрону в список сезона")
@@ -1251,6 +1409,7 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(default=None, description="Новый сезон", autocomplete=autocomplete_datacron_season),
         приоритет: str = commands.Param(default=None, description="Новый приоритет требования", choices=PRIORITY_CHOICES),
         отряд: str = commands.Param(default=None, description="Новый отряд/персонаж, для которого этот датакрон (справочно, не проверяется)"),
+        количество: int = commands.Param(default=None, description="[Обычное] сколько разных ДК с такими бонусами нужно", ge=1, le=DATACRON_MAX_QUANTITY),
         уровень3: str = commands.Param(default=None, description="[Обычное] новый бонус 3 уровня", autocomplete=autocomplete_datacron_level3),
         уровень6: str = commands.Param(default=None, description="[Обычное] новый бонус 6 уровня", autocomplete=autocomplete_datacron_level6),
         уровень9: str = commands.Param(default=None, description="[Обычное] новый бонус 9 уровня", autocomplete=autocomplete_datacron_level9),
@@ -1296,7 +1455,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.response.send_message(f"🗑️ Требование #{req_id} удалено.", ephemeral=True)
             return
 
-        _, cur_set_id, cur_pack, cur_l3, cur_l6, cur_l9, cur_comment, _, _, cur_priority, cur_stats = row
+        _, cur_set_id, cur_pack, cur_l3, cur_l6, cur_l9, cur_comment, _, _, cur_priority, cur_stats, cur_quantity = row
 
         new_set_id = cur_set_id
         if сезон is not None:
@@ -1313,6 +1472,7 @@ class DatacronRequirementsCog(commands.Cog):
         new_l9 = уровень9 if уровень9 is not None else cur_l9
         new_comment = комментарий if комментарий is not None else cur_comment
         new_stats = статы if статы is not None else cur_stats
+        new_quantity = количество if количество is not None else cur_quantity
 
         for level_num, value in ((3, new_l3), (6, new_l6), (9, new_l9)):
             if not _is_valid_level_value(self.bot.datacron_cache, new_set_id, level_num, value):
@@ -1333,8 +1493,8 @@ class DatacronRequirementsCog(commands.Cog):
         elif очистить_статы:
             database.set_datacron_requirement_stats(req_id, [], guild_id=guild_id)
 
-        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id, stats=new_stats)
-        summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=new_pack)
+        database.update_datacron_requirement(req_id, new_set_id, new_pack, new_l3, new_l6, new_l9, new_comment, new_priority, guild_id=guild_id, stats=new_stats, quantity=new_quantity)
+        summary = _format_requirement_summary(new_set_id, new_l3, new_l6, new_l9, self.bot.datacron_cache, pack=new_pack, quantity=new_quantity)
         await inter.response.send_message(f"✅ Требование #{req_id} [{PRIORITY_LABELS.get(new_priority, new_priority)}] обновлено: {summary}", ephemeral=True)
 
     async def _edit_focused_requirement(self, inter, req_id, сезон, приоритет, отряд, персонаж, уровень, комментарий, удалить, guild_id=1):
@@ -1571,23 +1731,22 @@ class DatacronRequirementsCog(commands.Cog):
             owned = _extract_player_base_datacrons(player, set_id)
             pairs = _match_requirements(requirements, owned)
             stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
-            for req, match in pairs:
-                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = req
+            for req, matches in pairs:
+                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats, _quantity = req
                 group = groups.get(priority, groups[PRIORITY_REQUIRED])
                 l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
+                evaluation = _evaluate_base_requirement(req, matches, stats_by_req.get(req_id))
                 closed_levels = None
-                if match:
-                    m = match["levels"]
+                if matches:
+                    m = matches[0]["levels"]
                     closed_levels = (
                         level_label(3, m[3]) if m[3] else "—",
                         level_label(6, m[6]) if m[6] else "—",
                         level_label(9, m[9]) if m[9] else "—",
                     )
-                stat_reqs = stats_by_req.get(req_id)
-                stat_checks = _check_requirement_stats(stat_reqs, match["stats"] if match else {}) if stat_reqs else None
-                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, bool(match), closed_levels, stats, stat_checks))
+                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, evaluation, closed_levels, stats))
                 group["total"] += 1
-                if match:
+                if evaluation["matched"]:
                     group["matched"] += 1
 
         if focused_requirements:
@@ -1650,11 +1809,11 @@ class DatacronRequirementsCog(commands.Cog):
             priority_items = {p: [] for p in PRIORITY_ORDER}
             stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
             for row in base_reqs:
-                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats = row
+                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats, quantity = row
                 l3_lbl = _level_label(season_data["level3"], l3)
                 l6_lbl = _level_label(season_data["level6"], l6)
                 l9_lbl = _level_label(season_data["level9"], l9)
-                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, stats, stats_by_req.get(req_id))
+                field = _base_requirement_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, stats, stats_by_req.get(req_id), quantity)
                 priority_items.get(priority, priority_items[PRIORITY_REQUIRED]).append(field)
             for row in focused_reqs:
                 _, _, pack, character_key, required_level, comment, _, _, priority = row

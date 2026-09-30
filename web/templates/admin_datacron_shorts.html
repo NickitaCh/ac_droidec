@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Сокращения ДК — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Сокращения бонусов датакронов</h1>
+                <p class="page-hero-lead">Короткий текст вместо игрового абзаца — в /дк_требования и на страницах датакронов, для всех гильдий. Пустое поле — встроенное или автоматическое сокращение (серым в поле).</p>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if saved is not none %}<p class="muted">Сохранено изменений: {{ saved }}.</p>{% endif %}
+
+    {% if not catalog_loaded %}
+        <p class="empty-state">Справочник датакронов ещё загружается — обновите страницу через минуту.</p>
+    {% elif not seasons %}
+        <p class="empty-state">Нет активных сезонов.</p>
+    {% else %}
+        <form method="get" action="/admin/datacron-shorts" class="table-toolbar dc-shorts-toolbar">
+            <select name="season" onchange="this.form.submit()">
+                {% for s in seasons %}
+                    <option value="{{ s.set_id }}" {% if s.set_id == selected %}selected{% endif %}>{{ s.display_name }} [{{ s.set_id }}]{% if s.missing %} — без сокращения: {{ s.missing }}{% endif %}</option>
+                {% endfor %}
+            </select>
+            <label class="checkbox"><input type="checkbox" id="dc-only-auto"> только без сокращения</label>
+        </form>
+
+        <form method="post" action="/admin/datacron-shorts/save" class="dc-shorts-form" id="dc-shorts-form">
+            <input type="hidden" name="season" value="{{ selected }}">
+            {% for level in (3, 6, 9) %}
+                {% if rows[level] %}
+                    <div class="panel">
+                        <div class="panel-title"><span>{{ level }} уровень</span><span class="panel-hint">{{ rows[level]|length }}</span></div>
+                        <div class="table-scroll">
+                            <table class="data dc-shorts-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ветка</th>
+                                        <th>Игровой текст</th>
+                                        <th>Сокращение</th>
+                                        <th>Сейчас</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for r in rows[level] %}
+                                        <tr data-source="{{ r.source }}">
+                                            <td>
+                                                {{ r.branches|join(", ") }}
+                                                <div class="muted dc-shorts-id">{{ r.ability_id }}</div>
+                                            </td>
+                                            <td class="dc-shorts-full">{{ r.full or "—" }}</td>
+                                            <td>
+                                                <textarea class="dc-shorts-input" name="short__{{ r.ability_id }}"
+                                                          data-ability="{{ r.ability_id }}" data-fallback-source="{{ r.fallback_source }}"
+                                                          data-orig="{{ r.custom }}" maxlength="{{ max_len }}" rows="2"
+                                                          placeholder="{{ r.fallback }}">{{ r.custom }}</textarea>
+                                            </td>
+                                            <td>
+                                                {% if r.source == "custom" %}<span class="badge badge-ok">{{ source_labels[r.source] }}</span>
+                                                {% elif r.source == "builtin" %}<span class="badge badge-neutral">{{ source_labels[r.source] }}</span>
+                                                {% else %}<span class="badge badge-warn">{{ source_labels[r.source] }}</span>{% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+
+            <div class="dc-shorts-actions">
+                <button type="submit">Сохранить</button>
+                <button type="button" class="button-secondary" id="dc-generate">✨ Черновики ИИ для пустых «авто»</button>
+                <span class="muted" id="dc-generate-status"></span>
+            </div>
+        </form>
+
+        <script>
+        (function () {
+            const form = document.getElementById("dc-shorts-form");
+            const inputs = Array.from(form.querySelectorAll(".dc-shorts-input"));
+            const status = document.getElementById("dc-generate-status");
+            const button = document.getElementById("dc-generate");
+
+            // В форму уходят только изменённые поля — иначе в аудит летит вся сотня textarea.
+            form.addEventListener("submit", () => {
+                inputs.forEach((el) => { if (el.value.trim() === el.dataset.orig) el.disabled = true; });
+            });
+
+            document.getElementById("dc-only-auto").addEventListener("change", (e) => {
+                form.querySelectorAll("tbody tr").forEach((tr) => {
+                    tr.hidden = e.target.checked && tr.dataset.source !== "auto";
+                });
+            });
+
+            button.addEventListener("click", async () => {
+                const targets = inputs.filter((el) => !el.value.trim() && el.dataset.fallbackSource === "auto");
+                if (!targets.length) { status.textContent = "Пустых «авто»-полей нет."; return; }
+                button.disabled = true;
+                status.textContent = `Генерирую ${targets.length} шт., это может занять до пары минут…`;
+                try {
+                    const resp = await fetch("/admin/datacron-shorts/api/generate", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({season: {{ selected }}, ability_ids: targets.map((el) => el.dataset.ability)}),
+                    });
+                    const data = await resp.json();
+                    let filled = 0;
+                    targets.forEach((el) => {
+                        const text = (data.drafts || {})[el.dataset.ability];
+                        if (text && !el.value.trim()) { el.value = text; el.classList.add("is-draft"); filled++; }
+                    });
+                    status.textContent = (filled ? `Заполнено черновиков: ${filled} — проверьте цифры и нажмите «Сохранить».` : "")
+                        + (data.error ? ` ${data.error}` : "");
+                } catch (err) {
+                    status.textContent = `Ошибка: ${err}`;
+                } finally {
+                    button.disabled = false;
+                }
+            });
+
+            inputs.forEach((el) => el.addEventListener("input", () => el.classList.remove("is-draft")));
+        })();
+        </script>
+    {% endif %}
+{% endblock %}

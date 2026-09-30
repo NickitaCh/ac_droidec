@@ -7,7 +7,7 @@
 
 import time
 
-from cogs.datacron_requirements import _fetch_datacron_cache
+from cogs.datacron_requirements import _fetch_datacron_cache, refresh_catalog_shorts
 
 _TTL_SECONDS = 12 * 60 * 60
 
@@ -23,13 +23,13 @@ async def get_catalog(comlink) -> dict:
     global _cache, _cached_at
     now = time.time()
     if _cache is not None and (now - _cached_at) <= _TTL_SECONDS:
-        return _cache
+        return refresh_catalog_shorts(_cache)
     try:
         fresh = await _fetch_datacron_cache(comlink)
     except Exception as e:
         if _cache is not None:
             print(f"⚠️ [web] Не удалось обновить каталог датакронов, использую прошлый: {e}")
-            return _cache
+            return refresh_catalog_shorts(_cache)
         raise
     _cache = fresh
     _cached_at = now

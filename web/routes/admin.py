@@ -1,13 +1,14 @@
+import asyncio
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
-from services import feature_flags, fun_features, tb_schedule
+from services import datacron_catalog, datacron_shorts, feature_flags, fun_features, tb_schedule
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -438,3 +439,78 @@ async def features_save(request: Request, user: dict = Depends(require_super_adm
             if feature_flags.is_enabled(gid, key) != want_enabled:
                 feature_flags.set_enabled(gid, key, want_enabled, user["discord_id"])
     return RedirectResponse("/admin/features?saved=1", status_code=303)
+
+
+# =====================================================================
+# Сокращения бонусов датакронов — глобальные (не per-guild), см. services/datacron_shorts.py.
+# Сохраняется только то, что прислала форма (JS отключает неизменённые поля, чтобы
+# в аудит не летела сотня textarea); пустое поле = вернуть встроенное/авто-сокращение.
+# =====================================================================
+@router.get("/datacron-shorts", response_class=HTMLResponse)
+async def datacron_shorts_page(request: Request, user: dict = Depends(require_super_admin)):
+    try:
+        catalog = await datacron_catalog.get_catalog(_get_comlink())
+    except Exception as e:
+        print(f"⚠️ [web] Каталог датакронов недоступен: {e}")
+        catalog = None
+    custom = database.get_datacron_ability_shorts()
+    seasons = []
+    if catalog:
+        seasons = [
+            {"set_id": sid, "display_name": data["display_name"], "missing": datacron_shorts.count_missing(data, custom)}
+            for sid, data in sorted(catalog["seasons"].items(), key=lambda kv: -kv[0])
+        ]
+    selected = None
+    season_param = request.query_params.get("season", "")
+    if seasons:
+        selected = int(season_param) if season_param.isdigit() and int(season_param) in catalog["seasons"] else seasons[0]["set_id"]
+    rows = datacron_shorts.season_rows(catalog["seasons"][selected], custom) if selected is not None else {}
+    return templates.TemplateResponse(request, "admin_datacron_shorts.html", {
+        "user": user,
+        "catalog_loaded": catalog is not None,
+        "seasons": seasons,
+        "selected": selected,
+        "rows": rows,
+        "source_labels": datacron_shorts.SOURCE_LABELS,
+        "max_len": datacron_shorts.MAX_SHORT_LEN,
+        "saved": request.query_params.get("saved"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/datacron-shorts/save", response_class=HTMLResponse)
+async def datacron_shorts_save(request: Request, user: dict = Depends(require_super_admin)):
+    form = await request.form()
+    season = form.get("season", "")
+    current = database.get_datacron_ability_shorts()
+    changes = {}
+    for key, value in form.items():
+        if not key.startswith("short__"):
+            continue
+        ability_id = key[len("short__"):]
+        text = " ".join(str(value).split())
+        if len(text) > datacron_shorts.MAX_SHORT_LEN:
+            qs = urlencode({"season": season, "error": f"{ability_id}: длиннее {datacron_shorts.MAX_SHORT_LEN} символов."})
+            return RedirectResponse(f"/admin/datacron-shorts?{qs}", status_code=303)
+        if text != current.get(ability_id, ""):
+            changes[ability_id] = text or None
+    saved = database.save_datacron_ability_shorts(changes, updated_by=user["discord_id"])
+    return RedirectResponse(f"/admin/datacron-shorts?{urlencode({'season': season, 'saved': saved})}", status_code=303)
+
+
+@router.post("/datacron-shorts/api/generate", response_class=JSONResponse)
+async def datacron_shorts_generate(request: Request, user: dict = Depends(require_super_admin)):
+    payload = await request.json()
+    try:
+        set_id = int(payload.get("season"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "Некорректный сезон."}, status_code=400)
+    ability_ids = [str(a) for a in (payload.get("ability_ids") or [])][:200]
+    if not ability_ids:
+        return JSONResponse({"error": "Нет пустых полей — генерировать нечего."}, status_code=400)
+    try:
+        catalog = await datacron_catalog.get_catalog(_get_comlink())
+    except Exception as e:
+        return JSONResponse({"error": f"Каталог датакронов недоступен: {e}"}, status_code=503)
+    drafts, error = await asyncio.to_thread(datacron_shorts.generate_drafts, catalog, set_id, ability_ids)
+    return JSONResponse({"drafts": drafts, "error": error})

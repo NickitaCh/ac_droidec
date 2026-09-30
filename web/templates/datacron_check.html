@@ -88,8 +88,8 @@
                                         </td>
                                         {% if r.kind == "base" %}
                                             <td>{{ r.pack or "—" }}</td>
-                                            <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}</td>
-                                            <td>{{ r.closed|join(", ") if r.closed else "—" }}</td>
+                                            <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}{% if r.quantity > 1 %} <span class="badge badge-neutral">×{{ r.quantity }}</span>{% endif %}</td>
+                                            <td>{% if r.quantity > 1 %}{{ r.found }}/{{ r.quantity }} ДК{% else %}{{ r.closed|join(", ") if r.closed else "—" }}{% endif %}</td>
                                         {% else %}
                                             <td>{{ r.pack or r.character_label }}</td>
                                             <td>{{ r.character_label }} — {{ r.required_level }}+</td>
@@ -99,7 +99,7 @@
                                         <td>
                                             {% if r.kind == "base" and r.stat_checks %}
                                                 {% for c in r.stat_checks %}
-                                                    <div>{% if c.ok %}✅{% else %}⚠️{% endif %} {{ c.label }}: {{ "%.2f"|format(c.actual) if c.actual is not none else "нет" }}% (≥{{ c.min_value }}%)</div>
+                                                    <div>{% if c.ok %}✅{% else %}⚠️{% endif %} {% if c.multi %}{{ c.label }} ≥{{ c.min_value }}%: {{ c.ok_count }}/{{ c.checked }} ДК{% else %}{{ c.label }}: {{ "%.2f"|format(c.actual) if c.actual is not none else "нет" }}% (≥{{ c.min_value }}%){% endif %}</div>
                                                 {% endfor %}
                                             {% else %}—{% endif %}
                                         </td>

@@ -3317,20 +3317,26 @@ def _ensure_datacron_requirements_table(cursor):
         cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN stats TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Сколько РАЗНЫХ датакронов игрока должно подойти под требование (напр. «5 ДК
+        # с призывами на 3 ур.») — подбор без пересечений, см. _match_requirements.
+        cursor.execute("ALTER TABLE datacron_requirements ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_guild_set ON datacron_requirements(guild_id, set_id)")
 
 
 def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_value: str, level9_value: str,
                               comment: str, created_by: str, priority: str = "required", guild_id: int = 1,
-                              stats: str = None) -> int:
+                              stats: str = None, quantity: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         INSERT INTO datacron_requirements
-            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, guild_id, stats)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, priority, guild_id, stats))
+            (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, guild_id, stats, quantity)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, created_by, priority, guild_id, stats, quantity))
     conn.commit()
     req_id = cursor.lastrowid
     conn.close()
@@ -3339,15 +3345,15 @@ def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_v
 
 def update_datacron_requirement(req_id: int, set_id: int, pack: str, level3_value: str, level6_value: str,
                                  level9_value: str, comment: str, priority: str, guild_id: int = 1,
-                                 stats: str = None) -> bool:
+                                 stats: str = None, quantity: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
     cursor.execute("""
         UPDATE datacron_requirements
-        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?, priority = ?, stats = ?
+        SET set_id = ?, pack = ?, level3_value = ?, level6_value = ?, level9_value = ?, comment = ?, priority = ?, stats = ?, quantity = ?
         WHERE id = ? AND guild_id = ?
-    """, (set_id, pack, level3_value, level6_value, level9_value, comment, priority, stats, req_id, guild_id))
+    """, (set_id, pack, level3_value, level6_value, level9_value, comment, priority, stats, quantity, req_id, guild_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
@@ -3400,8 +3406,9 @@ def get_datacron_requirement(req_id: int, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
+    conn.commit()  # миграция из _ensure_* иначе откатится при close() без commit
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats, quantity
         FROM datacron_requirements WHERE id = ? AND guild_id = ?
     """, (req_id, guild_id))
     row = cursor.fetchone()
@@ -3413,8 +3420,9 @@ def get_datacron_requirements_by_set(set_id: int, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
+    conn.commit()  # миграция из _ensure_* иначе откатится при close() без commit
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats, quantity
         FROM datacron_requirements WHERE set_id = ? AND guild_id = ? ORDER BY id
     """, (set_id, guild_id))
     rows = cursor.fetchall()
@@ -3426,13 +3434,78 @@ def get_all_datacron_requirements(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_datacron_requirements_table(cursor)
+    conn.commit()  # миграция из _ensure_* иначе откатится при close() без commit
     cursor.execute("""
-        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats
+        SELECT id, set_id, pack, level3_value, level6_value, level9_value, comment, created_by, created_at, priority, stats, quantity
         FROM datacron_requirements WHERE guild_id = ? ORDER BY set_id, id
     """, (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+# =====================================================================
+# СОКРАЩЁННЫЕ ОПИСАНИЯ БОНУСОВ ДАТАКРОНОВ: ability_id -> короткий текст. ГЛОБАЛЬНЫЕ
+# (не per-guild): тексты игровые, одинаковые для всех гильдий. Правятся супер-админом
+# на /admin/datacron-shorts, перекрывают встроенный словарь ABILITY_SHORT_OVERRIDES
+# в cogs/datacron_requirements.py. "{0}" в тексте — плейсхолдер ветки (как там же).
+# Версия (bot_state 'datacron_shorts_version', guild_id=0) меняется при каждой правке —
+# по ней бот и веб понимают, что пора пересобрать подписи в кэше каталога.
+# =====================================================================
+DATACRON_SHORTS_VERSION_KEY = "datacron_shorts_version"
+
+
+def _ensure_datacron_ability_shorts_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datacron_ability_shorts (
+            ability_id TEXT PRIMARY KEY,
+            short_text TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def get_datacron_ability_shorts() -> dict:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_ability_shorts_table(cursor)
+    conn.commit()
+    cursor.execute("SELECT ability_id, short_text FROM datacron_ability_shorts")
+    rows = cursor.fetchall()
+    conn.close()
+    return {ability_id: text for ability_id, text in rows}
+
+
+def save_datacron_ability_shorts(changes: dict, updated_by: str = None) -> int:
+    """changes: {ability_id: text_or_None} — None/пустая строка удаляет запись (возврат к
+    встроенному/автоматическому сокращению). Одной транзакцией + сдвиг версии."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_ability_shorts_table(cursor)
+    _ensure_bot_state_table(cursor)
+    for ability_id, text in changes.items():
+        if text:
+            cursor.execute("""
+                INSERT INTO datacron_ability_shorts (ability_id, short_text, updated_by, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(ability_id) DO UPDATE SET
+                    short_text = excluded.short_text, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+            """, (ability_id, text, updated_by))
+        else:
+            cursor.execute("DELETE FROM datacron_ability_shorts WHERE ability_id = ?", (ability_id,))
+    if changes:
+        cursor.execute(
+            "INSERT OR REPLACE INTO bot_state (guild_id, key, value) VALUES (0, ?, ?)",
+            (DATACRON_SHORTS_VERSION_KEY, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+        )
+    conn.commit()
+    conn.close()
+    return len(changes)
+
+
+def get_datacron_shorts_version() -> str:
+    return get_bot_state(DATACRON_SHORTS_VERSION_KEY, guild_id=0) or ""
 
 
 # =====================================================================

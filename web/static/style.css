@@ -2096,3 +2096,21 @@ main.wide > p, main.wide > ul, main.wide > ol, main.wide.docs-page h2 + p { max-
 .mod-loadout-primary { display: inline-flex; align-items: center; gap: 0.3em; }
 @media (max-width: 900px) { .mod-grid-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mod-set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .mod-grid-slots, .mod-set-grid { grid-template-columns: 1fr; } }
+
+/* /admin/datacron-shorts — сокращения бонусов ДК. form снимает сайтовый max-width:20em
+   (см. .omicron-priority-form), textarea тянется на всю ячейку. */
+.dc-shorts-toolbar { justify-content: flex-start; gap: 1em; flex-wrap: wrap; margin-bottom: 1em; }
+.dc-shorts-form { max-width: none; }
+.dc-shorts-table td { vertical-align: top; }
+.dc-shorts-id { font-size: 0.78em; word-break: break-all; }
+.dc-shorts-full { font-size: 0.88em; color: var(--fg-secondary); min-width: 20em; max-width: 40em; }
+.dc-shorts-input {
+    width: 100%; min-width: 18em; box-sizing: border-box; resize: vertical;
+    padding: 0.45em 0.6em; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--page); color: var(--fg); font: inherit;
+}
+.dc-shorts-input.is-draft { border-color: var(--status-warning); box-shadow: 0 0 0 1px var(--status-warning); }
+.dc-shorts-actions {
+    position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.8em;
+    padding: 0.8em 0; background: var(--page); border-top: 1px solid var(--border);
+}
