@@ -6,6 +6,7 @@ from disnake.ext import commands
 from dotenv import load_dotenv
 import database
 import guild_resolver
+import loop_watchdog
 from services import discord_invite, fun_features
 from swgoh_comlink import SwgohComlink
 
@@ -247,6 +248,8 @@ bot = GuildManagerBot()
 
 @bot.event
 async def on_ready():
+    loop_watchdog.start()
+
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
     database.init_birthday_table()

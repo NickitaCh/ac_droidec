@@ -190,7 +190,9 @@ class ViolationsCog(commands.Cog):
                     await asyncio.sleep(0.1)
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
-                database.sync_guild_roster(gid, temp_roster_data)
+                # В потоке: архивация выбывших + запись в SQLite, которую параллельно пишет
+                # веб — ожидание блокировки БД (до 5с) не должно вешать весь event loop.
+                await asyncio.to_thread(database.sync_guild_roster, gid, temp_roster_data)
                 await self._resolve_departed_names(gid, gname)
 
                 hybrid_cache = HybridCache(new_cache)

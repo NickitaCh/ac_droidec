@@ -1437,9 +1437,9 @@ dialog.platoon-picker-dialog {
     background: var(--surface);
     color: var(--fg);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
-    display: flex;
-    flex-direction: column;
 }
+/* display:flex только для открытого — иначе перебивает UA-правило dialog:not([open]) и окно видно на странице. */
+dialog.platoon-picker-dialog[open] { display: flex; flex-direction: column; }
 dialog.platoon-picker-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .platoon-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: 0.6em; }
 .platoon-picker-header h3 { margin: 0; font-size: 1.05em; }
