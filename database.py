@@ -2524,6 +2524,65 @@ def get_openrouter_requests_today() -> int:
     return int(get_bot_state(_openrouter_usage_key()) or 0)
 
 
+# Здоровье бесплатных моделей OpenRouter для роутера (services/openrouter_router.py):
+# успехи/ошибки и «остывание» после сбоя — общее для бота и веба, переживает рестарт.
+def _ensure_openrouter_model_health_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS openrouter_model_health (
+            model TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ok_count INTEGER NOT NULL DEFAULT 0,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            consecutive_fails INTEGER NOT NULL DEFAULT 0,
+            last_ok_at REAL,
+            last_fail_at REAL,
+            cooldown_until REAL NOT NULL DEFAULT 0,
+            last_error TEXT,
+            last_latency REAL,
+            PRIMARY KEY (model, kind)
+        )
+    """)
+
+
+def get_openrouter_model_health(kind: str) -> dict:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_openrouter_model_health_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT model, ok_count, fail_count, consecutive_fails, last_ok_at, last_fail_at, cooldown_until, last_error, last_latency
+        FROM openrouter_model_health WHERE kind = ?
+    """, (kind,))
+    keys = ("ok_count", "fail_count", "consecutive_fails", "last_ok_at", "last_fail_at", "cooldown_until", "last_error", "last_latency")
+    result = {row[0]: dict(zip(keys, row[1:])) for row in cursor.fetchall()}
+    conn.close()
+    return result
+
+
+def record_openrouter_model_result(model: str, kind: str, ok: bool, *, error: str = None,
+                                   cooldown_seconds: float = 0, latency: float = None):
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_openrouter_model_health_table(cursor)
+    cursor.execute("INSERT OR IGNORE INTO openrouter_model_health (model, kind) VALUES (?, ?)", (model, kind))
+    if ok:
+        cursor.execute("""
+            UPDATE openrouter_model_health
+            SET ok_count = ok_count + 1, consecutive_fails = 0, last_ok_at = ?, cooldown_until = 0, last_latency = ?
+            WHERE model = ? AND kind = ?
+        """, (now, latency, model, kind))
+    else:
+        cursor.execute("""
+            UPDATE openrouter_model_health
+            SET fail_count = fail_count + 1, consecutive_fails = consecutive_fails + 1, last_fail_at = ?,
+                cooldown_until = ?, last_error = ?
+            WHERE model = ? AND kind = ?
+        """, (now, now + cooldown_seconds, (error or "")[:300], model, kind))
+    conn.commit()
+    conn.close()
+
+
 # =====================================================================
 # ИСТОРИЯ ТБ (последние N событий, для команд compare / player_compare)
 # =====================================================================

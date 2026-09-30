@@ -1,130 +1,49 @@
-"""Общий вызов OpenRouter vision — заменил Mistral (services/mistral_vision.py, оставлен
-в проекте на будущее, вдруг снова заработает) после того, как выяснилось: с сентября
+"""Общий вызов OpenRouter (vision и текст) — заменил Mistral (services/mistral_vision.py,
+оставлен в проекте на будущее, вдруг снова заработает) после того, как выяснилось: с сентября
 2026 обычный API-ключ Mistral на Free-тарифе даёт 0 запросов/мин без включённого
-Pay-As-You-Go (проверено вживую, x-ratelimit-limit-req-minute: 0 на каждом запросе) —
-раньше (август 2026) работало без этого требования, что-то изменилось на их стороне.
+Pay-As-You-Go (проверено вживую, x-ratelimit-limit-req-minute: 0 на каждом запросе).
 
-Проверено вживую с этого VPS перед переключением (не угадано):
-- OpenRouter технически доступен с этого хостинга (в отличие от Gemini/Groq — оба
-  заблокированы по IP датацентра/сети, см. предыдущее обсуждение) — HTTP 200 с реальным
-  vision-ответом.
-- Не привязка карты не нужна для free-моделей (`sk-or-v1-...` ключ создаётся без биллинга).
-- Роутер `openrouter/free` (авто-выбор среди ~24 бесплатных моделей) НЕНАДЁЖЕН для наших
-  задач — на 3 тестовых вызова один раз попал на content-safety классификатор
-  ('nvidia/nemotron-3.5-content-safety:free'), который просто ответил "User Safety: safe"
-  и проигнорировал реальный запрос, JSON не распарсился. Поэтому здесь модель ЗАКРЕПЛЕНА
-  (не роутер) — 'minimax/minimax-m3:free', подтверждена 2/2 стабильных валidных JSON-ответа
-  подряд с картинкой + response_format=json_object.
+Проверено вживую с этого VPS (не угадано):
+- OpenRouter доступен с этого хостинга (в отличие от Gemini/Groq — заблокированы по IP
+  датацентра), привязка карты для free-моделей не нужна.
+- Модель больше НЕ закреплена: закреплённая minimax/minimax-m3:free пропала к 2026-09-30
+  (404), и /фарм с /тб_ордер_из_картинки перестали работать. Выбор и переключение модели —
+  services/openrouter_router.py.
 
-Бесплатный лимит OpenRouter без покупки кредитов (их документация, не угадано):
-20 запросов/мин, 50 запросов/сутки — здесь считаем расход по СУТКАМ (не по деньгам, как
-у Mistral) через database.record_openrouter_request/get_openrouter_requests_today."""
+Бесплатный лимит OpenRouter без покупки кредитов (их документация): 20 запросов/мин,
+50 запросов/сутки — считаем по СУТКАМ через database.record_openrouter_request/
+get_openrouter_requests_today (счёт ведёт роутер)."""
 
-import json
-import re
-import time
-
-import requests
+import base64
 
 import database
+from services import openrouter_router
 
-OPENROUTER_VISION_MODEL = "minimax/minimax-m3:free"
-# Текстовые задачи (черновики сокращений ДК) — свой список моделей по порядку: free-модели
-# на OpenRouter периодически исчезают (minimax-m3:free пропала к 2026-09-30 — 404) или
-# отвечают 429 из-за общего пула — тогда пробуем следующую. Первая проверена 2026-09-30 на
-# реальных бонусах сезона 34 (19/19 валидный JSON, ~75 с); две другие в тот момент
-# отдавали 429, качество на них не сравнивалось.
-OPENROUTER_TEXT_MODELS = (
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "google/gemma-4-31b-it:free",
-    "qwen/qwen3.8-27b:free",
-)
 OPENROUTER_DAILY_REQUEST_LIMIT = 50
 
-# Повтор при 429 — подтверждено вживую 2026-09-04: реальный запрос от пользователя словил
-# 429, но диагностический перезапрос буквально через минуту (тем же ключом/моделью, и без
-# картинки, и с ней) прошёл 200 без изменений с нашей стороны — это разовая перегрузка
-# бесплатного shared-пула провайдера (в тот раз ответ пришёл через 'GMICloud'), не наш
-# суточный лимит (счётчик в БД был всего 2 из 50). OpenRouter не всегда шлёт Retry-After на
-# 429 — если есть, используем его (с потолком, чтобы не морозить ephemeral-ответ надолго),
-# если нет — фиксированный бэкофф.
-_RETRY_BACKOFF_SECONDS = [2, 5]  # пауза перед 2-й и 3-й попыткой (итого до 3 попыток)
-_RETRY_AFTER_CAP_SECONDS = 10
 
-
-def call_vision_json(image_bytes: bytes, mime_type: str, api_key: str, prompt: str) -> dict:
-    import base64
-
+def call_vision_json(image_bytes: bytes, mime_type: str, api_key: str, prompt: str, validate=None) -> dict:
+    """validate(data) -> True | False | "причина" — отбраковать ответ и попробовать другую
+    модель (например, в ответе нет обязательных полей)."""
     b64 = base64.b64encode(image_bytes).decode()
-    request_json = {
-        "model": OPENROUTER_VISION_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-                ],
-            }
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
         ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0,
-    }
-    return _post_json_completion(request_json, api_key, timeout=60)
+    }]
+    return openrouter_router.call_json(
+        openrouter_router.KIND_VISION, messages, api_key, validate=validate, temperature=0, timeout=90,
+    )
 
 
-def call_text_json(prompt: str, api_key: str, timeout: int = 150, models=OPENROUTER_TEXT_MODELS) -> dict:
-    """То же без картинки — для текстовых задач (напр. черновики сокращений бонусов
-    датакронов, services/datacron_shorts.py). Тот же суточный счётчик запросов.
-    На 404/429 от модели переходит к следующей из models."""
-    last_error = None
-    for model in models:
-        request_json = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2,
-        }
-        try:
-            return _post_json_completion(request_json, api_key, timeout=timeout)
-        except requests.HTTPError as e:
-            if e.response is None or e.response.status_code not in (404, 429):
-                raise
-            last_error = e
-    raise last_error
-
-
-def _post_json_completion(request_json: dict, api_key: str, timeout: int) -> dict:
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    response = None
-    for attempt in range(len(_RETRY_BACKOFF_SECONDS) + 1):
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=request_json,
-            timeout=timeout,
-        )
-        if response.status_code != 429 or attempt == len(_RETRY_BACKOFF_SECONDS):
-            break
-        wait_seconds = _RETRY_BACKOFF_SECONDS[attempt]
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
-            try:
-                wait_seconds = min(float(retry_after), _RETRY_AFTER_CAP_SECONDS)
-            except ValueError:
-                pass
-        time.sleep(wait_seconds)
-
-    response.raise_for_status()
-    payload = response.json()
-
-    database.record_openrouter_request()
-
-    text = payload["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
-    return json.loads(text)
+def call_text_json(prompt: str, api_key: str, timeout: int = 150, validate=None) -> dict:
+    """Текстовые задачи (напр. черновики сокращений бонусов ДК, services/datacron_shorts.py)."""
+    return openrouter_router.call_json(
+        openrouter_router.KIND_TEXT, [{"role": "user", "content": prompt}], api_key,
+        validate=validate, temperature=0.2, timeout=timeout,
+    )
 
 
 def daily_used_ratio(daily_limit: int) -> float:

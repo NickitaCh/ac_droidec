@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Модели ИИ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Модели ИИ</h1>
+                <p class="page-hero-lead">Бесплатные модели OpenRouter в порядке, в котором их пробует бот. Модель со сбоем временно уходит в конец списка, после 404 — на сутки. Запросов сегодня: {{ used_today }} из {{ daily_limit }}.</p>
+            </div>
+        </div>
+    </section>
+
+    <p><a href="/admin/ai-models?refresh=1">Обновить список моделей с OpenRouter</a></p>
+
+    {% for k in kinds %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ k.label }}</span><span class="panel-hint">{{ k.rows|length }}</span></div>
+            {% if not k.rows %}
+                <p class="empty-state">Нет подходящих бесплатных моделей.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Модель</th>
+                                <th>Статус</th>
+                                <th>Успехов / сбоев</th>
+                                <th>Последний успех</th>
+                                <th>Время ответа</th>
+                                <th>Последняя ошибка</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in k.rows %}
+                                <tr>
+                                    <td>{{ loop.index }}</td>
+                                    <td>{{ r.id }}</td>
+                                    <td>
+                                        {% if r.cooling_until %}<span class="badge badge-warn">пауза до {{ r.cooling_until }}</span>
+                                        {% elif r.ok %}<span class="badge badge-ok">работает</span>
+                                        {% else %}<span class="badge badge-neutral">не пробовали</span>{% endif %}
+                                    </td>
+                                    <td>{{ r.ok }} / {{ r.fail }}</td>
+                                    <td>{{ r.last_ok }}</td>
+                                    <td>{{ "%.0f с"|format(r.latency) if r.latency else "—" }}</td>
+                                    <td class="muted">{{ r.last_error or "—" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+    {% endfor %}
+{% endblock %}

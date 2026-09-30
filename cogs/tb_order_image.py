@@ -177,6 +177,17 @@ def _overall_contribution(zone: str, stars: int) -> int:
     return max(0, stars)
 
 
+def _validate_response(data: dict):
+    """Для роутера (services/openrouter_router.py): ответ, из которого не собираются 6
+    этапов, отбраковывается — пробуем другую модель (не больше 2 отбракованных ответов,
+    чтобы не жечь суточный лимит, если картинка и правда не та)."""
+    try:
+        blocks, _total = _build_order_blocks(data)
+    except Exception as e:
+        return f"не разобрать этапы: {e}"
+    return True if len(blocks) == 6 else f"этапов {len(blocks)} вместо 6"
+
+
 def _build_order_blocks(data: dict):
     """Возвращает (список из 6 текстов этапов, сумма звёзд в общий зачёт)."""
     rounds = data.get("rounds") or []
@@ -327,7 +338,7 @@ class TBOrderImage(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT
+                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT, _validate_response
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")

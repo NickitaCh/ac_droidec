@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
-from services import datacron_catalog, datacron_shorts, feature_flags, fun_features, tb_schedule
+from services import datacron_catalog, datacron_shorts, feature_flags, fun_features, openrouter_router, openrouter_vision, tb_schedule
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -514,3 +514,44 @@ async def datacron_shorts_generate(request: Request, user: dict = Depends(requir
         return JSONResponse({"error": f"Каталог датакронов недоступен: {e}"}, status_code=503)
     drafts, error = await asyncio.to_thread(datacron_shorts.generate_drafts, catalog, set_id, ability_ids)
     return JSONResponse({"drafts": drafts, "error": error})
+
+
+# =====================================================================
+# Модели OpenRouter — только просмотр: роутер (services/openrouter_router.py) сам
+# выбирает и переключает модели, страница показывает, почему он выбрал именно так.
+# =====================================================================
+@router.get("/ai-models", response_class=HTMLResponse)
+async def ai_models_page(request: Request, user: dict = Depends(require_super_admin)):
+    import time as _time
+    from datetime import datetime, timedelta, timezone
+    msk = timezone(timedelta(hours=3))
+
+    def fmt(ts):
+        return datetime.fromtimestamp(ts, msk).strftime("%d.%m %H:%M") if ts else "—"
+
+    if request.query_params.get("refresh"):
+        await asyncio.to_thread(openrouter_router.free_models, True)
+    now = _time.time()
+    kinds = []
+    for kind, label in ((openrouter_router.KIND_VISION, "Картинки (/фарм, план ТБ)"), (openrouter_router.KIND_TEXT, "Текст (сокращения ДК)")):
+        ranked = await asyncio.to_thread(openrouter_router.ranked_candidates, kind)
+        rows = []
+        for model, h in ranked:
+            cooldown = h.get("cooldown_until") or 0
+            rows.append({
+                "id": model["id"],
+                "context": model["context"],
+                "ok": h.get("ok_count") or 0,
+                "fail": h.get("fail_count") or 0,
+                "last_ok": fmt(h.get("last_ok_at")),
+                "latency": h.get("last_latency"),
+                "cooling_until": fmt(cooldown) if cooldown > now else None,
+                "last_error": h.get("last_error") or "",
+            })
+        kinds.append({"label": label, "rows": rows})
+    return templates.TemplateResponse(request, "admin_ai_models.html", {
+        "user": user,
+        "kinds": kinds,
+        "used_today": database.get_openrouter_requests_today(),
+        "daily_limit": openrouter_vision.OPENROUTER_DAILY_REQUEST_LIMIT,
+    })

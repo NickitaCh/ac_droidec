@@ -138,7 +138,10 @@ def generate_drafts(catalog: dict, set_id: int, ability_ids: list) -> tuple:
     for batch in batches:
         wanted = {ability_id for ability_id, _full in batch}
         try:
-            answer = openrouter_vision.call_text_json(_build_prompt(batch, examples), api_key)
+            answer = openrouter_vision.call_text_json(
+                _build_prompt(batch, examples), api_key,
+                validate=lambda d, w=wanted: True if w & set(d) else "нет ни одного запрошенного id",
+            )
         except Exception as e:
             if drafts:
                 return drafts, f"Часть черновиков не получена: {e}"

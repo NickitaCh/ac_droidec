@@ -57,6 +57,16 @@ Star Wars: Galaxy of Heroes) — список недостающих детал�
 # Кнопка «Показать всем» на скрытом (ephemeral) ответе — по образцу
 # cogs/datacron_requirements.py::DatacronCheckRevealView (там для embed'ов, здесь для
 # простого текста, т.к. /фарм отвечает обычным сообщением, не embed'ом).
+def _validate_response(data: dict):
+    """Отбраковка ответа модели для роутера (services/openrouter_router.py): без поля
+    is_c3po_inventory или со списком items не того вида — пробуем другую модель."""
+    if "is_c3po_inventory" not in data:
+        return "нет поля is_c3po_inventory"
+    if data.get("is_c3po_inventory") and not isinstance(data.get("items"), list):
+        return "items не список"
+    return True
+
+
 class GearFarmRevealView(disnake.ui.View):
     def __init__(self, content: str):
         super().__init__(timeout=1800)
@@ -196,7 +206,7 @@ class GearFarm(commands.Cog):
 
         try:
             data = await asyncio.to_thread(
-                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT
+                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT, _validate_response
             )
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")
