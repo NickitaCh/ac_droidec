@@ -30,6 +30,22 @@ async def _heartbeat():
         await asyncio.sleep(BEAT_SEC)
 
 
+def _other_threads(frames) -> str:
+    """Хвосты стеков остальных занятых потоков. Если loop стоит в select/на ровном
+    месте, его держит не свой код, а GIL, захваченный другим потоком (например,
+    json.loads огромного ответа Comlink внутри to_thread — C-декодер GIL не отпускает)."""
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out = []
+    for tid, f in frames.items():
+        if tid in (_loop_thread_id, threading.get_ident()):
+            continue
+        tail = traceback.format_stack(f)[-4:]
+        if "threading.py" in tail[-1] and "wait" in tail[-1]:
+            continue  # простаивающий поток пула
+        out.append(f"  --- поток {names.get(tid, tid)}:\n" + "".join(tail))
+    return "🐢 [Watchdog] Занятые потоки:\n" + "".join(out) if out else ""
+
+
 def _watch():
     stalled_since = None
     while True:
@@ -38,9 +54,12 @@ def _watch():
         if lag > STALL_SEC:
             if stalled_since is None:
                 stalled_since = _last_beat
-                frame = sys._current_frames().get(_loop_thread_id)
+                frames = sys._current_frames()
+                frame = frames.get(_loop_thread_id)
                 stack = "".join(traceback.format_stack(frame)) if frame else "(стек недоступен)\n"
-                print(f"🐢 [Watchdog] Event loop заблокирован уже {lag:.1f}с. Стек потока loop'а:\n{stack}", end="")
+                ts = time.strftime("%H:%M:%S", time.gmtime())
+                print(f"🐢 [Watchdog] {ts} UTC: event loop заблокирован уже {lag:.1f}с. Стек потока loop'а:\n{stack}"
+                      + _other_threads(frames), end="")
         elif stalled_since is not None:
             print(f"🐢 [Watchdog] Event loop разблокирован, зависание длилось ~{_last_beat - stalled_since:.1f}с")
             stalled_since = None
