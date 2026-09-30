@@ -28,7 +28,8 @@ class ModScan(commands.Cog):
 
     @tasks.loop(minutes=SCAN_INTERVAL_MINUTES)
     async def mod_scan_loop(self):
-        targets = database.get_mod_scan_targets(owner_guild_id=None)
+        targets = await asyncio.to_thread(database.get_mod_scan_targets, owner_guild_id=None)
+        mod_scan.forget_targets_except(t["id"] for t in targets)
         if not targets:
             return
         for target in targets:
@@ -37,7 +38,7 @@ class ModScan(commands.Cog):
             except Exception as e:
                 print(f"⚠️ [МодСкан] Цель {target['id']} ({target.get('guild_name')}): {e}")
             await asyncio.sleep(BETWEEN_TARGETS_SLEEP)
-        database.prune_mod_scan_events(days=EVENT_RETENTION_DAYS)
+        await asyncio.to_thread(database.prune_mod_scan_events, days=EVENT_RETENTION_DAYS)
 
     @mod_scan_loop.before_loop
     async def _before_mod_scan_loop(self):

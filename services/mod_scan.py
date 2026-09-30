@@ -16,6 +16,8 @@ services/steal_build.py::resolve_guild, тот же факт уже задоку
 проверки слотов/статов), не дублируем её здесь."""
 
 import asyncio
+import hashlib
+import json
 
 import database
 from services.mod_search import decode_mod
@@ -149,46 +151,87 @@ def _diff_unit_mods(old_mods: list, new_mods: list) -> list[tuple[str, str]]:
     return events
 
 
+# {target_id: {(ally_code, base_id): sha1(mods_json)}} — слепок снапшота в памяти бота,
+# грузится из БД один раз на цель (после рестарта), дальше обновляется на каждом скане.
+# Раньше каждые 5 минут читался и перезаписывался весь снапшот (~190 МБ JSON на цель) прямо
+# в event loop — зависания по 5-10с и «Unknown interaction» на чужих командах.
+_snapshot_hashes: dict[int, dict] = {}
+
+
+def forget_targets_except(target_ids):
+    """Выкидывает из кэша удалённые цели (удаляются на вебе, в другом процессе)."""
+    for tid in set(_snapshot_hashes) - set(target_ids):
+        del _snapshot_hashes[tid]
+
+
+def _process_player(target_id: int, player_data: dict, player_name: str, hashes: dict):
+    """Выполняется в потоке: находит юниты игрока с изменившимися модами (по хэшу),
+    диффит только их против снапшота. Возвращает (строки для upsert с хэшами, события)."""
+    ally_code = str(player_data.get("allyCode") or "")
+    if not ally_code:
+        return [], []
+    changed = {}
+    for base_id, mods in _unit_mods(player_data).items():
+        mods_json = json.dumps(mods)
+        digest = hashlib.sha1(mods_json.encode()).digest()
+        if hashes.get((ally_code, base_id)) != digest:
+            changed[base_id] = (mods, mods_json, digest)
+    if not changed:
+        return [], []
+    old = database.get_mod_scan_player_mods(target_id, ally_code, changed.keys())
+    rows, events = [], []
+    for base_id, (mods, mods_json, digest) in changed.items():
+        old_mods = old.get(base_id)
+        if old_mods is not None:
+            for kind, description in _diff_unit_mods(old_mods, mods):
+                events.append((target_id, ally_code, player_name, base_id, kind, description))
+        rows.append((ally_code, player_name, base_id, mods_json, digest))
+    return rows, events
+
+
 async def scan_target(comlink, target: dict):
     """Один прогон одной цели: тянет свежий ростер, диффит против mod_scan_snapshot,
     пишет события и обновляет снапшот+статус цели. Ошибки на уровне ОТДЕЛЬНОГО игрока не
     прерывают скан остальных (см. docstring выше); ошибка на уровне САМОЙ гильдии (сеть/ID
-    протух) пишется в last_error и снапшот не трогается."""
+    протух) пишется в last_error и снапшот не трогается. Вся работа с БД и диффом — в
+    потоках, в снапшот пишутся только юниты с изменившимися модами."""
     target_id = target["id"]
     try:
         guild = await asyncio.to_thread(
             comlink.get_guild, target["swgoh_guild_id"], include_recent_guild_activity_info=True
         )
     except Exception as e:
-        database.update_mod_scan_target_sync(target_id, None, None, error=str(e))
+        await asyncio.to_thread(database.update_mod_scan_target_sync, target_id, None, None, error=str(e))
         return
     guild = guild.get("guild", guild)
     profile = guild.get("profile", {})
     guild_name = profile.get("name") or target.get("guild_name") or f"Гильдия {target['swgoh_guild_id']}"
     members = [(m["playerId"], m.get("playerName") or "") for m in guild.get("member", []) if m.get("playerId")]
     if not members:
-        database.update_mod_scan_target_sync(target_id, None, None, error="Гильдия пуста или недоступна.")
+        await asyncio.to_thread(database.update_mod_scan_target_sync, target_id, None, None,
+                                error="Гильдия пуста или недоступна.")
         return
 
-    old_snapshot = database.get_mod_scan_snapshot(target_id)
-    new_entries = []
+    hashes = _snapshot_hashes.get(target_id)
+    if hashes is None:
+        hashes = await asyncio.to_thread(database.get_mod_scan_snapshot_hashes, target_id)
+        _snapshot_hashes[target_id] = hashes
+    changed_rows = []
     events = []
     for player_id, player_name in members:
         try:
             player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
+            rows, player_events = await asyncio.to_thread(_process_player, target_id, player_data, player_name, hashes)
         except Exception:
             await asyncio.sleep(PLAYER_FETCH_SLEEP)
             continue
-        ally_code = str(player_data.get("allyCode") or "")
-        for base_id, mods in _unit_mods(player_data).items():
-            new_entries.append((ally_code, player_name, base_id, mods))
-            if ally_code:
-                old_mods = old_snapshot.get((ally_code, base_id))
-                if old_mods is not None:
-                    for kind, description in _diff_unit_mods(old_mods, mods):
-                        events.append((target_id, ally_code, player_name, base_id, kind, description))
+        changed_rows.extend(rows)
+        events.extend(player_events)
         await asyncio.sleep(PLAYER_FETCH_SLEEP)
 
-    database.upsert_mod_scan_snapshot(target_id, new_entries)
-    database.add_mod_scan_events(events)
-    database.update_mod_scan_target_sync(target_id, guild_name, len(members), error=None)
+    await asyncio.to_thread(database.upsert_mod_scan_snapshot, target_id,
+                            [(a, name, b, mods_json) for a, name, b, mods_json, _ in changed_rows])
+    for ally_code, _, base_id, _, digest in changed_rows:
+        hashes[(ally_code, base_id)] = digest
+    await asyncio.to_thread(database.add_mod_scan_events, events)
+    await asyncio.to_thread(database.update_mod_scan_target_sync, target_id, guild_name, len(members), error=None)

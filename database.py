@@ -6564,27 +6564,46 @@ def delete_mod_scan_target(target_id: int, owner_guild_id: int = 1) -> bool:
     return deleted
 
 
-def get_mod_scan_snapshot(target_id: int) -> dict:
-    """base_id ключом по факту не годится — один и тот же base_id уникален на игрока, но
-    цель включает много игроков, поэтому возвращает {(ally_code, base_id): mods_list}."""
+def get_mod_scan_snapshot_hashes(target_id: int) -> dict:
+    """{(ally_code, base_id): sha1(mods_json)} — компактный слепок снапшота для сверки
+    "изменилось ли" без загрузки самих модов (снапшот цели — ~17 тыс. строк и ~190 МБ JSON,
+    грузить его целиком каждые 5 минут вешало event loop и съедало ядро CPU). Читается
+    построчно, чтобы не держать все строки в памяти разом."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_mod_scan_tables(cursor)
     cursor.execute("SELECT ally_code, base_id, mods_json FROM mod_scan_snapshot WHERE target_id = ?", (target_id,))
-    rows = cursor.fetchall()
+    hashes = {(ally_code, base_id): hashlib.sha1(mods_json.encode()).digest() for ally_code, base_id, mods_json in cursor}
     conn.close()
-    return {(ally_code, base_id): json.loads(mods_json) for ally_code, base_id, mods_json in rows}
+    return hashes
 
 
-def upsert_mod_scan_snapshot(target_id: int, entries: list[tuple[str, str, str, list]]):
-    """entries: [(ally_code, player_name, base_id, mods_list), ...]"""
+def get_mod_scan_player_mods(target_id: int, ally_code: str, base_ids) -> dict:
+    """{base_id: mods_list} из снапшота для одного игрока — только нужные юниты (те,
+    у которых хэш модов поменялся), см. get_mod_scan_snapshot_hashes."""
+    wanted = set(base_ids)
+    if not wanted:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_mod_scan_tables(cursor)
+    cursor.execute("SELECT base_id, mods_json FROM mod_scan_snapshot WHERE target_id = ? AND ally_code = ?",
+                   (target_id, ally_code))
+    rows = {base_id: json.loads(mods_json) for base_id, mods_json in cursor if base_id in wanted}
+    conn.close()
+    return rows
+
+
+def upsert_mod_scan_snapshot(target_id: int, entries: list[tuple[str, str, str, str]]):
+    """entries: [(ally_code, player_name, base_id, mods_json), ...] — mods_json уже
+    сериализован (тем же json.dumps, от которого считается хэш в сканере)."""
     if not entries:
         return
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_mod_scan_tables(cursor)
-    rows = [(target_id, ally_code, player_name, base_id, json.dumps(mods_list))
-            for ally_code, player_name, base_id, mods_list in entries]
+    rows = [(target_id, ally_code, player_name, base_id, mods_json)
+            for ally_code, player_name, base_id, mods_json in entries]
     cursor.executemany("""
         INSERT INTO mod_scan_snapshot (target_id, ally_code, player_name, base_id, mods_json, updated_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
