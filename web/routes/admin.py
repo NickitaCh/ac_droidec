@@ -472,6 +472,7 @@ async def datacron_shorts_page(request: Request, user: dict = Depends(require_su
         "selected": selected,
         "rows": rows,
         "source_labels": datacron_shorts.SOURCE_LABELS,
+        "source_badges": datacron_shorts.SOURCE_BADGES,
         "max_len": datacron_shorts.MAX_SHORT_LEN,
         "saved": request.query_params.get("saved"),
         "error": request.query_params.get("error"),

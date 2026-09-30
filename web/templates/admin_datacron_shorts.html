@@ -7,10 +7,19 @@
             <div>
                 <p class="page-hero-eyebrow">Администрирование</p>
                 <h1>Сокращения бонусов датакронов</h1>
-                <p class="page-hero-lead">Короткий текст вместо игрового абзаца — в /дк_требования и на страницах датакронов, для всех гильдий. Пустое поле — встроенное или автоматическое сокращение (серым в поле).</p>
+                <p class="page-hero-lead">Полный текст бонуса из игры слишком длинный для /дк_требования и таблиц сайта, поэтому показывается короткая формулировка. Правки общие для всех гильдий.</p>
             </div>
         </div>
     </section>
+
+    <div class="panel dc-shorts-legend">
+        <p><b>Полный текст из игры</b> — описание бонуса как есть, только для справки.</p>
+        <p><b>Показывается сейчас</b> — именно этот текст видят в /дк_требования и на сайте. Откуда он взят:
+            <span class="badge badge-ok">ручное</span> сохранено на этой странице,
+            <span class="badge badge-neutral">встроенное</span> прописано в коде бота,
+            <span class="badge badge-warn">авто</span> первое предложение игрового текста (обычно длинно, лучше сократить).</p>
+        <p><b>Своя формулировка</b> — впишите и нажмите «Сохранить», она заменит показываемый текст. Очистите поле, чтобы вернуть встроенное или авто.</p>
+    </div>
 
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     {% if saved is not none %}<p class="muted">Сохранено изменений: {{ saved }}.</p>{% endif %}
@@ -26,7 +35,7 @@
                     <option value="{{ s.set_id }}" {% if s.set_id == selected %}selected{% endif %}>{{ s.display_name }} [{{ s.set_id }}]{% if s.missing %} — без сокращения: {{ s.missing }}{% endif %}</option>
                 {% endfor %}
             </select>
-            <label class="checkbox"><input type="checkbox" id="dc-only-auto"> только без сокращения</label>
+            <label class="checkbox"><input type="checkbox" id="dc-only-auto"> только «авто» (без готового сокращения)</label>
         </form>
 
         <form method="post" action="/admin/datacron-shorts/save" class="dc-shorts-form" id="dc-shorts-form">
@@ -40,9 +49,9 @@
                                 <thead>
                                     <tr>
                                         <th>Ветка</th>
-                                        <th>Игровой текст</th>
-                                        <th>Сокращение</th>
-                                        <th>Сейчас</th>
+                                        <th>Полный текст из игры</th>
+                                        <th>Показывается сейчас</th>
+                                        <th>Своя формулировка</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -53,16 +62,17 @@
                                                 <div class="muted dc-shorts-id">{{ r.ability_id }}</div>
                                             </td>
                                             <td class="dc-shorts-full">{{ r.full or "—" }}</td>
+                                            <td class="dc-shorts-effective"
+                                                data-fallback="{{ r.fallback }}" data-fallback-source="{{ r.fallback_source }}"
+                                                data-branch="{{ r.branch_label }}">
+                                                <span class="badge {{ source_badges[r.source] }}">{{ source_labels[r.source] }}</span>
+                                                <div class="dc-shorts-effective-text">{% if r.branch_label %}<span class="muted">{{ r.branch_label }}:</span> {% endif %}<span class="js-text">{{ r.effective }}</span></div>
+                                            </td>
                                             <td>
                                                 <textarea class="dc-shorts-input" name="short__{{ r.ability_id }}"
                                                           data-ability="{{ r.ability_id }}" data-fallback-source="{{ r.fallback_source }}"
                                                           data-orig="{{ r.custom }}" maxlength="{{ max_len }}" rows="2"
-                                                          placeholder="{{ r.fallback }}">{{ r.custom }}</textarea>
-                                            </td>
-                                            <td>
-                                                {% if r.source == "custom" %}<span class="badge badge-ok">{{ source_labels[r.source] }}</span>
-                                                {% elif r.source == "builtin" %}<span class="badge badge-neutral">{{ source_labels[r.source] }}</span>
-                                                {% else %}<span class="badge badge-warn">{{ source_labels[r.source] }}</span>{% endif %}
+                                                          placeholder="Пусто — показывается {{ source_labels[r.fallback_source] }}">{{ r.custom }}</textarea>
                                             </td>
                                         </tr>
                                     {% endfor %}
@@ -113,7 +123,7 @@
                     let filled = 0;
                     targets.forEach((el) => {
                         const text = (data.drafts || {})[el.dataset.ability];
-                        if (text && !el.value.trim()) { el.value = text; el.classList.add("is-draft"); filled++; }
+                        if (text && !el.value.trim()) { el.value = text; el.classList.add("is-draft"); preview(el); filled++; }
                     });
                     status.textContent = (filled ? `Заполнено черновиков: ${filled} — проверьте цифры и нажмите «Сохранить».` : "")
                         + (data.error ? ` ${data.error}` : "");
@@ -124,7 +134,20 @@
                 }
             });
 
-            inputs.forEach((el) => el.addEventListener("input", () => el.classList.remove("is-draft")));
+            // Колонка «Показывается сейчас» сразу отражает то, что будет после сохранения.
+            const labels = {{ source_labels|tojson }};
+            const badges = {{ source_badges|tojson }};
+            function preview(el) {
+                const cell = el.closest("tr").querySelector(".dc-shorts-effective");
+                const badge = cell.querySelector(".badge");
+                const value = el.value.trim();
+                const text = value ? value.split("{0}").join(cell.dataset.branch) : cell.dataset.fallback;
+                const source = value ? "custom" : cell.dataset.fallbackSource;
+                cell.querySelector(".js-text").textContent = text;
+                badge.className = "badge " + badges[source];
+                badge.textContent = labels[source] + (value !== el.dataset.orig ? " · не сохранено" : "");
+            }
+            inputs.forEach((el) => el.addEventListener("input", () => { el.classList.remove("is-draft"); preview(el); }));
         })();
         </script>
     {% endif %}

@@ -8,7 +8,9 @@
 предлагает черновик в поле формы — в БД попадает лишь то, что человек сохранил сам
 (модель иногда перевирает цифры/условия механик)."""
 
+import difflib
 import os
+import re
 
 import database
 from cogs.datacron_requirements import (
@@ -24,7 +26,10 @@ from services import openrouter_vision
 
 MAX_SHORT_LEN = 300
 GENERATE_BATCH_SIZE = 40
-_FEW_SHOT_LIMIT = 12
+_FEW_SHOT_LIMIT = 12  # минимум примеров (добивается образцами стиля)
+_FEW_SHOT_MAX = 24  # потолок похожих примеров на пачку — промпт не должен раздуваться
+_SIMILAR_PER_ITEM = 2
+_SIMILAR_MIN_RATIO = 0.5
 
 
 def season_rows(season: dict, custom_shorts: dict) -> dict:
@@ -39,7 +44,7 @@ def season_rows(season: dict, custom_shorts: dict) -> dict:
         fallback_source = ABILITY_SHORT_SOURCE_BUILTIN
         if fallback is None:
             fallback, fallback_source = _ability_short_template(ability_id, full, {})
-        _template, source = _ability_short_template(ability_id, full, custom_shorts)
+        template, source = _ability_short_template(ability_id, full, custom_shorts)
         rows[info["level"]].append({
             "ability_id": ability_id,
             "branches": branches,
@@ -48,6 +53,9 @@ def season_rows(season: dict, custom_shorts: dict) -> dict:
             "fallback": _fill_target(fallback, first_branch),
             "fallback_source": fallback_source,
             "source": source,
+            # То, что реально выводится в /дк_требования и на сайте прямо сейчас.
+            "effective": _fill_target(template, first_branch),
+            "branch_label": first_branch,
         })
     for level_rows in rows.values():
         level_rows.sort(key=lambda r: (", ".join(r["branches"]), r["ability_id"]))
@@ -62,26 +70,50 @@ def count_missing(season: dict, custom_shorts: dict) -> int:
     )
 
 
-def _few_shot_examples(catalog: dict, custom_shorts: dict) -> list:
-    """Пары «полный текст → сокращение» из уже сделанных вручную (сначала правки из БД,
-    потом встроенные) — задают модели стиль. Без полного текста — только пример стиля."""
-    pairs = []
+def _norm_for_similarity(text: str) -> str:
+    """Числа → «#»: «восстанавливают 2%» и «восстанавливают 10%» — один шаблон фразы."""
+    return re.sub(r"\d+(?:[.,]\d+)?", "#", text or "").lower()
+
+
+def _few_shot_examples(catalog: dict, custom_shorts: dict, items: list) -> list:
+    """Пары «полный текст → сокращение» из уже принятых (ручные правки + встроенные).
+    Для каждого сокращаемого бонуса берутся самые похожие по тексту (многие бонусы из
+    сезона в сезон повторяются с другой фракцией/цифрами — идея Ricardo, чат 2026-09-30),
+    остаток добивается образцами стиля, ручные правки первыми. Похожий ≠ тот же: модель
+    сама решает, совпадает ли механика (см. правило в _build_prompt)."""
     known = {**ABILITY_SHORT_OVERRIDES, **custom_shorts}
+    wanted = {ability_id for ability_id, _full in items}
+    pairs = {}  # ability_id -> (full, short, is_custom)
     for season in catalog["seasons"].values():
         for ability_id, info in season["abilities"].items():
-            if ability_id in known and info["full"]:
-                pairs.append((info["full"], known[ability_id], ability_id in custom_shorts))
-    pairs.sort(key=lambda p: not p[2])  # ручные правки гильдии — первыми
-    seen, result = set(), []
-    for full, short, _is_custom in pairs:
-        if short in seen:
-            continue
-        seen.add(short)
-        result.append((full, short))
-        if len(result) >= _FEW_SHOT_LIMIT:
+            if ability_id in known and ability_id not in wanted and info["full"]:
+                pairs[ability_id] = (info["full"], known[ability_id], ability_id in custom_shorts)
+    if not pairs:
+        return [(None, short) for short in list(ABILITY_SHORT_OVERRIDES.values())[:_FEW_SHOT_LIMIT]]
+
+    normalized = {aid: _norm_for_similarity(full) for aid, (full, _s, _c) in pairs.items()}
+    scored = {}
+    for _ability_id, full in items:
+        target = _norm_for_similarity(full)
+        best = sorted(
+            ((difflib.SequenceMatcher(None, target, text).ratio(), aid) for aid, text in normalized.items()),
+            reverse=True,
+        )[:_SIMILAR_PER_ITEM]
+        for ratio, aid in best:
+            if ratio >= _SIMILAR_MIN_RATIO:
+                scored[aid] = max(scored.get(aid, 0), ratio)
+    chosen = [aid for aid, _r in sorted(scored.items(), key=lambda kv: -kv[1])][:_FEW_SHOT_MAX]
+    for aid in sorted(pairs, key=lambda a: not pairs[a][2]):  # образцы стиля, ручные первыми
+        if len(chosen) >= _FEW_SHOT_LIMIT:
             break
-    if not result:
-        result = [(None, short) for short in list(ABILITY_SHORT_OVERRIDES.values())[:_FEW_SHOT_LIMIT]]
+        if aid not in chosen:
+            chosen.append(aid)
+    seen, result = set(), []
+    for aid in chosen:
+        full, short, _is_custom = pairs[aid]
+        if short not in seen:
+            seen.add(short)
+            result.append((full, short))
     return result
 
 
@@ -95,8 +127,12 @@ def _build_prompt(items: list, examples: list) -> str:
         "- Стиль: «условие → эффект», стандартные сокращения игроков: ШХ (шкала хода), ХП,",
         "  осн./особая способность, крит., доп. ход, «не увернуться», «нельзя снять».",
         "- Плейсхолдер {0} (название ветки) в ответе не используй.",
+        "- Многие бонусы повторяются из сезона в сезон с другой фракцией или цифрами. Если",
+        "  бонус совпадает с примером по механике (то же условие и тот же эффект) — возьми",
+        "  формулировку примера, заменив только цифры. Если условие или эффект другие — пиши",
+        "  заново, не подгоняй под похожий пример.",
         "",
-        "Примеры уже принятых сокращений:",
+        "Примеры уже принятых сокращений (сначала самые похожие на сокращаемые):",
     ]
     for full, short in examples:
         if full:
@@ -133,9 +169,10 @@ def generate_drafts(catalog: dict, set_id: int, ability_ids: list) -> tuple:
     if remaining < len(batches):
         return {}, f"Суточный лимит OpenRouter почти исчерпан (осталось {max(remaining, 0)} запросов, нужно {len(batches)})."
 
-    examples = _few_shot_examples(catalog, database.get_datacron_ability_shorts())
+    custom_shorts = database.get_datacron_ability_shorts()
     drafts = {}
     for batch in batches:
+        examples = _few_shot_examples(catalog, custom_shorts, batch)
         wanted = {ability_id for ability_id, _full in batch}
         try:
             answer = openrouter_vision.call_text_json(
@@ -160,4 +197,10 @@ SOURCE_LABELS = {
     ABILITY_SHORT_SOURCE_CUSTOM: "ручное",
     ABILITY_SHORT_SOURCE_BUILTIN: "встроенное",
     ABILITY_SHORT_SOURCE_AUTO: "авто",
+}
+
+SOURCE_BADGES = {
+    ABILITY_SHORT_SOURCE_CUSTOM: "badge-ok",
+    ABILITY_SHORT_SOURCE_BUILTIN: "badge-neutral",
+    ABILITY_SHORT_SOURCE_AUTO: "badge-warn",
 }
