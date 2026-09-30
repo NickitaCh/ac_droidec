@@ -14,6 +14,15 @@ from cogs.violations import autocomplete_players
 
 # 'DatacronDefinitions' — бит из comlink.get_enums()["GameDataItemsEnum"], проверено вживую.
 DATACRON_DEFINITIONS_FLAG = 70368744177664
+# Ещё два бита GameDataItemsEnum (проверено вживую 2026-09-30): определения способностей
+# дают точный descKey способности ДК (ключ локализации не всегда выводится из abilityId —
+# datacron_faction_ufu_002 → DATACRON_FACTION_UNALIGNEDFORCEUSER_002_DESC,
+# datacron_character_arctrooper501st_001 → DATACRON_CHARACTER_ARCTROOPER_001_DESC), а
+# правила выбора цели — категорию ветки (target_datacron_clone → profession_clonetrooper,
+# target_datacron_tech → selftag_badbatchtech). ~19 МБ, ~3 с, раз в 12 часов.
+ABILITY_DEFINITIONS_FLAG = 2097152
+BATTLE_TARGETING_RULES_FLAG = 4096
+DATACRON_GAME_DATA_ITEMS = str(DATACRON_DEFINITIONS_FLAG | ABILITY_DEFINITIONS_FLAG | BATTLE_TARGETING_RULES_FLAG)
 DATACRON_LEVELS = (3, 6, 9)
 
 DATACRON_ANY = "ANY"
@@ -208,11 +217,34 @@ def _parse_loc_kv(loc_text: str) -> dict:
     return kv
 
 
-def _resolve_ability_desc_key(ability_id: str, loc_kv: dict):
+def _game_data_hints(game_data: dict):
+    """(desc_keys, rule_categories) из game data, запрошенной с DATACRON_GAME_DATA_ITEMS:
+    desc_keys — {ability_id: descKey} для способностей ДК; rule_categories —
+    {target_key: [categoryId, ...]} (без исключающих категорий) для target_datacron_*."""
+    desc_keys = {
+        a["id"]: a.get("descKey")
+        for a in game_data.get("ability") or []
+        if str(a.get("id", "")).startswith("datacron_") and a.get("descKey")
+    }
+    rule_categories = {}
+    for rule in game_data.get("battleTargetingRule") or []:
+        rule_id = str(rule.get("id", ""))
+        if not rule_id.startswith("target_datacron_"):
+            continue
+        cats = ((rule.get("category") or {}).get("category")) or []
+        rule_categories[rule_id[len("target_datacron_"):]] = [c.get("categoryId") for c in cats if not c.get("exclude") and c.get("categoryId")]
+    return desc_keys, rule_categories
+
+
+def _resolve_ability_desc_key(ability_id: str, loc_kv: dict, desc_keys: dict = None):
     """Возвращает не сам текст, а КЛЮЧ локализации, под которым он найден — нужен
     отдельно от _resolve_ability_desc, чтобы найти тот же самый вариант текста
     в другом loc_kv (напр. EN вместо RU) для экспорта пар перевода, см.
-    _build_translation_export."""
+    _build_translation_export. Сначала — точный descKey из определения способности
+    (desc_keys, см. _game_data_hints), затем подбор по имени abilityId."""
+    exact = (desc_keys or {}).get(ability_id)
+    if exact and exact in loc_kv:
+        return exact
     prefix = f"{ability_id.upper()}_DESC"
     best_key = prefix if prefix in loc_kv else None
     for v in range(2, 8):
@@ -242,8 +274,8 @@ def _resolve_ability_desc_key(ability_id: str, loc_kv: dict):
     return None
 
 
-def _resolve_ability_desc(ability_id: str, loc_kv: dict):
-    key = _resolve_ability_desc_key(ability_id, loc_kv)
+def _resolve_ability_desc(ability_id: str, loc_kv: dict, desc_keys: dict = None):
+    key = _resolve_ability_desc_key(ability_id, loc_kv, desc_keys)
     return loc_kv.get(key) if key else None
 
 
@@ -264,7 +296,41 @@ def _auto_shorten(text: str, limit: int = 200) -> str:
     return first_sentence[:limit].rstrip(" ,;:") + "…"
 
 
-def _resolve_target_label(target_key: str, loc_kv: dict) -> str:
+_CATEGORY_PREFIX_RE = re.compile(r"^(profession|affiliation|role|species|faction|shipclass)_")
+
+
+def _label_from_category(category_id: str, loc_kv: dict):
+    """Подпись по categoryId из правила выбора цели: selftag_<baseid> — персонаж
+    (берём самое новое имя UNIT_<BASEID>_NAME_V#: у Рей-мусорщицы _V2 = «Рей (Мусорщица)»),
+    alignment_* — сторона, остальное — CATEGORY_<ID без префикса и подчёркиваний>_DESC."""
+    if category_id.startswith("selftag_"):
+        base = category_id[len("selftag_"):].upper()
+        for v in range(9, 1, -1):
+            if f"UNIT_{base}_NAME_V{v}" in loc_kv:
+                return loc_kv[f"UNIT_{base}_NAME_V{v}"]
+        return loc_kv.get(f"UNIT_{base}_NAME")
+    if category_id in ("alignment_dark", "alignment_light"):
+        return loc_kv.get("ForceAlignment_Dark" if category_id == "alignment_dark" else "ForceAlignment_Light")
+    stripped = _CATEGORY_PREFIX_RE.sub("", category_id)
+    for candidate in (stripped.upper().replace("_", ""), stripped.upper(), category_id.upper().replace("_", "")):
+        if f"CATEGORY_{candidate}_DESC" in loc_kv:
+            return loc_kv[f"CATEGORY_{candidate}_DESC"]
+    return None
+
+
+def _resolve_target_label(target_key: str, loc_kv: dict, rule_categories: dict = None) -> str:
+    label = _resolve_target_label_by_key(target_key, loc_kv)
+    if label == target_key and rule_categories:
+        # Ключ ветки не совпал ни с одним ключом локализации (clone, ufu, tech,
+        # scavengerrey...) — берём категорию из правила выбора цели самой игры.
+        for category_id in rule_categories.get(target_key, []):
+            found = _label_from_category(category_id, loc_kv)
+            if found:
+                return found
+    return label
+
+
+def _resolve_target_label_by_key(target_key: str, loc_kv: dict) -> str:
     if not target_key:
         return ""
     override_key = TARGET_LABEL_OVERRIDES.get(target_key)
@@ -341,9 +407,10 @@ def refresh_catalog_shorts(catalog):
 
 
 async def _fetch_datacron_cache(comlink) -> dict:
-    game_data = await asyncio.to_thread(comlink.get_game_data, items=str(DATACRON_DEFINITIONS_FLAG))
+    game_data = await asyncio.to_thread(comlink.get_game_data, items=DATACRON_GAME_DATA_ITEMS)
     loc = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
     loc_kv = _parse_loc_kv(loc.get("Loc_RUS_RU.txt", ""))
+    desc_keys, rule_categories = _game_data_hints(game_data)
 
     affix_sets = {a["id"]: a for a in game_data.get("datacronAffixTemplateSet", [])}
 
@@ -381,7 +448,7 @@ async def _fetch_datacron_cache(comlink) -> dict:
                 continue
             prefix = f"datacron_set_{set_id}_focused_"
             char_key = tid[len(prefix):] if tid.startswith(prefix) else tid
-            char_label = _resolve_target_label(char_key, loc_kv) if char_key else tid
+            char_label = _resolve_target_label(char_key, loc_kv, rule_categories) if char_key else tid
             max_tier = len(template.get("tier", []))
             seasons[set_id]["focused"][char_key] = (char_label, max_tier)
             continue
@@ -404,7 +471,7 @@ async def _fetch_datacron_cache(comlink) -> dict:
                     if branch_target_rule.startswith("target_datacron_")
                     else ""
                 )
-                branch_label = _resolve_target_label(branch_key, loc_kv) if branch_key else affix_set_id
+                branch_label = _resolve_target_label(branch_key, loc_kv, rule_categories) if branch_key else affix_set_id
                 season = seasons[set_id]
                 for affix in affixes:
                     ability_id = affix.get("abilityId")
@@ -414,7 +481,7 @@ async def _fetch_datacron_cache(comlink) -> dict:
                         season["entries"][level].append((branch_label, ability_id))
                     info = season["abilities"].get(ability_id)
                     if info is None:
-                        desc = _resolve_ability_desc(ability_id, loc_kv)
+                        desc = _resolve_ability_desc(ability_id, loc_kv, desc_keys)
                         info = season["abilities"][ability_id] = {
                             "level": level,
                             "full": _clean_ability_text(desc) if desc is not None else None,
@@ -434,6 +501,17 @@ async def _fetch_datacron_cache(comlink) -> dict:
             [(char_key, label, max_tier) for char_key, (label, max_tier) in data["focused"].items()],
             key=lambda t: t[1],
         )
+    unresolved = sorted({
+        f"{set_id}:{branch}" for set_id, data in seasons.items()
+        for level in DATACRON_LEVELS for branch, _ability_id in data["entries"][level]
+        if re.fullmatch(r"[a-z0-9_]+", branch)
+    } | {
+        f"{set_id}:{ability_id}" for set_id, data in seasons.items()
+        for ability_id, info in data["abilities"].items() if not info["full"]
+    })
+    if unresolved:
+        print(f"⚠️ [ДК] Не нашёл русское название ветки/текст бонуса: {', '.join(unresolved)}")
+
     catalog = {"seasons": result_seasons}
     return _apply_ability_labels(catalog, database.get_datacron_ability_shorts(), database.get_datacron_shorts_version())
 
@@ -470,6 +548,7 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
     Ограничено активными сезонами (та же фильтрация по expirationTimeMs, что и в
     _fetch_datacron_cache) и обычными (не фокусными) шаблонами — у фокусных ДК своя
     шкала уровней (1..N по конкретному персонажу), а не общие 3/6/9."""
+    desc_keys, rule_categories = _game_data_hints(game_data)
     now_ms = int(time.time() * 1000)
     seasons = {}
     for dset in game_data.get("datacronSet", []):
@@ -511,13 +590,13 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
                     if branch_target_rule.startswith("target_datacron_")
                     else ""
                 )
-                target_en = _resolve_target_label(target_key, loc_en_kv) if target_key else ""
-                target_ru = _resolve_target_label(target_key, loc_ru_kv) if target_key else ""
+                target_en = _resolve_target_label(target_key, loc_en_kv, rule_categories) if target_key else ""
+                target_ru = _resolve_target_label(target_key, loc_ru_kv, rule_categories) if target_key else ""
                 for affix in affixes:
                     ability_id = affix.get("abilityId")
                     if not ability_id:
                         continue
-                    key = _resolve_ability_desc_key(ability_id, loc_ru_kv)
+                    key = _resolve_ability_desc_key(ability_id, loc_ru_kv, desc_keys)
                     dedup_key = (set_id, level, key)
                     if not key or dedup_key in seen_keys:
                         continue
@@ -548,7 +627,7 @@ async def _fetch_and_write_translation_export(comlink) -> int:
     # что уже дёрнула _fetch_datacron_cache — она вызывается независимо и только с RU;
     # цена лишнего запроса раз в 12 часов незначительна, а раздельные функции проще
     # держать в голове по отдельности.
-    game_data = await asyncio.to_thread(comlink.get_game_data, items=str(DATACRON_DEFINITIONS_FLAG))
+    game_data = await asyncio.to_thread(comlink.get_game_data, items=DATACRON_GAME_DATA_ITEMS)
     loc_ru = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
     loc_en = await asyncio.to_thread(comlink.get_localization, locale="ENG_US", unzip=True)
     seasons = _build_translation_export(
