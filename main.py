@@ -411,9 +411,17 @@ def _check_access(author, command_name: str) -> bool:
 async def check_guild_roles(ctx):
     return _check_access(ctx.author, ctx.command.qualified_name)
 
+def _invoked_command_name(inter) -> str:
+    """Полное имя вызванной команды вместе с сабкомандой («задачи отчёт»).
+    inter.application_command в глобальной проверке — это команда верхнего уровня,
+    её qualified_name = «задачи», и сабкоманды из MEMBER_ACCESSIBLE_COMMANDS
+    с ним никогда не совпадали."""
+    chain, _ = inter.data._get_chain_and_kwargs()
+    return " ".join((inter.data.name, *chain))
+
 @bot.slash_command_check
 async def check_guild_roles_slash(inter):
-    return _check_access(inter.author, inter.application_command.qualified_name)
+    return _check_access(inter.author, _invoked_command_name(inter))
 
 @bot.event
 async def on_slash_command_completion(inter: disnake.ApplicationCommandInteraction):
@@ -485,7 +493,7 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
         tier = None
         try:
             tier = guild_resolver.resolve_tier(inter.author)
-            cmd_name = inter.application_command.qualified_name if inter.application_command else "?"
+            cmd_name = _invoked_command_name(inter)
             print(f"🛑 [Доступ] {inter.author} ({inter.author.id}) tier={tier} команда=/{cmd_name}: {error}")
         except Exception as log_err:
             print(f"🛑 [Доступ] (не удалось залогировать детали: {log_err}): {error}")
