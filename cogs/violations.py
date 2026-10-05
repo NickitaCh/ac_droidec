@@ -362,11 +362,11 @@ class ViolationsCog(commands.Cog):
         await inter.response.send_message(result_text, ephemeral=False)
 
     # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARNS С ТЕКСТОВОЙ ТАБЛИЦЕЙ СТАТИСТИКИ И ЗНАЧКАМИ 🚨 ---
-    @violations_group.sub_command(name="список", description="Своё досье нарушений (общая таблица и чужие досье — 🔒 офицеры)")
+    @violations_group.sub_command(name="список", description="Общая таблица нарушений или досье игрока")
     async def warns(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(description="Пусто: офицеру — общая таблица, участнику — своё досье. Чужое — 🔒 офицеры", default=None, autocomplete=autocomplete_players),
+        игрок: str = commands.Param(description="Игрок для досье; пусто — общая таблица по гильдии", default=None, autocomplete=autocomplete_players),
         тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
     ):
         await inter.response.defer(ephemeral=False)
@@ -375,14 +375,6 @@ class ViolationsCog(commands.Cog):
         guild_id = await guild_resolver.require_feature(inter, "violations")
         if guild_id is None:
             return
-
-        # Участник (не офицер) видит только своё досье: без параметров — оно же вместо
-        # общей таблицы, чужое — отказ с пояснением (self_only_error ниже).
-        if not guild_resolver.is_officer_for_resolved_guild(inter.author) and тег is None and not игрок:
-            if not database.get_user_registration(str(inter.author.id), guild_id=guild_id):
-                await guild_resolver.send_denied(inter, guild_resolver.self_only_error(inter.author, guild_id, None, param_hint="«игрок» / «тег»"))
-                return
-            тег = inter.author
 
         if тег is not None or игрок:
             if тег is not None:
@@ -402,11 +394,6 @@ class ViolationsCog(commands.Cog):
                     return
 
                 ally_code, actual_name = row
-
-            self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code, param_hint="«игрок» / «тег»")
-            if self_error:
-                await guild_resolver.send_denied(inter, self_error)
-                return
 
             rows = database.get_player_warns(ally_code, guild_id=guild_id)
 

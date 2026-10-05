@@ -916,10 +916,8 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
-    # Общего офицерского check на группе нет: офицерские сабкоманды закрыты глобальным
-    # гейтом main.py::_check_access (их нет в MEMBER_ACCESSIBLE_COMMANDS), а «игрок» и
-    # «сравнение_по_игроку» открыты участникам — только про себя (self_only_error).
-    @commands.slash_command(name="тб_отчет", description="Отчёты по ТБ: свои — всем, по гильдии и чужие — 🔒 офицеры")
+    @commands.slash_command(name="тб_отчет", description="Отчёты по ТБ")
+    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -975,7 +973,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, report, "tb_report.txt")
         await inter.edit_original_message("Отчёт отправлен файлом.")
 
-    @tb_report.sub_command(name="игрок", description="Своя статистика за последнюю ТБ по фазам и планетам (чужая — 🔒 офицеры)")
+    @tb_report.sub_command(name="игрок", description="Статистика игрока за последнюю ТБ по фазам и планетам")
     async def tb_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -1015,11 +1013,6 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
                 return
             allycode = cache[name]
-
-        self_error = guild_resolver.self_only_error(inter.author, guild_id, allycode, param_hint="«name» / «аликод»")
-        if self_error:
-            await guild_resolver.send_denied(inter, self_error)
-            return
 
         try:
             player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
@@ -1089,7 +1082,7 @@ class GuildEvents(commands.Cog):
         await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")
         await inter.edit_original_message("Отчёт сравнения отправлен файлом.")
 
-    @tb_report.sub_command(name="сравнение_по_игроку", description="Своя статистика по фазам за последние ТБ (чужая — 🔒 офицеры)")
+    @tb_report.sub_command(name="сравнение_по_игроку", description="Сравнение статистики игрока по фазам за последние ТБ")
     async def tb_player_compare(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -1126,11 +1119,6 @@ class GuildEvents(commands.Cog):
                 await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
                 return
             allycode = cache[name]
-
-        self_error = guild_resolver.self_only_error(inter.author, guild_id, allycode, param_hint="«name» / «аликод»")
-        if self_error:
-            await guild_resolver.send_denied(inter, self_error)
-            return
 
         try:
             player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
