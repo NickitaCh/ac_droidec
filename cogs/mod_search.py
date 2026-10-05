@@ -35,13 +35,13 @@ class ModSearchCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="моды_поиск", description="Поиск надетых модов гильдии по фильтру: сет/слот/primary/вторички")
+    @commands.slash_command(name="моды_поиск", description="Поиск своих надетых модов по фильтру (чужие и вся гильдия — 🔒 офицеры)")
     async def mod_search_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок — без гильдия=True и без указания берётся ваша регистрация", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии, вместо параметра «игрок»"),
-        гильдия: bool = commands.Param(default=False, description="Таблица по всей гильдии вместо одного игрока — только для офицеров"),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
+        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: таблица по всей гильдии вместо одного игрока"),
         сет: int = commands.Param(default=None, description="Сет мода", choices=SET_CHOICES),
         слот: str = commands.Param(default=None, description="Форма/слот мода", choices=SLOT_CHOICES),
         primary: int = commands.Param(default=None, description="Primary-стат мода", choices=STAT_CHOICES),
@@ -89,7 +89,7 @@ class ModSearchCog(commands.Cog):
                 await inter.edit_original_response("❌ Укажите либо игрока (или код союзника), либо `гильдия: True`, не оба сразу.")
                 return
             if not guild_resolver.is_officer_for_resolved_guild(inter.author):
-                await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
+                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
                 return
 
             roster = database.get_all_user_mappings(guild_id)
@@ -158,6 +158,11 @@ class ModSearchCog(commands.Cog):
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
+
+        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+        if self_error:
+            await guild_resolver.send_denied(inter, self_error)
+            return
 
         units = database.get_player_units(ally_code)
         if not units and fetch_live:

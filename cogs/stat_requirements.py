@@ -1650,11 +1650,11 @@ class StatRequirementsCog(commands.Cog):
     async def omicrons_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
-    @omicrons_group.sub_command(name="отчёт", description="Какие приоритетные для ВГ омикроны игрок уже готов поставить, но не поставил")
+    @omicrons_group.sub_command(name="отчёт", description="Какие приоритетные для ВГ омикроны вы готовы поставить, но не поставили")
     async def omicrons_report_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
     ):
         await inter.response.defer(ephemeral=True)
 
@@ -1674,6 +1674,11 @@ class StatRequirementsCog(commands.Cog):
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
+
+        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+        if self_error:
+            await guild_resolver.send_denied(inter, self_error)
+            return
 
         missing = omicron_priority.missing_omicrons_for_player(ally_code, guild_id)
         if not missing:
@@ -2330,16 +2335,16 @@ class StatRequirementsCog(commands.Cog):
             await inter.followup.send(embed=e, ephemeral=True)
 
     # ------------------ /статы (открытая команда) ------------------
-    @commands.slash_command(name="статы", description="Прогноз статов персонажа(ей) игрока на релик плейта относительно требований")
+    @commands.slash_command(name="статы", description="Прогноз своих статов на релик плейта (чужие и вся гильдия — 🔒 офицеры)")
     async def stats_check(
         self,
         inter: disnake.ApplicationCommandInteraction,
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
-        игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии, вместо параметра «игрок»"),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
-        гильдия: bool = commands.Param(default=False, description="Проверить всю гильдию вместо одного игрока — только для офицеров"),
+        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
         схема: str = commands.Param(default=None, description="Форсировать схему мод-билда вместо авто-детекта (не действует на персонажей без схем)", choices=FORCE_SCHEME_CHOICES),
     ):
@@ -2362,7 +2367,7 @@ class StatRequirementsCog(commands.Cog):
 
         if гильдия:
             if not guild_resolver.is_officer_for_resolved_guild(inter.author):
-                await inter.edit_original_response("❌ Проверка по всей гильдии доступна только офицерам.")
+                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
                 return
 
             report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme)
@@ -2429,6 +2434,11 @@ class StatRequirementsCog(commands.Cog):
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
+
+        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+        if self_error:
+            await guild_resolver.send_denied(inter, self_error)
+            return
 
         lines = []
         matched_total = 0
@@ -2535,12 +2545,12 @@ class StatRequirementsCog(commands.Cog):
             await inter.followup.send(embed=e)
 
     # ------------------ /ресурсы (потрачено деталей снаряжения + сигналов реликвии) ------------------
-    @commands.slash_command(name="ресурсы", description="Сколько деталей снаряжения и сигналов реликвии потрачено на прокачку за период")
+    @commands.slash_command(name="ресурсы", description="Сколько деталей и сигналов реликвии вы потратили за период (чужие — 🔒 офицеры)")
     async def resources_spent(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — вместо параметра «игрок»"),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
         период: str = commands.Param(default="month", description="За какой период считать", choices=RESOURCE_PERIOD_CHOICES),
     ):
         await inter.response.defer()
@@ -2574,6 +2584,11 @@ class StatRequirementsCog(commands.Cog):
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
+
+        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+        if self_error:
+            await guild_resolver.send_denied(inter, self_error)
+            return
 
         report = resource_spend.build_report(guild_id, ally_code, период)
         gear, relic = report["gear"], report["relic"]

@@ -112,7 +112,77 @@ MEMBER_ACCESSIBLE_COMMANDS = {
     "регистрация",
     "регистрация_отмена",
     "задачи отчёт",
+    # «Проверочные» команды: участнику — только про себя (свой основной аккаунт или
+    # альт из /регистрация), чужие игроки и сводка по гильдии — офицерам. Ограничение
+    # внутри самих команд: guild_resolver.self_only_error / GUILD_WIDE_OFFICER_ONLY.
+    "дк_требования проверить",
+    "моды_поиск",
+    "омикроны отчёт",
+    "тб_отчет игрок",
+    "тб_отчет сравнение_по_игроку",
+    "нарушения список",
 }
+
+# Команды, закрытые супер-админом (@commands.check(is_super_admin) в коге) — для
+# пометки в описании; ключ — qualified_name или его группа целиком.
+SUPER_ADMIN_COMMANDS = {
+    "гильдия", "админы", "фан",
+    "настройки антиспам_режим", "настройки антиспам", "настройки антиспам_история",
+}
+
+OFFICER_DESC_PREFIX = "🔒 Офицеры: "
+SUPER_ADMIN_DESC_PREFIX = "⛔ Админ бота: "
+DISCORD_DESC_LIMIT = 100
+
+
+def _access_prefix(qualified_name: str) -> str | None:
+    """Пометка уровня доступа для описания команды в Discord, чтобы рядовые участники
+    сразу видели, что команда не для них, и не дёргали офицерские. None — команда
+    открыта участникам (возможно, частично — тогда это сказано в её описании)."""
+    group = qualified_name.split(" ", 1)[0]
+    if qualified_name in SUPER_ADMIN_COMMANDS or group in SUPER_ADMIN_COMMANDS:
+        return SUPER_ADMIN_DESC_PREFIX
+    if qualified_name in ALWAYS_ALLOWED_COMMANDS or qualified_name in MEMBER_ACCESSIBLE_COMMANDS:
+        return None
+    return OFFICER_DESC_PREFIX
+
+
+def _labeled(description: str, prefix: str | None) -> str:
+    if not prefix or description.startswith(prefix):
+        return description
+    text = prefix + description
+    if len(text) > DISCORD_DESC_LIMIT:
+        text = prefix.split(" ", 1)[0] + " " + description
+    if len(text) > DISCORD_DESC_LIMIT:
+        text = text[:DISCORD_DESC_LIMIT - 1] + "…"
+    return text
+
+
+def apply_access_labels(slash_commands):
+    """Дописывает 🔒/⛔ в описания офицерских и админских команд. Правим body (его
+    отдаёт в Discord ручной REST-синк — см. CLAUDE.md), а не только объекты сабкоманд:
+    после инъекции кога body.options могут быть копиями. Вызывается из add_cog,
+    поэтому срабатывает и в боте, и в любом скрипте синка, который грузит коги."""
+    for cmd in slash_commands:
+        body = cmd.body
+        leaves = []
+        for opt in body.options:
+            if opt.type == disnake.OptionType.sub_command:
+                leaves.append((f"{body.name} {opt.name}", opt))
+            elif opt.type == disnake.OptionType.sub_command_group:
+                for sub in opt.options:
+                    leaves.append((f"{body.name} {opt.name} {sub.name}", sub))
+        if not leaves:
+            body.description = _labeled(body.description, _access_prefix(body.name))
+            continue
+        prefixes = set()
+        for qualified_name, opt in leaves:
+            prefix = _access_prefix(qualified_name)
+            prefixes.add(prefix)
+            opt.description = _labeled(opt.description, prefix)
+        # Описание самой группы — только если ВСЕ её сабкоманды одного закрытого уровня.
+        if len(prefixes) == 1 and None not in prefixes:
+            body.description = _labeled(body.description, prefixes.pop())
 
 # === Настройки ротационного тега ===
 PING_CHANNEL_ID = 1222515211659907204  # ID канала, куда слать теги
@@ -233,6 +303,10 @@ class GuildManagerBot(commands.Bot):
     # неё отказом и не звать super() вовсе. Обычный гейт доступа
     # (check_guild_roles_slash ниже) всё равно срабатывает после — это чисто
     # ДОПОЛНИТЕЛЬНЫЙ шаг перед ним, прав не даёт и не отбирает.
+    def add_cog(self, cog, *, override: bool = False) -> None:
+        super().add_cog(cog, override=override)
+        apply_access_labels(cog.get_slash_commands())
+
     async def process_application_commands(self, interaction: disnake.ApplicationCommandInteraction) -> None:
         cmd_name = interaction.data.name if interaction.data else None
         if (

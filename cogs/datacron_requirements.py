@@ -938,6 +938,88 @@ def _match_counts(player_json, set_id, requirements, focused_requirements) -> di
     return counts
 
 
+def _missing_required_labels(player_json, set_id, requirements, focused_requirements, cache) -> list:
+    """Короткие подписи незакрытых «Обязательно» у одного игрока — для тега должников из
+    гильд-отчёта. Одинаковые требования (частый приём вместо quantity: две одинаковые
+    требы) склеиваются в одну строку «×N»."""
+    season_data = cache["seasons"].get(set_id) if cache else None
+    labels = []
+    if requirements:
+        owned = _extract_player_base_datacrons(player_json, set_id)
+        for req, matches in _match_requirements(requirements, owned):
+            if req[9] != PRIORITY_REQUIRED:
+                continue
+            missing = _req_quantity(req) - len(matches)
+            if missing <= 0:
+                continue
+            _, _, pack, l3, l6, l9, *_rest = req
+            if pack:
+                label = pack
+            else:
+                parts = []
+                for level_num, value in ((3, l3), (6, l6), (9, l9)):
+                    if value == DATACRON_NONE:
+                        continue
+                    options = season_data[f"level{level_num}"] if season_data else []
+                    parts.append(f"{level_num} ур.: {_level_label(options, value)}")
+                label = " → ".join(parts) or "любой ДК сезона"
+            labels.extend([label] * missing)
+    if focused_requirements:
+        owned_focused = _extract_player_focused_datacrons(player_json, set_id)
+        for req in focused_requirements:
+            _, _, pack, character_key, required_level, _, _, _, priority = req
+            if priority != PRIORITY_REQUIRED:
+                continue
+            current_level = owned_focused.get(character_key, 0)
+            if current_level >= required_level:
+                continue
+            char_label = _focused_char_label(cache, set_id, character_key)
+            labels.append(f"{pack or 'Спец. ДК'}: {char_label} — ур. {current_level}/{required_level}")
+
+    merged = {}
+    for label in labels:
+        merged[label] = merged.get(label, 0) + 1
+    return [label + (f" ×{n}" if n > 1 else "") for label, n in merged.items()]
+
+
+DEBTORS_CONTENT_LIMIT = 2000
+
+
+def _build_debtors_message(season_label, set_id, debtors, guild_id):
+    """Одно сообщение с тегами тех, кто не закрыл «Обязательно», и что именно не закрыто.
+    debtors: [(name, ally_code, [labels])]. Возвращает (content, embed_or_None): если
+    всё влезает в 2000 символов — только content; иначе теги в content, а расшифровка
+    в embed (упоминания внутри embed не пингуют, поэтому сами теги всегда в content)."""
+    header = [
+        f"📢 **Датакроны — {season_label}**: не закрыты обязательные требования гильдии.",
+        f"Свой прогресс: `/дк_требования проверить сезон:{season_label} [{set_id}]`",
+        "",
+    ]
+    mentions = []
+    lines = []
+    for name, ally_code, labels in debtors:
+        discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
+        if discord_id:
+            mentions.append(f"<@{discord_id}>")
+            who = f"<@{discord_id}> ({name})"
+        else:
+            who = f"**{name}** (нет /регистрация — тег невозможен)"
+        lines.append(f"• {who} — не хватает: " + "; ".join(labels))
+
+    content = "\n".join(header + lines)
+    if len(content) <= DEBTORS_CONTENT_LIMIT:
+        return content, None
+
+    content = "\n".join(header[:2]) + "\n" + " ".join(mentions)
+    if len(content) > DEBTORS_CONTENT_LIMIT:
+        content = content[:DEBTORS_CONTENT_LIMIT - 1].rsplit(" ", 1)[0] + "…"
+    description = "\n".join(lines)
+    if len(description) > 4096:
+        description = description[:4090].rsplit("\n", 1)[0] + "\n…"
+    embed = disnake.Embed(title="Кто что не закрыл", description=description, color=DATACRON_CHECK_COLOR_PARTIAL)
+    return content, embed
+
+
 # =====================================================================
 # Подбор подходящих датакронов игрока под требования сезона
 # =====================================================================
@@ -1281,6 +1363,42 @@ class DatacronCheckRevealView(disnake.ui.View):
         await interaction.response.edit_message(view=self)
         for e in self.embeds:
             await interaction.channel.send(embed=e)
+
+
+class DatacronGuildReportView(DatacronCheckRevealView):
+    """Гильд-отчёт: «Показать всем» + «Тегнуть должников» — одно сообщение в канал, где
+    нажали кнопку, с тегами тех, кто не закрыл «Обязательно», и расшифровкой, что именно."""
+
+    def __init__(self, embeds, season_label, set_id, debtors, guild_id):
+        super().__init__(embeds)
+        self.season_label = season_label
+        self.set_id = set_id
+        self.debtors = debtors
+        self.guild_id = guild_id
+        self.tagged = False
+
+    @disnake.ui.button(label="Тегнуть должников", emoji="📢", style=disnake.ButtonStyle.danger)
+    async def tag_debtors(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if self.tagged:
+            await interaction.response.defer()
+            return
+        if not guild_resolver.is_officer_for_resolved_guild(interaction.author):
+            await interaction.response.send_message("❌ Тегать должников могут только офицеры.", ephemeral=True)
+            return
+        content, embed = _build_debtors_message(self.season_label, self.set_id, self.debtors, self.guild_id)
+        try:
+            await interaction.channel.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=disnake.AllowedMentions(users=True, roles=False, everyone=False),
+            )
+        except (disnake.Forbidden, disnake.HTTPException) as e:
+            await interaction.response.send_message(f"❌ Не удалось отправить сообщение в этот канал: {e}", ephemeral=True)
+            return
+        self.tagged = True
+        button.disabled = True
+        button.label = "Должники тегнуты"
+        await interaction.response.edit_message(view=self)
 
 
 # =====================================================================
@@ -1666,15 +1784,16 @@ class DatacronRequirementsCog(commands.Cog):
                         timeout=15.0,
                     )
                 except Exception:
-                    return name, None
-                return name, player
+                    return name, allycode, None
+                return name, allycode, player
 
         results = await asyncio.gather(*(fetch_one(name, allycode) for name, allycode in roster.items()))
 
         missing_required = []
         fully_compliant = []
         failed = []
-        for name, player in results:
+        debtors = []
+        for name, allycode, player in results:
             if player is None:
                 failed.append(name)
                 continue
@@ -1686,11 +1805,13 @@ class DatacronRequirementsCog(commands.Cog):
                     for p in PRIORITY_ORDER if counts[p]["total"] > 0
                 ]
                 missing_required.append((name, ", ".join(parts)))
+                debtors.append((name, allycode, _missing_required_labels(player, set_id, requirements, focused_requirements, self.bot.datacron_cache)))
             else:
                 fully_compliant.append(name)
 
         missing_required.sort(key=lambda t: t[0].lower())
         fully_compliant.sort(key=lambda s: s.lower())
+        debtors.sort(key=lambda t: t[0].lower())
 
         lines = [f"# ❌ Не закрыли «Обязательно» ({len(missing_required)})"]
         if missing_required:
@@ -1714,16 +1835,16 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             color = DATACRON_CHECK_COLOR_NONE
         title = f"📋 Проверка датакронов по гильдии — {season_label}"
-        return _lines_to_embeds(title, color, lines)
+        return _lines_to_embeds(title, color, lines), debtors
 
-    @datacron_req.sub_command(name="проверить", description="Проверить датакроны игрока, либо (без игрока) сводный отчёт по всей гильдии")
+    @datacron_req.sub_command(name="проверить", description="Проверить свои датакроны (чужие и всю гильдию — 🔒 офицеры)")
     async def datacron_req_check(
         self,
         inter: disnake.ApplicationCommandInteraction,
         сезон: str = commands.Param(description="Сезон для проверки", autocomplete=autocomplete_datacron_season),
-        игрок: str = commands.Param(default=None, description="Не указан → вы (/регистрация); либо гильдия=True для отчёта по всей гильдии", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — для игрока не из нашей гильдии, вместо параметра «игрок»"),
-        гильдия: bool = commands.Param(default=False, description="Отчёт по всей гильдии вместо одного игрока (работает только без указания игрока)"),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
+        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводный отчёт по всей гильдии (без «игрок»)"),
     ):
         await inter.response.defer(ephemeral=True)
 
@@ -1743,13 +1864,24 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message(f"ℹ️ У сезона {season_label} нет сохранённых требований.")
             return
 
-        if игрок is None and аликод is None and гильдия:
+        if гильдия and (игрок is not None or аликод is not None):
+            await inter.edit_original_message("❌ Укажите либо игрока (или код союзника), либо `гильдия: True`, не оба сразу.")
+            return
+
+        if гильдия:
+            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
+                return
             await inter.edit_original_message(f"⏳ Собираю данные по всей гильдии ({season_label})...")
-            embeds = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements, guild_id=guild_id)
-            if embeds is None:
+            report = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements, guild_id=guild_id)
+            if report is None:
                 await inter.edit_original_message("❌ Кэш состава гильдии пуст — подождите обновления или попробуйте позже.")
                 return
-            view = DatacronCheckRevealView(embeds)
+            embeds, debtors = report
+            if debtors:
+                view = DatacronGuildReportView(embeds, season_label, set_id, debtors, guild_id)
+            else:
+                view = DatacronCheckRevealView(embeds)
             await inter.edit_original_message(content=None, embed=embeds[0], view=view)
             for e in embeds[1:]:
                 await inter.followup.send(embed=e, ephemeral=True)
@@ -1779,6 +1911,11 @@ class DatacronRequirementsCog(commands.Cog):
                 await inter.edit_original_message("❌ Игрок не найден в кэше состава.")
                 return
             allycode = cache[игрок]
+
+        self_error = guild_resolver.self_only_error(inter.author, guild_id, allycode)
+        if self_error:
+            await guild_resolver.send_denied(inter, self_error)
+            return
 
         try:
             player = await asyncio.wait_for(
@@ -1862,8 +1999,12 @@ class DatacronRequirementsCog(commands.Cog):
         for e in embeds[1:]:
             await inter.followup.send(embed=e, ephemeral=True)
 
-    @datacron_req.sub_command(name="список", description="Показать весь список требуемых датакронов по активным сезонам")
-    async def datacron_req_list(self, inter: disnake.ApplicationCommandInteraction):
+    @datacron_req.sub_command(name="список", description="Список требуемых датакронов — по одному сезону или по всем")
+    async def datacron_req_list(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        сезон: str = commands.Param(default=None, description="Только этот сезон (пусто — все сезоны с требованиями)", autocomplete=autocomplete_datacron_season),
+    ):
         await inter.response.defer(ephemeral=False)
 
         guild_id = await guild_resolver.require_feature(inter, "datacrons")
@@ -1875,9 +2016,18 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message("⏳ Справочник датакронов ещё загружается, подождите...")
             return
 
+        if сезон is not None:
+            only_set_id = _parse_trailing_bracket_int(сезон)
+            if only_set_id is None or not _is_valid_season(cache, only_set_id):
+                await inter.edit_original_message("❌ Некорректный сезон — выберите вариант из списка автодополнения.")
+                return
+            set_ids = [only_set_id]
+        else:
+            set_ids = sorted(cache["seasons"].keys(), reverse=True)
+
         all_embeds = []
         any_found = False
-        for set_id in sorted(cache["seasons"].keys(), reverse=True):
+        for set_id in set_ids:
             season_data = cache["seasons"][set_id]
             base_reqs = database.get_datacron_requirements_by_set(set_id, guild_id=guild_id)
             focused_reqs = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
@@ -1904,6 +2054,9 @@ class DatacronRequirementsCog(commands.Cog):
             all_embeds.extend(_build_priority_embeds(title, DATACRON_LIST_COLOR, priority_items))
 
         if not any_found:
+            if сезон is not None:
+                await inter.edit_original_message(f"ℹ️ У сезона {_season_label(cache, set_ids[0])} нет сохранённых требований.")
+                return
             await inter.edit_original_message("ℹ️ Ни у одного активного сезона нет сохранённых требований.")
             return
 

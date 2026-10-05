@@ -159,6 +159,46 @@ def is_officer_for_resolved_guild(author) -> bool:
     return resolve_access(author)["tier"] == "officer"
 
 
+GUILD_WIDE_OFFICER_ONLY = (
+    "❌ Отчёт по всей гильдии доступен только офицерам.\n"
+    "Без параметра «гильдия» команда покажет ваши собственные данные."
+)
+
+
+def self_only_error(author, guild_id: int, ally_code: str | None, param_hint: str = "«игрок» / «аликод»") -> str | None:
+    """Рядовой участник может смотреть через "проверочные" команды только себя (основной
+    аккаунт или свой альт из /регистрация). Возвращает текст ошибки, если author — не
+    офицер и ally_code не его; None — можно показывать."""
+    if is_officer_for_resolved_guild(author):
+        return None
+    own = [row[0] for row in database.get_user_registrations(_discord_id(author), guild_id=guild_id)]
+    if ally_code and ally_code in own:
+        return None
+    if not own:
+        return (
+            "❌ Участники гильдии могут проверять только себя, а у вас нет привязанного аккаунта.\n"
+            "Привяжите его командой `/регистрация` — после этого не заполняйте "
+            f"{param_hint}, бот сам возьмёт ваш аккаунт.\n"
+            "Чужих игроков и всю гильдию проверяют офицеры."
+        )
+    return (
+        "❌ Участники гильдии могут проверять только себя — указанный игрок не привязан к вашему Discord.\n"
+        f"Чтобы посмотреть свои данные, оставьте {param_hint} пустым — бот сам возьмёт ваш аккаунт"
+        + (" (альт можно выбрать в «игрок»)." if len(own) > 1 else ".")
+        + "\nЧужих игроков и всю гильдию проверяют офицеры."
+    )
+
+
+async def send_denied(inter, text: str):
+    """Отказ "только себя"/"только офицерам" после уже сделанного defer: публичный
+    defer заменяем эфемерным сообщением, чтобы отказ не висел в канале у всех."""
+    try:
+        await inter.delete_original_response()
+    except Exception:
+        pass
+    await inter.followup.send(text, ephemeral=True)
+
+
 def resolve_tier(author_or_id) -> str | None:
     """"officer" | "member" | None — используется глобальным гейтом в main.py."""
     return resolve_access(author_or_id)["tier"]

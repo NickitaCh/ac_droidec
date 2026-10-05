@@ -515,12 +515,12 @@ class TasksCog(commands.Cog):
                 content = f"<@{discord_id}>"
         await inter.edit_original_response(content=content, embed=embed, allowed_mentions=disnake.AllowedMentions(users=True))
 
-    @tasks_group.sub_command(name="отчёт", description="Прогресс по задачам — свой открыт всем, чужой и по всей гильдии — только офицерам")
+    @tasks_group.sub_command(name="отчёт", description="Прогресс по своим задачам (чужие и по всей гильдии — 🔒 офицеры)")
     async def tasks_report(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок гильдии — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        гильдия: bool = commands.Param(default=False, description="Сводка по всей гильдии вместо одного игрока — только для офицеров"),
+        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводка по всей гильдии вместо одного игрока"),
     ):
         await inter.response.defer()
 
@@ -532,7 +532,7 @@ class TasksCog(commands.Cog):
 
         if гильдия:
             if not is_officer:
-                await inter.edit_original_response("❌ Сводка по всей гильдии доступна только офицерам.")
+                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
                 return
 
             # "Текущие" задачи — активные, или завершённые/проваленные не старше
@@ -587,11 +587,10 @@ class TasksCog(commands.Cog):
             if not ally_code:
                 await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
                 return
-            if not is_officer:
-                self_reg = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-                if not self_reg or self_reg[0] != ally_code:
-                    await inter.edit_original_response("❌ Просмотр чужих задач доступен только офицерам.")
-                    return
+            self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code, param_hint="«игрок»")
+            if self_error:
+                await guild_resolver.send_denied(inter, self_error)
+                return
 
         rows = [r for r in database.get_tasks_for_ally(ally_code, guild_id=guild_id) if not database.is_task_archived(r[11], r[6])]
         if not rows:
