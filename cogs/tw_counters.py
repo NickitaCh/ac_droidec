@@ -2,7 +2,8 @@
 5 локаций офицер выбирает вражеский пак (автокомплит по guilds.tw_guide_forum_
 channel_id) и нашу контру на него (автокомплит, зависит от выбранного пака),
 плюс свободный текст локации. Команда только возвращает готовый текст ответом
-(ephemeral) — офицер сам копирует его в ВГ-канал, бот сам ничего не постит.
+(ephemeral) — офицер копирует его сам или жмёт «Показать всем» (бот
+публикует тот же текст в текущий канал).
 
 База контр наполняется периодическим синком форум-канала гайдов (каждый тред
 форума = один вражеский пак, каждое сообщение внутри = один вариант контры на
@@ -256,6 +257,31 @@ autocomplete_tw_counter4 = _make_tw_counter_autocomplete("пак4")
 autocomplete_tw_counter5 = _make_tw_counter_autocomplete("пак5")
 
 
+# Кнопка «Показать всем» под скрытым ордером — по образцу
+# cogs/stat_requirements.py::StatsRevealView. Запрошено офицерами GR 2026-10-07:
+# копировать ордер руками неудобно. Публикует тот же текст в текущий канал.
+class TWOrderRevealView(disnake.ui.View):
+    def __init__(self, chunks):
+        super().__init__(timeout=1800)
+        self.chunks = chunks
+        self.revealed = False
+
+    @disnake.ui.button(label="Показать всем", emoji="🔓", style=disnake.ButtonStyle.secondary)
+    async def reveal(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if self.revealed:
+            await interaction.response.defer()
+            return
+        self.revealed = True
+        button.disabled = True
+        button.label = "Показано всем"
+        await interaction.response.edit_message(view=self)
+        try:
+            for chunk in self.chunks:
+                await interaction.channel.send(chunk)
+        except disnake.Forbidden:
+            await interaction.followup.send("❌ У бота нет права писать в этот канал.", ephemeral=True)
+
+
 class TWCounters(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -497,14 +523,19 @@ class TWCounters(commands.Cog):
         if role_id:
             full_text += f"\n\n<@&{role_id}>"
 
+        # Предупреждение о незаполненной настройке — только офицеру, не в канал.
+        view = TWOrderRevealView(_chunk_message(full_text))
         cfg_warning = config_warning_text(guild_cfg, "tw_guide")
         if cfg_warning:
             full_text += f"\n\n{cfg_warning}"
 
         chunks = _chunk_message(full_text)
-        await inter.response.send_message(chunks[0], ephemeral=True)
-        for chunk in chunks[1:]:
-            await inter.followup.send(chunk, ephemeral=True)
+        for i, chunk in enumerate(chunks):
+            last = i == len(chunks) - 1
+            if i == 0:
+                await inter.response.send_message(chunk, ephemeral=True, **({"view": view} if last else {}))
+            else:
+                await inter.followup.send(chunk, ephemeral=True, **({"view": view} if last else {}))
 
 
 def setup(bot: commands.Bot):
