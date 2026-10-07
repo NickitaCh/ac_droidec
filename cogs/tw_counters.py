@@ -292,9 +292,16 @@ class TWCounters(commands.Cog):
                 stats = retry_stats
             suspect = stats["threads"] < baseline * 0.5
         stats["suspect_partial"] = suspect
+        seen_threads = stats.pop("_seen_threads")
+        seen_messages = stats.pop("_seen_messages")
 
         if not suspect:
             database.set_bot_state(baseline_key, str(stats["threads"]), guild_id=gid)
+            # Удалённые из форума посты/треды иначе навсегда оставались бы в
+            # автокомплите /вг_ордер (синк только добавляет/обновляет). Чистим
+            # лишь после полного прохода — неполный синк не должен стирать базу.
+            removed = database.prune_tw_counters(gid, seen_threads, seen_messages)
+            stats["removed"] = removed["counters"]
         return stats
 
     async def _sync_guild_once(self, guild_cfg: dict) -> dict:
@@ -313,9 +320,11 @@ class TWCounters(commands.Cog):
         async for thread in channel.archived_threads(limit=None):
             threads.append(thread)
 
-        stats = {"threads": 0, "messages": 0, "parsed_ok": 0, "parsed_fail": 0}
+        stats = {"threads": 0, "messages": 0, "parsed_ok": 0, "parsed_fail": 0,
+                 "_seen_threads": set(), "_seen_messages": set()}
         for thread in threads:
             stats["threads"] += 1
+            stats["_seen_threads"].add(str(thread.id))
             tag_names = [t.name for t in getattr(thread, "applied_tags", [])]
             database.upsert_tw_counter_thread(
                 gid, str(thread.id), thread.name, tag=", ".join(tag_names) if tag_names else None
@@ -353,6 +362,7 @@ class TWCounters(commands.Cog):
                     author=str(message.author),
                     posted_at=message.created_at.isoformat(),
                 )
+                stats["_seen_messages"].add(str(message.id))
                 stats["messages"] += 1
                 stats["parsed_ok" if parsed["parsed_ok"] else "parsed_fail"] += 1
         return stats
@@ -407,7 +417,8 @@ class TWCounters(commands.Cog):
             f"Тредов: {stats['threads']}\n"
             f"Сообщений: {stats['messages']}\n"
             f"Распознано структурно: {stats['parsed_ok']}\n"
-            f"Не распознано (сохранено как есть): {stats['parsed_fail']}"
+            f"Не распознано (сохранено как есть): {stats['parsed_fail']}\n"
+            f"Удалено устаревших: {stats.get('removed', 0)}"
             f"{warning}"
         )
 

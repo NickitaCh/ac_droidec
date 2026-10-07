@@ -6376,6 +6376,35 @@ def delete_tw_counter(guild_id: int, message_id: str) -> None:
     conn.close()
 
 
+def prune_tw_counters(guild_id: int, seen_thread_ids, seen_message_ids) -> dict:
+    """Удаляет треды/контры гильдии, которых не было в последнем ПОЛНОМ синке
+    форума (удалённые посты/треды, смена канала гайдов) — иначе они навсегда
+    оставались в автокомплите /вг_ордер. Вызывать только после синка, который
+    не помечен как подозрительно неполный."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_counter_tables(cursor)
+    cursor.execute("CREATE TEMP TABLE IF NOT EXISTS _seen_tw_threads (id TEXT PRIMARY KEY)")
+    cursor.execute("CREATE TEMP TABLE IF NOT EXISTS _seen_tw_messages (id TEXT PRIMARY KEY)")
+    cursor.execute("DELETE FROM _seen_tw_threads")
+    cursor.execute("DELETE FROM _seen_tw_messages")
+    cursor.executemany("INSERT OR IGNORE INTO _seen_tw_threads (id) VALUES (?)", [(str(t),) for t in seen_thread_ids])
+    cursor.executemany("INSERT OR IGNORE INTO _seen_tw_messages (id) VALUES (?)", [(str(m),) for m in seen_message_ids])
+    cursor.execute("""
+        DELETE FROM tw_counters WHERE guild_id = ?
+          AND message_id NOT IN (SELECT id FROM _seen_tw_messages)
+    """, (guild_id,))
+    removed_counters = cursor.rowcount
+    cursor.execute("""
+        DELETE FROM tw_counter_threads WHERE guild_id = ?
+          AND thread_id NOT IN (SELECT id FROM _seen_tw_threads)
+    """, (guild_id,))
+    removed_threads = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return {"threads": removed_threads, "counters": removed_counters}
+
+
 def count_tw_counters(guild_id: int) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
