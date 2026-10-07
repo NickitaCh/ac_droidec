@@ -270,33 +270,42 @@ class TWCounters(commands.Cog):
         синка (наблюдалось в проде: Discord API/gateway обрывает итерацию
         тредов/сообщений без исключения, обычно когда event loop был занят
         другой блокирующей работой в этот момент — результат тихо занижен,
-        хотя команда бодро репортует "✅ завершено"). Если тредов заметно
-        меньше, чем в последнем НЕ подозрительном прогоне — повторяем синк
-        один раз и берём лучший результат; если и повтор подозрительный,
+        хотя команда бодро репортует "✅ завершено"). Если тредов или сообщений
+        заметно меньше, чем в последнем НЕ подозрительном прогоне — повторяем
+        синк один раз и берём лучший результат; если повтор дал другие числа и
+        всё равно подозрительный,
         сообщаем об этом наружу через stats["suspect_partial"], не обновляя
         сохранённый baseline (чтобы одна плохая попытка не занизила порог
         для следующих проверок)."""
         gid = guild_cfg["id"]
-        baseline_key = "tw_sync_last_threads"
-        baseline_raw = database.get_bot_state(baseline_key, guild_id=gid)
-        baseline = int(baseline_raw) if baseline_raw else None
+        baselines = {}
+        for key in ("threads", "messages"):
+            raw = database.get_bot_state(f"tw_sync_last_{key}", guild_id=gid)
+            baselines[key] = int(raw) if raw else None
+
+        def _is_suspect(s):
+            return any(baselines[k] is not None and s[k] < baselines[k] * 0.5 for k in baselines)
 
         stats = await self._sync_guild_once(guild_cfg)
         if "threads" not in stats:
             return stats  # skipped / error — нечего сравнивать
 
-        suspect = baseline is not None and stats["threads"] < baseline * 0.5
+        suspect = _is_suspect(stats)
         if suspect:
             retry_stats = await self._sync_guild_once(guild_cfg)
-            if retry_stats["threads"] > stats["threads"]:
+            first, second = (stats["threads"], stats["messages"]), (retry_stats["threads"], retry_stats["messages"])
+            if second > first:
                 stats = retry_stats
-            suspect = stats["threads"] < baseline * 0.5
+            # Два прохода подряд с одинаковым результатом — это не обрыв
+            # итерации, а реальное состояние форума (офицеры удалили гайды).
+            suspect = _is_suspect(stats) and first != second
         stats["suspect_partial"] = suspect
         seen_threads = stats.pop("_seen_threads")
         seen_messages = stats.pop("_seen_messages")
 
         if not suspect:
-            database.set_bot_state(baseline_key, str(stats["threads"]), guild_id=gid)
+            for key in baselines:
+                database.set_bot_state(f"tw_sync_last_{key}", str(stats[key]), guild_id=gid)
             # Удалённые из форума посты/треды иначе навсегда оставались бы в
             # автокомплите /вг_ордер (синк только добавляет/обновляет). Чистим
             # лишь после полного прохода — неполный синк не должен стирать базу.
@@ -330,7 +339,10 @@ class TWCounters(commands.Cog):
                 gid, str(thread.id), thread.name, tag=", ".join(tag_names) if tag_names else None
             )
             async for message in thread.history(limit=None):
-                if message.author.bot:
+                # Чужих ботов пропускаем, но свои сообщения бота — нет: гайды
+                # AbsoluteChaos переписаны в единый шаблон и опубликованы от
+                # имени этого бота (REST post+edit), это и есть основная база.
+                if message.author.bot and message.author.id != self.bot.user.id:
                     continue
                 # У форум-треда id стартового сообщения всегда равен id самого
                 # треда — это просто описание темы (не контра), пропускаем.
