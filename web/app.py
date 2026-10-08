@@ -48,6 +48,14 @@ async def _redirect_unauthenticated_to_login(request: Request, exc: StarletteHTT
         return RedirectResponse("/")
     return await http_exception_handler(request, exc)
 
+@app.on_event("startup")
+async def _warm_stat_calc():
+    """Калькулятор статов собирается долго (вся игровая база из Comlink) — начинаем сразу
+    при старте в фоне, чтобы первая страница со статами/скоростью не ждала его сама."""
+    from swgoh_comlink import SwgohComlink
+    from services import stat_forecast as stat_forecast_service
+    stat_forecast_service.start_background_build(SwgohComlink(url="http://localhost:3000"))
+
 session_secret = os.getenv("WEB_SESSION_SECRET")
 if not session_secret:
     # Только для локальной разработки без .env — на проде WEB_SESSION_SECRET обязателен,

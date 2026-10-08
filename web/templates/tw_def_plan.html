@@ -24,7 +24,7 @@
     <p><a href="/tw/def/plans">← Все планы</a> <span class="muted">· ростеры обновлены: {{ last_sync or "—" }} (UTC)</span></p>
     {% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}
     {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
-    {% if warning %}<p class="config-warning">{{ warning }}</p>{% endif %}
+    {% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
     {% if not has_squads %}<p class="config-warning">В библиотеке нет паков — <a href="/tw/def/squads/new">создайте первый</a>.</p>{% endif %}
     {% if plan.note %}<p class="twdef-note">{{ plan.note }}</p>{% endif %}
 
@@ -81,7 +81,7 @@
                                 <form method="post" action="/tw/def/plans/{{ plan.id }}/autoadd" class="twdef-zone-add">
                                     <input type="hidden" name="zone" value="{{ z.key }}">
                                     <select name="squad_id" required aria-label="Пак">
-                                        {% for s in z.squads %}<option value="{{ s.id }}" data-name="{{ s.name }}">{{ s.name }} · свободно {{ s.free }}</option>{% endfor %}
+                                        {% for s in z.squads %}<option value="{{ s.id }}" data-name="{{ s.name }}">{{ s.name }} · {% if s.free is none %}ждёт загрузки{% else %}свободно {{ s.free }}{% endif %}</option>{% endfor %}
                                     </select>
                                     <input type="number" name="count" value="1" min="1" max="{{ z.capacity - z.count }}" aria-label="Сколько" title="Сколько паков добавить">
                                     <button type="submit" title="Подобрать игроков автоматически">Авто</button>
@@ -133,8 +133,12 @@
                                     <td>{{ s.name }}</td>
                                     <td>{{ "флот" if s.combat_type == "ship" else "наземный" }}</td>
                                     <td class="num">{{ s.placed }}</td>
-                                    <td class="num">{% if s.can_now == 0 and s.can_total > 0 %}<span class="muted">0</span>{% else %}{{ s.can_now }}{% endif %}</td>
-                                    <td class="num">{{ s.can_total }}</td>
+                                    {% if s.speed_pending %}
+                                        <td class="num muted" colspan="2">ждёт загрузки данных</td>
+                                    {% else %}
+                                        <td class="num">{% if s.can_now == 0 and s.can_total > 0 %}<span class="muted">0</span>{% else %}{{ s.can_now }}{% endif %}</td>
+                                        <td class="num">{{ s.can_total }}</td>
+                                    {% endif %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -184,5 +188,5 @@
     </form>
     <script type="application/json" id="twdef-zones">{{ zone_options | tojson }}</script>
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261008a" defer></script>
+    <script src="/static/tw_def.js?v=20261008b" defer></script>
 {% endblock %}

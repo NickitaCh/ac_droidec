@@ -1,0 +1,10 @@
+{# Плашка «данные загружаются»: калькулятор статов собирается в фоне (services/stat_forecast.py).
+   web/static/tw_def.js опрашивает /tw/def/api/calc-status и обновляет страницу, когда готово. #}
+<div class="twdef-calc-wait" data-twdef-calc-wait role="status" aria-live="polite">
+    <span class="twdef-spinner" aria-hidden="true"></span>
+    <div class="twdef-calc-wait-text">
+        <strong data-calc-title>Загружаются данные игры для проверки скорости…</strong>
+        <div class="muted" data-calc-sub>Обычно до минуты. Страница обновится сама. Пока идёт загрузка, паки с требованием скорости считаются недоступными, остальное работает.</div>
+    </div>
+    <button type="button" class="button-secondary twdef-small" data-calc-retry hidden>Повторить</button>
+</div>

@@ -31,6 +31,47 @@
         });
     });
 
+    // ---------------------------------------------------------------- данные для скорости
+    // Плашка _tw_def_calc_wait.html: опрашиваем статус фоновой загрузки калькулятора
+    // статов и обновляем страницу, как только он готов.
+    const calcWait = document.querySelector("[data-twdef-calc-wait]");
+    if (calcWait) {
+        const title = calcWait.querySelector("[data-calc-title]");
+        const sub = calcWait.querySelector("[data-calc-sub]");
+        const retry = calcWait.querySelector("[data-calc-retry]");
+        const spinner = calcWait.querySelector(".twdef-spinner");
+        let timer;
+        const poll = async (again) => {
+            try {
+                const resp = await fetch(`/tw/def/api/calc-status${again ? "?retry=1" : ""}`, { headers: { Accept: "application/json" } });
+                const st = await resp.json();
+                if (st.ready) {
+                    title.textContent = "Данные загружены — обновляю страницу…";
+                    location.reload();
+                    return;
+                }
+                if (st.error && !st.loading) {
+                    calcWait.classList.add("twdef-calc-wait-error");
+                    spinner.hidden = true;
+                    title.textContent = "Не удалось загрузить данные игры";
+                    sub.textContent = "Скорее всего, недоступен сервис игровых данных. Требования по скорости пока не проверяются, остальное работает.";
+                    retry.hidden = false;
+                    return;
+                }
+            } catch { /* сеть моргнула — просто опрашиваем дальше */ }
+            timer = setTimeout(() => poll(false), 3000);
+        };
+        retry.addEventListener("click", () => {
+            calcWait.classList.remove("twdef-calc-wait-error");
+            spinner.hidden = false;
+            retry.hidden = true;
+            title.textContent = "Загружаются данные игры для проверки скорости…";
+            clearTimeout(timer);
+            poll(true);
+        });
+        timer = setTimeout(() => poll(false), 2000);
+    }
+
     // ---------------------------------------------------------------- копирование
     document.querySelectorAll("[data-twdef-copy]").forEach((btn) => {
         btn.addEventListener("click", async () => {

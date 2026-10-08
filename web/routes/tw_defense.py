@@ -2,7 +2,6 @@
 планы расстановки под соперника на карте из 10 зон, подбор игроков (вручную через окно
 кандидатов или автоматически) и текст расстановки для Discord. Логика — tw_def_engine.py
 (её же потом использует бот), здесь только HTTP и шаблоны."""
-import asyncio
 import json
 from pathlib import Path
 from urllib.parse import urlencode
@@ -36,34 +35,40 @@ def _redirect(path: str, **params) -> RedirectResponse:
     return RedirectResponse(path + (f"?{urlencode(params)}" if params else ""), status_code=303)
 
 
-_stat_calc_task: asyncio.Task | None = None
+CALC_LOADING_TEXT = "Данные игры для проверки скорости ещё загружаются — паки с требованием скорости пока считаются недоступными."
 
 
-async def _build_stat_calc():
-    try:
-        await stat_forecast.get_stat_calc(_get_comlink())
-    except Exception as e:
-        print(f"⚠️ [web] tw_def: калькулятор статов не собрался: {e}")
+def _warm_stat_calc() -> None:
+    """Запускает фоновую сборку калькулятора статов (если его нет/устарел). Вызывается при
+    входе на любую страницу раздела — к моменту работы с паками всё уже готово."""
+    stat_forecast.start_background_build(_get_comlink())
 
 
 async def _load_roster(guild_id: int, squads: list[dict], extra_base_ids=()) -> tuple[engine.Roster, str | None]:
-    """Ростер + StatCalc, только если какой-то пак требует скорость. Первая сборка
-    калькулятора долгая (вся игровая база из Comlink) — страницу ей не блокируем: сборка
-    уходит в фон, скоростные требования до её конца не проходят ("скорость не посчитана")."""
-    global _stat_calc_task
+    """Ростер + StatCalc, если какой-то пак требует скорость. Никогда не ждёт сборку
+    калькулятора (она долгая — вся игровая база из Comlink): берём уже собранный (даже
+    устаревший, обновление идёт в фоне), а если его ещё нет — возвращаем предупреждение,
+    страница показывает плашку загрузки и сама обновляется (web/static/tw_def.js)."""
+    _warm_stat_calc()
     stat_calc = None
     warning = None
     if engine.squads_need_speed(squads):
-        if stat_forecast.cached_stat_calc() is not None:
-            try:
-                stat_calc = await stat_forecast.get_stat_calc(_get_comlink())
-            except Exception:
-                stat_calc = stat_forecast.cached_stat_calc()
-        else:
-            if _stat_calc_task is None or _stat_calc_task.done():
-                _stat_calc_task = asyncio.create_task(_build_stat_calc())
-            warning = "Калькулятор статов загружается — требования по скорости заработают через минуту, обновите страницу."
+        stat_calc = stat_forecast.cached_stat_calc()
+        if stat_calc is None:
+            warning = CALC_LOADING_TEXT
     return engine.load_roster(guild_id, squads, stat_calc=stat_calc, extra_base_ids=extra_base_ids), warning
+
+
+def _speed_not_ready(squad: dict) -> bool:
+    return engine.squads_need_speed([squad]) and stat_forecast.cached_stat_calc() is None
+
+
+@router.get("/api/calc-status", response_class=JSONResponse)
+async def calc_status(retry: int = 0, user: dict = Depends(_require)):
+    """Опрос плашки «данные загружаются». retry=1 — повторить сборку после ошибки."""
+    if retry:
+        _warm_stat_calc()
+    return stat_forecast.build_status()
 
 
 def _squad_view(squad: dict, roster: engine.Roster | None = None) -> dict:
@@ -92,6 +97,7 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
     for s in squads:
         v = _squad_view(s, roster)
         v["availability"] = engine.availability(roster, s)
+        v["speed_pending"] = _speed_not_ready(s)
         views.append(v)
     return templates.TemplateResponse(request, "tw_def_squads.html", {
         "user": user,
@@ -119,6 +125,7 @@ def _editor_payload(squad: dict | None) -> dict:
 
 @router.get("/squads/new", response_class=HTMLResponse)
 async def squad_new(request: Request, user: dict = Depends(_require)):
+    _warm_stat_calc()
     return templates.TemplateResponse(request, "tw_def_squad_edit.html", {
         "user": user, "squad": _editor_payload(None), "errors": [], "max_slots": engine.MAX_SLOTS,
     })
@@ -126,6 +133,7 @@ async def squad_new(request: Request, user: dict = Depends(_require)):
 
 @router.get("/squads/{squad_id}/edit", response_class=HTMLResponse)
 async def squad_edit(squad_id: int, request: Request, user: dict = Depends(_require)):
+    _warm_stat_calc()
     squad = database.get_tw_def_squad(user["guild_id"], squad_id)
     if not squad:
         raise HTTPException(404, "Пак не найден.")
@@ -246,6 +254,7 @@ async def squad_check(squad_id: int, user: dict = Depends(_require)):
 # =====================================================================
 @router.get("/plans", response_class=HTMLResponse)
 async def plans_page(request: Request, user: dict = Depends(_require)):
+    _warm_stat_calc()
     return templates.TemplateResponse(request, "tw_def_plans.html", {
         "user": user,
         "plans": database.list_tw_def_plans(user["guild_id"]),
@@ -306,9 +315,10 @@ async def plan_page(plan_id: int, request: Request, user: dict = Depends(_requir
     for s in squads:
         placed = sum(1 for a in assignments if a["squad_id"] == s["id"])
         av = engine.availability(roster, s, assignments, excluded)
-        squad_stats.append({"id": s["id"], "name": s["name"], "combat_type": s["combat_type"], "placed": placed, **av})
+        squad_stats.append({"id": s["id"], "name": s["name"], "combat_type": s["combat_type"], "placed": placed,
+                            "speed_pending": _speed_not_ready(s), **av})
 
-    free_by_squad = {st["id"]: st["can_now"] for st in squad_stats}
+    free_by_squad = {st["id"]: (None if st["speed_pending"] else st["can_now"]) for st in squad_stats}
 
     zones = []
     for z in engine.ZONES:
@@ -491,6 +501,8 @@ async def plan_assign(plan_id: int, request: Request, zone: str = Form(...), squ
     plan = _get_plan_or_404(guild_id, plan_id)
     z = _zone_or_400(zone)
     squad = _squad_for_zone(guild_id, squad_id, z)
+    if _speed_not_ready(squad):
+        return _redirect(f"/tw/def/plans/{plan_id}", error=CALC_LOADING_TEXT)
     form = await request.form()
     ally_codes = [c for c in form.getlist("ally_codes") if c]
     added, skipped = await _assign(guild_id, plan, zone, squad, ally_codes, user)
@@ -505,6 +517,8 @@ async def plan_autoadd(plan_id: int, zone: str = Form(...), squad_id: int = Form
     plan = _get_plan_or_404(guild_id, plan_id)
     z = _zone_or_400(zone)
     squad = _squad_for_zone(guild_id, squad_id, z)
+    if _speed_not_ready(squad):
+        return _redirect(f"/tw/def/plans/{plan_id}", error=CALC_LOADING_TEXT)
     library = database.list_tw_def_squads(guild_id)
     assignments = database.get_tw_def_assignments(guild_id, plan_id)
     roster, _warning = await _load_roster(guild_id, library)

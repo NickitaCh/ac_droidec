@@ -9,6 +9,7 @@ cogs.stat_requirements._evaluate_character_player/_project_character_relic
 сам bot) — здесь передаётся лёгкий stand-in (types.SimpleNamespace), а не bot,
 чтобы не трогать/не дублировать существующую расчётную логику."""
 
+import asyncio
 import time
 import types
 
@@ -46,6 +47,42 @@ def cached_stat_calc():
     """Уже построенный калькулятор (даже с истёкшим TTL) или None — без сетевых вызовов.
     Для страниц, которые не должны ждать первую сборку (деф ВГ, web/routes/tw_defense.py)."""
     return _stat_calc
+
+
+# ---- Фоновая сборка: прогрев при старте веба (web/app.py) и страницы, которые
+# показывают «данные загружаются» вместо ожидания (деф ВГ). Сборка тяжёлая (вся
+# игровая база из Comlink), но идёт в to_thread — event loop не блокирует.
+_build_task: asyncio.Task | None = None
+_last_error: str | None = None
+
+
+async def _background_build(comlink):
+    global _last_error
+    try:
+        await get_stat_calc(comlink)
+        _last_error = None
+    except Exception as e:
+        _last_error = str(e) or e.__class__.__name__
+        print(f"⚠️ [web] Калькулятор статов не собрался в фоне: {_last_error}")
+
+
+def start_background_build(comlink) -> None:
+    """Запускает сборку/обновление калькулятора в фоне, если он отсутствует или устарел
+    и сборка ещё не идёт. Ничего не ждёт."""
+    global _build_task
+    if _stat_calc is not None and (time.time() - _cached_at) <= _TTL_SECONDS:
+        return
+    if _build_task is not None and not _build_task.done():
+        return
+    _build_task = asyncio.create_task(_background_build(comlink))
+
+
+def build_status() -> dict:
+    return {
+        "ready": _stat_calc is not None,
+        "loading": _build_task is not None and not _build_task.done(),
+        "error": _last_error if _stat_calc is None else None,
+    }
 
 
 def _bot_stand_in(comlink, stat_calc):

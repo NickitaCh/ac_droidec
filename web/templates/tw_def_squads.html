@@ -14,7 +14,7 @@
 
     {% if saved %}<p class="dash-flash">Пак «{{ saved }}» сохранён.</p>{% endif %}
     {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
-    {% if warning %}<p class="config-warning">{{ warning }}</p>{% endif %}
+    {% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
 
     <div class="twdef-toolbar">
         <a class="button" href="/tw/def/squads/new">+ Новый пак</a>
@@ -35,10 +35,14 @@
                     <article class="twdef-squad-card" data-search="{{ s.search_text }}">
                         <header class="twdef-squad-head">
                             <h3>{{ s.name }}</h3>
+                            {% if s.speed_pending %}
+                            <span class="badge badge-neutral" title="Пак требует скорость — посчитаем, когда загрузятся данные игры">ждёт загрузки</span>
+                            {% else %}
                             <button type="button" class="badge {% if s.availability.can_total == 0 %}badge-danger{% elif s.availability.can_total < roster_size // 4 %}badge-warn{% else %}badge-ok{% endif %} badge-clickable"
                                     data-twdef-check="/tw/def/api/squads/{{ s.id }}/check" data-title="{{ s.name }}">
                                 могут {{ s.availability.can_total }} из {{ roster_size }}
                             </button>
+                            {% endif %}
                         </header>
                         <ol class="twdef-slots">
                             {% for slot in s.slot_views %}
@@ -70,5 +74,5 @@
     {% endfor %}
 
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261008a" defer></script>
+    <script src="/static/tw_def.js?v=20261008b" defer></script>
 {% endblock %}
