@@ -140,6 +140,21 @@
                                             <label>Кол-во ДК
                                                 <input type="number" name="quantity" value="{{ r.quantity }}" min="1" max="{{ max_quantity }}" required>
                                             </label>
+                                            {% for lvl in (3, 6, 9) %}
+                                                {% set cur = r['level' ~ lvl] %}
+                                                <label>Ур. {{ lvl }}
+                                                    <select name="level{{ lvl }}">
+                                                        {% if ',' in cur %}
+                                                            <option value="{{ cur }}" selected title="{{ r['level' ~ lvl ~ '_label'] }}">Как сейчас: {{ r['level' ~ lvl ~ '_label']|truncate(70, True, '…') }}</option>
+                                                        {% endif %}
+                                                        <option value="{{ datacron_none }}" {% if cur == datacron_none %}selected{% endif %}>{{ datacron_none_label }}</option>
+                                                        <option value="{{ datacron_any }}" {% if cur == datacron_any %}selected{% endif %}>{{ datacron_any_label }}</option>
+                                                        {% for ability_id, label in level_options[lvl] %}
+                                                            <option value="{{ ability_id }}" title="{{ label }}" {% if cur == ability_id %}selected{% endif %}>{{ label|truncate(80, True, '…') }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </label>
+                                            {% endfor %}
                                             <input type="text" name="stats" value="{{ r.stats or '' }}" placeholder="Статы">
                                             <fieldset class="stat-req-fieldset">
                                                 <legend>Мин. % статов (полная замена при сохранении)</legend>

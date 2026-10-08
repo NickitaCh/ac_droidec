@@ -938,6 +938,12 @@ def _match_counts(player_json, set_id, requirements, focused_requirements) -> di
     return counts
 
 
+def _match_sort_key(name, counts):
+    """Порядок строк в гильд-отчёте: больше закрытых «Обязательно» — выше, при равенстве
+    решают «Опционально», затем «Полезно», затем имя."""
+    return (*(-counts[p]["matched"] for p in PRIORITY_ORDER), name.lower())
+
+
 def _missing_required_labels(player_json, set_id, requirements, focused_requirements, cache) -> list:
     """Короткие подписи незакрытых «Обязательно» у одного игрока — для тега должников из
     гильд-отчёта. Одинаковые требования (частый приём вместо quantity: две одинаковые
@@ -1804,18 +1810,18 @@ class DatacronRequirementsCog(commands.Cog):
                     f"{PRIORITY_LABELS[p]}: {counts[p]['matched']}/{counts[p]['total']}"
                     for p in PRIORITY_ORDER if counts[p]["total"] > 0
                 ]
-                missing_required.append((name, ", ".join(parts)))
+                missing_required.append((name, ", ".join(parts), counts))
                 debtors.append((name, allycode, _missing_required_labels(player, set_id, requirements, focused_requirements, self.bot.datacron_cache)))
             else:
-                fully_compliant.append(name)
+                fully_compliant.append((name, counts))
 
-        missing_required.sort(key=lambda t: t[0].lower())
-        fully_compliant.sort(key=lambda s: s.lower())
+        missing_required.sort(key=lambda t: _match_sort_key(t[0], t[2]))
+        fully_compliant = [name for name, counts in sorted(fully_compliant, key=lambda t: _match_sort_key(*t))]
         debtors.sort(key=lambda t: t[0].lower())
 
         lines = [f"# ❌ Не закрыли «Обязательно» ({len(missing_required)})"]
         if missing_required:
-            for name, detail in missing_required:
+            for name, detail, _counts in missing_required:
                 lines.append(f"**{name}** — {detail}")
         else:
             lines.append("Все закрыли все обязательные требования! 🎉")

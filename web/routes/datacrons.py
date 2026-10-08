@@ -46,6 +46,7 @@ from cogs.datacron_requirements import (
     _is_valid_season,
     _level_label,
     _match_counts,
+    _match_sort_key,
     _match_requirements,
     _parse_stat_pair_params,
 )
@@ -406,6 +407,9 @@ async def edit_base_requirement(
     pack: str = Form(""),
     priority: str = Form(...),
     quantity: int = Form(1),
+    level3: str = Form(None),
+    level6: str = Form(None),
+    level9: str = Form(None),
     stats: str = Form(""),
     stat1: str = Form(""), value1: float = Form(None),
     stat2: str = Form(""), value2: float = Form(None),
@@ -419,7 +423,18 @@ async def edit_base_requirement(
     row = database.get_datacron_requirement(req_id, guild_id=guild_id)
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
-    _, row_set_id, _cur_pack, l3, l6, l9, _cur_comment, _, _, _cur_priority, _cur_stats, _cur_quantity = row
+    _, row_set_id, _cur_pack, cur_l3, cur_l6, cur_l9, _cur_comment, _, _, _cur_priority, _cur_stats, _cur_quantity = row
+    # Поля уровней могут отсутствовать (старая открытая вкладка) — тогда уровни не трогаем.
+    l3 = level3 if level3 is not None else cur_l3
+    l6 = level6 if level6 is not None else cur_l6
+    l9 = level9 if level9 is not None else cur_l9
+    if (l3, l6, l9) != (cur_l3, cur_l6, cur_l9):
+        catalog = await _safe_catalog()
+        for level_num, value in ((3, l3), (6, l6), (9, l9)):
+            if not _is_valid_level_value(catalog, row_set_id, level_num, value):
+                return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из списка.")
+        if l3 == DATACRON_NONE and l6 == DATACRON_NONE and l9 == DATACRON_NONE:
+            return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).")
     if not 1 <= quantity <= DATACRON_MAX_QUANTITY:
         return _redirect_season(set_id, error=f"Количество — от 1 до {DATACRON_MAX_QUANTITY}.")
     stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
@@ -599,12 +614,12 @@ async def _build_guild_report(set_id, requirements, focused_requirements, guild_
         required = counts[PRIORITY_REQUIRED]
         if required["total"] > 0 and required["matched"] < required["total"]:
             parts = [f"{PRIORITY_LABELS[p]}: {counts[p]['matched']}/{counts[p]['total']}" for p in PRIORITY_ORDER if counts[p]["total"] > 0]
-            missing_required.append({"name": name, "detail": ", ".join(parts)})
+            missing_required.append({"name": name, "detail": ", ".join(parts), "counts": counts})
         else:
-            fully_compliant.append(name)
+            fully_compliant.append((name, counts))
 
-    missing_required.sort(key=lambda r: r["name"].lower())
-    fully_compliant.sort(key=str.lower)
+    missing_required.sort(key=lambda r: _match_sort_key(r["name"], r["counts"]))
+    fully_compliant = [name for name, counts in sorted(fully_compliant, key=lambda t: _match_sort_key(*t))]
     return {
         "guild_mode": True, "missing_required": missing_required,
         "fully_compliant": fully_compliant, "failed": failed, "total": len(results),
