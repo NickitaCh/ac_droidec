@@ -1,15 +1,9 @@
 {% extends "base.html" %}
+{% import "_tw.html" as twui %}
 {% block title %}ВГ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <section class="page-hero page-hero-dark">
-        <div class="page-hero-top">
-            <div>
-                <p class="page-hero-eyebrow">Территориальные войны</p>
-                <h1>История ВГ</h1>
-                <p class="page-hero-lead">Только гильдийский уровень — Comlink не отдаёт разбивку по игрокам для ВГ (в отличие от ТБ).</p>
-            </div>
-        </div>
+    {% call twui.tw_hero("История ВГ", "history", "Только гильдийский уровень — Comlink не отдаёт разбивку по игрокам для ВГ (в отличие от ТБ).") %}
         {% if rows %}
         <div class="hero-kpis">
             <div class="hero-kpi"><span class="hero-kpi-value">{{ rows|length }}</span><span class="hero-kpi-label">сохранено ВГ</span></div>
@@ -23,7 +17,7 @@
             {% endif %}
         </div>
         {% endif %}
-    </section>
+    {% endcall %}
 
     {% if not rows %}
         <p class="empty-state">История ВГ пока пуста — бот сохраняет её из данных Comlink каждые 5 минут, первая запись появится после ближайшего опроса.</p>

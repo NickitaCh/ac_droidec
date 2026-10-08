@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% block title %}Расстановка дефа ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ twui.tw_hero("Расстановка дефа", "plans", "План под соперника: какие паки в какую зону и кто их ставит. Можно копировать план под следующую ВГ.") }}
+
+    {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
+    {% if not squad_count %}
+        <p class="config-warning">Сначала заведите деф-паки на вкладке <a href="/tw/def/squads">«Деф-паки»</a> — расставлять пока нечего.</p>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title">Новый план</div>
+        <form method="post" action="/tw/def/plans/create" class="twdef-row-form">
+            <label>Название
+                <input type="text" name="name" required maxlength="80" placeholder="vs Mighty Chlorians">
+            </label>
+            <label title="Сколько паков вмещает наземная зона">Паков на зону
+                <input type="number" name="squads_per_zone" value="40" min="1" max="100">
+            </label>
+            <label title="Сколько флотов вмещает флотская зона">Флотов на зону
+                <input type="number" name="fleets_per_zone" value="40" min="1" max="100">
+            </label>
+            <button type="submit">Создать</button>
+        </form>
+    </div>
+
+    {% if plans %}
+        <div class="panel">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>План</th>
+                            <th class="num">Паков</th>
+                            <th class="num">Игроков</th>
+                            <th>Изменён (UTC)</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in plans %}
+                            <tr>
+                                <td><a href="/tw/def/plans/{{ p.id }}"><strong>{{ p.name }}</strong></a>{% if p.note %}<div class="cell-sub">{{ p.note }}</div>{% endif %}</td>
+                                <td class="num">{{ p.assigned_count }}</td>
+                                <td class="num">{{ p.player_count }}</td>
+                                <td>{{ p.updated_at }}</td>
+                                <td class="twdef-row-actions">
+                                    <form method="post" action="/tw/def/plans/{{ p.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия</button></form>
+                                    <form method="post" action="/tw/def/plans/{{ p.id }}/delete" class="twdef-inline"
+                                          onsubmit="return confirm('Удалить план «{{ p.name }}» со всеми назначениями?');">
+                                        <button type="submit" class="button-danger">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% else %}
+        <p class="empty-state">Планов пока нет.</p>
+    {% endif %}
+{% endblock %}

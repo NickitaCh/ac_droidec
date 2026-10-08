@@ -1,0 +1,34 @@
+{# Окно кандидатов по паку (рендерит web/static/tw_def.js). В библиотеке паков — только
+   просмотр «кто может», на карте расстановки — выбор игроков с отправкой формы assign. #}
+<dialog id="twdef-picker" class="twdef-picker">
+    <form method="post" id="twdef-picker-form" class="twdef-picker-form">
+        <div class="twdef-picker-header">
+            <div>
+                <h3 id="twdef-picker-title">Кандидаты</h3>
+                <p class="muted" id="twdef-picker-sub"></p>
+            </div>
+            <button type="button" class="button-secondary" data-twdef-close>✕</button>
+        </div>
+        <div class="twdef-picker-toolbar">
+            <input type="search" id="twdef-picker-search" placeholder="Поиск игрока…">
+            <select id="twdef-picker-filter">
+                <option value="ok">Могут поставить</option>
+                <option value="all">Все игроки</option>
+                <option value="used">Заняты в плане</option>
+                <option value="no">Не проходят</option>
+            </select>
+            <span class="muted" id="twdef-picker-counts"></span>
+        </div>
+        <p id="twdef-picker-warning" class="config-warning" hidden></p>
+        <p id="twdef-picker-loading" class="muted">Загрузка…</p>
+        <p id="twdef-picker-error" class="error" hidden></p>
+        <ul id="twdef-picker-list" class="twdef-picker-list"></ul>
+        <input type="hidden" name="zone">
+        <input type="hidden" name="squad_id">
+        <div class="twdef-picker-footer" id="twdef-picker-footer" hidden>
+            <span class="muted" id="twdef-picker-selected"></span>
+            <button type="button" class="button-secondary" id="twdef-picker-none">Снять все</button>
+            <button type="submit">Поставить выбранных</button>
+        </div>
+    </form>
+</dialog>

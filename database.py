@@ -1736,6 +1736,20 @@ def get_unit_types(base_ids: list[str]) -> dict:
     conn.close()
     return result
 
+
+def get_omicron_capable(base_ids: list[str]) -> set[str]:
+    """Подмножество base_ids, у которых в игре есть омикрон (game_units.has_omicron)."""
+    if not base_ids:
+        return set()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    unique_ids = list(set(base_ids))
+    placeholders = ", ".join("?" for _ in unique_ids)
+    cursor.execute(f"SELECT base_id FROM game_units WHERE has_omicron = 1 AND base_id IN ({placeholders})", unique_ids)
+    result = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    return result
+
 # =====================================================================
 # ЗАДАЧИ НА ПРОКАЧКУ (/задачи + часовой аудит выполнения через Comlink)
 # =====================================================================
@@ -6696,3 +6710,318 @@ def prune_mod_scan_events(days: int = 14):
     cursor.execute("DELETE FROM mod_scan_events WHERE detected_at < datetime('now', ?)", (f"-{days} days",))
     conn.commit()
     conn.close()
+
+# =====================================================================
+# ДЕФ НА ВГ: библиотека деф-паков гильдии (tw_def_squads), планы расстановки под
+# соперника (tw_def_plans) и назначения "игрок -> пак -> зона" (tw_def_assignments).
+# Логика проверки требований и подбора игроков — tw_def_engine.py, веб — /tw/def
+# (web/routes/tw_defense.py). Аналог Squads + TW Planning в HotUtils.
+#
+# slots_json пака: [{"options": [{"base_id", "min_relic", "min_stars", "min_gear",
+# "zeta", "omicron", "ultimate", "min_speed"}, ...]}, ...] — слот = упорядоченный список
+# допустимых юнитов (первый подходящий берётся, остальные — замены/пул).
+# units_json назначения — base_id реально выбранных юнитов на момент назначения: один
+# юнит игрока не может стоять в двух паках одного плана, а пак могут потом поправить.
+# =====================================================================
+def _ensure_tw_def_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_def_squads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            combat_type TEXT NOT NULL DEFAULT 'character',
+            slots_json TEXT NOT NULL DEFAULT '[]',
+            note TEXT,
+            created_by TEXT,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_def_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            squads_per_zone INTEGER NOT NULL DEFAULT 40,
+            fleets_per_zone INTEGER NOT NULL DEFAULT 40,
+            excluded_json TEXT NOT NULL DEFAULT '[]',
+            note TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tw_def_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            zone TEXT NOT NULL,
+            squad_id INTEGER,
+            squad_name TEXT NOT NULL,
+            ally_code TEXT NOT NULL,
+            units_json TEXT NOT NULL DEFAULT '[]',
+            created_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_squads_guild ON tw_def_squads(guild_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_plans_guild ON tw_def_plans(guild_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_assignments_plan ON tw_def_assignments(plan_id)")
+
+
+def _tw_def_connect():
+    # commit сразу после _ensure — иначе read-only вызов откатит только что созданные
+    # таблицы при close() (та же ловушка, что у других _ensure_*_table).
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tw_def_tables(cursor)
+    conn.commit()
+    return conn, cursor
+
+
+_TW_DEF_SQUAD_KEYS = ["id", "guild_id", "name", "combat_type", "slots_json", "note", "created_by", "updated_by", "updated_at"]
+
+
+def _tw_def_squad_row(row) -> dict:
+    d = dict(zip(_TW_DEF_SQUAD_KEYS, row))
+    try:
+        d["slots"] = json.loads(d.pop("slots_json") or "[]")
+    except ValueError:
+        d["slots"] = []
+    return d
+
+
+def list_tw_def_squads(guild_id: int) -> list[dict]:
+    conn, cursor = _tw_def_connect()
+    cursor.execute(f"SELECT {', '.join(_TW_DEF_SQUAD_KEYS)} FROM tw_def_squads WHERE guild_id = ? "
+                   "ORDER BY combat_type, name COLLATE NOCASE", (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [_tw_def_squad_row(r) for r in rows]
+
+
+def get_tw_def_squad(guild_id: int, squad_id: int) -> dict | None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute(f"SELECT {', '.join(_TW_DEF_SQUAD_KEYS)} FROM tw_def_squads WHERE guild_id = ? AND id = ?",
+                   (guild_id, squad_id))
+    row = cursor.fetchone()
+    conn.close()
+    return _tw_def_squad_row(row) if row else None
+
+
+def save_tw_def_squad(guild_id: int, squad_id: int | None, name: str, combat_type: str, slots: list,
+                      note: str | None, user: str) -> int:
+    conn, cursor = _tw_def_connect()
+    slots_json = json.dumps(slots, ensure_ascii=False)
+    if squad_id:
+        cursor.execute("""
+            UPDATE tw_def_squads SET name = ?, combat_type = ?, slots_json = ?, note = ?, updated_by = ?,
+                   updated_at = datetime('now')
+            WHERE guild_id = ? AND id = ?
+        """, (name, combat_type, slots_json, note, user, guild_id, squad_id))
+    else:
+        cursor.execute("""
+            INSERT INTO tw_def_squads (guild_id, name, combat_type, slots_json, note, created_by, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (guild_id, name, combat_type, slots_json, note, user, user))
+        squad_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return squad_id
+
+
+def delete_tw_def_squad(guild_id: int, squad_id: int) -> None:
+    """Назначения в планах не трогаем — у них свой snapshot имени и юнитов."""
+    conn, cursor = _tw_def_connect()
+    cursor.execute("DELETE FROM tw_def_squads WHERE guild_id = ? AND id = ?", (guild_id, squad_id))
+    conn.commit()
+    conn.close()
+
+
+_TW_DEF_PLAN_KEYS = ["id", "guild_id", "name", "squads_per_zone", "fleets_per_zone", "excluded_json", "note",
+                     "created_by", "created_at", "updated_at"]
+
+
+def _tw_def_plan_row(row) -> dict:
+    d = dict(zip(_TW_DEF_PLAN_KEYS, row))
+    try:
+        d["excluded"] = json.loads(d.pop("excluded_json") or "[]")
+    except ValueError:
+        d["excluded"] = []
+    return d
+
+
+def list_tw_def_plans(guild_id: int) -> list[dict]:
+    conn, cursor = _tw_def_connect()
+    cols = ", ".join(f"p.{k}" for k in _TW_DEF_PLAN_KEYS)
+    cursor.execute(f"""
+        SELECT {cols}, COUNT(a.id), COUNT(DISTINCT a.ally_code)
+        FROM tw_def_plans p LEFT JOIN tw_def_assignments a ON a.plan_id = p.id
+        WHERE p.guild_id = ?
+        GROUP BY p.id ORDER BY p.updated_at DESC
+    """, (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        d = _tw_def_plan_row(row[:len(_TW_DEF_PLAN_KEYS)])
+        d["assigned_count"], d["player_count"] = row[len(_TW_DEF_PLAN_KEYS):]
+        result.append(d)
+    return result
+
+
+def get_tw_def_plan(guild_id: int, plan_id: int) -> dict | None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute(f"SELECT {', '.join(_TW_DEF_PLAN_KEYS)} FROM tw_def_plans WHERE guild_id = ? AND id = ?",
+                   (guild_id, plan_id))
+    row = cursor.fetchone()
+    conn.close()
+    return _tw_def_plan_row(row) if row else None
+
+
+def create_tw_def_plan(guild_id: int, name: str, squads_per_zone: int, fleets_per_zone: int, user: str) -> int:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("""
+        INSERT INTO tw_def_plans (guild_id, name, squads_per_zone, fleets_per_zone, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    """, (guild_id, name, squads_per_zone, fleets_per_zone, user))
+    plan_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return plan_id
+
+
+def update_tw_def_plan(guild_id: int, plan_id: int, *, name: str, squads_per_zone: int, fleets_per_zone: int,
+                       excluded: list, note: str | None) -> None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("""
+        UPDATE tw_def_plans SET name = ?, squads_per_zone = ?, fleets_per_zone = ?, excluded_json = ?, note = ?,
+               updated_at = datetime('now')
+        WHERE guild_id = ? AND id = ?
+    """, (name, squads_per_zone, fleets_per_zone, json.dumps(excluded), note, guild_id, plan_id))
+    conn.commit()
+    conn.close()
+
+
+def touch_tw_def_plan(guild_id: int, plan_id: int) -> None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("UPDATE tw_def_plans SET updated_at = datetime('now') WHERE guild_id = ? AND id = ?",
+                   (guild_id, plan_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_tw_def_plan(guild_id: int, plan_id: int) -> None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("DELETE FROM tw_def_assignments WHERE guild_id = ? AND plan_id = ?", (guild_id, plan_id))
+    cursor.execute("DELETE FROM tw_def_plans WHERE guild_id = ? AND id = ?", (guild_id, plan_id))
+    conn.commit()
+    conn.close()
+
+
+def copy_tw_def_plan(guild_id: int, plan_id: int, new_name: str, user: str) -> int | None:
+    plan = get_tw_def_plan(guild_id, plan_id)
+    if not plan:
+        return None
+    conn, cursor = _tw_def_connect()
+    cursor.execute("""
+        INSERT INTO tw_def_plans (guild_id, name, squads_per_zone, fleets_per_zone, excluded_json, note,
+                                  created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    """, (guild_id, new_name, plan["squads_per_zone"], plan["fleets_per_zone"], json.dumps(plan["excluded"]),
+          plan["note"], user))
+    new_id = cursor.lastrowid
+    cursor.execute("""
+        INSERT INTO tw_def_assignments (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json,
+                                        created_by, created_at)
+        SELECT guild_id, ?, zone, squad_id, squad_name, ally_code, units_json, ?, datetime('now')
+        FROM tw_def_assignments WHERE guild_id = ? AND plan_id = ? ORDER BY id
+    """, (new_id, user, guild_id, plan_id))
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+_TW_DEF_ASSIGN_KEYS = ["id", "plan_id", "zone", "squad_id", "squad_name", "ally_code", "units_json", "created_by",
+                       "created_at"]
+
+
+def get_tw_def_assignments(guild_id: int, plan_id: int) -> list[dict]:
+    conn, cursor = _tw_def_connect()
+    cursor.execute(f"SELECT {', '.join(_TW_DEF_ASSIGN_KEYS)} FROM tw_def_assignments "
+                   "WHERE guild_id = ? AND plan_id = ? ORDER BY id", (guild_id, plan_id))
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        d = dict(zip(_TW_DEF_ASSIGN_KEYS, row))
+        try:
+            d["units"] = json.loads(d.pop("units_json") or "[]")
+        except ValueError:
+            d["units"] = []
+        result.append(d)
+    return result
+
+
+def add_tw_def_assignments(guild_id: int, plan_id: int, rows: list[tuple], user: str) -> int:
+    """rows: [(zone, squad_id, squad_name, ally_code, [base_id, ...]), ...]"""
+    if not rows:
+        return 0
+    conn, cursor = _tw_def_connect()
+    cursor.executemany("""
+        INSERT INTO tw_def_assignments (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json,
+                                        created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, [(guild_id, plan_id, zone, squad_id, squad_name, ally_code, json.dumps(units), user)
+          for zone, squad_id, squad_name, ally_code, units in rows])
+    cursor.execute("UPDATE tw_def_plans SET updated_at = datetime('now') WHERE guild_id = ? AND id = ?",
+                   (guild_id, plan_id))
+    conn.commit()
+    conn.close()
+    return len(rows)
+
+
+def delete_tw_def_assignment(guild_id: int, plan_id: int, assignment_id: int) -> None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("DELETE FROM tw_def_assignments WHERE guild_id = ? AND plan_id = ? AND id = ?",
+                   (guild_id, plan_id, assignment_id))
+    conn.commit()
+    conn.close()
+
+
+def move_tw_def_assignment(guild_id: int, plan_id: int, assignment_id: int, zone: str) -> None:
+    conn, cursor = _tw_def_connect()
+    cursor.execute("UPDATE tw_def_assignments SET zone = ? WHERE guild_id = ? AND plan_id = ? AND id = ?",
+                   (zone, guild_id, plan_id, assignment_id))
+    conn.commit()
+    conn.close()
+
+
+def clear_tw_def_assignments(guild_id: int, plan_id: int, zone: str | None = None, squad_id: int | None = None) -> None:
+    conn, cursor = _tw_def_connect()
+    sql = "DELETE FROM tw_def_assignments WHERE guild_id = ? AND plan_id = ?"
+    params: list = [guild_id, plan_id]
+    if zone:
+        sql += " AND zone = ?"
+        params.append(zone)
+    if squad_id:
+        sql += " AND squad_id = ?"
+        params.append(squad_id)
+    cursor.execute(sql, params)
+    conn.commit()
+    conn.close()
+
+
+def get_all_skill_tier_info() -> dict:
+    """{skill_id: (zeta_tier|None, omicron_tier|None, omicron_mode|None)} — как
+    get_all_skill_tier_thresholds, но с режимом омикрона (для требования "омикрон для ВГ"
+    в деф-паках, tw_def_engine.py)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_skill_tier_thresholds_table(cursor)
+    conn.commit()
+    cursor.execute("SELECT skill_id, zeta_tier, omicron_tier, omicron_mode FROM skill_tier_thresholds")
+    rows = cursor.fetchall()
+    conn.close()
+    return {skill_id: (zeta_tier, omicron_tier, omicron_mode) for skill_id, zeta_tier, omicron_tier, omicron_mode in rows}

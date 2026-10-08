@@ -42,6 +42,12 @@ async def get_stat_calc(comlink):
     return _stat_calc
 
 
+def cached_stat_calc():
+    """Уже построенный калькулятор (даже с истёкшим TTL) или None — без сетевых вызовов.
+    Для страниц, которые не должны ждать первую сборку (деф ВГ, web/routes/tw_defense.py)."""
+    return _stat_calc
+
+
 def _bot_stand_in(comlink, stat_calc):
     return types.SimpleNamespace(comlink=comlink, stat_calc=stat_calc)
 

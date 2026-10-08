@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% block title %}{% if squad.id %}{{ squad.name }}{% else %}Новый пак{% endif %} — Деф-паки ВГ{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ twui.tw_hero(squad.name if squad.id else "Новый деф-пак", "squads") }}
+    <p><a href="/tw/def/squads">← Все паки</a></p>
+
+    {% if errors %}
+        <div class="config-warning">
+            {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+        </div>
+    {% endif %}
+
+    <form method="post" action="/tw/def/squads/save" class="twdef-editor" id="twdef-editor">
+        <input type="hidden" name="squad_id" value="{{ squad.id or '' }}">
+        <input type="hidden" name="slots_json" id="twdef-slots-json">
+
+        <div class="panel twdef-editor-head">
+            <label class="twdef-field-wide">Название
+                <input type="text" name="name" value="{{ squad.name }}" required maxlength="80" placeholder="Например: Асока под Герой">
+            </label>
+            <fieldset class="twdef-type">
+                <legend>Тип</legend>
+                <label class="checkbox"><input type="radio" name="combat_type" value="character" {% if squad.combat_type != "ship" %}checked{% endif %}> Наземный (до {{ max_slots.character }})</label>
+                <label class="checkbox"><input type="radio" name="combat_type" value="ship" {% if squad.combat_type == "ship" %}checked{% endif %}> Флот (до {{ max_slots.ship }})</label>
+            </fieldset>
+            <label class="twdef-field-wide">Заметка
+                <input type="text" name="note" value="{{ squad.note }}" maxlength="200" placeholder="Например: ставить перед Беком">
+            </label>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>Слоты</span>
+                <span class="panel-hint">Слот 1 — лидер. В слоте можно указать замены: берётся первый подходящий юнит по порядку. «Любые 2 из 5» — два слота с одинаковым списком.</span>
+            </div>
+            <div id="twdef-slots" class="twdef-slot-editor-list"></div>
+            <button type="button" class="button-secondary" id="twdef-add-slot">+ Слот</button>
+        </div>
+
+        <div class="twdef-editor-actions">
+            <button type="submit">Сохранить</button>
+            <a class="button button-secondary" href="/tw/def/squads">Отмена</a>
+        </div>
+    </form>
+
+    <template id="twdef-option-tpl">
+        <div class="twdef-option-row">
+            <div class="unit-search twdef-unit-search">
+                <span class="twdef-option-portrait unit-portrait unit-portrait-xs"><img alt="" src="/static/img/game/portrait-fallback.svg"></span>
+                <input type="text" class="unit-search-input" placeholder="Юнит…" autocomplete="off">
+                <div class="unit-search-results"></div>
+            </div>
+            <label class="twdef-req twdef-req-char" title="Минимальная реликвия">R ≥
+                <select data-field="min_relic"><option value="">—</option>{% for r in range(0, 11) %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+            </label>
+            <label class="twdef-req twdef-req-char" title="Минимальный тир (если релик не важен)">G ≥
+                <select data-field="min_gear"><option value="">—</option>{% for g in range(8, 14) %}<option value="{{ g }}">{{ g }}</option>{% endfor %}</select>
+            </label>
+            <label class="twdef-req" title="Минимум звёзд">★ ≥
+                <select data-field="min_stars"><option value="">—</option>{% for s in range(1, 8) %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+            </label>
+            <label class="twdef-req twdef-req-char twdef-check" title="Все зеты юнита"><input type="checkbox" data-field="zeta"> зеты</label>
+            <label class="twdef-req twdef-req-char twdef-check" title="Омикрон для ВГ (если у юнита нет ВГ-омикрона — любой)"><input type="checkbox" data-field="omicron"> омикрон</label>
+            <label class="twdef-req twdef-req-char twdef-check" title="Ульта (легенды)"><input type="checkbox" data-field="ultimate"> ульта</label>
+            <label class="twdef-req twdef-req-char" title="Минимальная скорость с модами">ск ≥
+                <input type="number" data-field="min_speed" min="1" max="999" class="twdef-speed">
+            </label>
+            <button type="button" class="button-danger twdef-remove-option" title="Убрать вариант">✕</button>
+        </div>
+    </template>
+
+    <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
+    <script src="/static/tw_def.js?v=20261008a" defer></script>
+{% endblock %}

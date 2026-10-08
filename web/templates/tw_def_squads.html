@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% import "_game.html" as game %}
+{% block title %}Деф-паки ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {% call twui.tw_hero("Деф-паки", "squads", "Паки для дефа с требованиями к юнитам. Бот проверяет ростеры гильдии и считает, кто может их поставить.") %}
+        <div class="hero-kpis">
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ squads|selectattr("combat_type", "equalto", "character")|list|length }}</span><span class="hero-kpi-label">наземных паков</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ squads|selectattr("combat_type", "equalto", "ship")|list|length }}</span><span class="hero-kpi-label">флотов</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ roster_size }}</span><span class="hero-kpi-label">игроков в ростере</span></div>
+        </div>
+    {% endcall %}
+
+    {% if saved %}<p class="dash-flash">Пак «{{ saved }}» сохранён.</p>{% endif %}
+    {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
+    {% if warning %}<p class="config-warning">{{ warning }}</p>{% endif %}
+
+    <div class="twdef-toolbar">
+        <a class="button" href="/tw/def/squads/new">+ Новый пак</a>
+        {% if squads %}<input type="search" class="twdef-search" data-twdef-filter=".twdef-squad-card" placeholder="Поиск по названию или юниту…">{% endif %}
+        <span class="muted twdef-sync">Ростеры обновлены: {{ last_sync or "—" }} (UTC)</span>
+    </div>
+
+    {% if not squads %}
+        <p class="empty-state">Паков пока нет. Создайте первый: укажите юнитов по слотам и минимальные требования (релик, звёзды, зеты, омикрон, скорость). Потом паки расставляются по зонам на странице «Расстановка дефа».</p>
+    {% endif %}
+
+    {% for kind, title in [("character", "Наземные паки"), ("ship", "Флот")] %}
+        {% set group = squads|selectattr("combat_type", "equalto", kind)|list %}
+        {% if group %}
+            <h2 class="twdef-section-title">{{ title }}</h2>
+            <div class="twdef-squad-grid">
+                {% for s in group %}
+                    <article class="twdef-squad-card" data-search="{{ s.search_text }}">
+                        <header class="twdef-squad-head">
+                            <h3>{{ s.name }}</h3>
+                            <button type="button" class="badge {% if s.availability.can_total == 0 %}badge-danger{% elif s.availability.can_total < roster_size // 4 %}badge-warn{% else %}badge-ok{% endif %} badge-clickable"
+                                    data-twdef-check="/tw/def/api/squads/{{ s.id }}/check" data-title="{{ s.name }}">
+                                могут {{ s.availability.can_total }} из {{ roster_size }}
+                            </button>
+                        </header>
+                        <ol class="twdef-slots">
+                            {% for slot in s.slot_views %}
+                                <li class="twdef-slot{% if loop.first and kind == 'character' %} twdef-slot-lead{% endif %}">
+                                    {% for opt in slot %}
+                                        <span class="twdef-opt{% if not loop.first %} twdef-opt-alt{% endif %}" title="{{ opt.name }}{% if opt.req %} — {{ opt.req }}{% endif %}">
+                                            {{ game.portrait(opt.base_id, "sm" if loop.first else "xs") }}
+                                            {% if loop.first %}<span class="twdef-opt-name">{{ opt.name }}</span>{% endif %}
+                                            {% if opt.req and loop.first %}<span class="twdef-opt-req">{{ opt.req }}</span>{% endif %}
+                                        </span>
+                                    {% endfor %}
+                                    {% if slot|length > 1 %}<span class="twdef-alt-label">или {{ slot[1:]|map(attribute="name")|join(", ") }}</span>{% endif %}
+                                </li>
+                            {% endfor %}
+                        </ol>
+                        {% if s.note %}<p class="twdef-note">{{ s.note }}</p>{% endif %}
+                        <footer class="twdef-squad-actions">
+                            <a class="button button-secondary" href="/tw/def/squads/{{ s.id }}/edit">Изменить</a>
+                            <form method="post" action="/tw/def/squads/{{ s.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия</button></form>
+                            <form method="post" action="/tw/def/squads/{{ s.id }}/delete" class="twdef-inline"
+                                  onsubmit="return confirm('Удалить пак «{{ s.name }}»? Уже сделанные расстановки останутся.');">
+                                <button type="submit" class="button-danger">Удалить</button>
+                            </form>
+                        </footer>
+                    </article>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endfor %}
+
+    {% include "_tw_def_picker.html" %}
+    <script src="/static/tw_def.js?v=20261008a" defer></script>
+{% endblock %}

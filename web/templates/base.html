@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20260930c">
+    <link rel="stylesheet" href="/static/style.css?v=20261008a">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -58,7 +58,14 @@
                             <a href="/tb/platoons"><span class="nav-icon">👥</span><span class="nav-label">Взводы</span></a>
                         </div>
                     </details>
-                    <a href="/tw" title="ВГ"><span class="nav-icon">⚔️</span><span class="nav-label">ВГ</span></a>
+                    <details class="nav-dropdown">
+                        <summary title="ВГ"><span class="nav-icon">⚔️</span><span class="nav-label">ВГ</span></summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="/tw"><span class="nav-icon">📄</span><span class="nav-label">История</span></a>
+                            <a href="/tw/def/squads"><span class="nav-icon">🛡️</span><span class="nav-label">Деф-паки</span></a>
+                            <a href="/tw/def/plans"><span class="nav-icon">🗺️</span><span class="nav-label">Расстановка дефа</span></a>
+                        </div>
+                    </details>
                     <a href="/tasks" title="Задачи"><span class="nav-icon">✅</span><span class="nav-label">Задачи</span></a>
                     <a href="/datacrons" title="Датакроны"><span class="nav-icon">🔮</span><span class="nav-label">Датакроны</span></a>
                     <details class="nav-dropdown">

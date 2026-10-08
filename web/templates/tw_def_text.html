@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% block title %}Текст — {{ plan.name }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ twui.tw_hero(plan.name, "plans", "Готовый текст расстановки — скопируйте в канал. Публикация ботом в канал и рассылка в личку — следующим этапом.") }}
+    <p><a href="/tw/def/plans/{{ plan.id }}">← К карте</a></p>
+
+    {% if not assigned_total %}
+        <p class="empty-state">В плане пока нет назначений.</p>
+    {% else %}
+        <div class="twdef-text-grid">
+            {% for key, title, text in [("zone", "По зонам — для общего канала", by_zone), ("player", "По игрокам", by_player)] %}
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>{{ title }}</span>
+                        <span class="panel-hint">{{ text|length }} символов{% if text|length > 2000 %} — в Discord уйдёт несколькими сообщениями{% endif %}</span>
+                    </div>
+                    <textarea class="twdef-text" id="twdef-text-{{ key }}" readonly rows="18">{{ text }}</textarea>
+                    <button type="button" data-twdef-copy="twdef-text-{{ key }}">Скопировать</button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <script src="/static/tw_def.js?v=20261008a" defer></script>
+{% endblock %}

@@ -62,6 +62,8 @@ PAGES = [
     ("tb_platoons_filters", "ТБ — взводы, фильтры автозаполнения (со страницы Взводы)", "/tb/platoons/filters", "officers"),
     ("tb_platoons_notify", "ТБ — взводы, рассылка в личку (со страницы Взводы)", "/tb/platoons/notify", "officers"),
     ("tw", "ВГ — отчёт", "/tw", "officers"),
+    ("tw_def_squads", "ВГ — деф-паки (библиотека, «кто может», редактор)", "/tw/def/squads", "officers"),
+    ("tw_def_plans", "ВГ — расстановка дефа (карта, авто/ручной подбор, текст для Discord)", "/tw/def/plans", "officers"),
     ("tasks", "Задачи", "/tasks", "officers"),
     ("datacrons", "Датакроны", "/datacrons", "officers"),
     ("datacrons_check", "Датакроны — проверить игрока", "/datacrons/check", "officers"),

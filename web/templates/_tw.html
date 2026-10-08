@@ -1,0 +1,18 @@
+{# Шапка раздела ВГ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
+{% macro tw_hero(title, active, lead="") -%}
+<section class="page-hero page-hero-dark">
+    <div class="page-hero-top">
+        <div>
+            <p class="page-hero-eyebrow">Территориальные войны</p>
+            <h1>{{ title }}</h1>
+            {% if lead %}<p class="page-hero-lead">{{ lead }}</p>{% endif %}
+        </div>
+    </div>
+    <nav class="hero-tabs">
+        {% for href, key, label in [("/tw", "history", "История"), ("/tw/def/squads", "squads", "Деф-паки"), ("/tw/def/plans", "plans", "Расстановка дефа")] %}
+            {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
+        {% endfor %}
+    </nav>
+    {% if caller %}{{ caller() }}{% endif %}
+</section>
+{%- endmacro %}
