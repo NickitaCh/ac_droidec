@@ -2267,3 +2267,14 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 .twdef-spinner { flex: 0 0 auto; width: 1.4em; height: 1.4em; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: twdef-spin 0.9s linear infinite; }
 @keyframes twdef-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .twdef-spinner { animation-duration: 3s; } }
+
+/* Деф ВГ: требования к статам юнита и датакрон пака */
+.twdef-stat-rows { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 0.35em 0.8em; }
+.twdef-stat-rows:empty { display: none; }
+.twdef-stat-row { display: inline-flex; align-items: center; gap: 0.35em; font-size: 0.88em; padding: 0.2em 0.4em; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.twdef-stat-row select { padding: 0.25em; }
+.twdef-stat-row input[type="number"] { width: 6.5em; padding: 0.25em; }
+.twdef-editor-ship .twdef-stat-rows { display: none; }
+.twdef-dc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em 0.6em; margin: 0; padding: 0.45em 0.6em; border-radius: 8px; background: color-mix(in srgb, var(--series-2) 8%, var(--surface-2)); font-size: 0.85em; }
+.twdef-dc-label { flex: 1 1 100%; color: var(--fg-secondary); }
+.twdef-dc-count { color: var(--fg-secondary); }

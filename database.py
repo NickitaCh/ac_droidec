@@ -6765,6 +6765,12 @@ def _ensure_tw_def_tables(cursor):
             created_at TEXT NOT NULL
         )
     """)
+    try:
+        # Требование по датакрону на весь пак: {"kind": "base"|"focused", "req_id", "required"} —
+        # ссылка на требование из /datacrons (datacron_requirements / datacron_focused_requirements).
+        cursor.execute("ALTER TABLE tw_def_squads ADD COLUMN datacron_json TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_squads_guild ON tw_def_squads(guild_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_plans_guild ON tw_def_plans(guild_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_assignments_plan ON tw_def_assignments(plan_id)")
@@ -6780,7 +6786,8 @@ def _tw_def_connect():
     return conn, cursor
 
 
-_TW_DEF_SQUAD_KEYS = ["id", "guild_id", "name", "combat_type", "slots_json", "note", "created_by", "updated_by", "updated_at"]
+_TW_DEF_SQUAD_KEYS = ["id", "guild_id", "name", "combat_type", "slots_json", "note", "created_by", "updated_by", "updated_at",
+                      "datacron_json"]
 
 
 def _tw_def_squad_row(row) -> dict:
@@ -6789,6 +6796,10 @@ def _tw_def_squad_row(row) -> dict:
         d["slots"] = json.loads(d.pop("slots_json") or "[]")
     except ValueError:
         d["slots"] = []
+    try:
+        d["datacron"] = json.loads(d.pop("datacron_json") or "null")
+    except ValueError:
+        d["datacron"] = None
     return d
 
 
@@ -6811,20 +6822,22 @@ def get_tw_def_squad(guild_id: int, squad_id: int) -> dict | None:
 
 
 def save_tw_def_squad(guild_id: int, squad_id: int | None, name: str, combat_type: str, slots: list,
-                      note: str | None, user: str) -> int:
+                      note: str | None, user: str, datacron: dict | None = None) -> int:
     conn, cursor = _tw_def_connect()
     slots_json = json.dumps(slots, ensure_ascii=False)
+    datacron_json = json.dumps(datacron) if datacron else None
     if squad_id:
         cursor.execute("""
-            UPDATE tw_def_squads SET name = ?, combat_type = ?, slots_json = ?, note = ?, updated_by = ?,
-                   updated_at = datetime('now')
+            UPDATE tw_def_squads SET name = ?, combat_type = ?, slots_json = ?, note = ?, datacron_json = ?,
+                   updated_by = ?, updated_at = datetime('now')
             WHERE guild_id = ? AND id = ?
-        """, (name, combat_type, slots_json, note, user, guild_id, squad_id))
+        """, (name, combat_type, slots_json, note, datacron_json, user, guild_id, squad_id))
     else:
         cursor.execute("""
-            INSERT INTO tw_def_squads (guild_id, name, combat_type, slots_json, note, created_by, updated_by, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        """, (guild_id, name, combat_type, slots_json, note, user, user))
+            INSERT INTO tw_def_squads (guild_id, name, combat_type, slots_json, note, datacron_json, created_by,
+                                       updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (guild_id, name, combat_type, slots_json, note, datacron_json, user, user))
         squad_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -7025,3 +7038,50 @@ def get_all_skill_tier_info() -> dict:
     rows = cursor.fetchall()
     conn.close()
     return {skill_id: (zeta_tier, omicron_tier, omicron_mode) for skill_id, zeta_tier, omicron_tier, omicron_mode in rows}
+
+
+# Датакроны игроков (сырой player.datacron из comlink.get_player) — пишутся попутно в ежечасном
+# синке ростеров (services/activity_diff.py::fetch_player_units), без отдельных запросов. Нужны
+# для гильдийского подсчёта «у кого есть нужный ДК» (деф ВГ, tw_def_engine.py).
+def _ensure_player_datacron_cache_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS player_datacron_cache (
+            ally_code TEXT PRIMARY KEY,
+            datacron_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def upsert_player_datacrons(ally_code: str, datacrons: list) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_datacron_cache_table(cursor)
+    cursor.execute("""
+        INSERT OR REPLACE INTO player_datacron_cache (ally_code, datacron_json, updated_at)
+        VALUES (?, ?, datetime('now'))
+    """, (str(ally_code), json.dumps(datacrons or [])))
+    conn.commit()
+    conn.close()
+
+
+def get_player_datacrons_bulk(ally_codes: list) -> dict:
+    """{ally_code: [datacron, ...]} — только по тем, у кого кэш уже есть."""
+    if not ally_codes:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_datacron_cache_table(cursor)
+    conn.commit()
+    placeholders = ",".join("?" for _ in ally_codes)
+    cursor.execute(f"SELECT ally_code, datacron_json FROM player_datacron_cache WHERE ally_code IN ({placeholders})",
+                   [str(c) for c in ally_codes])
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for ally_code, raw in rows:
+        try:
+            result[ally_code] = json.loads(raw)
+        except ValueError:
+            continue
+    return result

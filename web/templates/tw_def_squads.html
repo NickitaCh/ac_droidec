@@ -35,8 +35,8 @@
                     <article class="twdef-squad-card" data-search="{{ s.search_text }}">
                         <header class="twdef-squad-head">
                             <h3>{{ s.name }}</h3>
-                            {% if s.speed_pending %}
-                            <span class="badge badge-neutral" title="Пак требует скорость — посчитаем, когда загрузятся данные игры">ждёт загрузки</span>
+                            {% if s.stats_pending %}
+                            <span class="badge badge-neutral" title="Пак требует статы — посчитаем, когда загрузятся данные игры">ждёт загрузки</span>
                             {% else %}
                             <button type="button" class="badge {% if s.availability.can_total == 0 %}badge-danger{% elif s.availability.can_total < roster_size // 4 %}badge-warn{% else %}badge-ok{% endif %} badge-clickable"
                                     data-twdef-check="/tw/def/api/squads/{{ s.id }}/check" data-title="{{ s.name }}">
@@ -58,6 +58,13 @@
                                 </li>
                             {% endfor %}
                         </ol>
+                        {% if s.datacron %}
+                            <p class="twdef-dc-line">
+                                <span class="twdef-dc-label">ДК: {{ s.dc_label }}</span>
+                                {% if s.datacron.required %}<span class="badge badge-warn">обязателен</span>{% endif %}
+                                <span class="twdef-dc-count">есть у <strong>{{ s.availability.with_dc }}</strong> из {{ roster_size }}{% if s.availability.dc_unknown %} · нет данных: {{ s.availability.dc_unknown }}{% endif %}</span>
+                            </p>
+                        {% endif %}
                         {% if s.note %}<p class="twdef-note">{{ s.note }}</p>{% endif %}
                         <footer class="twdef-squad-actions">
                             <a class="button button-secondary" href="/tw/def/squads/{{ s.id }}/edit">Изменить</a>
@@ -74,5 +81,5 @@
     {% endfor %}
 
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261008b" defer></script>
+    <script src="/static/tw_def.js?v=20261008c" defer></script>
 {% endblock %}

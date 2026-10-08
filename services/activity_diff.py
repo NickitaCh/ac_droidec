@@ -21,6 +21,9 @@ import stat_engine
 async def fetch_player_units(comlink, ally_code: str) -> dict:
     """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
     player_data = await asyncio.to_thread(comlink.get_player, allycode=str(ally_code))
+    # Датакроны приходят в том же ответе — сохраняем попутно (деф ВГ: «у кого нужный ДК»).
+    if "datacron" in player_data:
+        database.upsert_player_datacrons(str(ally_code), player_data.get("datacron") or [])
     roster = player_data.get("rosterUnit") or player_data.get("roster") or []
     units = {}
     for u in roster:

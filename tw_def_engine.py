@@ -34,8 +34,43 @@ ZONES_BY_KEY = {z["key"]: z for z in ZONES}
 MAX_SLOTS = {"character": 5, "ship": 8}
 SHIP_DEFAULT_MIN_STARS = 7
 
-OPTION_INT_FIELDS = {"min_relic": (0, 10), "min_stars": (1, 7), "min_gear": (1, 13), "min_speed": (1, 999)}
+OPTION_INT_FIELDS = {"min_relic": (0, 10), "min_stars": (1, 7), "min_gear": (1, 13)}
 OPTION_BOOL_FIELDS = ("zeta", "omicron", "ultimate")
+
+# Статы, которые можно требовать от юнита (ключи stat_engine.calc_final_stats; %-статы там уже
+# в игровых процентах). Подпись — в редакторе, короткая — в списках требований.
+STAT_CHOICES = [
+    ("Speed", "Скорость", "скорость", False),
+    ("Health", "Здоровье", "здоровье", False),
+    ("Protection", "Защита", "защита", False),
+    ("Physical Damage", "Физ. урон", "физ. урон", False),
+    ("Special Damage", "Спец. урон", "спец. урон", False),
+    ("Potency", "Эффективность, %", "эффективность", True),
+    ("Tenacity", "Стойкость, %", "стойкость", True),
+    ("Critical Damage", "Крит. урон, %", "крит. урон", True),
+    ("Physical Critical Chance", "Шанс физ. крита, %", "физ. крит", True),
+    ("Special Critical Chance", "Шанс спец. крита, %", "спец. крит", True),
+    ("Armor", "Броня, %", "броня", True),
+    ("Resistance", "Сопротивление, %", "сопротивление", True),
+]
+STAT_KEYS = {key for key, *_ in STAT_CHOICES}
+STAT_SHORT = {key: short for key, _label, short, _pct in STAT_CHOICES}
+STAT_PERCENT = {key for key, _label, _short, pct in STAT_CHOICES if pct}
+MAX_STATS_PER_UNIT = 6
+
+
+def _fmt_stat(stat: str, value: float) -> str:
+    if stat in STAT_PERCENT:
+        return f"{value:.1f}".rstrip("0").rstrip(".") + "%"
+    return f"{int(round(value)):,}".replace(",", " ")
+
+
+def option_stats(opt: dict) -> list[dict]:
+    """[{"stat", "min"}] варианта; старый формат min_speed читается как скорость."""
+    stats = list(opt.get("stats") or [])
+    if opt.get("min_speed") and not any(st.get("stat") == "Speed" for st in stats):
+        stats.insert(0, {"stat": "Speed", "min": opt["min_speed"]})
+    return stats
 
 
 def zone_capacity(plan: dict, zone_key: str) -> int:
@@ -87,10 +122,29 @@ def normalize_slots(raw_slots, combat_type: str, known_units: dict, omicron_capa
             for key in OPTION_BOOL_FIELDS:
                 if raw.get(key):
                     opt[key] = True
+            stats = []
+            for st in option_stats(raw):
+                if not isinstance(st, dict) or st.get("stat") not in STAT_KEYS or st.get("min") in (None, ""):
+                    continue
+                try:
+                    value = float(st["min"])
+                except (TypeError, ValueError):
+                    errors.append(f"Слот {slot_index}: некорректное значение стата.")
+                    continue
+                if value <= 0 or value > 10_000_000:
+                    errors.append(f"Слот {slot_index}: значение стата вне диапазона.")
+                    continue
+                if any(x["stat"] == st["stat"] for x in stats):
+                    continue
+                stats.append({"stat": st["stat"], "min": int(value) if value.is_integer() else value})
+            if len(stats) > MAX_STATS_PER_UNIT:
+                errors.append(f"Слот {slot_index}: не больше {MAX_STATS_PER_UNIT} статов на юнит.")
+            if stats:
+                opt["stats"] = stats[:MAX_STATS_PER_UNIT]
             if opt.get("omicron") and omicron_capable is not None and base_id not in omicron_capable:
                 opt.pop("omicron")
             if combat_type == "ship":
-                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "min_speed"):
+                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "stats"):
                     opt.pop(key, None)
             options.append(opt)
         if options:
@@ -121,8 +175,8 @@ def option_requirement_label(opt: dict, combat_type: str) -> str:
         parts.append("омикрон")
     if opt.get("ultimate"):
         parts.append("ульта")
-    if opt.get("min_speed"):
-        parts.append(f"ск {opt['min_speed']}+")
+    for st in option_stats(opt):
+        parts.append(f"{STAT_SHORT.get(st['stat'], st['stat'])} {_fmt_stat(st['stat'], st['min'])}+")
     return ", ".join(parts)
 
 
@@ -139,26 +193,30 @@ class Roster:
     skills: dict                               # skill_id -> (zeta_tier, omicron_tier, omicron_mode)
     stat_calc: object = None
     last_sync: str | None = None
-    _speed_cache: dict = field(default_factory=dict)
+    datacrons: dict = field(default_factory=dict)          # ally_code -> [player.datacron...]
+    dc_reqs: dict = field(default_factory=dict)            # ("base"|"focused", req_id) -> строка требования
+    _stats_cache: dict = field(default_factory=dict)
 
     def unit_name(self, base_id: str) -> str:
         return self.unit_names.get(base_id) or base_id
 
-    def speed(self, ally_code: str, base_id: str) -> float | None:
+    def stat(self, ally_code: str, base_id: str, stat: str) -> float | None:
+        """Итоговый стат юнита с модами (StatCalc); None, если калькулятора нет."""
         if self.stat_calc is None:
             return None
         key = (ally_code, base_id)
-        if key not in self._speed_cache:
+        if key not in self._stats_cache:
             unit = self.units.get(ally_code, {}).get(base_id)
             try:
-                self._speed_cache[key] = stat_engine.calc_final_stats(self.stat_calc, unit).get("Speed") if unit else None
+                self._stats_cache[key] = stat_engine.calc_final_stats(self.stat_calc, unit) if unit else None
             except Exception:
-                self._speed_cache[key] = None
-        return self._speed_cache[key]
+                self._stats_cache[key] = None
+        stats = self._stats_cache[key]
+        return stats.get(stat) if stats else None
 
 
-def squads_need_speed(squads: list[dict]) -> bool:
-    return any(opt.get("min_speed") for s in squads for slot in s["slots"] for opt in slot["options"])
+def squads_need_stats(squads: list[dict]) -> bool:
+    return any(option_stats(opt) for s in squads for slot in s["slots"] for opt in slot["options"])
 
 
 def load_roster(guild_id: int, squads: list[dict], stat_calc=None, extra_base_ids=()) -> Roster:
@@ -177,7 +235,14 @@ def load_roster(guild_id: int, squads: list[dict], stat_calc=None, extra_base_id
     units: dict[str, dict[str, dict]] = {}
     for row in database.get_player_unit_owners_bulk(ally_codes, base_ids) if base_ids else []:
         units.setdefault(row["ally_code"], {})[row["base_id"]] = row["unit"]
+    datacrons, dc_reqs = {}, {}
+    if any(s.get("datacron") for s in squads):
+        datacrons = database.get_player_datacrons_bulk(ally_codes)
+        dc_reqs = {("base", row[0]): row for row in database.get_all_datacron_requirements(guild_id)}
+        dc_reqs.update({("focused", row[0]): row for row in database.get_all_datacron_focused_requirements(guild_id)})
     return Roster(
+        datacrons=datacrons,
+        dc_reqs=dc_reqs,
         ally_codes=sorted(ally_codes, key=lambda c: (names.get(c) or c).lower()),
         names=names,
         units=units,
@@ -252,13 +317,41 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
         return reason
     if opt.get("ultimate") and not unit.get("purchasedAbilityId"):
         return "нет ульты"
-    if opt.get("min_speed"):
-        speed = roster.speed(ally_code, opt["base_id"])
-        if speed is None:
-            return "скорость не посчитана"
-        if speed < opt["min_speed"]:
-            return f"скорость {int(speed)} < {opt['min_speed']}"
+    for st in option_stats(opt):
+        value = roster.stat(ally_code, opt["base_id"], st["stat"])
+        if value is None:
+            return "статы ещё не посчитаны"
+        if value < st["min"]:
+            name = STAT_SHORT.get(st["stat"], st["stat"])
+            return f"{name} {_fmt_stat(st['stat'], value)} < {_fmt_stat(st['stat'], st['min'])}"
     return None
+
+
+def check_datacron(roster: Roster, ally_code: str, dc: dict | None) -> str | None:
+    """Статус требования ДК пака у игрока: None (у пака нет ДК), "ok", "no",
+    "unknown" (датакроны игрока ещё не синкались), "gone" (требование удалили в /datacrons)."""
+    if not dc:
+        return None
+    row = roster.dc_reqs.get((dc.get("kind"), dc.get("req_id")))
+    if row is None:
+        return "gone"
+    if ally_code not in roster.datacrons:
+        return "unknown"
+    from cogs.datacron_requirements import (
+        _extract_player_base_datacrons, _extract_player_focused_datacrons, _match_requirements, _req_quantity,
+    )
+    player = {"datacron": roster.datacrons[ally_code]}
+    if dc["kind"] == "focused":
+        _id, set_id, _pack, character_key, required_level, *_rest = row
+        level = _extract_player_focused_datacrons(player, set_id).get(character_key, 0)
+        return "ok" if level >= (required_level or 0) else "no"
+    owned = _extract_player_base_datacrons(player, row[1])
+    pairs = _match_requirements([row], owned)
+    matches = pairs[0][1] if pairs else []
+    return "ok" if len(matches) >= _req_quantity(row) else "no"
+
+
+DC_REASONS = {"no": "нет нужного ДК", "unknown": "датакроны игрока ещё не синкались", "gone": "требование ДК удалено"}
 
 
 @dataclass
@@ -364,6 +457,7 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             "reason": None,
             "power": 0,
             "conflict": 0,
+            "dc": check_datacron(roster, ally_code, squad.get("datacron")),
         }
         if ally_code in excluded:
             entry["status"] = "excluded"
@@ -372,6 +466,12 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             continue
         blocked = used.get(ally_code, set())
         match = match_squad(roster, ally_code, squad, blocked)
+        if (squad.get("datacron") or {}).get("required") and entry["dc"] in ("no", "unknown"):
+            entry["status"] = "no"
+            dc_reason = DC_REASONS[entry["dc"]]
+            entry["reason"] = f"{match.reason}; {dc_reason}" if match.units is None and match.reason else dc_reason
+            result.append(entry)
+            continue
         if match.units is not None:
             entry["status"] = "ok"
             entry["units"] = match.units
@@ -407,17 +507,29 @@ def suggest(candidates: list[dict], count: int) -> list[dict]:
 def availability(roster: Roster, squad: dict, assignments: list[dict] = (), excluded=frozenset()) -> dict:
     """Сколько игроков может поставить пак: всего по требованиям и прямо сейчас с учётом плана."""
     used = used_units_by_player(assignments)
+    dc = squad.get("datacron")
+    dc_required = bool((dc or {}).get("required"))
     can_total = 0
     can_now = 0
+    with_dc = 0
+    dc_unknown = 0
     for ally_code in roster.ally_codes:
         if ally_code in excluded:
+            continue
+        dc_state = check_datacron(roster, ally_code, dc)
+        if dc_state == "ok":
+            with_dc += 1
+        elif dc_state == "unknown":
+            dc_unknown += 1
+        if dc_required and dc_state in ("no", "unknown"):
             continue
         if match_squad(roster, ally_code, squad).units is None:
             continue
         can_total += 1
         if match_squad(roster, ally_code, squad, used.get(ally_code, set())).units is not None:
             can_now += 1
-    return {"can_total": can_total, "can_now": can_now}
+    return {"can_total": can_total, "can_now": can_now, "with_dc": with_dc if dc else None,
+            "dc_unknown": dc_unknown}
 
 
 # ---------------------------------------------------------------------------

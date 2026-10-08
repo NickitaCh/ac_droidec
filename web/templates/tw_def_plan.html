@@ -133,7 +133,7 @@
                                     <td>{{ s.name }}</td>
                                     <td>{{ "флот" if s.combat_type == "ship" else "наземный" }}</td>
                                     <td class="num">{{ s.placed }}</td>
-                                    {% if s.speed_pending %}
+                                    {% if s.stats_pending %}
                                         <td class="num muted" colspan="2">ждёт загрузки данных</td>
                                     {% else %}
                                         <td class="num">{% if s.can_now == 0 and s.can_total > 0 %}<span class="muted">0</span>{% else %}{{ s.can_now }}{% endif %}</td>
@@ -188,5 +188,5 @@
     </form>
     <script type="application/json" id="twdef-zones">{{ zone_options | tojson }}</script>
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261008b" defer></script>
+    <script src="/static/tw_def.js?v=20261008c" defer></script>
 {% endblock %}

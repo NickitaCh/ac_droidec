@@ -31,7 +31,7 @@
         });
     });
 
-    // ---------------------------------------------------------------- данные для скорости
+    // ---------------------------------------------------------------- данные для статов
     // Плашка _tw_def_calc_wait.html: опрашиваем статус фоновой загрузки калькулятора
     // статов и обновляем страницу, как только он готов.
     const calcWait = document.querySelector("[data-twdef-calc-wait]");
@@ -54,7 +54,7 @@
                     calcWait.classList.add("twdef-calc-wait-error");
                     spinner.hidden = true;
                     title.textContent = "Не удалось загрузить данные игры";
-                    sub.textContent = "Скорее всего, недоступен сервис игровых данных. Требования по скорости пока не проверяются, остальное работает.";
+                    sub.textContent = "Скорее всего, недоступен сервис игровых данных. Требования к статам пока не проверяются, остальное работает.";
                     retry.hidden = false;
                     return;
                 }
@@ -65,7 +65,7 @@
             calcWait.classList.remove("twdef-calc-wait-error");
             spinner.hidden = false;
             retry.hidden = true;
-            title.textContent = "Загружаются данные игры для проверки скорости…";
+            title.textContent = "Загружаются данные игры для проверки статов…";
             clearTimeout(timer);
             poll(true);
         });
@@ -201,6 +201,9 @@
                     conflict.title = "Сколько других паков библиотеки игрок сможет поставить, только если не брать его сюда";
                     meta.appendChild(conflict);
                 }
+                if (c.dc === "ok") meta.appendChild(el("span", "badge badge-ok", "ДК есть"));
+                else if (c.dc === "no") meta.appendChild(el("span", "badge badge-warn", "нет ДК"));
+                else if (c.dc === "unknown") meta.appendChild(el("span", "badge badge-neutral", "ДК: нет данных"));
                 if (c.suggested && selectable) meta.appendChild(el("span", "badge badge-ok", "предложен"));
                 li.appendChild(meta);
                 if (c.reason) li.appendChild(el("span", "twdef-cand-reason", c.reason));
@@ -297,7 +300,25 @@
         const tpl = document.getElementById("twdef-option-tpl");
         const addSlotBtn = document.getElementById("twdef-add-slot");
         const MAX = { character: 5, ship: 8 };
-        const FIELDS = ["min_relic", "min_gear", "min_stars", "min_speed"];
+        const FIELDS = ["min_relic", "min_gear", "min_stars"];
+        const statTpl = document.getElementById("twdef-stat-tpl");
+        const MAX_STATS = 6;
+
+        // Требования к статам юнита: строки «стат ≥ минимум». Старый min_speed — как скорость.
+        const addStatRow = (row, stat, min) => {
+            const box = row.querySelector(".twdef-stat-rows");
+            if (box.children.length >= MAX_STATS) return null;
+            const line = statTpl.content.firstElementChild.cloneNode(true);
+            if (stat) line.querySelector("[data-stat]").value = stat;
+            if (min !== undefined && min !== null) line.querySelector("[data-stat-min]").value = min;
+            line.querySelector(".twdef-remove-stat").addEventListener("click", () => {
+                line.remove();
+                row.querySelector(".twdef-add-stat").disabled = false;
+            });
+            box.appendChild(line);
+            row.querySelector(".twdef-add-stat").disabled = box.children.length >= MAX_STATS;
+            return line;
+        };
         const FLAGS = ["zeta", "omicron", "ultimate"];
 
         const combatType = () => editor.querySelector("input[name=combat_type]:checked").value;
@@ -388,6 +409,13 @@
                 if (!slot.querySelector(".twdef-option-row")) slot.querySelector(".twdef-options").appendChild(makeOption({}));
                 renumber();
             });
+            const stats = (opt.stats || []).slice();
+            if (opt.min_speed && !stats.some((x) => x.stat === "Speed")) stats.unshift({ stat: "Speed", min: opt.min_speed });
+            stats.forEach((x) => addStatRow(row, x.stat, x.min));
+            row.querySelector(".twdef-add-stat").addEventListener("click", () => {
+                const line = addStatRow(row, null, null);
+                if (line) line.querySelector("[data-stat-min]").focus();
+            });
             attachSearch(row);
             return row;
         };
@@ -468,6 +496,12 @@
                         if (v !== "") opt[f] = parseInt(v, 10);
                     });
                     FLAGS.forEach((f) => { if (row.querySelector(`[data-field=${f}]`).checked) opt[f] = true; });
+                    const stats = [];
+                    row.querySelectorAll(".twdef-stat-row").forEach((line) => {
+                        const v = line.querySelector("[data-stat-min]").value;
+                        if (v !== "") stats.push({ stat: line.querySelector("[data-stat]").value, min: parseFloat(v) });
+                    });
+                    if (stats.length) opt.stats = stats;
                     options.push(opt);
                 });
                 if (options.length) slots.push({ options });

@@ -39,6 +39,28 @@
             <button type="button" class="button-secondary" id="twdef-add-slot">+ Слот</button>
         </div>
 
+        <div class="panel twdef-dc-panel twdef-req-char">
+            <div class="panel-title">
+                <span>Датакрон</span>
+                <span class="panel-hint">Требование из раздела <a href="/datacrons">«Датакроны»</a>. На карточке пака будет видно, у скольких игроков такой ДК есть.</span>
+            </div>
+            {% if dc_options %}
+                <div class="twdef-row-form">
+                    <label class="twdef-field-wide">Нужный ДК
+                        <select name="datacron">
+                            <option value="">— без датакрона —</option>
+                            {% for o in dc_options %}<option value="{{ o.value }}" {% if o.value == dc_value %}selected{% endif %}>{{ o.label }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label class="checkbox" title="Без нужного ДК игрок не может поставить этот пак">
+                        <input type="checkbox" name="datacron_required" value="1" {% if squad.datacron and squad.datacron.required %}checked{% endif %}> обязателен
+                    </label>
+                </div>
+            {% else %}
+                <p class="muted">Требований к датакронам у гильдии пока нет — добавьте их на странице <a href="/datacrons">«Датакроны»</a>, и они появятся здесь.</p>
+            {% endif %}
+        </div>
+
         <div class="twdef-editor-actions">
             <button type="submit">Сохранить</button>
             <a class="button button-secondary" href="/tw/def/squads">Отмена</a>
@@ -64,13 +86,23 @@
             <label class="twdef-req twdef-req-char twdef-check" title="Все зеты юнита"><input type="checkbox" data-field="zeta"> зеты</label>
             <label class="twdef-req twdef-req-char twdef-check" title="Омикрон для ВГ (если у юнита нет ВГ-омикрона — любой)"><input type="checkbox" data-field="omicron"> омикрон</label>
             <label class="twdef-req twdef-req-char twdef-check" title="Ульта (легенды)"><input type="checkbox" data-field="ultimate"> ульта</label>
-            <label class="twdef-req twdef-req-char" title="Минимальная скорость с модами">ск ≥
-                <input type="number" data-field="min_speed" min="1" max="999" class="twdef-speed">
-            </label>
+            <button type="button" class="button-secondary twdef-small twdef-req-char twdef-add-stat" title="Минимальный стат с модами: скорость, здоровье, защита…">+ стат</button>
             <button type="button" class="button-danger twdef-remove-option" title="Убрать вариант">✕</button>
+            <div class="twdef-stat-rows twdef-req-char"></div>
         </div>
     </template>
 
+    <template id="twdef-stat-tpl">
+        <span class="twdef-stat-row">
+            <select data-stat aria-label="Стат">
+                {% for st in stat_choices %}<option value="{{ st.key }}">{{ st.label }}</option>{% endfor %}
+            </select>
+            <span class="muted">≥</span>
+            <input type="number" data-stat-min min="0" step="any" required aria-label="Минимум">
+            <button type="button" class="twdef-x twdef-remove-stat" title="Убрать стат">✕</button>
+        </span>
+    </template>
+
     <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
-    <script src="/static/tw_def.js?v=20261008b" defer></script>
+    <script src="/static/tw_def.js?v=20261008c" defer></script>
 {% endblock %}

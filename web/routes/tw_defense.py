@@ -2,6 +2,7 @@
 планы расстановки под соперника на карте из 10 зон, подбор игроков (вручную через окно
 кандидатов или автоматически) и текст расстановки для Discord. Логика — tw_def_engine.py
 (её же потом использует бот), здесь только HTTP и шаблоны."""
+import asyncio
 import json
 from pathlib import Path
 from urllib.parse import urlencode
@@ -12,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 import tw_def_engine as engine
-from services import feature_flags, stat_forecast
+from services import datacron_catalog, feature_flags, stat_forecast
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -35,7 +36,7 @@ def _redirect(path: str, **params) -> RedirectResponse:
     return RedirectResponse(path + (f"?{urlencode(params)}" if params else ""), status_code=303)
 
 
-CALC_LOADING_TEXT = "Данные игры для проверки скорости ещё загружаются — паки с требованием скорости пока считаются недоступными."
+CALC_LOADING_TEXT = "Данные игры для проверки статов ещё загружаются — паки с требованиями к статам пока считаются недоступными."
 
 
 def _warm_stat_calc() -> None:
@@ -45,22 +46,22 @@ def _warm_stat_calc() -> None:
 
 
 async def _load_roster(guild_id: int, squads: list[dict], extra_base_ids=()) -> tuple[engine.Roster, str | None]:
-    """Ростер + StatCalc, если какой-то пак требует скорость. Никогда не ждёт сборку
+    """Ростер + StatCalc, если какой-то пак требует статы. Никогда не ждёт сборку
     калькулятора (она долгая — вся игровая база из Comlink): берём уже собранный (даже
     устаревший, обновление идёт в фоне), а если его ещё нет — возвращаем предупреждение,
     страница показывает плашку загрузки и сама обновляется (web/static/tw_def.js)."""
     _warm_stat_calc()
     stat_calc = None
     warning = None
-    if engine.squads_need_speed(squads):
+    if engine.squads_need_stats(squads):
         stat_calc = stat_forecast.cached_stat_calc()
         if stat_calc is None:
             warning = CALC_LOADING_TEXT
     return engine.load_roster(guild_id, squads, stat_calc=stat_calc, extra_base_ids=extra_base_ids), warning
 
 
-def _speed_not_ready(squad: dict) -> bool:
-    return engine.squads_need_speed([squad]) and stat_forecast.cached_stat_calc() is None
+def _stats_not_ready(squad: dict) -> bool:
+    return engine.squads_need_stats([squad]) and stat_forecast.cached_stat_calc() is None
 
 
 @router.get("/api/calc-status", response_class=JSONResponse)
@@ -69,6 +70,64 @@ async def calc_status(retry: int = 0, user: dict = Depends(_require)):
     if retry:
         _warm_stat_calc()
     return stat_forecast.build_status()
+
+
+_catalog_task: asyncio.Task | None = None
+
+
+def _datacron_catalog_cached():
+    """Каталог ДК для подписей уровней — только из кэша, без ожидания; если его нет,
+    сборка уходит в фон (подписи появятся при следующем открытии страницы)."""
+    global _catalog_task
+    catalog = datacron_catalog._cache
+    if catalog is None and (_catalog_task is None or _catalog_task.done()):
+        async def build():
+            try:
+                await datacron_catalog.get_catalog(_get_comlink())
+            except Exception as e:
+                print(f"⚠️ [web] tw_def: каталог ДК не собрался: {e}")
+        _catalog_task = asyncio.create_task(build())
+    return catalog
+
+
+def _dc_options(guild_id: int) -> list[dict]:
+    """Требования ДК гильдии (страница «Датакроны») для выпадашки в редакторе пака."""
+    from cogs.datacron_requirements import _focused_char_label, _level_label
+    catalog = _datacron_catalog_cached()
+    options = []
+    for row in database.get_all_datacron_requirements(guild_id):
+        req_id, set_id, pack, l3, l6, l9, comment = row[:7]
+        season = catalog["seasons"].get(set_id) if catalog else None
+        levels = []
+        for n, value in ((3, l3), (6, l6), (9, l9)):
+            label = _level_label(season[f"level{n}"] if season else [], value)
+            if label and label != "-":
+                levels.append(f"{n}: {label}")
+        quantity = row[11] if len(row) > 11 and row[11] and row[11] > 1 else None
+        title = pack or "ДК"
+        label = f"Сезон {set_id} · {title} — " + "; ".join(levels) + (f" ×{quantity}" if quantity else "")
+        options.append({"value": f"base:{req_id}", "label": label[:170], "short": title, "set_id": set_id})
+    for row in database.get_all_datacron_focused_requirements(guild_id):
+        req_id, set_id, pack, character_key, required_level = row[:5]
+        char = _focused_char_label(catalog, set_id, character_key) if catalog else character_key
+        title = pack or char
+        options.append({"value": f"focused:{req_id}",
+                        "label": f"Сезон {set_id} · {title} — персональный {char}, ур. {required_level}"[:170],
+                        "short": title, "set_id": set_id})
+    # Свежие сезоны сверху — ДК закончившихся сезонов у игроков уже нет.
+    options.sort(key=lambda o: -o["set_id"])
+    return options
+
+
+def _parse_dc(value: str, required: bool, options: list[dict]) -> dict | None:
+    if not value or value not in {o["value"] for o in options}:
+        return None
+    kind, req_id = value.split(":", 1)
+    return {"kind": kind, "req_id": int(req_id), "required": bool(required)}
+
+
+def _dc_value(dc: dict | None) -> str:
+    return f"{dc['kind']}:{dc['req_id']}" if dc else ""
 
 
 def _squad_view(squad: dict, roster: engine.Roster | None = None) -> dict:
@@ -93,11 +152,14 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
     guild_id = user["guild_id"]
     squads = database.list_tw_def_squads(guild_id)
     roster, warning = await _load_roster(guild_id, squads)
+    dc_labels = {o["value"]: o["label"] for o in _dc_options(guild_id)} if any(s.get("datacron") for s in squads) else {}
     views = []
     for s in squads:
         v = _squad_view(s, roster)
         v["availability"] = engine.availability(roster, s)
-        v["speed_pending"] = _speed_not_ready(s)
+        v["stats_pending"] = _stats_not_ready(s)
+        if s.get("datacron"):
+            v["dc_label"] = dc_labels.get(_dc_value(s["datacron"]), "требование ДК удалено на странице «Датакроны»")
         views.append(v)
     return templates.TemplateResponse(request, "tw_def_squads.html", {
         "user": user,
@@ -112,7 +174,8 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
 
 def _editor_payload(squad: dict | None) -> dict:
     if not squad:
-        return {"id": None, "name": "", "combat_type": "character", "note": "", "slots": [{"options": []}]}
+        return {"id": None, "name": "", "combat_type": "character", "note": "", "slots": [{"options": []}],
+                "datacron": None}
     base_ids = list(engine.squad_base_ids(squad))
     names = database.get_game_unit_names(base_ids)
     omicron = database.get_omicron_capable(base_ids)
@@ -120,15 +183,22 @@ def _editor_payload(squad: dict | None) -> dict:
                            "has_omicron": opt["base_id"] in omicron} for opt in slot["options"]]}
              for slot in squad["slots"]]
     return {"id": squad["id"], "name": squad["name"], "combat_type": squad["combat_type"],
-            "note": squad.get("note") or "", "slots": slots}
+            "note": squad.get("note") or "", "slots": slots, "datacron": squad.get("datacron")}
+
+
+def _editor_context(user: dict, squad: dict, errors: list) -> dict:
+    return {
+        "user": user, "squad": squad, "errors": errors, "max_slots": engine.MAX_SLOTS,
+        "stat_choices": [{"key": k, "label": label} for k, label, _short, _pct in engine.STAT_CHOICES],
+        "dc_options": _dc_options(user["guild_id"]),
+        "dc_value": _dc_value(squad.get("datacron")),
+    }
 
 
 @router.get("/squads/new", response_class=HTMLResponse)
 async def squad_new(request: Request, user: dict = Depends(_require)):
     _warm_stat_calc()
-    return templates.TemplateResponse(request, "tw_def_squad_edit.html", {
-        "user": user, "squad": _editor_payload(None), "errors": [], "max_slots": engine.MAX_SLOTS,
-    })
+    return templates.TemplateResponse(request, "tw_def_squad_edit.html", _editor_context(user, _editor_payload(None), []))
 
 
 @router.get("/squads/{squad_id}/edit", response_class=HTMLResponse)
@@ -137,9 +207,7 @@ async def squad_edit(squad_id: int, request: Request, user: dict = Depends(_requ
     squad = database.get_tw_def_squad(user["guild_id"], squad_id)
     if not squad:
         raise HTTPException(404, "Пак не найден.")
-    return templates.TemplateResponse(request, "tw_def_squad_edit.html", {
-        "user": user, "squad": _editor_payload(squad), "errors": [], "max_slots": engine.MAX_SLOTS,
-    })
+    return templates.TemplateResponse(request, "tw_def_squad_edit.html", _editor_context(user, _editor_payload(squad), []))
 
 
 @router.post("/squads/save", response_class=HTMLResponse)
@@ -150,6 +218,8 @@ async def squad_save(
     combat_type: str = Form("character"),
     note: str = Form(""),
     slots_json: str = Form("[]"),
+    datacron: str = Form(""),
+    datacron_required: str = Form(""),
     user: dict = Depends(_require),
 ):
     guild_id = user["guild_id"]
@@ -172,18 +242,18 @@ async def squad_save(
     name = name.strip()
     if not name:
         errors.append("Укажите название пака.")
+    dc = _parse_dc(datacron, bool(datacron_required), _dc_options(guild_id)) if combat_type == "character" else None
     if errors:
         draft = {"id": sid, "name": name, "combat_type": combat_type, "note": note,
-                 "slots": raw_slots if isinstance(raw_slots, list) else []}
+                 "slots": raw_slots if isinstance(raw_slots, list) else [], "datacron": dc}
         names = database.get_game_unit_names(base_ids) if base_ids else {}
         for s in draft["slots"]:
             for o in (s.get("options") or []) if isinstance(s, dict) else []:
                 if isinstance(o, dict) and o.get("base_id"):
                     o["name"] = names.get(o["base_id"]) or o["base_id"]
-        return templates.TemplateResponse(request, "tw_def_squad_edit.html", {
-            "user": user, "squad": draft, "errors": errors, "max_slots": engine.MAX_SLOTS,
-        }, status_code=400)
-    database.save_tw_def_squad(guild_id, sid, name, combat_type, slots, note.strip() or None, _who(user))
+        return templates.TemplateResponse(request, "tw_def_squad_edit.html", _editor_context(user, draft, errors),
+                                          status_code=400)
+    database.save_tw_def_squad(guild_id, sid, name, combat_type, slots, note.strip() or None, _who(user), dc)
     return _redirect("/tw/def/squads", saved=name)
 
 
@@ -193,7 +263,7 @@ async def squad_copy(squad_id: int, user: dict = Depends(_require)):
     if not squad:
         raise HTTPException(404, "Пак не найден.")
     new_id = database.save_tw_def_squad(user["guild_id"], None, f"{squad['name']} (копия)", squad["combat_type"],
-                                        squad["slots"], squad.get("note"), _who(user))
+                                        squad["slots"], squad.get("note"), _who(user), squad.get("datacron"))
     return RedirectResponse(f"/tw/def/squads/{new_id}/edit", status_code=303)
 
 
@@ -228,6 +298,7 @@ def _candidate_json(roster: engine.Roster, squad: dict, candidates: list[dict], 
             "assigned": c["assigned"],
             "conflict": c["conflict"],
             "power": c["power"],
+            "dc": c.get("dc"),
             "suggested": c["ally_code"] in suggested,
             "units": [{"base_id": b, "name": roster.unit_name(b),
                        "badge": engine.unit_badge(units.get(b), squad["combat_type"])} for b in c["units"]],
@@ -316,9 +387,9 @@ async def plan_page(plan_id: int, request: Request, user: dict = Depends(_requir
         placed = sum(1 for a in assignments if a["squad_id"] == s["id"])
         av = engine.availability(roster, s, assignments, excluded)
         squad_stats.append({"id": s["id"], "name": s["name"], "combat_type": s["combat_type"], "placed": placed,
-                            "speed_pending": _speed_not_ready(s), **av})
+                            "stats_pending": _stats_not_ready(s), **av})
 
-    free_by_squad = {st["id"]: (None if st["speed_pending"] else st["can_now"]) for st in squad_stats}
+    free_by_squad = {st["id"]: (None if st["stats_pending"] else st["can_now"]) for st in squad_stats}
 
     zones = []
     for z in engine.ZONES:
@@ -454,7 +525,7 @@ async def plan_candidates(plan_id: int, squad_id: int, zone: str, count: int = 0
         "squad": squad["name"],
         "zone": z["label"],
         "free": free,
-        "warning": warning if engine.squads_need_speed([squad]) else None,
+        "warning": warning if engine.squads_need_stats([squad]) else None,
         "candidates": _candidate_json(roster, squad, candidates, suggested),
     }
 
@@ -501,7 +572,7 @@ async def plan_assign(plan_id: int, request: Request, zone: str = Form(...), squ
     plan = _get_plan_or_404(guild_id, plan_id)
     z = _zone_or_400(zone)
     squad = _squad_for_zone(guild_id, squad_id, z)
-    if _speed_not_ready(squad):
+    if _stats_not_ready(squad):
         return _redirect(f"/tw/def/plans/{plan_id}", error=CALC_LOADING_TEXT)
     form = await request.form()
     ally_codes = [c for c in form.getlist("ally_codes") if c]
@@ -517,7 +588,7 @@ async def plan_autoadd(plan_id: int, zone: str = Form(...), squad_id: int = Form
     plan = _get_plan_or_404(guild_id, plan_id)
     z = _zone_or_400(zone)
     squad = _squad_for_zone(guild_id, squad_id, z)
-    if _speed_not_ready(squad):
+    if _stats_not_ready(squad):
         return _redirect(f"/tw/def/plans/{plan_id}", error=CALC_LOADING_TEXT)
     library = database.list_tw_def_squads(guild_id)
     assignments = database.get_tw_def_assignments(guild_id, plan_id)
