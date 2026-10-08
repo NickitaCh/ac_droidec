@@ -403,6 +403,7 @@ async def plan_page(plan_id: int, request: Request, user: dict = Depends(_requir
                 "name": names.get(a["ally_code"]) or a["ally_code"],
                 "gone": a["ally_code"] not in roster_set or a["ally_code"] in departed,
                 "excluded": a["ally_code"] in excluded,
+                "dc": bool(a.get("datacron_id")),
                 "units": unit_cells(a),
             })
         for g in groups.values():
@@ -537,6 +538,8 @@ async def _assign(guild_id: int, plan: dict, zone: str, squad: dict, ally_codes:
     assignments = database.get_tw_def_assignments(guild_id, plan["id"])
     roster, _warning = await _load_roster(guild_id, library)
     used = engine.used_units_by_player(assignments)
+    used_dc = engine.used_datacrons_by_player(assignments)
+    dc = squad.get("datacron")
     free = engine.zone_capacity(plan, zone) - sum(1 for a in assignments if a["zone"] == zone)
     excluded = set(plan["excluded"])
     rows, skipped = [], []
@@ -552,8 +555,15 @@ async def _assign(guild_id: int, plan: dict, zone: str, squad: dict, ally_codes:
         if match.units is None:
             skipped.append(f"{name} — {match.reason}")
             continue
+        # ДК: свободный подходящий датакрон отдаётся этому паку (один ДК — один пак плана).
+        dc_state, dc_id = engine.pick_datacron(roster, ally_code, dc, used_dc.get(ally_code, frozenset()))
+        if dc and dc.get("required") and dc_state != "ok":
+            skipped.append(f"{name} — {engine.DC_REASONS.get(dc_state, 'нет нужного ДК')}")
+            continue
         used.setdefault(ally_code, set()).update(match.units)
-        rows.append((zone, squad["id"], squad["name"], ally_code, match.units))
+        if dc_id:
+            used_dc.setdefault(ally_code, set()).update(dc_id.split(","))
+        rows.append((zone, squad["id"], squad["name"], ally_code, match.units, dc_id))
     database.add_tw_def_assignments(guild_id, plan["id"], rows, _who(user))
     return len(rows), skipped
 

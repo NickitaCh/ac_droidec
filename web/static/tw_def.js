@@ -203,6 +203,7 @@
                 }
                 if (c.dc === "ok") meta.appendChild(el("span", "badge badge-ok", "ДК есть"));
                 else if (c.dc === "no") meta.appendChild(el("span", "badge badge-warn", "нет ДК"));
+                else if (c.dc === "used") meta.appendChild(el("span", "badge badge-warn", "ДК занят в другом паке"));
                 else if (c.dc === "unknown") meta.appendChild(el("span", "badge badge-neutral", "ДК: нет данных"));
                 if (c.suggested && selectable) meta.appendChild(el("span", "badge badge-ok", "предложен"));
                 li.appendChild(meta);

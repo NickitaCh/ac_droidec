@@ -100,7 +100,7 @@
                                     <ul class="twdef-rows">
                                         {% for r in g.rows %}
                                             <li class="twdef-row{% if r.gone %} twdef-row-gone{% elif r.excluded %} twdef-row-excluded{% endif %}">
-                                                <span class="twdef-row-name">{{ r.name }}{% if r.gone %} <span class="badge badge-danger">не в гильдии</span>{% elif r.excluded %} <span class="badge badge-warn">не участвует</span>{% endif %}</span>
+                                                <span class="twdef-row-name">{{ r.name }}{% if r.dc %} <span class="badge badge-ok" title="Игроку назначен датакрон под этот пак">ДК</span>{% endif %}{% if r.gone %} <span class="badge badge-danger">не в гильдии</span>{% elif r.excluded %} <span class="badge badge-warn">не участвует</span>{% endif %}</span>
                                                 {{ unit_strip(r.units) }}
                                                 <button type="button" class="twdef-x" data-twdef-move="{{ r.id }}" data-kind="{{ z.kind }}" data-zone="{{ z.key }}" title="Перенести в другую зону">⇄</button>
                                                 <button type="button" class="twdef-x" data-twdef-del="{{ r.id }}" data-back="#zone-{{ z.key }}" title="Убрать">✕</button>

@@ -6773,6 +6773,12 @@ def _ensure_tw_def_tables(cursor):
         pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_squads_guild ON tw_def_squads(guild_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_plans_guild ON tw_def_plans(guild_id)")
+    try:
+        # id датакрона(ов) игрока, отданных этому паку (через запятую при quantity>1) — один ДК
+        # игрока может стоять только в одном паке плана (как и юнит).
+        cursor.execute("ALTER TABLE tw_def_assignments ADD COLUMN datacron_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tw_def_assignments_plan ON tw_def_assignments(plan_id)")
 
 
@@ -6947,8 +6953,8 @@ def copy_tw_def_plan(guild_id: int, plan_id: int, new_name: str, user: str) -> i
     new_id = cursor.lastrowid
     cursor.execute("""
         INSERT INTO tw_def_assignments (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json,
-                                        created_by, created_at)
-        SELECT guild_id, ?, zone, squad_id, squad_name, ally_code, units_json, ?, datetime('now')
+                                        datacron_id, created_by, created_at)
+        SELECT guild_id, ?, zone, squad_id, squad_name, ally_code, units_json, datacron_id, ?, datetime('now')
         FROM tw_def_assignments WHERE guild_id = ? AND plan_id = ? ORDER BY id
     """, (new_id, user, guild_id, plan_id))
     conn.commit()
@@ -6957,7 +6963,7 @@ def copy_tw_def_plan(guild_id: int, plan_id: int, new_name: str, user: str) -> i
 
 
 _TW_DEF_ASSIGN_KEYS = ["id", "plan_id", "zone", "squad_id", "squad_name", "ally_code", "units_json", "created_by",
-                       "created_at"]
+                       "created_at", "datacron_id"]
 
 
 def get_tw_def_assignments(guild_id: int, plan_id: int) -> list[dict]:
@@ -6978,16 +6984,17 @@ def get_tw_def_assignments(guild_id: int, plan_id: int) -> list[dict]:
 
 
 def add_tw_def_assignments(guild_id: int, plan_id: int, rows: list[tuple], user: str) -> int:
-    """rows: [(zone, squad_id, squad_name, ally_code, [base_id, ...]), ...]"""
+    """rows: [(zone, squad_id, squad_name, ally_code, [base_id, ...], datacron_id|None), ...]
+    (datacron_id можно опустить — 5-элементные кортежи тоже принимаются)."""
     if not rows:
         return 0
     conn, cursor = _tw_def_connect()
     cursor.executemany("""
         INSERT INTO tw_def_assignments (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json,
-                                        created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, [(guild_id, plan_id, zone, squad_id, squad_name, ally_code, json.dumps(units), user)
-          for zone, squad_id, squad_name, ally_code, units in rows])
+                                        datacron_id, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, [(guild_id, plan_id, row[0], row[1], row[2], row[3], json.dumps(row[4]), row[5] if len(row) > 5 else None, user)
+          for row in rows])
     cursor.execute("UPDATE tw_def_plans SET updated_at = datetime('now') WHERE guild_id = ? AND id = ?",
                    (guild_id, plan_id))
     conn.commit()

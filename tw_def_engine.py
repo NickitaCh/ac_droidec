@@ -327,31 +327,64 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
     return None
 
 
-def check_datacron(roster: Roster, ally_code: str, dc: dict | None) -> str | None:
-    """Статус требования ДК пака у игрока: None (у пака нет ДК), "ok", "no",
+def pick_datacron(roster: Roster, ally_code: str, dc: dict | None, used=frozenset()) -> tuple[str | None, str | None]:
+    """Подбор ДК игрока под требование пака: (статус, id). Статус: None (у пака нет ДК),
+    "ok" (есть свободный подходящий — id через запятую, если quantity>1), "used" (подходящие
+    есть, но все уже отданы другим пакам плана — один ДК только в один пак), "no",
     "unknown" (датакроны игрока ещё не синкались), "gone" (требование удалили в /datacrons)."""
     if not dc:
-        return None
+        return None, None
     row = roster.dc_reqs.get((dc.get("kind"), dc.get("req_id")))
     if row is None:
-        return "gone"
+        return "gone", None
     if ally_code not in roster.datacrons:
-        return "unknown"
-    from cogs.datacron_requirements import (
-        _extract_player_base_datacrons, _extract_player_focused_datacrons, _match_requirements, _req_quantity,
-    )
-    player = {"datacron": roster.datacrons[ally_code]}
+        return "unknown", None
+    datacrons = roster.datacrons[ally_code]
     if dc["kind"] == "focused":
         _id, set_id, _pack, character_key, required_level, *_rest = row
-        level = _extract_player_focused_datacrons(player, set_id).get(character_key, 0)
-        return "ok" if level >= (required_level or 0) else "no"
-    owned = _extract_player_base_datacrons(player, row[1])
-    pairs = _match_requirements([row], owned)
+        prefix = f"datacron_set_{set_id}_focused_"
+        fits = []
+        for d in datacrons:
+            tid = str(d.get("templateId", ""))
+            if d.get("setId") != set_id or not d.get("focused") or not tid.startswith(prefix):
+                continue
+            key = tid[len(prefix):]
+            if key.endswith("_upgraded"):
+                key = key[:-len("_upgraded")]
+            if key == character_key and len(d.get("affix", [])) >= (required_level or 0):
+                fits.append(str(d.get("id")))
+        free = [i for i in fits if i not in used]
+        if free:
+            return "ok", free[0]
+        return ("used" if fits else "no"), None
+    from cogs.datacron_requirements import _extract_player_base_datacrons, _match_requirements, _req_quantity
+    owned = _extract_player_base_datacrons({"datacron": datacrons}, row[1])
+    need = _req_quantity(row)
+    free_owned = [d for d in owned if str(d.get("id")) not in used]
+    pairs = _match_requirements([row], free_owned)
     matches = pairs[0][1] if pairs else []
-    return "ok" if len(matches) >= _req_quantity(row) else "no"
+    if len(matches) >= need:
+        return "ok", ",".join(str(m.get("id")) for m in matches[:need])
+    all_pairs = _match_requirements([row], owned)
+    if len(all_pairs[0][1] if all_pairs else []) >= need:
+        return "used", None
+    return "no", None
 
 
-DC_REASONS = {"no": "нет нужного ДК", "unknown": "датакроны игрока ещё не синкались", "gone": "требование ДК удалено"}
+def check_datacron(roster: Roster, ally_code: str, dc: dict | None, used=frozenset()) -> str | None:
+    return pick_datacron(roster, ally_code, dc, used)[0]
+
+
+def used_datacrons_by_player(assignments: list[dict]) -> dict[str, set[str]]:
+    used: dict[str, set[str]] = {}
+    for a in assignments:
+        if a.get("datacron_id"):
+            used.setdefault(a["ally_code"], set()).update(a["datacron_id"].split(","))
+    return used
+
+
+DC_REASONS = {"no": "нет нужного ДК", "unknown": "датакроны игрока ещё не синкались", "gone": "требование ДК удалено",
+              "used": "нужный ДК уже стоит в другом паке плана"}
 
 
 @dataclass
@@ -445,6 +478,7 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
     паков библиотеки игрок сейчас может поставить, но потеряет, если взять этот —
     чем меньше, тем "дешевле" отдать игрока под этот пак (используется автоподбором)."""
     used = used_units_by_player(assignments)
+    used_dc = used_datacrons_by_player(assignments)
     counts = squad_counts_by_player(assignments)
     others = [s for s in (library or []) if s["id"] != squad.get("id") and s["combat_type"] == squad["combat_type"]]
     result = []
@@ -457,7 +491,7 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             "reason": None,
             "power": 0,
             "conflict": 0,
-            "dc": check_datacron(roster, ally_code, squad.get("datacron")),
+            "dc": check_datacron(roster, ally_code, squad.get("datacron"), used_dc.get(ally_code, frozenset())),
         }
         if ally_code in excluded:
             entry["status"] = "excluded"
@@ -466,8 +500,9 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             continue
         blocked = used.get(ally_code, set())
         match = match_squad(roster, ally_code, squad, blocked)
-        if (squad.get("datacron") or {}).get("required") and entry["dc"] in ("no", "unknown"):
-            entry["status"] = "no"
+        if (squad.get("datacron") or {}).get("required") and entry["dc"] in ("no", "unknown", "used"):
+            plan_only = entry["dc"] == "used" and (match.units is not None or match.blocked_by_plan)
+            entry["status"] = "used" if plan_only else "no"
             dc_reason = DC_REASONS[entry["dc"]]
             entry["reason"] = f"{match.reason}; {dc_reason}" if match.units is None and match.reason else dc_reason
             result.append(entry)
@@ -507,6 +542,7 @@ def suggest(candidates: list[dict], count: int) -> list[dict]:
 def availability(roster: Roster, squad: dict, assignments: list[dict] = (), excluded=frozenset()) -> dict:
     """Сколько игроков может поставить пак: всего по требованиям и прямо сейчас с учётом плана."""
     used = used_units_by_player(assignments)
+    used_dc = used_datacrons_by_player(assignments)
     dc = squad.get("datacron")
     dc_required = bool((dc or {}).get("required"))
     can_total = 0
@@ -526,6 +562,8 @@ def availability(roster: Roster, squad: dict, assignments: list[dict] = (), excl
         if match_squad(roster, ally_code, squad).units is None:
             continue
         can_total += 1
+        if dc_required and check_datacron(roster, ally_code, dc, used_dc.get(ally_code, frozenset())) != "ok":
+            continue
         if match_squad(roster, ally_code, squad, used.get(ally_code, set())).units is not None:
             can_now += 1
     return {"can_total": can_total, "can_now": can_now, "with_dc": with_dc if dc else None,
