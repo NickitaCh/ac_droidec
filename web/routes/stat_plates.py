@@ -767,23 +767,72 @@ async def requirement_edit(
     # есть. У сравнения с персонажем оператор (включая строгие >/<) и отрыв редактируемы. Схема — не захардкожена ни у одного
     # из типов, её можно менять всегда (просто классификация строки, не влияет на
     # оператор/значение).
+    error = _apply_requirement_edit(row, operator, threshold, priority, comment, scheme_num, guild_id)
+    if error:
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+    return RedirectResponse(f"/plates/{plate_name}#char-{character_key}", status_code=303)
+
+
+def _apply_requirement_edit(row, operator, threshold, priority, comment, scheme_num, guild_id) -> str | None:
+    """Правка одной строки плейта (общая для одиночной и массовой правки). None — успех."""
+    req_id, row_plate, character_key, stat_name, cur_operator, cur_threshold, *_ = row
+    compare_character_key = row[13]
     _locked = stat_name in (STAT_OMICRON,) + MOD_REQ_STATS
     allowed_ops = COMPARE_OPERATORS if compare_character_key else {c.value for c in OPERATOR_CHOICES}
     if not _locked and ((operator is not None and operator not in allowed_ops)
                         or (compare_character_key and threshold is not None and threshold < 0)):
-        return RedirectResponse(
-            f"/plates/{plate_name}?{urlencode({'error': 'Некорректный оператор или значение.'})}", status_code=303,
-        )
+        return f"Требование #{req_id}: некорректный оператор или значение."
+    if priority not in {value for _label, value in PRIORITY_OPTIONS}:
+        return f"Требование #{req_id}: некорректный приоритет."
     new_operator = cur_operator if _locked or operator is None else operator
     new_threshold = cur_threshold if _locked or threshold is None else threshold
     database.update_stat_requirement(
-        req_id, row_plate, character_key, stat_name, new_operator, new_threshold, priority, comment.strip() or None, guild_id=guild_id,
+        req_id, row_plate, character_key, stat_name, new_operator, new_threshold, priority, (comment or "").strip() or None, guild_id=guild_id,
     )
-    database.set_stat_requirement_scheme(req_id, _parse_scheme_form(scheme_num), guild_id=guild_id)
-    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+    database.set_stat_requirement_scheme(req_id, _parse_scheme_form(scheme_num or ""), guild_id=guild_id)
+    return None
+
+
+@router.post("/{plate_name}/requirements/bulk_edit", response_class=HTMLResponse)
+async def requirements_bulk_edit(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    """Попап «Править» персонажа: все его строки одной формой (поля <name>_<id>),
+    отмеченные «удалить» — удаляются. После сохранения возвращаемся к тому же персонажу."""
+    guild_id = user["guild_id"]
+    form = await request.form()
+    anchor = ""
+    errors = []
+    for raw_id in form.getlist("ids"):
+        try:
+            req_id = int(raw_id)
+        except ValueError:
+            continue
+        row = database.get_stat_requirement(req_id, guild_id=guild_id)
+        if not row:
+            continue
+        anchor = f"#char-{row[2]}"
+        if form.get(f"delete_{req_id}"):
+            database.delete_stat_requirement(req_id, guild_id=guild_id)
+            continue
+        threshold = None
+        raw_threshold = form.get(f"threshold_{req_id}")
+        if raw_threshold not in (None, ""):
+            try:
+                threshold = float(str(raw_threshold).replace(",", "."))
+            except ValueError:
+                errors.append(f"Требование #{req_id}: значение не число.")
+                continue
+        error = _apply_requirement_edit(
+            row, form.get(f"operator_{req_id}"), threshold, form.get(f"priority_{req_id}") or row[6],
+            form.get(f"comment_{req_id}", ""), form.get(f"scheme_num_{req_id}", ""), guild_id,
+        )
+        if error:
+            errors.append(error)
+    query = f"?{urlencode({'error': ' '.join(errors)})}" if errors else ""
+    return RedirectResponse(f"/plates/{plate_name}{query}{anchor}", status_code=303)
 
 
 @router.post("/{plate_name}/requirements/{req_id}/delete", response_class=HTMLResponse)
 async def requirement_delete(plate_name: str, req_id: int, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    row = database.get_stat_requirement(req_id, guild_id=user["guild_id"])
     database.delete_stat_requirement(req_id, guild_id=user["guild_id"])
-    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+    return RedirectResponse(f"/plates/{plate_name}" + (f"#char-{row[2]}" if row else ""), status_code=303)

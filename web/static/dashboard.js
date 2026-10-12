@@ -2,6 +2,24 @@
 // поиск по таблице (input[data-table-search]) и сортировка по клику на th[data-sort].
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Платформенный попап редактирования (style.css: dialog.edit-modal).
+    document.querySelectorAll("[data-modal-open]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            const dialog = document.getElementById(btn.dataset.modalOpen);
+            if (!dialog) return;
+            e.preventDefault();
+            dialog.showModal();
+        });
+    });
+    document.querySelectorAll("dialog.edit-modal").forEach((dialog) => {
+        dialog.querySelectorAll("[data-modal-close]").forEach((b) => b.addEventListener("click", () => dialog.close()));
+        dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+        // Чекбокс «удалить» в строке — визуально зачёркивает строку.
+        dialog.querySelectorAll("[data-row-delete]").forEach((cb) => {
+            cb.addEventListener("change", () => cb.closest(".edit-modal-row").classList.toggle("is-deleted", cb.checked));
+        });
+    });
+
     // Тумблер темы (base.html) — клик переключает light/dark и сохраняет выбор в
     // localStorage; сам атрибут data-theme на <html> уже мог быть выставлен раньше
     // инлайн-скриптом в <head>, чтобы не мигать не той темой при загрузке.

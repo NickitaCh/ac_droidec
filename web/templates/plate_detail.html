@@ -347,6 +347,61 @@
 
     {% macro requirements_table(char, reqs, loadout=none) %}
         {{ mod_loadout(loadout) }}
+        {% if not is_modular and reqs %}
+            {% set modal_id = "edit-reqs-" ~ char.base_id ~ "-" ~ reqs[0].id %}
+            <div class="row-actions" style="margin-bottom:0.4em;">
+                <button type="button" class="button-secondary" data-modal-open="{{ modal_id }}">Править требования ({{ reqs|length }})</button>
+            </div>
+            <dialog class="edit-modal" id="{{ modal_id }}">
+                <form method="post" action="/plates/{{ plate_name }}/requirements/bulk_edit">
+                    <div class="edit-modal-header">
+                        <h3>{{ char.name }} — требования</h3>
+                        <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+                    </div>
+                    <div class="edit-modal-body">
+                        {% for r in reqs %}
+                            <input type="hidden" name="ids" value="{{ r.id }}">
+                            <div class="edit-modal-row">
+                                <span class="edit-modal-row-title">{{ r.value_display }}</span>
+                                {% if r.is_compare %}
+                                    <select name="operator_{{ r.id }}" aria-label="Оператор">
+                                        {% for label, value in compare_operator_options %}
+                                            <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="number" name="threshold_{{ r.id }}" step="any" min="0" value="{{ r.threshold }}" title="На сколько" required>
+                                {% elif not r.is_omicron and not r.is_mod_primary and not r.is_mod_set and not r.is_mod_set_list %}
+                                    <select name="operator_{{ r.id }}" aria-label="Оператор">
+                                        {% for label, value in operator_options %}
+                                            <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="number" name="threshold_{{ r.id }}" step="any" value="{{ r.threshold }}" required aria-label="Значение">
+                                {% endif %}
+                                <select name="priority_{{ r.id }}" aria-label="Приоритет">
+                                    {% for label, value in priority_options %}
+                                        <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if char.has_schemes %}
+                                    <select name="scheme_num_{{ r.id }}" title="Схема">
+                                        {% for label, value in scheme_options %}
+                                            <option value="{{ value }}" {% if r.scheme_num_str == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% endif %}
+                                <input type="text" name="comment_{{ r.id }}" value="{{ r.comment or '' }}" placeholder="Комментарий">
+                                <label class="checkbox"><input type="checkbox" name="delete_{{ r.id }}" value="1" data-row-delete> удалить</label>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <div class="edit-modal-footer">
+                        <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                        <button type="submit">Сохранить всё</button>
+                    </div>
+                </form>
+            </dialog>
+        {% endif %}
         <div class="table-scroll">
             <table class="data">
                 <thead>
@@ -367,40 +422,6 @@
                                 <td><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
                             {% else %}
                             <td class="row-actions">
-                                <details>
-                                    <summary class="link-btn">править</summary>
-                                    <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/edit" class="inline-form requirement-edit-form">
-                                        {% if r.is_compare %}
-                                            <select name="operator">
-                                                {% for label, value in compare_operator_options %}
-                                                    <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <input type="number" name="threshold" step="any" min="0" value="{{ r.threshold }}" title="На сколько" required>
-                                        {% elif not r.is_omicron and not r.is_mod_primary and not r.is_mod_set and not r.is_mod_set_list %}
-                                            <select name="operator">
-                                                {% for label, value in operator_options %}
-                                                    <option value="{{ value }}" {% if value == r.operator %}selected{% endif %}>{{ label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <input type="number" name="threshold" step="any" value="{{ r.threshold }}" required>
-                                        {% endif %}
-                                        <select name="priority">
-                                            {% for label, value in priority_options %}
-                                                <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
-                                            {% endfor %}
-                                        </select>
-                                        {% if char.has_schemes %}
-                                            <select name="scheme_num" title="Схема">
-                                                {% for label, value in scheme_options %}
-                                                    <option value="{{ value }}" {% if r.scheme_num_str == value %}selected{% endif %}>{{ label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                        {% endif %}
-                                        <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
-                                        <button type="submit">Сохранить</button>
-                                    </form>
-                                </details>
                                 <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
                                       onsubmit="return confirm('Удалить требование «{{ r.value_display }}» для {{ char.name }}?');">
                                     <button type="submit" class="button-danger">Удалить</button>
@@ -422,7 +443,7 @@
         {% endif %}
         <div id="plate-characters-list">
         {% for char in characters %}
-            <div class="panel" data-base-id="{{ char.base_id }}">
+            <div class="panel" id="char-{{ char.base_id }}" data-base-id="{{ char.base_id }}">
                 <div class="panel-title">
                     <span class="panel-title-left">{% if not is_modular %}<span class="drag-handle">⠿</span>{% endif %}<span>{{ char.name }}</span></span>
                     <span class="panel-hint">{{ char.requirements|length }} треб.</span>

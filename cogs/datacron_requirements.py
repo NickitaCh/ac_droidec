@@ -10,6 +10,7 @@ from disnake.ext import commands, tasks
 
 import database
 import guild_resolver
+import stat_engine
 from cogs.violations import autocomplete_players
 
 # 'DatacronDefinitions' — бит из comlink.get_enums()["GameDataItemsEnum"], проверено вживую.
@@ -914,6 +915,75 @@ def _build_priority_embeds(title, color, priority_items, footer_totals=None):
     return _lines_to_embeds(title, color, lines)
 
 
+MAX_SQUAD_UNITS = 5
+
+
+def _squad_missing_reason(units, player_json) -> str | None:
+    """Почему у игрока нет пака требования (None — пак есть). units: [{"base_id",
+    "min_relic"?}] — нужен каждый юнит; min_relic не задан — достаточно, что юнит открыт."""
+    roster = {}
+    for unit in (player_json or {}).get("rosterUnit") or []:
+        roster[str(unit.get("definitionId", "")).split(":")[0]] = unit
+    names = database.get_game_unit_names([u["base_id"] for u in units])
+    for spec in units:
+        name = names.get(spec["base_id"]) or spec["base_id"]
+        unit = roster.get(spec["base_id"])
+        if unit is None:
+            return f"нет {name}"
+        min_relic = spec.get("min_relic")
+        if min_relic is not None:
+            gear = unit.get("currentTier") or 0
+            relic = stat_engine.get_current_relic_level(unit) if gear >= 13 else None
+            if relic is None or relic < min_relic:
+                have = f"R{relic}" if relic is not None else f"G{gear}"
+                return f"{name} {have} < R{min_relic}"
+    return None
+
+
+def _split_by_squad(player_json, requirements, focused_requirements, squads):
+    """Отсекает требования, пака которых у игрока нет: ДК под них ему не нужен, и они не
+    участвуют в подборе ДК (не забирают датакроны у остальных требований) и в счётчиках.
+    squads — database.get_datacron_requirement_squads_by_set. Возвращает
+    (requirements, focused_requirements, skipped), skipped: [(kind, req, причина)]."""
+    if not squads:
+        return list(requirements or []), list(focused_requirements or []), []
+    skipped = []
+    kept_base, kept_focused = [], []
+    for kind, rows, kept in (("base", requirements or [], kept_base), ("focused", focused_requirements or [], kept_focused)):
+        for req in rows:
+            units = squads.get((kind, req[0]))
+            reason = _squad_missing_reason(units, player_json) if units else None
+            if reason:
+                skipped.append((kind, req, reason))
+            else:
+                kept.append(req)
+    return kept_base, kept_focused, skipped
+
+
+def _squad_label(units) -> str:
+    names = database.get_game_unit_names([u["base_id"] for u in units])
+    return ", ".join(
+        (names.get(u["base_id"]) or u["base_id"]) + (f" R{u['min_relic']}+" if u.get("min_relic") is not None else "")
+        for u in units
+    )
+
+
+def _skipped_label(kind, req, cache, set_id) -> str:
+    if kind == "focused":
+        return f"{req[2] or 'Спец. ДК'}: {_focused_char_label(cache, set_id, req[3])}"
+    return req[2] or f"Требование #{req[0]}"
+
+
+def _skipped_lines(skipped, cache, set_id) -> list:
+    """Хвост проверки игрока: требования, которые не действуют — у игрока нет пака."""
+    if not skipped:
+        return []
+    lines = ["", f"# ⚪ Не требуется — нет пака ({len(skipped)})"]
+    for kind, req, reason in skipped:
+        lines.append(f"**{_skipped_label(kind, req, cache, set_id)}** — {reason}")
+    return lines
+
+
 def _match_counts(player_json, set_id, requirements, focused_requirements) -> dict:
     """Только счётчики matched/total по приоритету — для сводного гильд-отчёта,
     без построения текста полей (в отличие от полного /дк_требования проверить)."""
@@ -1799,11 +1869,14 @@ class DatacronRequirementsCog(commands.Cog):
         fully_compliant = []
         failed = []
         debtors = []
+        squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
         for name, allycode, player in results:
             if player is None:
                 failed.append(name)
                 continue
-            counts = _match_counts(player, set_id, requirements, focused_requirements)
+            # Требования, пака которых у игрока нет, для него не действуют.
+            p_requirements, p_focused, _skipped = _split_by_squad(player, requirements, focused_requirements, squads)
+            counts = _match_counts(player, set_id, p_requirements, p_focused)
             required = counts[PRIORITY_REQUIRED]
             if required["total"] > 0 and required["matched"] < required["total"]:
                 parts = [
@@ -1811,7 +1884,7 @@ class DatacronRequirementsCog(commands.Cog):
                     for p in PRIORITY_ORDER if counts[p]["total"] > 0
                 ]
                 missing_required.append((name, ", ".join(parts), counts))
-                debtors.append((name, allycode, _missing_required_labels(player, set_id, requirements, focused_requirements, self.bot.datacron_cache)))
+                debtors.append((name, allycode, _missing_required_labels(player, set_id, p_requirements, p_focused, self.bot.datacron_cache)))
             else:
                 fully_compliant.append((name, counts))
 
@@ -1851,12 +1924,19 @@ class DatacronRequirementsCog(commands.Cog):
         игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
         аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводный отчёт по всей гильдии (без «игрок»)"),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer(ephemeral=True)
 
-        guild_id = await guild_resolver.require_feature(inter, "datacrons")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "datacrons", other_target=bool(игрок or аликод or гильдия))
+            if alt is None:
+                return
+            guild_id, аликод = alt["guild_id"], alt["ally_code"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "datacrons")
+            if guild_id is None:
+                return
 
         set_id = _parse_trailing_bracket_int(сезон)
         if set_id is None:
@@ -1949,6 +2029,9 @@ class DatacronRequirementsCog(commands.Cog):
 
         groups = {p: {"items": [], "matched": 0, "total": 0} for p in PRIORITY_ORDER}
 
+        squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
+        requirements, focused_requirements, skipped = _split_by_squad(player, requirements, focused_requirements, squads)
+
         if requirements:
             owned = _extract_player_base_datacrons(player, set_id)
             pairs = _match_requirements(requirements, owned)
@@ -1991,14 +2074,16 @@ class DatacronRequirementsCog(commands.Cog):
         }
         total_matched = sum(g["matched"] for g in groups.values())
         total_all = sum(g["total"] for g in groups.values())
-        if total_all and total_matched == total_all:
+        if total_matched == total_all:
             color = DATACRON_CHECK_COLOR_FULL
         elif total_matched:
             color = DATACRON_CHECK_COLOR_PARTIAL
         else:
             color = DATACRON_CHECK_COLOR_NONE
         title = f"📋 Проверка датакронов: {игрок} — {season_label} ({total_matched}/{total_all})"
-        embeds = _build_priority_embeds(title, color, priority_items, footer_totals=footer_totals)
+        lines = _build_priority_description(priority_items, footer_totals)
+        lines.extend(_skipped_lines(skipped, self.bot.datacron_cache, set_id))
+        embeds = _lines_to_embeds(title, color, lines)
 
         view = DatacronCheckRevealView(embeds)
         await inter.edit_original_message(content=None, embed=embeds[0], view=view)

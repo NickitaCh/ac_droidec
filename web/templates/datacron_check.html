@@ -112,6 +112,19 @@
                 </div>
             {% endif %}
         {% endfor %}
+        {% if result.skipped %}
+            <div class="panel">
+                <div class="panel-title"><span>⚪ Не требуется — нет пака</span><span class="panel-hint">{{ result.skipped|length }}</span></div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Требование</th><th>Чего не хватает</th></tr></thead>
+                        <tbody>
+                            {% for r in result.skipped %}<tr><td>{{ r.label }}</td><td>{{ r.reason }}</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
     {% elif result and result.guild_mode %}
         <div class="stats-grid">
             <div class="stat-tile"><div class="stat-value">{{ result.total }}</div><div class="stat-label">Проверено</div></div>

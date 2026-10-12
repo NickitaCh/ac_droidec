@@ -48,6 +48,10 @@ from cogs.datacron_requirements import (
     _match_counts,
     _match_sort_key,
     _match_requirements,
+    _skipped_label,
+    _split_by_squad,
+    _squad_label,
+    MAX_SQUAD_UNITS,
     _parse_stat_pair_params,
 )
 from services import datacron_catalog, feature_flags
@@ -97,14 +101,57 @@ def _redirect_list(error: str = None, notice: str = None):
     return RedirectResponse(f"/datacrons{qs}", status_code=303)
 
 
-def _redirect_season(set_id: int, error: str = None, notice: str = None):
+def _redirect_season(set_id: int, error: str = None, notice: str = None, anchor: str = ""):
     params = {}
     if error:
         params["error"] = error
     if notice:
         params["notice"] = notice
     qs = f"?{urlencode(params)}" if params else ""
-    return RedirectResponse(f"/datacrons/{set_id}{qs}", status_code=303)
+    return RedirectResponse(f"/datacrons/{set_id}{qs}{anchor}", status_code=303)
+
+
+def _level_from_form(values: list) -> str:
+    """Уровень из попапа: несколько <select> (основной вариант + альтернативы «ИЛИ»).
+    «Любой» перекрывает всё, пустые и «не проверять» отбрасываются."""
+    parts = []
+    for v in values:
+        v = (v or "").strip()
+        if v == DATACRON_ANY:
+            return DATACRON_ANY
+        if v and v != DATACRON_NONE and v not in parts:
+            parts.append(v)
+    return ",".join(parts) if parts else DATACRON_NONE
+
+
+def _squad_from_form(form) -> tuple[list, str | None]:
+    """Состав пака из попапа: squad_unit_N (base_id) + squad_relic_N (пусто — любой)."""
+    units = []
+    for i in range(1, MAX_SQUAD_UNITS + 1):
+        base_id = (form.get(f"squad_unit_{i}") or "").strip()
+        if not base_id or any(u["base_id"] == base_id for u in units):
+            continue
+        if not database.get_game_unit_name(base_id):
+            return [], f"Неизвестный юнит пака: {base_id}."
+        unit = {"base_id": base_id}
+        raw_relic = (form.get(f"squad_relic_{i}") or "").strip()
+        if raw_relic:
+            try:
+                relic = int(raw_relic)
+            except ValueError:
+                relic = -1
+            if not 0 <= relic <= 10:
+                return [], "Релик пака — целое число от 0 до 10."
+            unit["min_relic"] = relic
+        units.append(unit)
+    return units, None
+
+
+def _squad_rows(units) -> list:
+    """Строки формы состава пака: всегда MAX_SQUAD_UNITS (пустые — для новых юнитов)."""
+    names = database.get_game_unit_names([u["base_id"] for u in units]) if units else {}
+    rows = [{"base_id": u["base_id"], "name": names.get(u["base_id"]) or u["base_id"], "min_relic": u.get("min_relic")} for u in units]
+    return rows + [{"base_id": "", "name": "", "min_relic": None}] * (MAX_SQUAD_UNITS - len(rows))
 
 
 # =====================================================================
@@ -236,6 +283,7 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
     focused_rows = database.get_datacron_focused_requirements_by_set(set_id, guild_id=guild_id)
 
     stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
+    squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
     base_reqs = []
     for row in base_rows:
         req_id, _, pack, l3, l6, l9, comment, created_by, created_at, priority, stats, quantity = row
@@ -251,8 +299,11 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
             "priority_emoji": PRIORITY_EMOJI.get(priority, ""),
             # Уровни, к которым имеет смысл предложить "добавить альтернативу" —
             # только там, где уже стоит конкретная способность (не ANY/NONE).
-            "alt_levels": [n for n, v in ((3, l3), (6, l6), (9, l9)) if v not in (DATACRON_ANY, DATACRON_NONE)],
+            # Варианты уровня по отдельности — в попапе у каждого свой <select> («ИЛИ»).
+            "level_parts": {n: v.split(",") for n, v in ((3, l3), (6, l6), (9, l9))},
             "stat_reqs": [{"stat_id": sid, "label": DATACRON_STAT_LABELS.get(sid, str(sid)), "min_value": val} for sid, val in stat_reqs],
+            "squad_label": _squad_label(squads[("base", req_id)]) if ("base", req_id) in squads else "",
+            "squad_rows": _squad_rows(squads.get(("base", req_id), [])),
         })
     focused_reqs = []
     for row in focused_rows:
@@ -263,6 +314,8 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
             "required_level": required_level, "comment": comment, "priority": priority,
             "priority_label": PRIORITY_LABELS.get(priority, priority),
             "priority_emoji": PRIORITY_EMOJI.get(priority, ""),
+            "squad_label": _squad_label(squads[("focused", req_id)]) if ("focused", req_id) in squads else "",
+            "squad_rows": _squad_rows(squads.get(("focused", req_id), [])),
         })
 
     return templates.TemplateResponse(request, "datacron_season.html", {
@@ -402,6 +455,7 @@ async def add_alt(set_id: int, req_id: int, level: int = Form(...), value: str =
 # =====================================================================
 @router.post("/{set_id}/requirements/{req_id}/edit", response_class=HTMLResponse)
 async def edit_base_requirement(
+    request: Request,
     set_id: int,
     req_id: int,
     pack: str = Form(""),
@@ -424,25 +478,32 @@ async def edit_base_requirement(
     if not row:
         return _redirect_season(set_id, error=f"Требование #{req_id} не найдено.")
     _, row_set_id, _cur_pack, cur_l3, cur_l6, cur_l9, _cur_comment, _, _, _cur_priority, _cur_stats, _cur_quantity = row
-    # Поля уровней могут отсутствовать (старая открытая вкладка) — тогда уровни не трогаем.
-    l3 = level3 if level3 is not None else cur_l3
-    l6 = level6 if level6 is not None else cur_l6
-    l9 = level9 if level9 is not None else cur_l9
+    form = await request.form()
+    anchor = f"#req-{req_id}"
+    # Уровень приходит несколькими <select> (альтернативы «ИЛИ» из попапа). Полей нет
+    # (старая открытая вкладка) — уровни не трогаем.
+    l3 = _level_from_form(form.getlist("level3")) if "level3" in form else cur_l3
+    l6 = _level_from_form(form.getlist("level6")) if "level6" in form else cur_l6
+    l9 = _level_from_form(form.getlist("level9")) if "level9" in form else cur_l9
     if (l3, l6, l9) != (cur_l3, cur_l6, cur_l9):
         catalog = await _safe_catalog()
         for level_num, value in ((3, l3), (6, l6), (9, l9)):
-            if not _is_valid_level_value(catalog, row_set_id, level_num, value):
-                return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из списка.")
+            if not all(_is_valid_level_value(catalog, row_set_id, level_num, part) for part in value.split(",")):
+                return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из списка.", anchor=anchor)
         if l3 == DATACRON_NONE and l6 == DATACRON_NONE and l9 == DATACRON_NONE:
-            return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).")
+            return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).", anchor=anchor)
     if not 1 <= quantity <= DATACRON_MAX_QUANTITY:
-        return _redirect_season(set_id, error=f"Количество — от 1 до {DATACRON_MAX_QUANTITY}.")
+        return _redirect_season(set_id, error=f"Количество — от 1 до {DATACRON_MAX_QUANTITY}.", anchor=anchor)
     stat_pairs, stat_error = _stat_pairs_from_form([stat1, stat2, stat3, stat4, stat5], [value1, value2, value3, value4, value5])
     if stat_error:
-        return _redirect_season(set_id, error=stat_error)
+        return _redirect_season(set_id, error=stat_error, anchor=anchor)
+    squad, squad_error = _squad_from_form(form)
+    if squad_error:
+        return _redirect_season(set_id, error=squad_error, anchor=anchor)
     database.update_datacron_requirement(req_id, row_set_id, pack.strip() or None, l3, l6, l9, comment.strip() or None, priority, guild_id=guild_id, stats=stats.strip() or None, quantity=quantity)
     database.set_datacron_requirement_stats(req_id, stat_pairs, guild_id=guild_id)  # полная замена (веб = не патч-семантика)
-    return _redirect_season(set_id, notice=f"Требование #{req_id} обновлено.")
+    database.set_datacron_requirement_squad("base", req_id, squad, guild_id=guild_id)
+    return _redirect_season(set_id, notice=f"Требование #{req_id} обновлено.", anchor=anchor)
 
 
 @router.post("/{set_id}/requirements/{req_id}/delete", response_class=HTMLResponse)
@@ -453,6 +514,7 @@ async def delete_base_requirement(set_id: int, req_id: int, user: dict = Depends
 
 @router.post("/{set_id}/focused/{req_id}/edit", response_class=HTMLResponse)
 async def edit_focused_requirement(
+    request: Request,
     set_id: int,
     req_id: int,
     required_level: int = Form(...),
@@ -468,8 +530,12 @@ async def edit_focused_requirement(
     if required_level < 1:
         return _redirect_season(set_id, error="Уровень должен быть не меньше 1.")
     _, row_set_id, _cur_pack, character_key, _cur_level, _cur_comment, _, _, _cur_priority = row
+    squad, squad_error = _squad_from_form(await request.form())
+    if squad_error:
+        return _redirect_season(set_id, error=squad_error, anchor=f"#req-f{req_id}")
     database.update_datacron_focused_requirement(req_id, row_set_id, pack.strip() or None, character_key, required_level, comment.strip() or None, priority, guild_id=guild_id)
-    return _redirect_season(set_id, notice=f"Спец. требование F{req_id} обновлено.")
+    database.set_datacron_requirement_squad("focused", req_id, squad, guild_id=guild_id)
+    return _redirect_season(set_id, notice=f"Спец. требование F{req_id} обновлено.", anchor=f"#req-f{req_id}")
 
 
 @router.post("/{set_id}/focused/{req_id}/delete", response_class=HTMLResponse)
@@ -498,6 +564,14 @@ async def clear_season(set_id: int, user: dict = Depends(feature_flags.require_f
 # (season_detail), список фокус-персонажей обычно намного длиннее, там
 # live-search по-прежнему оправдан.
 # =====================================================================
+@router.get("/api/units", response_class=JSONResponse)
+async def units_search(q: str = "", user: dict = Depends(feature_flags.require_feature("datacrons"))):
+    """Поиск юнита для состава пака в попапе требования."""
+    if not q or len(q.strip()) < 2:
+        return []
+    return [{"base_id": base_id, "name": name} for base_id, name in database.search_game_units(q.strip(), limit=20)]
+
+
 @router.get("/api/focused-characters/{season}", response_class=JSONResponse)
 async def focused_characters_search(season: int, q: str = "", user: dict = Depends(feature_flags.require_feature("datacrons"))):
     catalog = await _safe_catalog()
@@ -536,6 +610,10 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
 
     rows_by_priority = {p: [] for p in PRIORITY_ORDER}
     totals = {p: {"matched": 0, "total": 0} for p in PRIORITY_ORDER}
+
+    squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
+    requirements, focused_requirements, skipped = _split_by_squad(player, requirements, focused_requirements, squads)
+    skipped_rows = [{"label": _skipped_label(kind, req, catalog, set_id), "reason": reason} for kind, req, reason in skipped]
 
     if requirements:
         owned = _extract_player_base_datacrons(player, set_id)
@@ -584,7 +662,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
             if ok:
                 tb["matched"] += 1
 
-    return {"player_name": player_name, "rows_by_priority": rows_by_priority, "totals": totals}
+    return {"player_name": player_name, "rows_by_priority": rows_by_priority, "totals": totals, "skipped": skipped_rows}
 
 
 async def _build_guild_report(set_id, requirements, focused_requirements, guild_id):
@@ -606,11 +684,13 @@ async def _build_guild_report(set_id, requirements, focused_requirements, guild_
     results = await asyncio.gather(*(fetch_one(ally_code, name) for _discord_id, ally_code, name in roster))
 
     missing_required, fully_compliant, failed = [], [], []
+    squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
     for name, player in results:
         if player is None:
             failed.append(name)
             continue
-        counts = _match_counts(player, set_id, requirements, focused_requirements)
+        p_requirements, p_focused, _skipped = _split_by_squad(player, requirements, focused_requirements, squads)
+        counts = _match_counts(player, set_id, p_requirements, p_focused)
         required = counts[PRIORITY_REQUIRED]
         if required["total"] > 0 and required["matched"] < required["total"]:
             parts = [f"{PRIORITY_LABELS[p]}: {counts[p]['matched']}/{counts[p]['total']}" for p in PRIORITY_ORDER if counts[p]["total"] > 0]

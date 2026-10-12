@@ -2331,6 +2331,22 @@ def get_registrations_for_discord_id(discord_id: str) -> dict[int, tuple[str, st
     return result
 
 
+def get_all_registrations_for_discord_id(discord_id: str) -> list[tuple[int, str, str, int]]:
+    """[(guild_id, ally_code, ingame_name, is_main), ...] — все аккаунты игрока во всех
+    гильдиях (основные и альты), для параметра «альт» (guild_resolver.alt_account)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT guild_id, ally_code, ingame_name, is_main FROM user_registration WHERE discord_id = ? "
+        "ORDER BY guild_id, is_main DESC, registered_at",
+        (discord_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def discord_id_has_any_registration(discord_id: str) -> bool:
     """Есть ли у этого discord_id хоть одна привязка в ЛЮБОЙ гильдии, активной или
     нет — в отличие от get_user_registration(s), не фильтрует по guild_id и не
@@ -3649,6 +3665,68 @@ def get_datacron_requirement_stats_by_set(set_id: int, guild_id: int = 1):
     result = {}
     for req_id, stat_id, min_value in rows:
         result.setdefault(req_id, []).append((stat_id, min_value))
+    return result
+
+
+# Состав пака у требования ДК: [{"base_id", "min_relic"?}, ...]. Если у игрока пака нет
+# (нет юнита или релик ниже), ДК под это требование ему не нужен — требование пропускается
+# при проверке (cogs/datacron_requirements.py::_split_by_squad). kind: "base" | "focused".
+# Отдельная таблица, а не колонка: строки требований везде разбираются по позициям.
+def _ensure_datacron_requirement_squads_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datacron_requirement_squads (
+            guild_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            req_id INTEGER NOT NULL,
+            units_json TEXT NOT NULL,
+            PRIMARY KEY (guild_id, kind, req_id)
+        )
+    """)
+
+
+def set_datacron_requirement_squad(kind: str, req_id: int, units: list, guild_id: int = 1):
+    """Пустой units — состав убирается (требование снова для всех)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirement_squads_table(cursor)
+    if units:
+        cursor.execute(
+            "INSERT OR REPLACE INTO datacron_requirement_squads (guild_id, kind, req_id, units_json) VALUES (?, ?, ?, ?)",
+            (guild_id, kind, req_id, json.dumps(units, ensure_ascii=False)),
+        )
+    else:
+        cursor.execute("DELETE FROM datacron_requirement_squads WHERE guild_id = ? AND kind = ? AND req_id = ?", (guild_id, kind, req_id))
+    conn.commit()
+    conn.close()
+
+
+def get_datacron_requirement_squads_by_set(set_id: int, guild_id: int = 1) -> dict:
+    """{(kind, req_id): [units]} для требований сезона (только существующих — join)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_datacron_requirements_table(cursor)
+    _ensure_datacron_focused_requirements_table(cursor)
+    _ensure_datacron_requirement_squads_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT s.kind, s.req_id, s.units_json FROM datacron_requirement_squads s
+        JOIN datacron_requirements r ON s.kind = 'base' AND r.id = s.req_id AND r.guild_id = s.guild_id
+        WHERE r.set_id = ? AND s.guild_id = ?
+        UNION ALL
+        SELECT s.kind, s.req_id, s.units_json FROM datacron_requirement_squads s
+        JOIN datacron_focused_requirements f ON s.kind = 'focused' AND f.id = s.req_id AND f.guild_id = s.guild_id
+        WHERE f.set_id = ? AND s.guild_id = ?
+    """, (set_id, guild_id, set_id, guild_id))
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for kind, req_id, units_json in rows:
+        try:
+            units = json.loads(units_json)
+        except (TypeError, ValueError):
+            continue
+        if units:
+            result[(kind, req_id)] = units
     return result
 
 

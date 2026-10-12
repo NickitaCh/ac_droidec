@@ -152,6 +152,67 @@ async def require_feature(inter, feature_key: str):
     return guild_id
 
 
+def alt_account(author_or_id) -> dict | None:
+    """Второй аккаунт игрока для параметра «альт: True» проверочных команд:
+    {"guild_id", "ally_code", "name"} либо None. Это любой привязанный аккаунт,
+    кроме того, что бот берёт по умолчанию (resolve_access) — сначала альт в той же
+    гильдии, затем аккаунт в другой гильдии (игрок, у которого основные аккаунты в
+    двух гильдиях: по умолчанию побеждает гильдия с более высоким рангом)."""
+    access = resolve_access(author_or_id)
+    default_guild, default_code = access["guild_id"], access["ally_code"]
+    active_guild_ids = {cfg["id"] for cfg in database.get_all_guild_configs()}
+    candidates = []
+    for guild_id, ally_code, name, is_main in database.get_all_registrations_for_discord_id(_discord_id(author_or_id)):
+        if ally_code == default_code or guild_id not in active_guild_ids:
+            continue
+        if guild_id != default_guild and _tier_for_level(database.get_member_level(guild_id, ally_code)) is None:
+            continue  # не в ростере той гильдии (вышел/кикнут)
+        candidates.append(((guild_id != default_guild, guild_id), {"guild_id": guild_id, "ally_code": ally_code, "name": name}))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0])
+    return candidates[0][1]
+
+
+async def _reply(inter, msg: str):
+    if inter.response.is_done():
+        await inter.edit_original_response(msg)
+    else:
+        await inter.response.send_message(msg, ephemeral=True)
+
+
+async def require_alt(inter, feature_key: str, other_target: bool = False) -> dict | None:
+    """alt_account + проверки одним вызовом (по образцу require_feature): сама
+    отвечает и возвращает None, если «альт» указан вместе с другим игроком/гильдией,
+    второго аккаунта нет или фича выключена в гильдии альта."""
+    from services import feature_flags
+
+    if other_target:
+        await _reply(inter, "❌ «альт» — это ваш второй аккаунт; не указывайте вместе с ним «игрок», «аликод» или «гильдия».")
+        return None
+    alt = alt_account(inter.author)
+    if alt is None:
+        await _reply(inter, "❌ Второй аккаунт не найден — привяжите его через `/регистрация` (код союзника второго аккаунта).")
+        return None
+    if not feature_flags.is_enabled(alt["guild_id"], feature_key):
+        await _reply(inter, f"❌ Функция «{feature_flags.label(feature_key)}» отключена в гильдии вашего второго аккаунта.")
+        return None
+    return alt
+
+
+def autocomplete_guild_id(inter) -> int | None:
+    """Гильдия для автодополнений (плейты, персонажи плейта): если в команде уже
+    выбран «альт: True» — гильдия второго аккаунта, иначе обычная."""
+    if inter.filled_options.get("альт"):
+        alt = alt_account(inter.author)
+        if alt is not None:
+            return alt["guild_id"]
+    return resolve_guild_id(inter.author)
+
+
+ALT_PARAM_DESCRIPTION = "Ваш второй аккаунт (альт или аккаунт в другой гильдии) вместо основного"
+
+
 def is_officer_for_resolved_guild(author) -> bool:
     """Сигнатура не менялась — используется в @commands.check на офицерских
     сабкомандах (birthday.py, stat_requirements.py, datacron_requirements.py,

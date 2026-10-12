@@ -1190,7 +1190,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
 # Автокомплиты (модульные функции — как autocomplete_players/autocomplete_datacron_*)
 # =====================================================================
 async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, string: str):
-    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    guild_id = guild_resolver.autocomplete_guild_id(inter)
     if guild_id is None:
         return []
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
@@ -1201,7 +1201,7 @@ async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, 
 
 
 async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteraction, string: str):
-    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    guild_id = guild_resolver.autocomplete_guild_id(inter)
     if guild_id is None:
         return []
     plate = inter.filled_options.get("плейт")
@@ -1655,14 +1655,23 @@ class StatRequirementsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer(ephemeral=True)
 
-        guild_id = await guild_resolver.require_feature(inter, "omicron")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "omicron", other_target=bool(игрок))
+            if alt is None:
+                return
+            guild_id, ally_code, игрок = alt["guild_id"], alt["ally_code"], alt["name"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "omicron")
+            if guild_id is None:
+                return
 
-        if игрок is None:
+        if альт:
+            pass
+        elif игрок is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_response("❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно.")
@@ -2347,12 +2356,19 @@ class StatRequirementsCog(commands.Cog):
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
         схема: str = commands.Param(default=None, description="Форсировать схему мод-билда вместо авто-детекта (не действует на персонажей без схем)", choices=FORCE_SCHEME_CHOICES),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "stat_requirements", other_target=bool(игрок or аликод or гильдия))
+            if alt is None:
+                return
+            guild_id, аликод = alt["guild_id"], alt["ally_code"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+            if guild_id is None:
+                return
 
         if not self.bot.stat_calc:
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
@@ -2552,12 +2568,19 @@ class StatRequirementsCog(commands.Cog):
         игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
         аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
         период: str = commands.Param(default="month", description="За какой период считать", choices=RESOURCE_PERIOD_CHOICES),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "stat_requirements", other_target=bool(игрок or аликод))
+            if alt is None:
+                return
+            guild_id, аликод = alt["guild_id"], alt["ally_code"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+            if guild_id is None:
+                return
 
         if аликод is not None:
             if игрок is not None:

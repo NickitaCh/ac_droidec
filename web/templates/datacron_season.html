@@ -2,6 +2,23 @@
 {% block title %}{{ display_name }} — Датакроны — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
+{% macro squad_fields(rows) %}
+    <div class="edit-modal-section">
+        <h4>Состав пака — если у игрока его нет, ДК не требуется</h4>
+        <p class="muted" style="margin:0;font-size:0.85em;">Ключевые персонажи (до {{ rows|length }}). Релик пусто — достаточно, что персонаж открыт. Пустой состав — требование для всех.</p>
+        {% for u in rows %}
+            <div class="edit-modal-row">
+                <div class="unit-search" data-live-search data-url="/datacrons/api/units" data-value-field="base_id" data-label-field="name" data-required="false" style="flex:1 1 14em;">
+                    <input type="text" class="unit-search-input" placeholder="Персонаж {{ loop.index }}…" autocomplete="off" value="{{ u.name }}">
+                    <input type="hidden" name="squad_unit_{{ loop.index }}" class="unit-search-value" value="{{ u.base_id }}">
+                    <div class="unit-search-results"></div>
+                </div>
+                <label style="flex-direction:row;align-items:center;gap:0.4em;">мин. R <input type="number" name="squad_relic_{{ loop.index }}" min="0" max="10" value="{{ u.min_relic if u.min_relic is not none else '' }}" style="width:4.5em;"></label>
+            </div>
+        {% endfor %}
+    </div>
+{% endmacro %}
+
     <section class="page-hero">
         <a class="page-hero-back" href="/datacrons">← Все сезоны</a>
         <div class="page-hero-top">
@@ -87,7 +104,7 @@
             </label>
             <button type="submit">Добавить</button>
         </form>
-        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень — через «+ альтернатива» у уже созданного требования. «Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
+        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень и состав пака — в «править» у уже созданного требования. «Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
     </div>
 
     {% if not base_reqs %}
@@ -113,8 +130,8 @@
                     </thead>
                     <tbody>
                         {% for r in base_reqs %}
-                            <tr>
-                                <td>#{{ r.id }} {{ r.pack or "—" }}</td>
+                            <tr id="req-{{ r.id }}">
+                                <td>#{{ r.id }} {{ r.pack or "—" }}{% if r.squad_label %}<div class="muted" style="font-size:0.85em;">Пак: {{ r.squad_label }}</div>{% endif %}</td>
                                 <td class="dc-level-col">{{ r.level3_label }}</td>
                                 <td class="dc-level-col">{{ r.level6_label }}</td>
                                 <td class="dc-level-col">{{ r.level9_label }}</td>
@@ -128,70 +145,68 @@
                                 </td>
                                 <td>{{ r.comment or "—" }}</td>
                                 <td class="row-actions">
-                                    <details>
-                                        <summary class="link-btn">править</summary>
-                                        <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/edit" class="inline-form">
-                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Отряд">
-                                            <select name="priority">
-                                                {% for label, value in priority_options %}
-                                                    <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <label>Кол-во ДК
-                                                <input type="number" name="quantity" value="{{ r.quantity }}" min="1" max="{{ max_quantity }}" required>
-                                            </label>
-                                            {% for lvl in (3, 6, 9) %}
-                                                {% set cur = r['level' ~ lvl] %}
-                                                <label>Ур. {{ lvl }}
-                                                    <select name="level{{ lvl }}">
-                                                        {% if ',' in cur %}
-                                                            <option value="{{ cur }}" selected title="{{ r['level' ~ lvl ~ '_label'] }}">Как сейчас: {{ r['level' ~ lvl ~ '_label']|truncate(70, True, '…') }}</option>
-                                                        {% endif %}
-                                                        <option value="{{ datacron_none }}" {% if cur == datacron_none %}selected{% endif %}>{{ datacron_none_label }}</option>
-                                                        <option value="{{ datacron_any }}" {% if cur == datacron_any %}selected{% endif %}>{{ datacron_any_label }}</option>
-                                                        {% for ability_id, label in level_options[lvl] %}
-                                                            <option value="{{ ability_id }}" title="{{ label }}" {% if cur == ability_id %}selected{% endif %}>{{ label|truncate(80, True, '…') }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                </label>
-                                            {% endfor %}
-                                            <input type="text" name="stats" value="{{ r.stats or '' }}" placeholder="Статы">
-                                            <fieldset class="stat-req-fieldset">
-                                                <legend>Мин. % статов (полная замена при сохранении)</legend>
-                                                {% for i in stat_slots %}
-                                                    {% set sr = r.stat_reqs[i-1] if i-1 < r.stat_reqs|length else None %}
-                                                    <div class="stat-req-slot">
-                                                        <select name="stat{{ i }}">
-                                                            <option value="">—</option>
-                                                            {% for sid, label in stat_options %}
-                                                                <option value="{{ sid }}" {% if sr and sr.stat_id == sid %}selected{% endif %}>{{ label }}</option>
+                                    <button type="button" class="link-btn" data-modal-open="dc-edit-{{ r.id }}">править</button>
+                                    <dialog class="edit-modal" id="dc-edit-{{ r.id }}">
+                                        <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/edit">
+                                            <div class="edit-modal-header">
+                                                <h3>Требование #{{ r.id }}{% if r.pack %} — {{ r.pack }}{% endif %}</h3>
+                                                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+                                            </div>
+                                            <div class="edit-modal-body">
+                                                <div class="edit-modal-grid">
+                                                    <label>Отряд <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
+                                                    <label>Приоритет
+                                                        <select name="priority">
+                                                            {% for label, value in priority_options %}
+                                                                <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
                                                             {% endfor %}
                                                         </select>
-                                                        <input type="number" name="value{{ i }}" min="0" max="100" step="0.01" placeholder="мин. %" value="{{ sr.min_value if sr else '' }}">
+                                                    </label>
+                                                    <label>Сколько таких ДК <input type="number" name="quantity" value="{{ r.quantity }}" min="1" max="{{ max_quantity }}" required></label>
+                                                    <label>Статы (текст) <input type="text" name="stats" value="{{ r.stats or '' }}"></label>
+                                                </div>
+                                                {% for lvl in (3, 6, 9) %}
+                                                    <div class="edit-modal-section" data-level-box>
+                                                        <h4>{{ lvl }} уровень — подходит любой из вариантов</h4>
+                                                        {% for part in r.level_parts[lvl] %}
+                                                            <select name="level{{ lvl }}" class="full-width" data-level-select>
+                                                                {% if not loop.first %}<option value="">— убрать вариант —</option>{% endif %}
+                                                                <option value="{{ datacron_none }}" {% if part == datacron_none %}selected{% endif %}>{{ datacron_none_label }}</option>
+                                                                <option value="{{ datacron_any }}" {% if part == datacron_any %}selected{% endif %}>{{ datacron_any_label }}</option>
+                                                                {% for ability_id, label in level_options[lvl] %}
+                                                                    <option value="{{ ability_id }}" title="{{ label }}" {% if part == ability_id %}selected{% endif %}>{{ label|truncate(110, True, '…') }}</option>
+                                                                {% endfor %}
+                                                            </select>
+                                                        {% endfor %}
+                                                        <button type="button" class="button-secondary" data-level-add style="align-self:flex-start;">+ вариант «ИЛИ»</button>
                                                     </div>
                                                 {% endfor %}
-                                            </fieldset>
-                                            <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
-                                            <button type="submit">Сохранить</button>
-                                        </form>
-                                    </details>
-                                    {% if r.alt_levels %}
-                                        <details>
-                                            <summary class="link-btn">+ альтернатива</summary>
-                                            {% for lvl in r.alt_levels %}
-                                                <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/add-alt" class="inline-form">
-                                                    <input type="hidden" name="level" value="{{ lvl }}">
-                                                    <select name="value" required>
-                                                        <option value="" disabled selected>Ур. {{ lvl }}: ещё вариант…</option>
-                                                        {% for ability_id, label in level_options[lvl] %}
-                                                            <option value="{{ ability_id }}" title="{{ label }}">{{ label|truncate(80, True, '…') }}</option>
+                                                <div class="edit-modal-section">
+                                                    <h4>Мин. % статов ДК</h4>
+                                                    <div class="edit-modal-grid">
+                                                        {% for i in stat_slots %}
+                                                            {% set sr = r.stat_reqs[i-1] if i-1 < r.stat_reqs|length else None %}
+                                                            <div class="stat-req-slot">
+                                                                <select name="stat{{ i }}">
+                                                                    <option value="">—</option>
+                                                                    {% for sid, label in stat_options %}
+                                                                        <option value="{{ sid }}" {% if sr and sr.stat_id == sid %}selected{% endif %}>{{ label }}</option>
+                                                                    {% endfor %}
+                                                                </select>
+                                                                <input type="number" name="value{{ i }}" min="0" max="100" step="0.01" placeholder="мин. %" value="{{ sr.min_value if sr else '' }}">
+                                                            </div>
                                                         {% endfor %}
-                                                    </select>
-                                                    <button type="submit">Добавить</button>
-                                                </form>
-                                            {% endfor %}
-                                        </details>
-                                    {% endif %}
+                                                    </div>
+                                                </div>
+                                                {{ squad_fields(r.squad_rows) }}
+                                                <label>Комментарий <input type="text" name="comment" value="{{ r.comment or '' }}"></label>
+                                            </div>
+                                            <div class="edit-modal-footer">
+                                                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                                                <button type="submit">Сохранить</button>
+                                            </div>
+                                        </form>
+                                    </dialog>
                                     <form method="post" action="/datacrons/{{ set_id }}/requirements/{{ r.id }}/delete"
                                           onsubmit="return confirm('Удалить требование #{{ r.id }}?');">
                                         <button type="submit" class="button-danger">Удалить</button>
@@ -259,27 +274,41 @@
                     </thead>
                     <tbody>
                         {% for r in focused_reqs %}
-                            <tr>
-                                <td>F{{ r.id }} {{ r.pack or "—" }}</td>
+                            <tr id="req-f{{ r.id }}">
+                                <td>F{{ r.id }} {{ r.pack or "—" }}{% if r.squad_label %}<div class="muted" style="font-size:0.85em;">Пак: {{ r.squad_label }}</div>{% endif %}</td>
                                 <td>{{ r.character_label }}</td>
                                 <td class="num">{{ r.required_level }}+</td>
                                 <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
                                 <td>{{ r.comment or "—" }}</td>
                                 <td class="row-actions">
-                                    <details>
-                                        <summary class="link-btn">править</summary>
-                                        <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/edit" class="inline-form">
-                                            <input type="number" name="required_level" min="1" max="20" value="{{ r.required_level }}" required>
-                                            <input type="text" name="pack" value="{{ r.pack or '' }}" placeholder="Отряд">
-                                            <select name="priority">
-                                                {% for label, value in priority_options %}
-                                                    <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <input type="text" name="comment" value="{{ r.comment or '' }}" placeholder="Комментарий">
-                                            <button type="submit">Сохранить</button>
+                                    <button type="button" class="link-btn" data-modal-open="dc-fedit-{{ r.id }}">править</button>
+                                    <dialog class="edit-modal" id="dc-fedit-{{ r.id }}">
+                                        <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/edit">
+                                            <div class="edit-modal-header">
+                                                <h3>Спец. требование F{{ r.id }} — {{ r.character_label }}</h3>
+                                                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+                                            </div>
+                                            <div class="edit-modal-body">
+                                                <div class="edit-modal-grid">
+                                                    <label>Нужный уровень <input type="number" name="required_level" min="1" max="20" value="{{ r.required_level }}" required></label>
+                                                    <label>Отряд <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
+                                                    <label>Приоритет
+                                                        <select name="priority">
+                                                            {% for label, value in priority_options %}
+                                                                <option value="{{ value }}" {% if value == r.priority %}selected{% endif %}>{{ label }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                    </label>
+                                                </div>
+                                                {{ squad_fields(r.squad_rows) }}
+                                                <label>Комментарий <input type="text" name="comment" value="{{ r.comment or '' }}"></label>
+                                            </div>
+                                            <div class="edit-modal-footer">
+                                                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                                                <button type="submit">Сохранить</button>
+                                            </div>
                                         </form>
-                                    </details>
+                                    </dialog>
                                     <form method="post" action="/datacrons/{{ set_id }}/focused/{{ r.id }}/delete"
                                           onsubmit="return confirm('Удалить спец. требование F{{ r.id }}?');">
                                         <button type="submit" class="button-danger">Удалить</button>
@@ -300,4 +329,23 @@
             <button type="submit" class="button-danger">Очистить весь сезон</button>
         </form>
     </div>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("[data-level-add]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const box = btn.closest("[data-level-box]");
+            const clone = box.querySelector("[data-level-select]").cloneNode(true);
+            if (!clone.querySelector('option[value=""]')) {
+                const empty = document.createElement("option");
+                empty.value = "";
+                empty.textContent = "— убрать вариант —";
+                clone.prepend(empty);
+            }
+            clone.value = "";
+            box.insertBefore(clone, btn);
+            clone.focus();
+        });
+    });
+});
+</script>
 {% endblock %}

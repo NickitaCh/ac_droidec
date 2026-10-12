@@ -1422,6 +1422,41 @@ dialog.confirm-dialog .dialog-actions {
     margin-top: 1em;
 }
 
+/* ---- Попап редактирования (платформенный компонент): кнопка [data-modal-open="<id>"]
+   открывает <dialog class="edit-modal" id="<id>">, [data-modal-close] и клик по фону
+   закрывают. Вся правка строк таблиц (плейты, требования ДК) — здесь, а не инлайн в
+   узкой колонке «действия», где формы не помещались. ---- */
+dialog.edit-modal {
+    width: min(56em, 94vw);
+    max-height: 90vh;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 0;
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+dialog.edit-modal[open] { display: flex; flex-direction: column; }
+dialog.edit-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
+dialog.edit-modal > form { display: flex; flex-direction: column; min-height: 0; margin: 0; }
+.edit-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding: 0.9em 1.2em; border-bottom: 1px solid var(--border); }
+.edit-modal-header h3 { margin: 0; font-size: 1.05em; }
+.edit-modal-body { padding: 1em 1.2em; overflow-y: auto; display: flex; flex-direction: column; gap: 0.9em; }
+.edit-modal-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.6em; padding: 0.8em 1.2em; border-top: 1px solid var(--border); }
+.edit-modal-section { display: flex; flex-direction: column; gap: 0.45em; }
+.edit-modal-section > h4 { margin: 0; font-size: 0.92em; color: var(--muted); font-weight: 600; }
+.edit-modal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13em, 1fr)); gap: 0.6em 0.9em; }
+.edit-modal-grid label, .edit-modal-section label { display: flex; flex-direction: column; gap: 0.25em; font-size: 0.9em; }
+.edit-modal select, .edit-modal input[type="text"], .edit-modal input[type="number"] { max-width: 100%; min-width: 0; }
+.edit-modal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.6em; padding: 0.5em 0.6em; border: 1px solid var(--border); border-radius: 8px; }
+.edit-modal-row .edit-modal-row-title { flex: 1 1 100%; font-weight: 600; font-size: 0.92em; }
+.edit-modal-row input[type="number"] { width: 7em; }
+.edit-modal-row input[type="text"] { flex: 1 1 12em; }
+.edit-modal-row.is-deleted { opacity: 0.45; }
+.edit-modal-row.is-deleted .edit-modal-row-title { text-decoration: line-through; }
+.edit-modal .full-width { width: 100%; }
+[id^="char-"], [id^="req-"] { scroll-margin-top: 1em; }
+
 /* ---- Попап выбора игрока на слот взвода ТБ (/tb/platoons) — по прямому запросу
    пользователя 2026-09-14: список кандидатов раньше открывался инлайн в узкой колонке
    .platoon-op-card (топ-20 по релику) — теперь полноразмерный попап с полным списком

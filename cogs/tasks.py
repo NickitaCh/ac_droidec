@@ -521,12 +521,19 @@ class TasksCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводка по всей гильдии вместо одного игрока"),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_feature(inter, "tasks")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "tasks", other_target=bool(игрок or гильдия))
+            if alt is None:
+                return
+            guild_id, ally_code, игрок = alt["guild_id"], alt["ally_code"], alt["name"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "tasks")
+            if guild_id is None:
+                return
 
         is_officer = guild_resolver.is_officer_for_resolved_guild(inter.author)
 
@@ -575,7 +582,9 @@ class TasksCog(commands.Cog):
                 await inter.followup.send(embed=e)
             return
 
-        if игрок is None:
+        if альт:
+            pass
+        elif игрок is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_response("❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите игрока явно.")

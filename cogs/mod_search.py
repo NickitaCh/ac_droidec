@@ -54,12 +54,19 @@ class ModSearchCog(commands.Cog):
         стат_3: int = commands.Param(default=None, description="Вторичка №3 — стат", choices=STAT_CHOICES),
         оператор_3: str = commands.Param(default=None, description="Вторичка №3 — оператор", choices=OPERATOR_CHOICES),
         значение_3: float = commands.Param(default=None, description="Вторичка №3 — значение"),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 
-        guild_id = await guild_resolver.require_feature(inter, "mod_search")
-        if guild_id is None:
-            return
+        if альт:
+            alt = await guild_resolver.require_alt(inter, "mod_search", other_target=bool(игрок or аликод or гильдия))
+            if alt is None:
+                return
+            guild_id, аликод = alt["guild_id"], alt["ally_code"]
+        else:
+            guild_id = await guild_resolver.require_feature(inter, "mod_search")
+            if guild_id is None:
+                return
 
         conditions = []
         for stat_id, op, value in ((стат_1, оператор_1, значение_1), (стат_2, оператор_2, значение_2), (стат_3, оператор_3, значение_3)):
