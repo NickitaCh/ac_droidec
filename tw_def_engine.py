@@ -52,7 +52,10 @@ STAT_CHOICES = [
     ("Special Critical Chance", "Шанс спец. крита, %", "спец. крит", True),
     ("Armor", "Броня, %", "броня", True),
     ("Resistance", "Сопротивление, %", "сопротивление", True),
+    # Синтетический: Health + Protection (как "Total Life" в /статы) — "общий запас здоровья".
+    ("Total Life", "Здоровье + защита", "здоровье+защита", False),
 ]
+STAT_OPS = (">=", "<=")
 STAT_KEYS = {key for key, *_ in STAT_CHOICES}
 STAT_SHORT = {key: short for key, _label, short, _pct in STAT_CHOICES}
 STAT_PERCENT = {key for key, _label, _short, pct in STAT_CHOICES if pct}
@@ -65,8 +68,20 @@ def _fmt_stat(stat: str, value: float) -> str:
     return f"{int(round(value)):,}".replace(",", " ")
 
 
+def stat_op(st: dict) -> str:
+    """Оператор стат-требования: ">=" (по умолчанию, ключ "min" исторический) или "<="."""
+    return "<=" if st.get("op") == "<=" else ">="
+
+
+def _stat_text(st: dict) -> str:
+    name = STAT_SHORT.get(st["stat"], st["stat"])
+    value = _fmt_stat(st["stat"], st["min"])
+    return f"{name} ≤ {value}" if stat_op(st) == "<=" else f"{name} {value}+"
+
+
 def option_stats(opt: dict) -> list[dict]:
-    """[{"stat", "min"}] варианта; старый формат min_speed читается как скорость."""
+    """[{"stat", "min", "op"?}] варианта ("min" — порог, op "<=" — не больше);
+    старый формат min_speed читается как скорость."""
     stats = list(opt.get("stats") or [])
     if opt.get("min_speed") and not any(st.get("stat") == "Speed" for st in stats):
         stats.insert(0, {"stat": "Speed", "min": opt["min_speed"]})
@@ -134,9 +149,13 @@ def normalize_slots(raw_slots, combat_type: str, known_units: dict, omicron_capa
                 if value <= 0 or value > 10_000_000:
                     errors.append(f"Слот {slot_index}: значение стата вне диапазона.")
                     continue
-                if any(x["stat"] == st["stat"] for x in stats):
+                op = stat_op(st)
+                if any(x["stat"] == st["stat"] and stat_op(x) == op for x in stats):
                     continue
-                stats.append({"stat": st["stat"], "min": int(value) if value.is_integer() else value})
+                entry = {"stat": st["stat"], "min": int(value) if value.is_integer() else value}
+                if op == "<=":
+                    entry["op"] = "<="
+                stats.append(entry)
             if len(stats) > MAX_STATS_PER_UNIT:
                 errors.append(f"Слот {slot_index}: не больше {MAX_STATS_PER_UNIT} статов на юнит.")
             if stats:
@@ -176,7 +195,7 @@ def option_requirement_label(opt: dict, combat_type: str) -> str:
     if opt.get("ultimate"):
         parts.append("ульта")
     for st in option_stats(opt):
-        parts.append(f"{STAT_SHORT.get(st['stat'], st['stat'])} {_fmt_stat(st['stat'], st['min'])}+")
+        parts.append(_stat_text(st))
     return ", ".join(parts)
 
 
@@ -212,7 +231,12 @@ class Roster:
             except Exception:
                 self._stats_cache[key] = None
         stats = self._stats_cache[key]
-        return stats.get(stat) if stats else None
+        if not stats:
+            return None
+        if stat == "Total Life":
+            health, protection = stats.get("Health"), stats.get("Protection")
+            return None if health is None or protection is None else health + protection
+        return stats.get(stat)
 
 
 def squads_need_stats(squads: list[dict]) -> bool:
@@ -321,8 +345,11 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
         value = roster.stat(ally_code, opt["base_id"], st["stat"])
         if value is None:
             return "статы ещё не посчитаны"
-        if value < st["min"]:
-            name = STAT_SHORT.get(st["stat"], st["stat"])
+        name = STAT_SHORT.get(st["stat"], st["stat"])
+        if stat_op(st) == "<=":
+            if value > st["min"]:
+                return f"{name} {_fmt_stat(st['stat'], value)} > {_fmt_stat(st['stat'], st['min'])}"
+        elif value < st["min"]:
             return f"{name} {_fmt_stat(st['stat'], value)} < {_fmt_stat(st['stat'], st['min'])}"
     return None
 

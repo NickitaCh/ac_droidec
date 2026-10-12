@@ -305,13 +305,14 @@
         const statTpl = document.getElementById("twdef-stat-tpl");
         const MAX_STATS = 6;
 
-        // Требования к статам юнита: строки «стат ≥ минимум». Старый min_speed — как скорость.
-        const addStatRow = (row, stat, min) => {
+        // Требования к статам юнита: строки «стат ≥/≤ порог». Старый min_speed — как скорость.
+        const addStatRow = (row, stat, min, op) => {
             const box = row.querySelector(".twdef-stat-rows");
             if (box.children.length >= MAX_STATS) return null;
             const line = statTpl.content.firstElementChild.cloneNode(true);
             if (stat) line.querySelector("[data-stat]").value = stat;
             if (min !== undefined && min !== null) line.querySelector("[data-stat-min]").value = min;
+            if (op === "<=") line.querySelector("[data-stat-op]").value = "<=";
             line.querySelector(".twdef-remove-stat").addEventListener("click", () => {
                 line.remove();
                 row.querySelector(".twdef-add-stat").disabled = false;
@@ -412,7 +413,7 @@
             });
             const stats = (opt.stats || []).slice();
             if (opt.min_speed && !stats.some((x) => x.stat === "Speed")) stats.unshift({ stat: "Speed", min: opt.min_speed });
-            stats.forEach((x) => addStatRow(row, x.stat, x.min));
+            stats.forEach((x) => addStatRow(row, x.stat, x.min, x.op));
             row.querySelector(".twdef-add-stat").addEventListener("click", () => {
                 const line = addStatRow(row, null, null);
                 if (line) line.querySelector("[data-stat-min]").focus();
@@ -500,7 +501,10 @@
                     const stats = [];
                     row.querySelectorAll(".twdef-stat-row").forEach((line) => {
                         const v = line.querySelector("[data-stat-min]").value;
-                        if (v !== "") stats.push({ stat: line.querySelector("[data-stat]").value, min: parseFloat(v) });
+                        if (v === "") return;
+                        const st = { stat: line.querySelector("[data-stat]").value, min: parseFloat(v) };
+                        if (line.querySelector("[data-stat-op]").value === "<=") st.op = "<=";
+                        stats.push(st);
                     });
                     if (stats.length) opt.stats = stats;
                     options.push(opt);

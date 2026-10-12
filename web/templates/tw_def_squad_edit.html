@@ -97,12 +97,12 @@
             <select data-stat aria-label="Стат">
                 {% for st in stat_choices %}<option value="{{ st.key }}">{{ st.label }}</option>{% endfor %}
             </select>
-            <span class="muted">≥</span>
-            <input type="number" data-stat-min min="0" step="any" required aria-label="Минимум">
+            <select data-stat-op aria-label="Условие"><option value=">=">≥</option><option value="<=">≤</option></select>
+            <input type="number" data-stat-min min="0" step="any" required aria-label="Порог">
             <button type="button" class="twdef-x twdef-remove-stat" title="Убрать стат">✕</button>
         </span>
     </template>
 
     <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
-    <script src="/static/tw_def.js?v=20261008c" defer></script>
+    <script src="/static/tw_def.js?v=20261012a" defer></script>
 {% endblock %}
