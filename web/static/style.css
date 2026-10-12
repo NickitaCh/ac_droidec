@@ -1356,6 +1356,8 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .row-actions summary { list-style: none; cursor: pointer; }
 .row-actions summary::-webkit-details-marker { display: none; }
 .link-btn { color: var(--accent); font-size: 0.9em; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+/* <button class="link-btn"> иначе берёт фон --accent у button и текст сливается с фоном. */
+button.link-btn { background: none; border: none; padding: 0; border-radius: 0; }
 .row-actions details[open] { flex-basis: 100%; }
 .inline-form {
     flex-direction: row;
