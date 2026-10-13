@@ -365,7 +365,7 @@ def _build_table(headers: list, table_rows: list) -> str:
 
 def _stat_label(stat_name: str, priority: str) -> str:
     label = STAT_LABEL_SHORT.get(stat_name, stat_name)
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _omicron_options_for_base(base_id: str) -> list:
@@ -396,7 +396,7 @@ def _omicron_ability_label(skill_id: str) -> str:
 
 def _omicron_label(skill_id: str, priority: str) -> str:
     label = f"Омикрон: {_omicron_ability_label(skill_id)}"
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _mod_primary_option(slot_key: str, unit_stat_id) -> dict | None:
@@ -419,12 +419,12 @@ def _mod_primary_req_text(mod_slot: str, unit_stat_id, skill_id=None) -> str:
 
 def _mod_primary_label(mod_slot: str, priority: str) -> str:
     label = f"Основа: {MOD_SLOT_LABELS.get(mod_slot, mod_slot)}"
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _compare_label(stat_name: str, compare_character_key: str, priority: str) -> str:
     label = f"{_stat_label(stat_name, '')} vs {_unit_display_name(compare_character_key)}"
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _compare_offset_sign(operator: str) -> int:
@@ -474,7 +474,7 @@ def _player_mod_set_counts(unit: dict) -> dict:
 
 def _mod_set_label(set_id, priority: str) -> str:
     label = f"Сет: {_SET_NAME_BY_ID.get(int(set_id), set_id)}"
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _mod_set_req_text(set_id, sets_count=1) -> str:
@@ -518,7 +518,7 @@ def _mod_set_list_req_text(stat_name: str, skill_id) -> str:
 
 def _mod_set_list_label(stat_name: str, priority: str) -> str:
     label = "Сет: один из" if stat_name == STAT_SET_ANY else "Сеты: только"
-    return f"{label}*" if priority == "optional" else label
+    return f"{label}*" if priority in ("optional", "useful") else label
 
 
 def _worn_sets_text(mod_set_counts: dict) -> str:
@@ -594,7 +594,7 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     relic_reqs = [r for r in rows if r[3] == "Relic"]
     required_relic = int(relic_reqs[0][5]) if relic_reqs else None
     comments = [r[8] for r in rows if r[8]]
-    legend = " · * опционально" if any(r[6] == "optional" for r in rows) else ""
+    legend = " · * опционально" if any(r[6] in ("optional", "useful") for r in rows) else ""
     return rows, char_name, required_relic, comments, legend
 
 
@@ -773,7 +773,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             key = f"{stat_name}:{skill_id}"
             label = _mod_set_list_label(stat_name, priority)
             req_cell = _mod_set_list_req_text(stat_name, skill_id)
-            suffix = "*" if priority == "optional" else ""
+            suffix = "*" if priority in ("optional", "useful") else ""
             ok = current_values.get(key, 0.0) >= 1.0
             mod_set_lines.append(f"{_worn_sets_text(mod_set_counts)} {'✅' if ok else '❌'} — {req_cell}{suffix}")
             total += 1
@@ -795,7 +795,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             compare_char_name = _unit_display_name(compare_character_key)
             compare_unit, _ = await _get_unit_for_player(bot, ally_code, compare_character_key, force_refresh)
             if compare_unit is None:
-                suffix = "*" if priority == "optional" else ""
+                suffix = "*" if priority in ("optional", "useful") else ""
                 compare_lines.append(f"⚠️ {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}: нет данных у сравниваемого")
                 continue
             compare_stats = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, compare_unit)))
@@ -831,7 +831,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         else:
             req_cell = f"{operator} {_fmt_compact(threshold)}"
         cur_val = current_values.get(lookup_key)
-        suffix = "*" if priority == "optional" else ""
+        suffix = "*" if priority in ("optional", "useful") else ""
         if cur_val is None or threshold is None:
             if is_omicron:
                 omicron_lines.append(f"⚠️ {_omicron_ability_label(skill_id)}{suffix}: нет данных")
