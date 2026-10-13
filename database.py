@@ -1755,8 +1755,8 @@ def get_omicron_capable(base_ids: list[str]) -> set[str]:
 # =====================================================================
 def _ensure_journey_guide_table(cursor):
     """Требования «Руководства» (Journey Guide) — общий для всех гильдий справочник,
-    заполняется services/journey_guide.py из Comlink. Одна строка = один юнит, которого
-    нужно прокачать для открытия guide_base_id. source: 'quest' — квест открытия игры
+    заполняется services/journey_guide.py из Comlink. Одна строка = одна цель юнита
+    (у героя эпохи их две: звёзды и реликвия из «уровня эпохи»). source: 'quest' — квест открытия игры
     (реальное требование), 'entry' — минимум для входа в бои старого события (такие
     уровни гильдия может поднять у себя — journey_guide_overrides)."""
     cursor.execute("""
@@ -1767,13 +1767,38 @@ def _ensure_journey_guide_table(cursor):
             unit_base_id TEXT NOT NULL,
             target_type TEXT NOT NULL,
             target_value TEXT NOT NULL,
-            PRIMARY KEY (guide_base_id, unit_base_id)
+            source TEXT NOT NULL DEFAULT 'quest',
+            PRIMARY KEY (guide_base_id, unit_base_id, target_type)
         )
     """)
     try:
         cursor.execute("ALTER TABLE journey_guide_requirements ADD COLUMN source TEXT NOT NULL DEFAULT 'quest'")
     except sqlite3.OperationalError:
         pass
+    # Старый ключ (guide, unit) не пускал вторую цель юнита — пересоздаём с переносом строк.
+    pk = [r[1] for r in sorted(cursor.execute("PRAGMA table_info(journey_guide_requirements)").fetchall(), key=lambda r: r[5]) if r[5]]
+    if "target_type" not in pk:
+        cursor.execute("ALTER TABLE journey_guide_requirements RENAME TO journey_guide_requirements_old")
+        cursor.execute("""
+            CREATE TABLE journey_guide_requirements (
+                guide_base_id TEXT NOT NULL,
+                guide_kind TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                unit_base_id TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_value TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'quest',
+                PRIMARY KEY (guide_base_id, unit_base_id, target_type)
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO journey_guide_requirements
+                (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value, source)
+            SELECT guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value, source
+            FROM journey_guide_requirements_old
+        """)
+        cursor.execute("DROP TABLE journey_guide_requirements_old")
+        cursor.connection.commit()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS journey_guide_overrides (
             guild_id INTEGER NOT NULL,
@@ -1809,7 +1834,7 @@ def get_journey_guides() -> list[tuple]:
     _ensure_journey_guide_table(cursor)
     conn.commit()
     cursor.execute("""
-        SELECT guide_base_id, guide_kind, COUNT(*), MAX(source) FROM journey_guide_requirements
+        SELECT guide_base_id, guide_kind, COUNT(DISTINCT unit_base_id), MAX(source) FROM journey_guide_requirements
         GROUP BY guide_base_id, guide_kind ORDER BY MIN(rowid)
     """)
     rows = cursor.fetchall()
@@ -1839,7 +1864,16 @@ def get_journey_guide_requirements_detail(guide_base_id: str, guild_id: int | No
     """, (guild_id if guild_id is not None else -1, guide_base_id))
     rows = cursor.fetchall()
     conn.close()
-    return rows
+    # Уровень гильдии заменяет все цели юнита одной — остальные строки этого юнита дубли.
+    seen_overridden = set()
+    result = []
+    for row in rows:
+        if row[6]:
+            if row[0] in seen_overridden:
+                continue
+            seen_overridden.add(row[0])
+        result.append(row)
+    return result
 
 
 def set_journey_guide_overrides(guild_id: int, guide_base_id: str, overrides: dict) -> None:

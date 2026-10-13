@@ -251,12 +251,16 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     batch_groups = {}
     for t in tasks_ctx:
         if t["batch_id"] and t["status"] == "ACTIVE":
+            # Группа «Руководства» — разные герои у одного игрока: перечисляем всех, а не
+            # первого попавшегося (Ricardo, 2026-10-13: группа выглядела как один «Командир
+            # снежных штурмовиков»). Игроки и цели — без повторов.
             g = batch_groups.setdefault(t["batch_id"], {
-                "count": 0, "players": [],
-                "unit_name": t["unit_name"], "target_label": t["target_label"], "deadline": t["deadline"],
+                "count": 0, "players": [], "units": [], "targets": [], "deadline": t["deadline"],
             })
             g["count"] += 1
-            g["players"].append(t["player_name"])
+            for key, value in (("players", t["player_name"]), ("units", t["unit_name"]), ("targets", t["target_label"])):
+                if value not in g[key]:
+                    g[key].append(value)
     batch_list = [{"batch_id": bid, **g} for bid, g in batch_groups.items()]
 
     players_view = []
@@ -542,14 +546,21 @@ async def _guide_plans(guild_id: int, ally_codes: list, requirements: list) -> d
 async def guide_requirements(base_id: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
     reqs = database.get_journey_guide_requirements_detail(base_id, user["guild_id"])
     names = database.get_game_unit_names([r[0] for r in reqs])
-    return [
-        {"base_id": unit_id, "name": names.get(unit_id) or unit_id,
-         "label": journey_guide.short_label(target_type, target_value),
-         "target_type": target_type, "target_value": target_value,
-         "editable": source == "entry", "overridden": bool(overridden),
-         "default_label": journey_guide.short_label(default_type, default_value)}
-        for unit_id, target_type, target_value, source, default_type, default_value, overridden in reqs
-    ]
+    # У героя эпохи две цели (звёзды + реликвия) — одна строка «7★ + R4».
+    result = {}
+    for unit_id, target_type, target_value, source, default_type, default_value, overridden in reqs:
+        label = journey_guide.short_label(target_type, target_value)
+        default_label = journey_guide.short_label(default_type, default_value)
+        if unit_id in result:
+            result[unit_id]["label"] += f" + {label}"
+            result[unit_id]["default_label"] += f" + {default_label}"
+            continue
+        result[unit_id] = {
+            "base_id": unit_id, "name": names.get(unit_id) or unit_id, "label": label,
+            "target_type": target_type, "target_value": target_value,
+            "editable": source == "entry", "overridden": bool(overridden), "default_label": default_label,
+        }
+    return list(result.values())
 
 
 @router.post("/api/guide-levels", response_class=JSONResponse)
@@ -601,7 +612,7 @@ async def guide_preview(
          for c, p in plans.items()),
         key=lambda p: (-p["create"], p["name"].lower()),
     )
-    return {"players": players, "total": len(requirements), "create": sum(p["create"] for p in players)}
+    return {"players": players, "total": len(journey_guide.group_by_unit(requirements)), "create": sum(p["create"] for p in players)}
 
 
 @router.post("/add-guide", response_class=HTMLResponse)

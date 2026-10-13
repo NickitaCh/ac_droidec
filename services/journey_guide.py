@@ -8,7 +8,10 @@
    юнит в actionLinkDef.link (`base_id=CAPTAINREX`), уровень в descKey
    (`GLEVENT_PREREQ_RELIC_07`, `GLEVENT_PREREQ_STAR_04`, `EVENT_PREREQ_GEAR_12`).
    У Енота и Дарта Джа-Джа ссылки нет — их квесты `Event_Unlock_<Событие>_TierNN`
-   находятся по имени узла кампании. `EVENT_PREREQ_ERA_LEVEL_*` (уровень эпохи) не берём.
+   находятся по имени узла кампании. `EVENT_PREREQ_ERA_LEVEL_N` — «уровень эпохи» героя
+   эпохи (один уровень вместо уровня/снаряжения/способностей); по таблице
+   eraDefinition[].eraLevel он переводится в реликвию или снаряжение (125 = R4). У такого
+   героя две цели — звёзды и реликвия; ставится первая невыполненная (plan_player).
 2. Старые события без квестов (source='entry'): условия входа в бои —
    campaign[EVENTS] → узел из guide.campaignElementIdentifier → campaignNodeMission[]
    .entryCategoryAllowed: mandatoryRosterUnit + categoryId `selftag_*` (конкретный юнит,
@@ -29,12 +32,13 @@ UNIT_GUIDE_DEFINITION_FLAG = 17179869184
 REQUIREMENT_FLAG = 512
 CHALLENGE_FLAG = 8388608
 CAMPAIGN_FLAG = 274877906944
+ERA_DEFINITION_FLAG = 2251799813685248
 CHALLENGE_REQUIREMENT_TYPE = 105
 
 KIND_LABELS = {"gl": "Легенды галактики", "capital": "Флагманы", "journey": "Путешествия",
                "event": "Старые события (минимум для входа)"}
 
-_DESC_RE = re.compile(r"PREREQ_(RELIC|STAR|GEAR)_(\d+)$")
+_DESC_RE = re.compile(r"PREREQ_(RELIC|STAR|GEAR|ERA_LEVEL)_(\d+)$")
 _DESC_TYPES = {"RELIC": "relic", "STAR": "stars", "GEAR": "gear"}
 _BASE_ID_RE = re.compile(r"base_id=([A-Z0-9_]+)")
 _UNLOCK_QUEST_RE = re.compile(r"^Event_Unlock_(.+?)(?:_Tier\d+|_\d+)?$")
@@ -52,7 +56,35 @@ def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-def _units_from_challenges(challenges: list) -> dict:
+# Порядок выбора цели юнита: сначала реликвия (самая тяжёлая), потом снаряжение, звёзды.
+TARGET_PRIORITY = {"relic": 0, "gear": 1, "stars": 2}
+
+
+def era_level_index(eras: list) -> dict:
+    """{unit: {era_level: (gear_tier, relic_raw)}} из eraDefinition."""
+    index = {}
+    for era in eras:
+        levels = {e["level"]: (e.get("currentGearTier") or 0, e.get("currentRelicTier") or 0)
+                  for e in era.get("eraLevel") or []}
+        for unit in era.get("eraUnitId") or []:
+            index[unit] = levels
+    return index
+
+
+def _era_level_target(level: int, levels: dict) -> tuple | None:
+    """Уровень эпохи → (target_type, value): реликвия, если она уже есть на этом уровне,
+    иначе снаряжение. None — уровня нет в таблице."""
+    if level not in levels:
+        return None
+    gear, relic_raw = levels[level]
+    if relic_raw >= 3:  # сырой tier: 1 — нет, 2 — R0, 3 — R1
+        return "relic", relic_raw - 2
+    if gear > 1:
+        return "gear", gear
+    return None
+
+
+def _units_from_challenges(challenges: list, era_levels: dict | None = None) -> dict:
     """{(unit, target_type): max value} по заданиям квестов."""
     units = {}
     for challenge in challenges:
@@ -62,8 +94,15 @@ def _units_from_challenges(challenges: list) -> dict:
             desc_m = _DESC_RE.search(task.get("descKey", ""))
             if not unit_m or not desc_m:
                 continue  # скрытые задания ещё не вышедшей цели, уровень эпохи
-            target_type, value = _DESC_TYPES[desc_m.group(1)], int(desc_m.group(2))
-            key = (unit_m.group(1), target_type)
+            unit_id, value = unit_m.group(1), int(desc_m.group(2))
+            if desc_m.group(1) == "ERA_LEVEL":
+                target = _era_level_target(value, (era_levels or {}).get(unit_id, {}))
+                if target is None:
+                    continue
+                target_type, value = target
+            else:
+                target_type = _DESC_TYPES[desc_m.group(1)]
+            key = (unit_id, target_type)
             if key not in units or units[key] < value:
                 units[key] = value
     return units
@@ -98,9 +137,11 @@ def _units_from_entry(node: dict, guide_unit: str, selftags: dict) -> dict:
 
 
 def parse_guide_requirements(guides: list, requirements: list, challenges: list,
-                             campaigns: list | None = None, selftags: dict | None = None) -> list[tuple]:
-    """Строки для database.replace_journey_guide_requirements. Юнит, встречающийся в
-    нескольких квестах одной цели, берётся один раз — с максимальным уровнем."""
+                             campaigns: list | None = None, selftags: dict | None = None,
+                             eras: list | None = None) -> list[tuple]:
+    """Строки для database.replace_journey_guide_requirements. Цель юнита (тип), встречающаяся
+    в нескольких квестах, берётся один раз — с максимальным уровнем."""
+    era_levels = era_level_index(eras or [])
     req_by_id = {r["id"]: r for r in requirements}
     ch_by_id = {c["id"]: c for c in challenges}
     unlock_quests = {}
@@ -119,12 +160,12 @@ def parse_guide_requirements(guides: list, requirements: list, challenges: list,
     for entry in guides:
         req = req_by_id.get(entry.get("additionalActivationRequirementId") or "")
         quest_ids = [i.get("id") for i in (req or {}).get("requirementItem", []) if i.get("type") == CHALLENGE_REQUIREMENT_TYPE]
-        units = _units_from_challenges([ch_by_id[q] for q in quest_ids if q in ch_by_id])
+        units = _units_from_challenges([ch_by_id[q] for q in quest_ids if q in ch_by_id], era_levels)
         kind, source = _guide_kind(entry), "quest"
         ce = entry.get("campaignElementIdentifier") or {}
         if not units and ce.get("campaignNodeId"):
             found = sorted(unlock_quests.get(_norm(ce["campaignNodeId"]), []), key=lambda c: c["id"])
-            units = _units_from_challenges(found)
+            units = _units_from_challenges(found, era_levels)
         if not units and ce.get("campaignId") == "EVENTS" and selftags:
             node = nodes.get((ce["campaignId"], ce.get("campaignMapId"), ce["campaignNodeId"], ce.get("campaignNodeDifficulty")))
             if node:
@@ -135,11 +176,11 @@ def parse_guide_requirements(guides: list, requirements: list, challenges: list,
         guide_id = entry["unitBaseId"]
         if guide_id == "TBA" and req:  # анонс ещё не вышедшей цели — юнита в справочнике нет
             guide_id = req["id"].replace("_JOURNEY_GUIDE_REQUIREMENT", "")
-        seen_units = set()
-        for order, ((unit_id, target_type), value) in enumerate(units.items()):
-            if unit_id in seen_units:
-                continue
-            seen_units.add(unit_id)
+        # Реликвия уже включает G13 — снаряжение из младших ярусов эпохи лишнее.
+        units = {k: v for k, v in units.items() if not (k[1] == "gear" and (k[0], "relic") in units)}
+        unit_order = list(dict.fromkeys(unit_id for unit_id, _t in units))
+        ordered = sorted(units.items(), key=lambda kv: (unit_order.index(kv[0][0]), TARGET_PRIORITY.get(kv[0][1], 9)))
+        for order, ((unit_id, target_type), value) in enumerate(ordered):
             rows.append((guide_id, kind, order, unit_id, target_type, str(value), source))
     return rows
 
@@ -155,9 +196,10 @@ async def sync_journey_guide(comlink) -> int:
     requirements = await fetch(REQUIREMENT_FLAG, "requirement")
     challenges = await fetch(CHALLENGE_FLAG, "challenge")
     campaigns = await fetch(CAMPAIGN_FLAG, "campaign")
+    eras = await fetch(ERA_DEFINITION_FLAG, "eraDefinition")
     raw_selftags = database.get_bot_state("unit_selftags", guild_id=0)
     selftags = json.loads(raw_selftags) if raw_selftags else {}
-    rows = parse_guide_requirements(guides, requirements, challenges, campaigns, selftags)
+    rows = parse_guide_requirements(guides, requirements, challenges, campaigns, selftags, eras)
     # Событийные копии героев (GENERALKENOBI_GLE, IG11_MANDALORIAN_EVENT) — не юниты ростера.
     known = database.get_game_unit_names([r[3] for r in rows])
     rows = [r for r in rows if r[3] in known]
@@ -216,24 +258,38 @@ def roster_index(player_data: dict) -> dict:
     return {(u.get("baseId") or u.get("definitionId", "").split(":")[0]): u for u in roster}
 
 
+def group_by_unit(requirements: list[tuple]) -> dict:
+    """{unit: [(target_type, target_value), ...]} в порядке игры, цели — по TARGET_PRIORITY."""
+    grouped = {}
+    for unit_id, target_type, target_value in requirements:
+        grouped.setdefault(unit_id, []).append((target_type, target_value))
+    for targets in grouped.values():
+        targets.sort(key=lambda t: TARGET_PRIORITY.get(t[0], 9))
+    return grouped
+
+
 def plan_player(guild_id: int, ally_code: str, requirements: list[tuple], roster: dict | None) -> dict:
-    """Что поставить игроку по требованиям цели. roster=None — Comlink недоступен:
-    ставим всё, кроме дублей, без снимка прогресса.
+    """Что поставить игроку по требованиям цели. У юнита может быть несколько целей
+    (звёзды + реликвия у героя эпохи) — ставится одна, первая невыполненная: реликвия,
+    потом снаряжение, потом звёзды. roster=None — Comlink недоступен: ставим главную цель,
+    кроме дублей, без снимка прогресса.
     → {"create": [(unit, type, value, initial)], "done": [unit], "duplicate": [unit]}"""
     plan = {"create": [], "done": [], "duplicate": []}
-    for unit_id, target_type, target_value in requirements:
+    for unit_id, targets in group_by_unit(requirements).items():
         if database.get_active_task_for_unit(guild_id, ally_code, unit_id):
             plan["duplicate"].append(unit_id)
             continue
-        initial = None
-        if roster is not None:
-            unit = roster.get(unit_id)
-            if unit is not None:  # не открыт — без снимка, как в /задачи добавить
-                if unit_meets(unit, target_type, target_value):
-                    plan["done"].append(unit_id)
-                    continue
-                initial = unit_progress(unit, target_type)
-        plan["create"].append((unit_id, target_type, target_value, initial))
+        unit = roster.get(unit_id) if roster is not None else None
+        if unit is None:  # не открыт или нет данных — без снимка, как в /задачи добавить
+            target_type, target_value = targets[0]
+            plan["create"].append((unit_id, target_type, target_value, None))
+            continue
+        pending = [(t, v) for t, v in targets if not unit_meets(unit, t, v)]
+        if not pending:
+            plan["done"].append(unit_id)
+            continue
+        target_type, target_value = pending[0]
+        plan["create"].append((unit_id, target_type, target_value, unit_progress(unit, target_type)))
     return plan
 
 
