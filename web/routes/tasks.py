@@ -6,6 +6,7 @@
 и напоминания — там же (tasks_notify_loop) — веб лишь читает уже проставленный ботом
 статус и настраивает время рассылки (guilds.tasks_notify_time, см. /settings)."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
-from services import feature_flags
+from services import feature_flags, journey_guide
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -28,7 +29,8 @@ MSK = ZoneInfo("Europe/Moscow")
 
 TARGET_TYPE_OPTIONS = [
     ("stars", "⭐ Звёзды (1-7)"),
-    ("relic", "♦️ Реликвия (0-9)"),
+    ("relic", "♦️ Реликвия (0-10)"),
+    ("gear", "⚙️ Снаряжение (1-13)"),
     ("omicron", "🧬 Омикрон"),
 ]
 TARGET_TYPE_LABELS = dict(TARGET_TYPE_OPTIONS)
@@ -100,13 +102,9 @@ def _fetch_unit_data(comlink, ally_code: str, base_id: str) -> dict | None:
 
 
 def _current_progress_value(unit_data: dict, target_type: str, target_value: str) -> str:
-    if target_type == 'stars':
-        return str(unit_data.get('currentRarity', 0))
-    if target_type == 'relic':
-        # См. cogs/tasks.py::_current_progress_value за объяснением смещения +2 —
-        # тот же баг дублирован здесь (файл намеренно не импортирует cogs/tasks.py).
-        raw_tier = unit_data.get('relic', {}).get('currentTier', 0)
-        return str(raw_tier - 2) if raw_tier > 2 else "0"
+    # stars/relic/gear — общая с ботом логика (смещение +2 у реликвии и т.п.).
+    if target_type in ('stars', 'relic', 'gear'):
+        return journey_guide.unit_progress(unit_data, target_type)
     if target_type == 'omicron':
         for skill in unit_data.get('skill', []):
             if skill.get('id') == target_value:
@@ -116,13 +114,8 @@ def _current_progress_value(unit_data: dict, target_type: str, target_value: str
 
 
 def _is_target_completed(unit_data: dict, target_type: str, target_value: str, skill_thresholds: dict) -> bool:
-    if target_type == 'stars':
-        return unit_data.get('currentRarity', 0) >= int(target_value)
-    if target_type == 'relic':
-        current_relic_tier = unit_data.get('relic', {}).get('currentTier', 0)
-        target_val_int = int(target_value)
-        required_tier = target_val_int + 2 if target_val_int > 0 else 0
-        return current_relic_tier >= required_tier
+    if target_type in ('stars', 'relic', 'gear'):
+        return journey_guide.unit_meets(unit_data, target_type, target_value)
     if target_type == 'omicron':
         omicron_tier = skill_thresholds.get(target_value, (None, None))[1]
         if omicron_tier is None:
@@ -150,8 +143,8 @@ def _omicron_options(base_id: str) -> list:
 def _target_label(target_type: str, target_value: str) -> str:
     if target_type == "stars":
         return f"⭐ Звёзды {target_value}"
-    if target_type == "relic":
-        return f"♦️ Реликвия {target_value}"
+    if target_type in ("relic", "gear"):
+        return journey_guide.target_label(target_type, target_value)
     if target_type == "omicron":
         info = database.get_skill_display_info([target_value]).get(target_value)
         name = info[0] if info and info[0] else target_value
@@ -171,7 +164,7 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
         if target_value not in valid_skills:
             return "Для омикрона выберите конкретную способность из подсказки (не свободный текст)."
     elif not target_value.isdigit():
-        return "Для звёзд/реликвии значение должно быть числом."
+        return "Для звёзд/реликвии/снаряжения значение должно быть числом."
     return None
 
 
@@ -300,6 +293,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "players_view": players_view,
         "omicron_options_by_unit": omicron_options_by_unit,
         "target_type_options": TARGET_TYPE_OPTIONS,
+        "guide_options": journey_guide.guide_options(),
         "roster": roster,
         "prefill": prefill,
         "error": request.query_params.get("error"),
@@ -523,6 +517,100 @@ async def task_add_bulk(
     return RedirectResponse(f"/tasks?{urlencode({'notice': ', '.join(parts)})}", status_code=303)
 
 
+# ---------------------------------------------------------------------------
+# Постановка по «Руководству»: все герои, нужные для ГЛ / флагмана / путешествия
+# (RicardoOneS, тред "Гайд по АС Боту", 2026-10-09: "по одному персу назначать муторно").
+# ---------------------------------------------------------------------------
+
+async def _guide_plans(guild_id: int, ally_codes: list, requirements: list) -> dict:
+    """{ally_code: plan} — ростер каждого игрока грузится один раз, до 5 параллельно."""
+    comlink = _get_comlink()
+    sem = asyncio.Semaphore(5)
+
+    async def one(code):
+        async with sem:
+            try:
+                roster = journey_guide.roster_index(await asyncio.to_thread(comlink.get_player, code))
+            except Exception:
+                roster = None
+        return code, journey_guide.plan_player(guild_id, code, requirements, roster)
+
+    return dict(await asyncio.gather(*(one(c) for c in ally_codes)))
+
+
+@router.get("/api/guide", response_class=JSONResponse)
+async def guide_requirements(base_id: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
+    reqs = database.get_journey_guide_requirements(base_id)
+    names = database.get_game_unit_names([r[0] for r in reqs])
+    return [
+        {"base_id": unit_id, "name": names.get(unit_id) or unit_id,
+         "label": journey_guide.short_label(target_type, target_value)}
+        for unit_id, target_type, target_value in reqs
+    ]
+
+
+@router.post("/api/guide-preview", response_class=JSONResponse)
+async def guide_preview(
+    ally_codes: list = Form(default=[]),
+    guide: str = Form(...),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
+):
+    guild_id = user["guild_id"]
+    requirements = database.get_journey_guide_requirements(guide)
+    if not requirements:
+        return JSONResponse({"error": "Выберите цель из «Руководства»."}, status_code=400)
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    valid_codes = [c for c in ally_codes if c in names_by_code]
+    if not valid_codes:
+        return JSONResponse({"error": "Не выбрано ни одного игрока из состава гильдии."}, status_code=400)
+
+    plans = await _guide_plans(guild_id, valid_codes, requirements)
+    players = sorted(
+        ({"name": names_by_code[c], "create": len(p["create"]), "done": len(p["done"]), "duplicate": len(p["duplicate"])}
+         for c, p in plans.items()),
+        key=lambda p: (-p["create"], p["name"].lower()),
+    )
+    return {"players": players, "total": len(requirements), "create": sum(p["create"] for p in players)}
+
+
+@router.post("/add-guide", response_class=HTMLResponse)
+async def task_add_guide(
+    ally_codes: list = Form(default=[]),
+    guide: str = Form(...),
+    deadline: str = Form(...),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
+):
+    guild_id = user["guild_id"]
+    requirements = database.get_journey_guide_requirements(guide)
+    if not requirements:
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'Выберите цель из «Руководства».'})}", status_code=303)
+    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+    valid_codes = [c for c in ally_codes if c in names_by_code]
+    if not valid_codes:
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'Не выбрано ни одного игрока из состава гильдии.'})}", status_code=303)
+    err = _validate_deadline(deadline)
+    if err:
+        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
+
+    plans = await _guide_plans(guild_id, valid_codes, requirements)
+    batch_id = uuid.uuid4().hex[:12]
+    created = done = duplicate = 0
+    for code, plan in plans.items():
+        for unit_id, target_type, target_value, initial in plan["create"]:
+            database.add_task(code, unit_id, target_type, target_value, deadline, str(user["discord_id"]),
+                              guild_id=guild_id, batch_id=batch_id, initial_value=initial)
+        created += len(plan["create"])
+        done += len(plan["done"])
+        duplicate += len(plan["duplicate"])
+
+    parts = [f"поставлено: {created}"]
+    if duplicate:
+        parts.append(f"пропущено (уже назначено): {duplicate}")
+    if done:
+        parts.append(f"пропущено (уже выполнено): {done}")
+    return RedirectResponse(f"/tasks?{urlencode({'notice': ', '.join(parts)})}", status_code=303)
+
+
 @router.post("/{task_id}/edit", response_class=HTMLResponse)
 async def task_edit(
     task_id: int,
@@ -569,6 +657,7 @@ async def sync_units_now(user: dict = Depends(require_officer_access)):
     comlink = _get_comlink()
     try:
         total = await sync_units(comlink)
+        await journey_guide.sync_journey_guide(comlink)
     except Exception as e:
         return RedirectResponse(f"/tasks?{urlencode({'error': f'Ошибка синхронизации: {e}'})}", status_code=303)
     return RedirectResponse(f"/tasks?{urlencode({'synced': str(total)})}", status_code=303)

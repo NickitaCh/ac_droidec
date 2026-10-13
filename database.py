@@ -1753,6 +1753,69 @@ def get_omicron_capable(base_ids: list[str]) -> set[str]:
 # =====================================================================
 # ЗАДАЧИ НА ПРОКАЧКУ (/задачи + часовой аудит выполнения через Comlink)
 # =====================================================================
+def _ensure_journey_guide_table(cursor):
+    """Требования «Руководства» (Journey Guide) — общий для всех гильдий справочник,
+    заполняется services/journey_guide.py из Comlink. Одна строка = один юнит, которого
+    нужно прокачать для открытия guide_base_id (ГЛ, капшип, путешествие)."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS journey_guide_requirements (
+            guide_base_id TEXT NOT NULL,
+            guide_kind TEXT NOT NULL,
+            sort_order INTEGER NOT NULL,
+            unit_base_id TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_value TEXT NOT NULL,
+            PRIMARY KEY (guide_base_id, unit_base_id)
+        )
+    """)
+
+
+def replace_journey_guide_requirements(rows: list[tuple]) -> None:
+    """rows: (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value).
+    Полная замена справочника одной транзакцией."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_journey_guide_table(cursor)
+    cursor.execute("DELETE FROM journey_guide_requirements")
+    cursor.executemany("""
+        INSERT OR REPLACE INTO journey_guide_requirements
+            (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, rows)
+    conn.commit()
+    conn.close()
+
+
+def get_journey_guides() -> list[tuple]:
+    """[(guide_base_id, guide_kind, units_count)] в порядке первого появления."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_journey_guide_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT guide_base_id, guide_kind, COUNT(*) FROM journey_guide_requirements
+        GROUP BY guide_base_id, guide_kind ORDER BY MIN(rowid)
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_journey_guide_requirements(guide_base_id: str) -> list[tuple]:
+    """[(unit_base_id, target_type, target_value)] в порядке квестов игры."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_journey_guide_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT unit_base_id, target_type, target_value FROM journey_guide_requirements
+        WHERE guide_base_id = ? ORDER BY sort_order
+    """, (guide_base_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1,
              batch_id: str = None, initial_value: str = None) -> int:
     """initial_value — снимок текущего состояния юнита на момент постановки (см.

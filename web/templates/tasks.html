@@ -129,6 +129,63 @@
         </details>
     </div>
 
+    {% if guide_options %}
+    <div class="panel" style="max-width: 40em;">
+        <details>
+            <summary class="link-btn">По «Руководству» — все герои для ГЛ, флагмана или путешествия</summary>
+            <form method="post" action="/tasks/add-guide" class="inline-form" id="task-add-guide-form" style="flex-direction: column; align-items: stretch;">
+                <label>
+                    Цель
+                    <select name="guide" id="guide-select" required>
+                        <option value="">— выберите —</option>
+                        {% for kind_label, items in guide_options|groupby("kind_label", default="") %}
+                            <optgroup label="{{ kind_label }}">
+                                {% for g in items %}
+                                    <option value="{{ g.base_id }}">{{ g.name }} ({{ g.count }})</option>
+                                {% endfor %}
+                            </optgroup>
+                        {% endfor %}
+                    </select>
+                </label>
+                <div id="guide-reqs" class="muted"></div>
+                <label>
+                    Игроки
+                    <input type="search" placeholder="Фильтр по имени…" data-table-search="guide-player-table">
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="guide-select-all"> Выбрать всех
+                </label>
+                <div class="table-scroll" style="max-height: 16em;">
+                    <table class="data" id="guide-player-table">
+                        <tbody>
+                            {% for code, name in roster %}
+                                <tr data-search="{{ name|lower }}">
+                                    <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"> {{ name }}</label></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <label>
+                    Дедлайн
+                    <input type="date" name="deadline" required>
+                </label>
+                <p class="muted">Задача ставится на каждого героя, который ещё не дотягивает до требования. Уже выполненное и уже назначенное пропускается.</p>
+                <button type="submit" id="guide-submit-btn">Поставить выбранным</button>
+            </form>
+        </details>
+    </div>
+
+    <dialog id="guide-confirm-dialog" class="confirm-dialog">
+        <h3>Подтверждение постановки</h3>
+        <div id="guide-confirm-body"></div>
+        <div class="dialog-actions">
+            <button type="button" class="button-secondary" id="guide-confirm-cancel">Отмена</button>
+            <button type="button" id="guide-confirm-ok">Поставить</button>
+        </div>
+    </dialog>
+    {% endif %}
+
     <dialog id="bulk-confirm-dialog" class="confirm-dialog">
         <h3>Подтверждение постановки</h3>
         <div id="bulk-confirm-body"></div>
@@ -438,6 +495,88 @@ document.addEventListener("DOMContentLoaded", () => {
             bulkForm.requestSubmit();
         });
         bulkCancelBtn.addEventListener("click", () => bulkDialog.close());
+    }
+
+    // Постановка по «Руководству»: список требований выбранной цели + предпросмотр
+    // по игрокам (сколько задач будет поставлено каждому) перед реальной отправкой.
+    const guideForm = document.getElementById("task-add-guide-form");
+    if (guideForm) {
+        const guideSelect = document.getElementById("guide-select");
+        const guideReqs = document.getElementById("guide-reqs");
+        const guideAll = document.getElementById("guide-select-all");
+        const guideDialog = document.getElementById("guide-confirm-dialog");
+        const guideBody = document.getElementById("guide-confirm-body");
+        const guideOk = document.getElementById("guide-confirm-ok");
+        const guideSubmit = document.getElementById("guide-submit-btn");
+        let guideConfirmed = false;
+
+        guideAll.addEventListener("change", () => {
+            guideForm.querySelectorAll('input[name="ally_codes"]').forEach((cb) => { cb.checked = guideAll.checked; });
+        });
+
+        guideSelect.addEventListener("change", async () => {
+            guideReqs.innerHTML = "";
+            if (!guideSelect.value) return;
+            try {
+                const resp = await fetch(`/tasks/api/guide?base_id=${encodeURIComponent(guideSelect.value)}`);
+                const reqs = resp.ok ? await resp.json() : [];
+                guideReqs.innerHTML = reqs.map((r) =>
+                    `<span class="badge badge-neutral badge-unit"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/${encodeURIComponent(r.base_id)}" alt="" loading="lazy"></span>${escapeHtml(r.name)} — ${escapeHtml(r.label)}</span>`
+                ).join(" ");
+            } catch {
+                guideReqs.textContent = "Не удалось загрузить требования.";
+            }
+        });
+
+        guideForm.addEventListener("submit", async (e) => {
+            if (guideConfirmed) {
+                guideConfirmed = false;
+                return;
+            }
+            e.preventDefault();
+            if (!guideForm.querySelectorAll('input[name="ally_codes"]:checked').length) {
+                alert("Не выбрано ни одного игрока.");
+                return;
+            }
+            const originalText = guideSubmit.textContent;
+            guideSubmit.disabled = true;
+            guideSubmit.textContent = "⏳ Проверяю ростеры...";
+            let preview;
+            try {
+                const resp = await fetch("/tasks/api/guide-preview", { method: "POST", body: new FormData(guideForm) });
+                preview = await resp.json();
+                if (!resp.ok) {
+                    alert(preview.error || "Не удалось проверить постановку.");
+                    return;
+                }
+            } catch {
+                alert("Не удалось проверить постановку.");
+                return;
+            } finally {
+                guideSubmit.disabled = false;
+                guideSubmit.textContent = originalText;
+            }
+
+            const rows = preview.players.map((p) =>
+                `<tr><td>${escapeHtml(p.name)}</td><td>${p.create}</td><td>${p.done}</td><td>${p.duplicate}</td></tr>`
+            ).join("");
+            guideBody.innerHTML =
+                `<p><strong>Будет поставлено задач: ${preview.create}</strong> (требований у цели: ${preview.total})</p>` +
+                `<div class="table-scroll" style="max-height: 20em;"><table class="data"><thead><tr><th>Игрок</th><th>Поставить</th><th>Уже выполнено</th><th>Уже назначено</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            guideOk.style.display = preview.create ? "" : "none";
+            guideOk.textContent = `Поставить (${preview.create})`;
+            guideDialog.showModal();
+        });
+
+        guideOk.addEventListener("click", () => {
+            guideDialog.close();
+            guideOk.disabled = true;
+            guideSubmit.disabled = true;
+            guideSubmit.textContent = "⏳ Ставлю задачи...";
+            guideConfirmed = true;
+            guideForm.requestSubmit();
+        });
+        document.getElementById("guide-confirm-cancel").addEventListener("click", () => guideDialog.close());
     }
 });
 </script>

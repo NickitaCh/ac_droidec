@@ -1,5 +1,6 @@
 import asyncio
 import re
+import uuid
 import disnake
 from disnake.ext import commands, tasks
 from datetime import datetime
@@ -8,6 +9,7 @@ import database
 import guild_resolver
 from services import feature_flags
 from services.units_sync import sync_units
+from services import journey_guide
 from services.equipment_sync import sync_equipment
 from services.config_status import config_warning_text
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
@@ -74,6 +76,17 @@ async def autocomplete_task_target_value(inter: disnake.ApplicationCommandIntera
     return options[:25]
 
 
+async def autocomplete_journey_guide(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Цели «Руководства» (ГЛ / флагманы / путешествия) из справочника journey_guide."""
+    search = string.lower().strip()
+    options = []
+    for g in journey_guide.guide_options():
+        label = f"{g['name']} — {g['kind_label']} ({g['count']})"
+        if not search or search in label.lower() or search in g["base_id"].lower():
+            options.append(disnake.OptionChoice(name=label[:100], value=g["base_id"]))
+    return options[:25]
+
+
 class TasksCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -116,6 +129,11 @@ class TasksCog(commands.Cog):
             print(f"✅ [Задачи] Справочник обновлён: {total} юнитов")
         except Exception as e:
             print(f"⚠️ [Задачи] Не удалось обновить справочник: {e}")
+        try:
+            rows = await journey_guide.sync_journey_guide(self.bot.comlink)
+            print(f"✅ [Задачи] Требования «Руководства» обновлены: {rows}")
+        except Exception as e:
+            print(f"⚠️ [Задачи] Не удалось обновить требования «Руководства»: {e}")
 
     @units_sync_loop.before_loop
     async def before_units_sync(self):
@@ -143,8 +161,8 @@ class TasksCog(commands.Cog):
     def _format_target_label(self, target_type: str, target_value: str) -> str:
         if target_type == "stars":
             return f"⭐ Звёзды {target_value}"
-        if target_type == "relic":
-            return f"♦️ Реликвия {target_value}"
+        if target_type in ("relic", "gear"):
+            return journey_guide.target_label(target_type, target_value)
         if target_type == "omicron":
             info = database.get_skill_display_info([target_value]).get(target_value)
             name = info[0] if info and info[0] else target_value
@@ -193,19 +211,11 @@ class TasksCog(commands.Cog):
     def _current_progress_value(self, unit_data: dict, target_type: str, target_value: str) -> str:
         """Значение, сравнимое с initial_value/target_value — "текущее состояние"
         для отчётов (пп. 8-9 из Discord-треда "Гайд по АС Боту")."""
-        if target_type == 'stars':
-            return str(unit_data.get('currentRarity', 0))
-        if target_type == 'relic':
-            # Comlink хранит "сырой" currentTier со смещением +2 от отображаемого игроку
-            # номера реликвии (см. _is_target_completed: required_tier = target+2) — R7
-            # это raw currentTier=9. Раньше здесь возвращался raw currentTier напрямую,
-            # без обратного пересчёта, поэтому initial_value/current_value сравнивались
-            # с target_value в разных единицах — игрок на R7 (raw 9) при цели Р9
-            # (target_value="9") видел прогресс "9 → 9", как будто цель уже достигнута
-            # (Ricardo, Discord-тред "Гайд по АС Боту", 2026-09-08). Приводим к тем же
-            # человекочитаемым единицам, что и target_value.
-            raw_tier = unit_data.get('relic', {}).get('currentTier', 0)
-            return str(raw_tier - 2) if raw_tier > 2 else "0"
+        if target_type in ('stars', 'relic', 'gear'):
+            # Смещение +2 у реликвии (R7 = raw 9) учтено в journey_guide.unit_progress —
+            # раньше здесь сравнивались разные единицы (Ricardo, тред "Гайд по АС Боту",
+            # 2026-09-08: прогресс "9 → 9" при цели Р9 у игрока на R7).
+            return journey_guide.unit_progress(unit_data, target_type)
         if target_type == 'omicron':
             for skill in unit_data.get('skill', []):
                 if skill.get('id') == target_value:
@@ -214,13 +224,8 @@ class TasksCog(commands.Cog):
         return ""
 
     def _is_target_completed(self, unit_data: dict, target_type: str, target_value: str, skill_thresholds: dict) -> bool:
-        if target_type == 'stars':
-            return unit_data.get('currentRarity', 0) >= int(target_value)
-        if target_type == 'relic':
-            current_relic_tier = unit_data.get('relic', {}).get('currentTier', 0)
-            target_val_int = int(target_value)
-            required_tier = target_val_int + 2 if target_val_int > 0 else 0
-            return current_relic_tier >= required_tier
+        if target_type in ('stars', 'relic', 'gear'):
+            return journey_guide.unit_meets(unit_data, target_type, target_value)
         if target_type == 'omicron':
             # Раньше здесь проверялось "есть ли у юнита ЛЮБОЙ skill с tier>=8" по
             # несуществующему ключу 'skills' (реальный ключ Comlink — 'skill', см.
@@ -415,12 +420,13 @@ class TasksCog(commands.Cog):
             desc="Критерий прокачки",
             choices=[
                 disnake.OptionChoice(name="⭐ Звёзды (1-7)", value="stars"),
-                disnake.OptionChoice(name="♦️ Реликвия (0-9)", value="relic"),
+                disnake.OptionChoice(name="♦️ Реликвия (0-10)", value="relic"),
+                disnake.OptionChoice(name="⚙️ Снаряжение (1-13)", value="gear"),
                 disnake.OptionChoice(name="🧬 Омикрон", value="omicron")
             ]
         ),
         значение: str = commands.Param(
-            desc="Число для звёзд/реликвии, либо способность для омикрона — выберите из подсказки",
+            desc="Число для звёзд/реликвии/снаряжения, либо способность для омикрона — выберите из подсказки",
             autocomplete=autocomplete_task_target_value,
         ),
         дедлайн: str = commands.Param(desc="Дата дедлайна: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ"),
@@ -458,7 +464,7 @@ class TasksCog(commands.Cog):
                 await inter.edit_original_response("❌ Для омикрона выберите конкретную способность из подсказки автокомплита (не свободный текст).")
                 return
         elif not значение.isdigit():
-            await inter.edit_original_response("❌ Для звёзд/реликвии значение должно быть числом.")
+            await inter.edit_original_response("❌ Для звёзд/реликвии/снаряжения значение должно быть числом.")
             return
 
         deadline_date = _parse_deadline_input(дедлайн)
@@ -514,6 +520,87 @@ class TasksCog(commands.Cog):
             if discord_id:
                 content = f"<@{discord_id}>"
         await inter.edit_original_response(content=content, embed=embed, allowed_mentions=disnake.AllowedMentions(users=True))
+
+    @tasks_group.sub_command(name="руководство", description="Задачи на всех героев для ГЛ, флагмана или путешествия из «Руководства»")
+    async def task_add_guide(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        цель: str = commands.Param(desc="ГЛ / флагман / путешествие из «Руководства»", autocomplete=autocomplete_journey_guide),
+        игрок: str = commands.Param(desc="Выберите игрока", autocomplete=autocomplete_players),
+        дедлайн: str = commands.Param(desc="Дата дедлайна: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ"),
+    ):
+        await inter.response.defer()
+
+        guild_id = await guild_resolver.require_feature(inter, "tasks")
+        if guild_id is None:
+            return
+
+        requirements = database.get_journey_guide_requirements(цель)
+        if not requirements:
+            await inter.edit_original_response("❌ Выберите цель из подсказки — для неё нет требований в справочнике.")
+            return
+
+        cache = self.bot.guild_roster_caches.get(guild_id, {})
+        ally_code = cache.get(игрок)
+        if not ally_code:
+            row = database.get_user_mapping_for_name(guild_id, игрок)
+            if row:
+                ally_code = row[0]
+        if not ally_code:
+            await inter.edit_original_response("❌ Ошибка: Не удалось определить Ally Code выбранного игрока.")
+            return
+        player_name = cache.get(ally_code, игрок)
+
+        deadline_date = _parse_deadline_input(дедлайн)
+        if deadline_date is None:
+            await inter.edit_original_response("❌ Некорректная или прошедшая дата. Формат: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.")
+            return
+
+        try:
+            player_data = await asyncio.to_thread(self.bot.comlink.get_player, ally_code)
+            roster = journey_guide.roster_index(player_data)
+        except Exception:
+            roster = None
+        plan = journey_guide.plan_player(guild_id, ally_code, requirements, roster)
+
+        batch_id = uuid.uuid4().hex[:12]
+        for unit_id, target_type, target_value, initial in plan["create"]:
+            database.add_task(ally_code, unit_id, target_type, target_value, deadline_date, str(inter.author.id),
+                              guild_id=guild_id, batch_id=batch_id, initial_value=initial)
+
+        all_ids = [r[0] for r in requirements] + [цель]
+        names = database.get_game_unit_names(all_ids)
+        goal_name = next((g["name"] for g in journey_guide.guide_options() if g["base_id"] == цель), цель)
+        lines = [f"**Игрок:** {player_name} ({ally_code}) · **Срок:** до {deadline_date}", ""]
+        if plan["create"]:
+            lines.append(f"🎯 **Поставлено: {len(plan['create'])}**")
+            for unit_id, target_type, target_value, initial in plan["create"]:
+                now = f" (сейчас {initial})" if initial is not None else " (не открыт)" if roster is not None else ""
+                lines.append(f"• {names.get(unit_id, unit_id)} — {journey_guide.short_label(target_type, target_value)}{now}")
+        else:
+            lines.append("Новых задач нет.")
+        if plan["done"]:
+            lines.append("")
+            lines.append(f"✅ Уже выполнено: {len(plan['done'])} — " + ", ".join(names.get(u, u) for u in plan["done"]))
+        if plan["duplicate"]:
+            lines.append(f"🔁 Уже есть задача: {len(plan['duplicate'])} — " + ", ".join(names.get(u, u) for u in plan["duplicate"]))
+        if roster is None:
+            lines.append("")
+            lines.append("⚠️ Данные игрока не загрузились — выполненное не отсеяно, задачи поставлены без снимка прогресса.")
+
+        embeds = _lines_to_embeds(f"📘 Руководство: {goal_name}", disnake.Color.blue(), lines)
+        warning = config_warning_text(database.get_guild_config(guild_id), "tasks")
+        if warning:
+            embeds[-1].add_field(name="Внимание", value=warning, inline=False)
+
+        content = None
+        if plan["create"] and feature_flags.is_enabled(guild_id, "tasks_mention"):
+            discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
+            if discord_id:
+                content = f"<@{discord_id}>"
+        await inter.edit_original_response(content=content, embed=embeds[0], allowed_mentions=disnake.AllowedMentions(users=True))
+        for e in embeds[1:]:
+            await inter.followup.send(embed=e)
 
     @tasks_group.sub_command(name="отчёт", description="Прогресс по своим задачам (чужие и по всей гильдии — 🔒 офицеры)")
     async def tasks_report(
@@ -629,7 +716,9 @@ class TasksCog(commands.Cog):
         await inter.response.defer()
         try:
             total = await self._do_units_synchronization()
-            await inter.edit_original_response(f"✅ Справочник успешно обновлен вручную! Записано юнитов: **{total}**.")
+            guide_rows = await journey_guide.sync_journey_guide(self.bot.comlink)
+            await inter.edit_original_response(
+                f"✅ Справочник успешно обновлен вручную! Записано юнитов: **{total}**, требований «Руководства»: **{guide_rows}**.")
         except Exception as e:
             await inter.edit_original_response(f"❌ Ошибка при обновлении: `{e}`")
 
