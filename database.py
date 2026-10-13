@@ -1756,7 +1756,9 @@ def get_omicron_capable(base_ids: list[str]) -> set[str]:
 def _ensure_journey_guide_table(cursor):
     """Требования «Руководства» (Journey Guide) — общий для всех гильдий справочник,
     заполняется services/journey_guide.py из Comlink. Одна строка = один юнит, которого
-    нужно прокачать для открытия guide_base_id (ГЛ, капшип, путешествие)."""
+    нужно прокачать для открытия guide_base_id. source: 'quest' — квест открытия игры
+    (реальное требование), 'entry' — минимум для входа в бои старого события (такие
+    уровни гильдия может поднять у себя — journey_guide_overrides)."""
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS journey_guide_requirements (
             guide_base_id TEXT NOT NULL,
@@ -1768,32 +1770,46 @@ def _ensure_journey_guide_table(cursor):
             PRIMARY KEY (guide_base_id, unit_base_id)
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE journey_guide_requirements ADD COLUMN source TEXT NOT NULL DEFAULT 'quest'")
+    except sqlite3.OperationalError:
+        pass
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS journey_guide_overrides (
+            guild_id INTEGER NOT NULL,
+            guide_base_id TEXT NOT NULL,
+            unit_base_id TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_value TEXT NOT NULL,
+            PRIMARY KEY (guild_id, guide_base_id, unit_base_id)
+        )
+    """)
 
 
 def replace_journey_guide_requirements(rows: list[tuple]) -> None:
-    """rows: (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value).
-    Полная замена справочника одной транзакцией."""
+    """rows: (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value, source).
+    Полная замена справочника одной транзакцией (уровни гильдий не трогает)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_journey_guide_table(cursor)
     cursor.execute("DELETE FROM journey_guide_requirements")
     cursor.executemany("""
         INSERT OR REPLACE INTO journey_guide_requirements
-            (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (guide_base_id, guide_kind, sort_order, unit_base_id, target_type, target_value, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """, rows)
     conn.commit()
     conn.close()
 
 
 def get_journey_guides() -> list[tuple]:
-    """[(guide_base_id, guide_kind, units_count)] в порядке первого появления."""
+    """[(guide_base_id, guide_kind, units_count, source)] в порядке первого появления."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_journey_guide_table(cursor)
     conn.commit()
     cursor.execute("""
-        SELECT guide_base_id, guide_kind, COUNT(*) FROM journey_guide_requirements
+        SELECT guide_base_id, guide_kind, COUNT(*), MAX(source) FROM journey_guide_requirements
         GROUP BY guide_base_id, guide_kind ORDER BY MIN(rowid)
     """)
     rows = cursor.fetchall()
@@ -1801,19 +1817,45 @@ def get_journey_guides() -> list[tuple]:
     return rows
 
 
-def get_journey_guide_requirements(guide_base_id: str) -> list[tuple]:
-    """[(unit_base_id, target_type, target_value)] в порядке квестов игры."""
+def get_journey_guide_requirements(guide_base_id: str, guild_id: int | None = None) -> list[tuple]:
+    """[(unit_base_id, target_type, target_value)] в порядке игры; с guild_id — с учётом
+    уровней, заданных гильдией (journey_guide_overrides)."""
+    return [(u, t, v) for u, t, v, *_ in get_journey_guide_requirements_detail(guide_base_id, guild_id)]
+
+
+def get_journey_guide_requirements_detail(guide_base_id: str, guild_id: int | None = None) -> list[tuple]:
+    """[(unit_base_id, target_type, target_value, source, default_type, default_value, overridden)]."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_journey_guide_table(cursor)
     conn.commit()
     cursor.execute("""
-        SELECT unit_base_id, target_type, target_value FROM journey_guide_requirements
-        WHERE guide_base_id = ? ORDER BY sort_order
-    """, (guide_base_id,))
+        SELECT r.unit_base_id, COALESCE(o.target_type, r.target_type), COALESCE(o.target_value, r.target_value),
+               r.source, r.target_type, r.target_value, o.unit_base_id IS NOT NULL
+        FROM journey_guide_requirements r
+        LEFT JOIN journey_guide_overrides o
+          ON o.guild_id = ? AND o.guide_base_id = r.guide_base_id AND o.unit_base_id = r.unit_base_id
+        WHERE r.guide_base_id = ? ORDER BY r.sort_order
+    """, (guild_id if guild_id is not None else -1, guide_base_id))
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def set_journey_guide_overrides(guild_id: int, guide_base_id: str, overrides: dict) -> None:
+    """overrides: {unit_base_id: (target_type, target_value)} — полностью заменяет уровни
+    гильдии для этой цели (пустой dict = сброс к игровым)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_journey_guide_table(cursor)
+    cursor.execute("DELETE FROM journey_guide_overrides WHERE guild_id = ? AND guide_base_id = ?",
+                   (guild_id, guide_base_id))
+    cursor.executemany("""
+        INSERT INTO journey_guide_overrides (guild_id, guide_base_id, unit_base_id, target_type, target_value)
+        VALUES (?, ?, ?, ?, ?)
+    """, [(guild_id, guide_base_id, unit, tt, tv) for unit, (tt, tv) in overrides.items()])
+    conn.commit()
+    conn.close()
 
 
 def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1,

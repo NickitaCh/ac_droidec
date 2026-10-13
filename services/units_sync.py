@@ -6,6 +6,7 @@ web/routes/registration.py::_get_comlink). Явный comlink-параметр �
 self.bot.comlink — единственное отличие от исходной версии в cogs/tasks.py."""
 
 import asyncio
+import json
 
 import database
 
@@ -241,6 +242,7 @@ async def sync_units(comlink) -> int:
 
     units_to_db = {}
     thumbnails = {}
+    selftags = {}
     gear_recipes = {}
     for unit in units_list:
         if not _is_canonical_playable_unit(unit):
@@ -255,6 +257,9 @@ async def sync_units(comlink) -> int:
         units_to_db[bid] = (name, unit_type, name_en)
         if unit.get("thumbnailName"):
             thumbnails[bid] = unit["thumbnailName"]
+        for cat in unit.get("categoryId") or []:
+            if cat.startswith("selftag_"):
+                selftags[cat] = bid
 
         # Рецепт деталей по тиру снаряжения (unitTier[].equipmentSet) — для
         # resource_spend.py (счётчик потраченных деталей в /ресурсы). Тир 13 у comlink —
@@ -275,6 +280,11 @@ async def sync_units(comlink) -> int:
     database.prune_game_units(units_to_db.keys())
     database.set_unit_thumbnails(thumbnails)
     database.set_unit_gear_recipes(gear_recipes)
+    # selftag_<юнит> → base_id: в условиях входа событий юниты указаны категориями,
+    # и имя категории не всегда совпадает с base_id (selftag_asajventriss → ASAJVENTRESS).
+    # Читает services/journey_guide.py.
+    if selftags:
+        database.set_bot_state("unit_selftags", json.dumps(selftags), guild_id=0)
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление

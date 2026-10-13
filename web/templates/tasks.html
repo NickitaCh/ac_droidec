@@ -514,19 +514,69 @@ document.addEventListener("DOMContentLoaded", () => {
             guideForm.querySelectorAll('input[name="ally_codes"]').forEach((cb) => { cb.checked = guideAll.checked; });
         });
 
-        guideSelect.addEventListener("change", async () => {
+        // Старые события без квестов: уровни — минимум для входа, гильдия может их поднять
+        // (/tasks/api/guide-levels). Редактор — без name у полей, в отправку формы не попадает.
+        const typeNames = { stars: "★", relic: "R", gear: "G" };
+        const unitPortrait = (r) => `<span class="unit-portrait unit-portrait-xs"><img src="/unit-img/${encodeURIComponent(r.base_id)}" alt="" loading="lazy"></span>`;
+
+        const renderGuide = (reqs) => {
+            const editable = reqs.some((r) => r.editable);
+            let html = reqs.map((r) =>
+                `<span class="badge ${r.overridden ? "badge-ok" : "badge-neutral"} badge-unit"${r.overridden ? ` title="Игровой минимум: ${escapeHtml(r.default_label)}"` : ""}>${unitPortrait(r)}${escapeHtml(r.name)} — ${escapeHtml(r.label)}</span>`
+            ).join(" ");
+            if (editable) {
+                html = `<p>Квестов у события нет — уровни взяты из условий входа в бои (минимум, не гарантия победы). Зелёные — заданы гильдией.</p>` + html +
+                    ` <button type="button" class="link-btn" id="guide-levels-edit">Изменить уровни</button>`;
+            }
+            guideReqs.innerHTML = html;
+            const editBtn = document.getElementById("guide-levels-edit");
+            if (editBtn) editBtn.addEventListener("click", () => renderEditor(reqs));
+        };
+
+        const renderEditor = (reqs) => {
+            const rows = reqs.map((r, i) => `<tr data-unit="${escapeHtml(r.base_id)}">
+                <td><span class="unit-cell">${unitPortrait(r)}${escapeHtml(r.name)}</span></td>
+                <td><select data-f="type">${Object.entries(typeNames).map(([v, l]) => `<option value="${v}"${v === r.target_type ? " selected" : ""}>${l}</option>`).join("")}</select></td>
+                <td><input type="number" data-f="value" min="0" max="13" value="${escapeHtml(r.target_value)}" style="width: 4em;"></td>
+                <td class="muted">игра: ${escapeHtml(r.default_label)}</td></tr>`).join("");
+            guideReqs.innerHTML = `<div class="table-scroll"><table class="data"><tbody>${rows}</tbody></table></div>
+                <p><button type="button" id="guide-levels-save">Сохранить уровни</button>
+                <button type="button" class="button-secondary" id="guide-levels-reset">Вернуть игровые</button>
+                <button type="button" class="button-secondary" id="guide-levels-cancel">Отмена</button></p>`;
+            const send = async (reset) => {
+                const fd = new FormData();
+                fd.append("guide", guideSelect.value);
+                if (!reset) {
+                    guideReqs.querySelectorAll("tr[data-unit]").forEach((tr) => {
+                        fd.append("unit", tr.dataset.unit);
+                        fd.append("target_type", tr.querySelector('[data-f="type"]').value);
+                        fd.append("target_value", tr.querySelector('[data-f="value"]').value);
+                    });
+                }
+                const resp = await fetch("/tasks/api/guide-levels", { method: "POST", body: fd });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    alert(data.error || "Не удалось сохранить.");
+                    return;
+                }
+                loadGuide();
+            };
+            document.getElementById("guide-levels-save").addEventListener("click", () => send(false));
+            document.getElementById("guide-levels-reset").addEventListener("click", () => send(true));
+            document.getElementById("guide-levels-cancel").addEventListener("click", () => renderGuide(reqs));
+        };
+
+        const loadGuide = async () => {
             guideReqs.innerHTML = "";
             if (!guideSelect.value) return;
             try {
                 const resp = await fetch(`/tasks/api/guide?base_id=${encodeURIComponent(guideSelect.value)}`);
-                const reqs = resp.ok ? await resp.json() : [];
-                guideReqs.innerHTML = reqs.map((r) =>
-                    `<span class="badge badge-neutral badge-unit"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/${encodeURIComponent(r.base_id)}" alt="" loading="lazy"></span>${escapeHtml(r.name)} — ${escapeHtml(r.label)}</span>`
-                ).join(" ");
+                renderGuide(resp.ok ? await resp.json() : []);
             } catch {
                 guideReqs.textContent = "Не удалось загрузить требования.";
             }
-        });
+        };
+        guideSelect.addEventListener("change", loadGuide);
 
         guideForm.addEventListener("submit", async (e) => {
             if (guideConfirmed) {

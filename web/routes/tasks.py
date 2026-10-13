@@ -540,13 +540,44 @@ async def _guide_plans(guild_id: int, ally_codes: list, requirements: list) -> d
 
 @router.get("/api/guide", response_class=JSONResponse)
 async def guide_requirements(base_id: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
-    reqs = database.get_journey_guide_requirements(base_id)
+    reqs = database.get_journey_guide_requirements_detail(base_id, user["guild_id"])
     names = database.get_game_unit_names([r[0] for r in reqs])
     return [
         {"base_id": unit_id, "name": names.get(unit_id) or unit_id,
-         "label": journey_guide.short_label(target_type, target_value)}
-        for unit_id, target_type, target_value in reqs
+         "label": journey_guide.short_label(target_type, target_value),
+         "target_type": target_type, "target_value": target_value,
+         "editable": source == "entry", "overridden": bool(overridden),
+         "default_label": journey_guide.short_label(default_type, default_value)}
+        for unit_id, target_type, target_value, source, default_type, default_value, overridden in reqs
     ]
+
+
+@router.post("/api/guide-levels", response_class=JSONResponse)
+async def guide_levels_save(
+    guide: str = Form(...),
+    unit: list = Form(default=[]),
+    target_type: list = Form(default=[]),
+    target_value: list = Form(default=[]),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
+):
+    """Уровни гильдии для старого события (минимум для входа можно поднять). Сохраняются
+    только отличия от игрового минимума; пустой список = сброс."""
+    detail = {r[0]: r for r in database.get_journey_guide_requirements_detail(guide, user["guild_id"])}
+    if not detail or any(r[3] != "entry" for r in detail.values()):
+        return JSONResponse({"error": "Уровни можно менять только у старых событий."}, status_code=400)
+    limits = {"stars": (1, 7), "relic": (0, 10), "gear": (1, 13)}
+    overrides = {}
+    for u, tt, tv in zip(unit, target_type, target_value):
+        if u not in detail or tt not in limits or not str(tv).strip().isdigit():
+            return JSONResponse({"error": "Некорректный уровень."}, status_code=400)
+        lo, hi = limits[tt]
+        if not lo <= int(tv) <= hi:
+            return JSONResponse({"error": f"Значение вне диапазона {lo}–{hi}."}, status_code=400)
+        default = (detail[u][4], detail[u][5])
+        if (tt, str(int(tv))) != default:
+            overrides[u] = (tt, str(int(tv)))
+    database.set_journey_guide_overrides(user["guild_id"], guide, overrides)
+    return {"ok": True, "overridden": len(overrides)}
 
 
 @router.post("/api/guide-preview", response_class=JSONResponse)
@@ -556,7 +587,7 @@ async def guide_preview(
     user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
-    requirements = database.get_journey_guide_requirements(guide)
+    requirements = database.get_journey_guide_requirements(guide, guild_id)
     if not requirements:
         return JSONResponse({"error": "Выберите цель из «Руководства»."}, status_code=400)
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
@@ -581,7 +612,7 @@ async def task_add_guide(
     user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
-    requirements = database.get_journey_guide_requirements(guide)
+    requirements = database.get_journey_guide_requirements(guide, guild_id)
     if not requirements:
         return RedirectResponse(f"/tasks?{urlencode({'error': 'Выберите цель из «Руководства».'})}", status_code=303)
     names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}

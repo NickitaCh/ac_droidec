@@ -535,7 +535,7 @@ class TasksCog(commands.Cog):
         if guild_id is None:
             return
 
-        requirements = database.get_journey_guide_requirements(цель)
+        requirements = database.get_journey_guide_requirements(цель, guild_id)
         if not requirements:
             await inter.edit_original_response("❌ Выберите цель из подсказки — для неё нет требований в справочнике.")
             return
@@ -570,8 +570,12 @@ class TasksCog(commands.Cog):
 
         all_ids = [r[0] for r in requirements] + [цель]
         names = database.get_game_unit_names(all_ids)
-        goal_name = next((g["name"] for g in journey_guide.guide_options() if g["base_id"] == цель), цель)
+        goal = next((g for g in journey_guide.guide_options() if g["base_id"] == цель), {})
+        goal_name = goal.get("name", цель)
         lines = [f"**Игрок:** {player_name} ({ally_code}) · **Срок:** до {deadline_date}", ""]
+        if goal.get("entry"):
+            lines.insert(1, "ℹ️ Квестов открытия у события нет — уровни взяты из условий входа в бои "
+                            "(или заданы гильдией на сайте, /tasks).")
         if plan["create"]:
             lines.append(f"🎯 **Поставлено: {len(plan['create'])}**")
             for unit_id, target_type, target_value, initial in plan["create"]:
