@@ -316,7 +316,7 @@
                                                 {% if r.kind == "base" %}
                                                     <td>{{ r.pack or "—" }}</td>
                                                     <td>{{ r.l3 }} → {{ r.l6 }} → {{ r.l9 }}{% if r.quantity > 1 %} <span class="badge badge-neutral">×{{ r.quantity }}</span>{% endif %}</td>
-                                                    <td>{% if r.quantity > 1 %}{{ r.found }}/{{ r.quantity }} ДК{% else %}{{ r.closed|join(", ") if r.closed else "—" }}{% endif %}</td>
+                                                    <td>{% if r.quantity > 1 %}{{ r.found }}/{{ r.quantity }} ДК{% elif r.closed %}{% for c in r.closed %}<div{% if c.full %} title="{{ c.full }}"{% endif %}>{{ c.text }}</div>{% endfor %}{% else %}—{% endif %}{% for s in r.dc_stats %}<div class="muted">🎲 {% if r.quantity > 1 %}ДК {{ loop.index }}: {% endif %}{{ s }}</div>{% endfor %}</td>
                                                 {% else %}
                                                     <td>{{ r.pack or r.character_label }}</td>
                                                     <td>{{ r.character_label }} — {{ r.required_level }}+</td>

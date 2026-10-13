@@ -66,6 +66,17 @@ DATACRON_STAT_LABELS = {
     55: "Здоровье",
     56: "Защита",
 }
+# Короткие подписи для строки «статы подобранного ДК» в проверке игрока.
+DATACRON_STAT_SHORT_LABELS = {
+    16: "Крит. урон",
+    17: "Эффективность",
+    18: "Стойкость",
+    48: "Атака",
+    49: "Оборона",
+    53: "Шанс крита",
+    55: "Здоровье",
+    56: "Защита",
+}
 DATACRON_MAX_STAT_REQUIREMENTS = 5
 DATACRON_MAX_QUANTITY = 20
 
@@ -818,9 +829,21 @@ def _focused_requirement_field(pack, char_label, required_level, comment):
     return name, "\n".join(lines)
 
 
-def _base_check_field(pack, l3_label, l6_label, l9_label, comment, evaluation, closed_levels, stats=None):
+def _format_datacron_stats(stats) -> str:
+    """{stat_id: %} подобранного ДК -> «Атака 8.1% · Оборона 5%» (по убыванию значения)."""
+    parts = [
+        f"{DATACRON_STAT_SHORT_LABELS.get(sid, f'стат {sid}')} {value:.1f}%".replace(".0%", "%")
+        for sid, value in sorted(stats.items(), key=lambda kv: -kv[1])
+    ]
+    return " · ".join(parts)
+
+
+def _base_check_field(pack, l3_label, l6_label, l9_label, comment, evaluation, closed_levels, stats=None, matches=None):
     """evaluation — результат _evaluate_base_requirement. ⚠️ вместо ✅ — способности
-    закрыты, но хотя бы один стат ниже порога (мягкая проверка, только рекомендация)."""
+    закрыты, но хотя бы один стат ниже порога (мягкая проверка, только рекомендация).
+    closed_levels — подписи способностей подобранного ДК по уровням 3/6/9 ("—" если нет);
+    при закрытом требовании уровни показываются списком по ДК игрока (а не по требованию),
+    лишний (не требуемый) уровень — с пометкой, без повтора тех же текстов строкой «Закрыто»."""
     matched = evaluation["matched"]
     quantity = evaluation["quantity"]
     if not matched:
@@ -830,12 +853,25 @@ def _base_check_field(pack, l3_label, l6_label, l9_label, comment, evaluation, c
     else:
         status = "✅"
     name = f"{status} {pack if pack else _branch_fallback_name(l3_label, l6_label, l9_label)}{_quantity_suffix(quantity)}"
-    lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)
+    if matched and quantity == 1 and closed_levels:
+        lines = []
+        for tier, req_label, own_label in zip((3, 6, 9), (l3_label, l6_label, l9_label), closed_levels):
+            if req_label != "-":
+                lines.append(f"**{tier} ур.** ✅ {own_label}")
+            elif own_label != "—":
+                lines.append(f"**{tier} ур.** · {own_label} *(не требуется)*")
+        if stats:
+            lines.append(f"📊 *{stats}*")
+        if comment:
+            lines.append(f"💠 *{comment}*")
+    else:
+        lines = _requirement_value_lines(l3_label, l6_label, l9_label, comment, stats)
     if quantity > 1:
         lines.append(f"📦 Подходящих ДК: {evaluation['found']}/{quantity}")
-    elif matched and closed_levels:
-        closed_parts = [v for v in closed_levels if v != "—"]
-        lines.append(f"✅ Закрыто: {' → '.join(closed_parts)}")
+    for i, dc in enumerate(matches or [], 1):
+        if dc.get("stats"):
+            prefix = f"🎲 ДК {i}" if quantity > 1 else "🎲 Статы ДК"
+            lines.append(f"{prefix}: {_format_datacron_stats(dc['stats'])}")
     if evaluation["found"]:
         for check in evaluation["stat_checks"]:
             lines.append(_format_stat_check_line(check))
@@ -2049,7 +2085,7 @@ class DatacronRequirementsCog(commands.Cog):
                         level_label(6, m[6]) if m[6] else "—",
                         level_label(9, m[9]) if m[9] else "—",
                     )
-                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, evaluation, closed_levels, stats))
+                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, evaluation, closed_levels, stats, matches))
                 group["total"] += 1
                 if evaluation["matched"]:
                     group["matched"] += 1

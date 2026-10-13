@@ -40,7 +40,9 @@ from cogs.datacron_requirements import (
     _evaluate_base_requirement,
     _extract_player_base_datacrons,
     _extract_player_focused_datacrons,
+    _fill_target,
     _focused_char_label,
+    _format_datacron_stats,
     _is_valid_focused_character,
     _is_valid_level_value,
     _is_valid_season,
@@ -591,6 +593,15 @@ async def focused_characters_search(season: int, q: str = "", user: dict = Depen
 # Проверка датакронов игрока/гильдии — GET-форма (в т.ч. чтобы результат
 # можно было передать ссылкой), результат считается на лету через живой Comlink.
 # =====================================================================
+def _closed_level(season_data, level_num, ability_id, label) -> dict:
+    """Уровень подобранного ДК: короткая подпись + полный игровой текст для подсказки —
+    сокращения общие для всех гильдий и не всем понятны без оригинала."""
+    info = (season_data or {}).get("abilities", {}).get(ability_id) or {}
+    full = info.get("full") or ""
+    branch = label.split(": ", 1)[0] if ": " in label else ""
+    return {"text": f"{level_num} ур.: {label}", "full": _fill_target(full, branch) if full else ""}
+
+
 async def _build_player_report(catalog, set_id, ally_code, player_name, requirements, focused_requirements, guild_id):
     comlink = _get_comlink()
     try:
@@ -625,7 +636,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
             closed = []
             if matches and evaluation["quantity"] == 1:
                 m = matches[0]["levels"]
-                closed = [level_label(n, m[n]) for n in (3, 6, 9) if m[n]]
+                closed = [_closed_level(season_data, n, m[n], level_label(n, m[n])) for n in (3, 6, 9) if m[n]]
             stat_checks_labeled = [
                 dict(c, label=DATACRON_STAT_LABELS.get(c["stat_id"], str(c["stat_id"])))
                 for c in evaluation["stat_checks"]
@@ -638,6 +649,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
                 "quantity": evaluation["quantity"], "found": evaluation["found"],
                 "stat_checks": stat_checks_labeled,
                 "stat_warning": evaluation["stat_warning"],
+                "dc_stats": [_format_datacron_stats(dc["stats"]) for dc in matches if dc.get("stats")],
             })
             tb = totals.get(priority, totals[PRIORITY_REQUIRED])
             tb["total"] += 1

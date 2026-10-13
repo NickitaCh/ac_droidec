@@ -25,6 +25,8 @@ from cogs.datacron_requirements import (
 from services import openrouter_vision
 
 MAX_SHORT_LEN = 300
+SHORT_TARGET_MAX = 120  # жёсткий потолок черновика ИИ; ручное сокращение может быть длиннее
+_MIN_SHRINK = 0.6  # черновик длиннее 60% полного текста — это пересказ, а не сокращение
 GENERATE_BATCH_SIZE = 40
 _FEW_SHOT_LIMIT = 12  # минимум примеров (добивается образцами стиля)
 _FEW_SHOT_MAX = 24  # потолок похожих примеров на пачку — промпт не должен раздуваться
@@ -118,14 +120,20 @@ def _few_shot_examples(catalog: dict, custom_shorts: dict, items: list) -> list:
 
 
 def _build_prompt(items: list, examples: list) -> str:
+    shorts = [short for _full, short in examples if short]
+    avg_len = round(sum(map(len, shorts)) / len(shorts)) if shorts else 60
     lines = [
         "Ты сокращаешь описания бонусов датакронов из игры Star Wars: Galaxy of Heroes для",
         "компактного списка требований гильдии. Правила:",
-        "- По-русски, одной строкой, обычно 40–120 символов, максимум 200.",
-        "- Сохраняй ВСЕ числа, длительности (ходы), условия и ограничения — нельзя терять механику.",
+        "- По-русски, одной строкой, как пишут игроки в чате: главный эффект, а не пересказ.",
+        f"- Длина — как у примеров ниже (в среднем ~{avg_len} символов), не больше {SHORT_TARGET_MAX}.",
+        "  Сокращение должно быть заметно короче полного текста; если не влезает — выкинь",
+        "  второстепенное (длительности «до конца боя», уточнения «суммируется до…», оговорки).",
+        "- Оставляй ключевые числа главного эффекта и условие срабатывания, если без него",
+        "  бонус непонятен. Не добавляй ничего, чего нет в полном тексте.",
         "- Субъект (фракцию/сторону/персонажа) НЕ повторяй: перед текстом уже стоит «Ветка: ».",
-        "- Стиль: «условие → эффект», стандартные сокращения игроков: ШХ (шкала хода), ХП,",
-        "  осн./особая способность, крит., доп. ход, «не увернуться», «нельзя снять».",
+        "- Стандартные сокращения игроков: ШХ (шкала хода), ХП, КУ (крит. урон), осн./особая",
+        "  способность, доп. ход, «→» между условием и эффектом.",
         "- Плейсхолдер {0} (название ветки) в ответе не используй.",
         "- Многие бонусы повторяются из сезона в сезон с другой фракцией или цифрами. Если",
         "  бонус совпадает с примером по механике (то же условие и тот же эффект) — возьми",
@@ -145,6 +153,30 @@ def _build_prompt(items: list, examples: list) -> str:
     for ability_id, full in items:
         lines.append(f"{ability_id}: {full}")
     return "\n".join(lines)
+
+
+def _is_real_short(text, full: str) -> bool:
+    """Черновик годится, только если он действительно короткий: пример Ricardo
+    (тред 2026-10-12) — на «+1 турель» модель выдала пересказ длиннее оригинала."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    text = " ".join(text.split())
+    return len(text) <= SHORT_TARGET_MAX and len(text) <= len(full) * _MIN_SHRINK
+
+
+def _validate_drafts(data, batch: list):
+    """validate для роутера: ответ, где больше половины черновиков — не сокращения,
+    отбраковывается, и роутер пробует следующую модель."""
+    if not isinstance(data, dict):
+        return "ответ не JSON-объект"
+    answered = [(aid, data[aid]) for aid, _full in batch if aid in data]
+    if not answered:
+        return "нет ни одного запрошенного id"
+    full_by_id = dict(batch)
+    good = sum(1 for aid, text in answered if _is_real_short(text, full_by_id[aid]))
+    if good * 2 < len(answered):
+        return f"не сокращения: годных {good} из {len(answered)} (длиннее {SHORT_TARGET_MAX} симв. или 60% оригинала)"
+    return True
 
 
 def generate_drafts(catalog: dict, set_id: int, ability_ids: list) -> tuple:
@@ -177,7 +209,7 @@ def generate_drafts(catalog: dict, set_id: int, ability_ids: list) -> tuple:
         try:
             answer = openrouter_vision.call_text_json(
                 _build_prompt(batch, examples), api_key,
-                validate=lambda d, w=wanted: True if w & set(d) else "нет ни одного запрошенного id",
+                validate=lambda d, b=batch: _validate_drafts(d, b),
             )
         except Exception as e:
             if drafts:
@@ -185,9 +217,10 @@ def generate_drafts(catalog: dict, set_id: int, ability_ids: list) -> tuple:
             return {}, f"Ошибка OpenRouter: {e}"
         if not isinstance(answer, dict):
             continue
+        full_by_id = dict(batch)
         for ability_id, text in answer.items():
-            if ability_id in wanted and isinstance(text, str) and text.strip():
-                drafts[ability_id] = " ".join(text.split())[:MAX_SHORT_LEN]
+            if ability_id in wanted and _is_real_short(text, full_by_id[ability_id]):
+                drafts[ability_id] = " ".join(text.split())
     if not drafts:
         return {}, "Модель не вернула ни одного сокращения — попробуйте ещё раз."
     return drafts, None
