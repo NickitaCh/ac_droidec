@@ -1475,6 +1475,17 @@ def resolve_unit_display_names(names: list[str]) -> dict[str, str | None]:
     return {name: by_name.get(name.lower()) for name in names}
 
 
+def get_game_unit_en_names() -> dict[str, str]:
+    """{английское имя: base_id} — для разбора текстов HotBot/HotUtils, где персонаж
+    назван по-английски в начале строки (services/hotbot_import.py)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT base_id, cached_name_en FROM game_units WHERE cached_name_en IS NOT NULL AND cached_name_en != ''")
+    rows = cursor.fetchall()
+    conn.close()
+    return {name_en: base_id for base_id, name_en in rows}
+
+
 def set_unit_thumbnails(thumbnails: dict):
     """thumbnails: {base_id: thumbnail_name}. Отдельным UPDATE после upsert_game_units —
     тот делает INSERT OR REPLACE и затирает все колонки, которых нет в его кортеже."""
@@ -4630,6 +4641,25 @@ def update_stat_requirement(req_id: int, plate_name: str, character_key: str, st
         SET plate_name = ?, character_key = ?, stat_name = ?, operator = ?, threshold_value = ?, priority = ?, comment = ?
         WHERE id = ? AND guild_id = ?
     """, (plate_name, character_key, stat_name, operator, threshold_value, priority, comment, req_id, guild_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_stat_requirement_fields(req_id: int, guild_id: int, **fields) -> bool:
+    """Точечное обновление строки требования (импорт HotBot: порог/оператор/приоритет и
+    skill_id у основ и списков сетов), не трогая комментарий и схему."""
+    allowed = {"operator", "threshold_value", "priority", "skill_id", "raw_text"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return False
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_requirements_table(cursor)
+    assignments = ", ".join(f"{k} = ?" for k in fields)
+    cursor.execute(f"UPDATE stat_requirements SET {assignments} WHERE id = ? AND guild_id = ?",
+                   (*fields.values(), req_id, guild_id))
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()

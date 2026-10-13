@@ -20,7 +20,7 @@ from cogs.stat_requirements import (
     COMPARE_OPERATOR_CHOICES, COMPARE_OPERATORS, MOD_REQ_STATS, MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON,
     STAT_SET, STAT_SET_ANY, STAT_SET_ONLY, SET_CHOICES, mod_primary_allowed, parse_id_list,
 )
-from services import feature_flags
+from services import feature_flags, hotbot_import
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -180,6 +180,66 @@ async def plates_list(request: Request, user: dict = Depends(feature_flags.requi
         "plates": plates,
         "error": request.query_params.get("error"),
     })
+
+
+# ---------------------------------------------------------------------------
+# Импорт из сообщения HotBot «templates test» (services/hotbot_import.py). Роуты стоят
+# раньше /{plate_name}, иначе GET /plates/import уйдёт в карточку плейта «import».
+# ---------------------------------------------------------------------------
+
+def _import_mapping(form, plan_sections_count: int) -> dict:
+    return {form.get(f"section_{i}", ""): form.get(f"map_{i}", "") for i in range(plan_sections_count)
+            if form.get(f"section_{i}")}
+
+
+async def _import_plan(link: str, guild_id: int, mapping: dict | None = None):
+    parsed = hotbot_import.parse_messages(await hotbot_import.fetch_messages(link))
+    return parsed, hotbot_import.build_plan(parsed, guild_id, mapping)
+
+
+@router.get("/import", response_class=HTMLResponse)
+async def plates_import_page(request: Request, link: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    ctx = {"user": user, "link": link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
+    if link:
+        try:
+            _parsed, plan = await _import_plan(link, user["guild_id"])
+            ctx.update(plan=plan, selected=hotbot_import.default_selection(plan), counts=hotbot_import.plan_counts(plan))
+        except hotbot_import.HotbotImportError as e:
+            ctx["error"] = str(e)
+        except Exception as e:
+            ctx["error"] = f"Не удалось прочитать сообщение: {e}"
+    return templates.TemplateResponse(request, "plates_import.html", ctx)
+
+
+@router.post("/import", response_class=HTMLResponse)
+async def plates_import_submit(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    """action=preview — пересчитать с новым сопоставлением разделов; action=apply — записать
+    отмеченное. План всегда строится заново из сообщения, форма шлёт только выбор."""
+    form = await request.form()
+    link = (form.get("link") or "").strip()
+    ctx = {"user": user, "link": link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
+    try:
+        sections_count = int(form.get("sections_count") or 0)
+        mapping = _import_mapping(form, sections_count)
+        _parsed, plan = await _import_plan(link, user["guild_id"], mapping)
+    except hotbot_import.HotbotImportError as e:
+        ctx["error"] = str(e)
+        return templates.TemplateResponse(request, "plates_import.html", ctx)
+    except Exception as e:
+        ctx["error"] = f"Не удалось прочитать сообщение: {e}"
+        return templates.TemplateResponse(request, "plates_import.html", ctx)
+
+    remapped = any((form.get(f"map_{i}") or "").strip() != (form.get(f"orig_map_{i}") or "").strip() for i in range(sections_count))
+    if form.get("action") == "apply" and remapped:
+        ctx["error"] = "Плейты для разделов изменились — проверьте обновлённый список и нажмите «Применить» ещё раз."
+    elif form.get("action") == "apply":
+        selected = set(form.getlist("sel"))
+        result = hotbot_import.apply_plan(plan, selected, user["guild_id"], str(user["discord_id"]),
+                                          build_parent=form.get("build_parent") == "1")
+        _parsed, plan = await _import_plan(link, user["guild_id"], mapping)
+        ctx["result"] = result
+    ctx.update(plan=plan, selected=hotbot_import.default_selection(plan), counts=hotbot_import.plan_counts(plan))
+    return templates.TemplateResponse(request, "plates_import.html", ctx)
 
 
 @router.post("/create", response_class=HTMLResponse)

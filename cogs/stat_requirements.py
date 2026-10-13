@@ -2,6 +2,7 @@ import asyncio
 import math
 import re
 from datetime import datetime
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import disnake
@@ -1350,6 +1351,94 @@ async def autocomplete_stat_req_id(inter: disnake.ApplicationCommandInteraction,
 # конвенция репозитория, см. CLAUDE.md). Публикует те же embed'ы отчёта в канал
 # открытым сообщением по нажатию — запрошено пользователем 2026-09-21 для
 # /омикроны отчёт "как и в схожих командах".
+def _hotbot_plan_embed(plan: dict, link: str) -> disnake.Embed:
+    """Предпросмотр импорта из HotBot: по разделам — плейт и счётчики, подсказки похожих
+    плейтов. Подробный список и удаление «только у нас» — на сайте."""
+    from services import hotbot_import
+    counts = hotbot_import.plan_counts(plan)
+    title = f"📥 Импорт из HotBot: {plan['title']}"
+    lines = [f"Новых **{counts['add']}** · изменённых **{counts['change']}** · совпадает {counts['same']}"
+             f" · только у нас {counts['only_ours']}" + (f" · не переносится {counts['skipped']}" if counts["skipped"] else ""), ""]
+    for s in plan["sections"]:
+        mark = " ⛔ модульный" if s["plate_modular"] else "" if s["plate_exists"] else " 🆕 будет создан"
+        lines.append(f"**{s['name']}** → `{s['plate']}`{mark}: +{len(s['add'])} ~{len(s['change'])} ={s['same']} −{len(s['only_ours'])}")
+        if s.get("suggest"):
+            sg = s["suggest"]
+            lines.append(f"  ↳ похоже на `{sg['plate']}` ({sg['overlap']}/{sg['total']} персонажей)")
+        for x in s["change"][:5]:
+            lines.append(f"  ~ {x['old_text']} → {x['text']}")
+        for x in s["add"][:5]:
+            lines.append(f"  + {x['text']}")
+        extra = len(s["add"]) + len(s["change"]) - min(len(s["change"]), 5) - min(len(s["add"]), 5)
+        if extra > 0:
+            lines.append(f"  … ещё {extra}")
+    parent = plan.get("parent")
+    if parent and parent["usable"] and parent["missing"]:
+        action = "подключить к" if parent["exists"] else "создать модульный"
+        lines += ["", f"🧩 «Применить» также {action} `{parent['name']}`: {', '.join(parent['missing'])}"]
+    lines += ["", f"«Только у нас» не удаляются — отметить на сайте: {SITE_URL_IMPORT}?{urlencode({'link': link})}"]
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n…"
+    return disnake.Embed(title=title, description=text, color=disnake.Color.blurple())
+
+
+SITE_URL_IMPORT = "https://swgoh-sng.ru/plates/import"
+
+
+class HotbotImportView(disnake.ui.View):
+    """Кнопки предпросмотра импорта: «Применить» (новые + изменения, модульный плейт),
+    «Взять подсказки» (пересчитать с похожими плейтами вместо имён разделов)."""
+
+    def __init__(self, author_id: int, guild_id: int, link: str, parsed: dict, plan: dict, mapping: dict):
+        super().__init__(timeout=1800)
+        self.author_id, self.guild_id, self.link = author_id, guild_id, link
+        self.parsed, self.plan, self.mapping = parsed, plan, mapping
+        self.done = False
+        self.add_item(disnake.ui.Button(label="Открыть на сайте", style=disnake.ButtonStyle.link,
+                                        url=f"{SITE_URL_IMPORT}?{urlencode({'link': link})}"))
+        if not any(s.get("suggest") for s in plan["sections"]):
+            for child in self.children:
+                if getattr(child, "label", None) == "Взять подсказки":
+                    child.disabled = True
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id != self.author_id:
+            await interaction.response.send_message("Эти кнопки — для того, кто запустил импорт.", ephemeral=True)
+            return False
+        return True
+
+    @disnake.ui.button(label="Применить", emoji="✅", style=disnake.ButtonStyle.success)
+    async def apply(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        from services import hotbot_import
+        if self.done:
+            await interaction.response.defer()
+            return
+        self.done = True
+        for child in self.children:
+            if not getattr(child, "url", None):
+                child.disabled = True
+        result = hotbot_import.apply_plan(self.plan, hotbot_import.default_selection(self.plan), self.guild_id,
+                                          str(interaction.author.id), build_parent=True)
+        parts = [f"добавлено {result['added']}", f"изменено {result['changed']}"]
+        if result["created_plates"]:
+            parts.append("новые плейты: " + ", ".join(result["created_plates"]))
+        if result["parent"]:
+            parts.append(f"модульный: {result['parent']}")
+        await interaction.response.edit_message(content="✅ Импорт применён: " + "; ".join(parts) + ".", view=self)
+
+    @disnake.ui.button(label="Взять подсказки", emoji="🔀", style=disnake.ButtonStyle.secondary)
+    async def suggest(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        from services import hotbot_import
+        mapping = dict(self.mapping)
+        for s in self.plan["sections"]:
+            if s.get("suggest"):
+                mapping[s["name"]] = s["suggest"]["plate"]
+        plan = await asyncio.to_thread(hotbot_import.build_plan, self.parsed, self.guild_id, mapping)
+        view = HotbotImportView(self.author_id, self.guild_id, self.link, self.parsed, plan, mapping)
+        await interaction.response.edit_message(embed=_hotbot_plan_embed(plan, self.link), view=view)
+
+
 class StatsRevealView(disnake.ui.View):
     def __init__(self, embeds):
         super().__init__(timeout=1800)
@@ -2243,6 +2332,35 @@ class StatRequirementsCog(commands.Cog):
         await inter.response.send_message(f"🗑️ Плейт «{плейт}» удалён вместе с требованиями: {deleted}.", ephemeral=True)
 
     # ------------------ Состав модульных плейтов ------------------
+    @stat_req.sub_command(name="импорт", description="Импорт плейтов из сообщения HotBot «templates test»: предпросмотр разницы и применение")
+    async def stat_req_import_hotbot(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        ссылка: str = commands.Param(description="Ссылка на ответ HotBot (ПКМ по сообщению → «Копировать ссылку»)"),
+        соответствие: str = commands.Param(default=None, description="Плейты для разделов вручную: ЛЕЯ=AC_ORGANA; МДК=AC_JMK"),
+    ):
+        from services import hotbot_import
+        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
+        if guild_id is None:
+            return
+        await inter.response.defer(ephemeral=True)
+        mapping = {}
+        for part in re.split(r"[;\n]", соответствие or ""):
+            name, sep, plate = part.partition("=")
+            if sep and name.strip() and plate.strip():
+                mapping[name.strip()] = plate.strip()
+        try:
+            parsed = hotbot_import.parse_messages(await hotbot_import.fetch_messages(ссылка))
+        except hotbot_import.HotbotImportError as e:
+            await inter.edit_original_response(f"❌ {e}")
+            return
+        except Exception as e:
+            await inter.edit_original_response(f"❌ Не удалось прочитать сообщение: {e}")
+            return
+        plan = await asyncio.to_thread(hotbot_import.build_plan, parsed, guild_id, mapping)
+        view = HotbotImportView(inter.author.id, guild_id, ссылка, parsed, plan, mapping)
+        await inter.edit_original_response(embed=_hotbot_plan_embed(plan, ссылка), view=view)
+
     @stat_req.sub_command(name="модуль_добавить", description="Подключить плейт (целиком либо одного персонажа из него) к модульному плейту")
     async def stat_req_module_add(
         self,

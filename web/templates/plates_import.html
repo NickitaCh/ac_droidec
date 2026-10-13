@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Импорт из HotBot — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow"><a href="/plates">Плейты статов</a></p>
+                <h1>Импорт из HotBot</h1>
+                <p class="page-hero-lead">Ссылка на ответ HotBot на «templates test» → разница с нашими плейтами → применить отмеченное.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    {% if result %}
+        <p class="notice">
+            Готово: добавлено {{ result.added }}, изменено {{ result.changed }}, удалено {{ result.deleted }}.
+            {% if result.created_plates %}Новые плейты: {{ result.created_plates|join(", ") }}.{% endif %}
+            {% if result.parent %}Модульный плейт: {{ result.parent }}.{% endif %}
+        </p>
+    {% endif %}
+
+    <form method="get" action="/plates/import" class="panel inline-form">
+        <input type="url" name="link" value="{{ link }}" placeholder="https://discord.com/channels/…/…/…" required style="flex:1; min-width: 18em;">
+        <button type="submit">Прочитать</button>
+    </form>
+
+    {% if plan %}
+        <form method="post" action="/plates/import" id="import-form">
+            <input type="hidden" name="link" value="{{ link }}">
+            <input type="hidden" name="sections_count" value="{{ plan.sections|length }}">
+
+            <div class="panel">
+                <h2>{{ plan.title }}{% if plan.player %} <span class="muted">· проверка {{ plan.player }}</span>{% endif %}</h2>
+                <p class="muted">
+                    Новых {{ counts.add }} · изменённых {{ counts.change }} · совпадает {{ counts.same }}
+                    · только у нас {{ counts.only_ours }}{% if counts.skipped %} · не переносится {{ counts.skipped }}{% endif %}
+                </p>
+
+                <datalist id="plates-list">
+                    {% for p in plan.plates %}<option value="{{ p }}">{% endfor %}
+                </datalist>
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Раздел HotBot</th><th>Плейт у нас</th><th class="num">+</th><th class="num">~</th><th class="num">=</th><th class="num">−</th></tr></thead>
+                        <tbody>
+                            {% for s in plan.sections %}
+                                <tr>
+                                    <td><strong>{{ s.name }}</strong><input type="hidden" name="section_{{ loop.index0 }}" value="{{ s.name }}"><input type="hidden" name="orig_map_{{ loop.index0 }}" value="{{ s.plate }}"></td>
+                                    <td>
+                                        <input type="text" name="map_{{ loop.index0 }}" value="{{ s.plate }}" list="plates-list" style="max-width: 14em;">
+                                        {% if s.plate_modular %}<span class="badge badge-danger">модульный — нельзя</span>
+                                        {% elif not s.plate_exists %}<span class="badge badge-warn">будет создан</span>{% endif %}
+                                        {% if s.suggest %}
+                                            <button type="button" class="link-btn" data-suggest="{{ loop.index0 }}" data-plate="{{ s.suggest.plate }}">
+                                                похоже на {{ s.suggest.plate }} ({{ s.suggest.overlap }}/{{ s.suggest.total }} персонажей)
+                                            </button>
+                                        {% endif %}
+                                    </td>
+                                    <td class="num">{{ s.add|length }}</td>
+                                    <td class="num">{{ s.change|length }}</td>
+                                    <td class="num">{{ s.same }}</td>
+                                    <td class="num">{{ s.only_ours|length }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p><button type="submit" name="action" value="preview" class="button-secondary">Пересчитать с этими плейтами</button></p>
+            </div>
+
+            {% for s in plan.sections %}
+                {% if s.add or s.change or s.only_ours or s.skipped %}
+                    <div class="panel">
+                        <h3>{{ s.name }} → {{ s.plate }}</h3>
+                        {% if s.plate_modular %}
+                            <p class="error">«{{ s.plate }}» — модульный плейт, требования в него не пишутся. Выберите обычный плейт.</p>
+                        {% else %}
+                            {% if s.add %}
+                                <h4>Новые</h4>
+                                {% for x in s.add %}
+                                    <label class="checkbox"><input type="checkbox" name="sel" value="{{ x.id }}" {% if x.id in selected %}checked{% endif %}> {{ x.text }}</label>
+                                {% endfor %}
+                            {% endif %}
+                            {% if s.change %}
+                                <h4>Изменятся</h4>
+                                {% for x in s.change %}
+                                    <label class="checkbox"><input type="checkbox" name="sel" value="{{ x.id }}" {% if x.id in selected %}checked{% endif %}>
+                                        <span><s class="muted">{{ x.old_text }}</s> → {{ x.text }}</span></label>
+                                {% endfor %}
+                            {% endif %}
+                        {% endif %}
+                        {% if s.only_ours %}
+                            <h4>Есть только у нас <span class="muted">(отметьте, чтобы удалить)</span></h4>
+                            {% for x in s.only_ours %}
+                                <label class="checkbox"><input type="checkbox" name="sel" value="{{ x.id }}"> {{ x.text }}</label>
+                            {% endfor %}
+                        {% endif %}
+                        {% if s.skipped %}
+                            <h4>Не переносится</h4>
+                            <ul class="muted">
+                                {% for x in s.skipped %}<li>{{ x.line }} — {{ x.reason }}</li>{% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+
+            <div class="panel">
+                {% if plan.parent %}
+                    {% if plan.parent.usable %}
+                        <label class="checkbox">
+                            <input type="checkbox" name="build_parent" value="1" {% if plan.parent.missing %}checked{% endif %}>
+                            {% if plan.parent.exists %}
+                                Подключить к модульному плейту «{{ plan.parent.name }}»{% if plan.parent.missing %}: {{ plan.parent.missing|join(", ") }}{% else %} (все уже подключены){% endif %}
+                            {% else %}
+                                Создать модульный плейт «{{ plan.parent.name }}» из этих разделов
+                            {% endif %}
+                        </label>
+                    {% else %}
+                        <p class="muted">«{{ plan.parent.name }}» уже есть и он не модульный — собирать в него разделы не будем.</p>
+                    {% endif %}
+                {% endif %}
+                <button type="submit" name="action" value="apply">Применить отмеченное</button>
+            </div>
+        </form>
+        <script>
+            document.querySelectorAll("[data-suggest]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const input = document.querySelector(`input[name="map_${btn.dataset.suggest}"]`);
+                    input.value = btn.dataset.plate;
+                    btn.closest("form").querySelector('button[value="preview"]').click();
+                });
+            });
+        </script>
+    {% endif %}
+{% endblock %}
