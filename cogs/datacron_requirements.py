@@ -960,6 +960,12 @@ def _squad_missing_reason(units, player_json) -> str | None:
     roster = {}
     for unit in (player_json or {}).get("rosterUnit") or []:
         roster[str(unit.get("definitionId", "")).split(":")[0]] = unit
+    return squad_missing_reason_in_roster(units, roster)
+
+
+def squad_missing_reason_in_roster(units, roster: dict) -> str | None:
+    """То же по готовому ростеру {base_id: rosterUnit} — плейты берут его из
+    player_unit_cache (database.get_player_units), см. cogs/stat_requirements.py."""
     names = database.get_game_unit_names([u["base_id"] for u in units])
     for spec in units:
         name = names.get(spec["base_id"]) or spec["base_id"]

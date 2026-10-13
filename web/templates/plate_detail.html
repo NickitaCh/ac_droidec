@@ -20,6 +20,35 @@
             <button type="submit">Сохранить</button>
         </form>
     </details>
+    <p class="muted">Отряд: {{ squad_label or "не задан — плейт для всех" }}
+        <button type="button" class="link-btn" data-modal-open="plate-squad-modal">{{ "изменить" if squad_label else "задать" }}</button></p>
+    <dialog class="edit-modal" id="plate-squad-modal">
+        <form method="post" action="/plates/{{ plate_name }}/squad">
+            <div class="edit-modal-header">
+                <h3>Отряд плейта</h3>
+                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+            </div>
+            <div class="edit-modal-body">
+                <div class="edit-modal-section">
+                    <p class="muted" style="margin:0;font-size:0.85em;">С галочкой «только с отрядом» в /статы плейт не проверяется у тех, у кого отряда нет. В модульном плейте действует отряд каждого плейта-источника. Релик пусто — достаточно, что персонаж открыт. Пустой состав — для всех.</p>
+                    {% for u in squad_rows %}
+                        <div class="edit-modal-row">
+                            <div class="unit-search" data-live-search data-url="/plates/api/units" data-value-field="base_id" data-label-field="name" data-required="false" style="flex:1 1 14em;">
+                                <input type="text" class="unit-search-input" placeholder="Персонаж {{ loop.index }}…" autocomplete="off" value="{{ u.name }}">
+                                <input type="hidden" name="squad_unit_{{ loop.index }}" class="unit-search-value" value="{{ u.base_id }}">
+                                <div class="unit-search-results"></div>
+                            </div>
+                            <label style="flex-direction:row;align-items:center;gap:0.4em;">мин. R <input type="number" name="squad_relic_{{ loop.index }}" min="0" max="10" value="{{ u.min_relic if u.min_relic is not none else '' }}" style="width:4.5em;"></label>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="edit-modal-footer">
+                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                <button type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
 
     {% if error %}
         <p class="error">{{ error }}</p>

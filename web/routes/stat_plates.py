@@ -15,12 +15,13 @@ from fastapi.templating import Jinja2Templates
 
 import database
 import stat_engine
-from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED
+from cogs.datacron_requirements import PRIORITY_CHOICES, PRIORITY_EMOJI, PRIORITY_LABELS, PRIORITY_REQUIRED, _squad_label
 from cogs.stat_requirements import (
     COMPARE_OPERATOR_CHOICES, COMPARE_OPERATORS, MOD_REQ_STATS, MOD_SLOT_LABELS, OPERATOR_CHOICES, STAT_CHOICES, STAT_MOD_PRIMARY, STAT_OMICRON,
     STAT_SET, STAT_SET_ANY, STAT_SET_ONLY, SET_CHOICES, mod_primary_allowed, parse_id_list,
 )
 from services import feature_flags, hotbot_import
+from web.routes.datacrons import _squad_from_form, _squad_rows
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -276,6 +277,15 @@ async def plates_edit_description(
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
+@router.post("/{plate_name}/squad", response_class=HTMLResponse)
+async def plates_squad_save(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    squad, error = _squad_from_form(await request.form())
+    if error:
+        return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
+    database.set_stat_plate_squad(plate_name, squad, guild_id=user["guild_id"])
+    return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+
+
 @router.post("/{plate_name}/delete", response_class=HTMLResponse)
 async def plates_delete(plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     database.delete_stat_plate(plate_name, guild_id=user["guild_id"])
@@ -304,6 +314,7 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
     # get_stat_requirement_characters/get_stat_requirements уже прозрачно разворачивают
     # композицию для модульных плейтов (database.py::_resolve_modular_plate_leaf_pairs) —
     # эта часть не отличается от обычного плейта.
+    squad = database.get_stat_plate_squads(guild_id).get(plate_name, [])
     char_keys = database.get_stat_requirement_characters(plate_name, guild_id=guild_id)
     characters = []
     for base_id in char_keys:
@@ -387,6 +398,8 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         "plate_name": plate_name,
         "description": plate[1] if plate else None,
         "is_modular": is_modular,
+        "squad_label": _squad_label(squad) if squad else "",
+        "squad_rows": _squad_rows(squad),
         "other_plates": other_plates,
         "current_components": current_components,
         "characters": characters,

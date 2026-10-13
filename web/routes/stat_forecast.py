@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 import database
 import guild_resolver
 import services.stat_forecast as stat_forecast
-from cogs.stat_requirements import SCENARIO_RAW, SCENARIO_UP, SCENARIO_FULL
+from cogs.stat_requirements import SCENARIO_RAW, SCENARIO_UP, SCENARIO_FULL, _char_squad_skip, _missing_plate_squads
 from services import feature_flags
 
 SCENARIO_LABELS = {
@@ -60,6 +60,7 @@ async def stats_check_form(
     action: str = "",
     scenario: str = SCENARIO_RAW,
     scheme: str = "",
+    squad_only: bool = False,
     user: dict = Depends(feature_flags.require_feature("stat_requirements")),
 ):
     guild_id = user["guild_id"]
@@ -80,6 +81,9 @@ async def stats_check_form(
         "selected_ally_code_manual": ally_code_manual,
         "selected_character": character,
         "force_refresh": force_refresh,
+        "squad_only": squad_only,
+        "skipped_plate": None,
+        "skipped_chars": [],
         "selected_scenario": scenario,
         "scenario_choices": SCENARIO_LABELS.items(),
         "scenario_label": SCENARIO_LABELS[scenario],
@@ -129,16 +133,31 @@ async def stats_check_form(
         # Игрок не выбран — проверка по всей гильдии (кэшированные данные, без live Comlink).
         context["guild_report"] = await stat_forecast.build_guild_report(
             comlink, stat_calc, plate, target_chars, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme,
+            squad_only=squad_only,
         )
         return templates.TemplateResponse(request, "stats_check.html", context)
 
     player_label = next((name for code, name in roster if code == target_ally_code), target_ally_code)
+    context["player_label"] = player_label
+    missing = {}
+    if squad_only:
+        if force_refresh:
+            await stat_forecast.refresh_player_units(comlink, target_ally_code)
+        missing = _missing_plate_squads(target_ally_code, guild_id)
+        if plate in missing:
+            context["skipped_plate"] = missing[plate]
+            context["results"] = []
+            return templates.TemplateResponse(request, "stats_check.html", context)
     results = []
     failed_required = []
     for base_id in target_chars:
+        skip_plates, skip_reason = _char_squad_skip(plate, base_id, guild_id, missing)
+        if skip_reason:
+            context["skipped_chars"].append((database.get_game_unit_name(base_id) or base_id, skip_reason))
+            continue
         outcome = await stat_forecast.evaluate_character_player(
             comlink, stat_calc, plate, base_id, target_ally_code, force_refresh, player_label, guild_id=guild_id,
-            scenario=scenario, forced_scheme=forced_scheme,
+            scenario=scenario, forced_scheme=forced_scheme, skip_plates=skip_plates,
         )
         if outcome is None:
             continue

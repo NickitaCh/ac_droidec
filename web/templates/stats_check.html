@@ -55,9 +55,14 @@
                     </select>
                 </label>
 
-                <label class="checkbox-label">
+                <label class="checkbox">
                     <input type="checkbox" name="force_refresh" value="1" {% if force_refresh %}checked{% endif %}>
                     Обновить статы игрока с сервера (медленнее, но актуально прямо сейчас)
+                </label>
+
+                <label class="checkbox">
+                    <input type="checkbox" name="squad_only" value="1" {% if squad_only %}checked{% endif %}>
+                    Только у кого есть отряд плейта (состав — на странице плейта)
                 </label>
 
                 <label>
@@ -88,7 +93,11 @@
     {% if loading %}
         <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
     {% elif results is not none %}
-        {% if not results %}
+        {% if skipped_plate %}
+            <p class="empty-state">⚪ У игрока {{ player_label }} нет отряда плейта ({{ skipped_plate }}) — плейт ему не требуется.</p>
+        {% elif not results and skipped_chars %}
+            <p class="empty-state">⚪ У игрока {{ player_label }} нет отрядов этого плейта — проверять нечего.</p>
+        {% elif not results %}
             <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
         {% else %}
             <h2>{{ player_label }}</h2>
@@ -124,6 +133,14 @@
                     </div>
                 {% endif %}
             </div>
+            {% if skipped_chars %}
+                <div class="panel">
+                    <div class="panel-title"><span>⚪ Не требуется — нет отряда</span><span class="panel-hint">{{ skipped_chars|length }}</span></div>
+                    <ul>
+                        {% for name, reason in skipped_chars %}<li><strong>{{ name }}</strong> — {{ reason }}</li>{% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
         {% endif %}
     {% elif guild_report is not none %}
         {% if guild_report.error %}
@@ -183,6 +200,15 @@
 
             {% if guild_report.no_data %}
                 <p class="muted">⚠️ Нет кэшированных данных ни по одному юниту: {{ guild_report.no_data|map(attribute="name")|join(", ") }}</p>
+            {% endif %}
+
+            {% if guild_report.skipped %}
+                <div class="panel">
+                    <div class="panel-title"><span>⚪ Не требуется — нет отряда</span><span class="panel-hint">{{ guild_report.skipped|length }}</span></div>
+                    <ul>
+                        {% for r in guild_report.skipped %}<li><strong>{{ r.name }}</strong> — {{ r.reason }}</li>{% endfor %}
+                    </ul>
+                </div>
             {% endif %}
 
             {% if guild_report.problem %}

@@ -13,8 +13,10 @@ import asyncio
 import time
 import types
 
+import database
 import stat_engine
 from cogs.stat_requirements import _evaluate_character_player, _project_character_relic, _build_guild_report, SCENARIO_RAW
+from services import activity_diff
 
 _TTL_SECONDS = 12 * 60 * 60
 
@@ -91,7 +93,7 @@ def _bot_stand_in(comlink, stat_calc):
 
 async def evaluate_character_player(
     comlink, stat_calc, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1,
-    scenario: str = SCENARIO_RAW, forced_scheme: int | None = None,
+    scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None,
 ):
     """Обёртка над cogs.stat_requirements._evaluate_character_player — см. её докстринг
     для формата результата (char_name, block, matched, total, updated_at, failed_required,
@@ -99,7 +101,7 @@ async def evaluate_character_player(
     и forced_scheme (форсирует схему мод-билда вместо авто-детекта, только для персонажей у
     которых есть схемы), либо None, если для этого персонажа нет сохранённых требований в плейте."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
+    return await _evaluate_character_player(bot_stand_in, plate_name, base_id, ally_code, force_refresh, player_label, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme, skip_plates=skip_plates)
 
 
 async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1, forced_scheme: int | None = None):
@@ -109,9 +111,16 @@ async def project_character_relic(comlink, stat_calc, plate_name: str, base_id: 
     return await _project_character_relic(bot_stand_in, plate_name, base_id, target_relic, guild_id=guild_id, forced_scheme=forced_scheme)
 
 
-async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None) -> dict:
+async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, squad_only: bool = False) -> dict:
     """Обёртка над cogs.stat_requirements._build_guild_report — см. её докстринг для формата
-    результата ({"error", "total_players", "compliant", "problem", "no_data"}) и параметров
-    scenario/forced_scheme."""
+    результата ({"error", "total_players", "compliant", "problem", "no_data", "skipped"}) и параметров
+    scenario/forced_scheme/squad_only."""
     bot_stand_in = _bot_stand_in(comlink, stat_calc)
-    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
+    return await _build_guild_report(bot_stand_in, plate_name, char_keys, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme, squad_only=squad_only)
+
+
+async def refresh_player_units(comlink, ally_code: str) -> None:
+    """Свежий ростер игрока в player_unit_cache — нужен до проверки отряда («обновить»)."""
+    units = await activity_diff.fetch_player_units(comlink, ally_code)
+    if units:
+        database.upsert_player_units(ally_code, units)

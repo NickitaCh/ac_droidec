@@ -4205,6 +4205,56 @@ def _ensure_stat_plate_components_table(cursor):
     )
 
 
+def _ensure_stat_plate_squads_table(cursor):
+    """Необязательный состав отряда плейта: [{"base_id", "min_relic"?}, ...], как у ДК
+    (datacron_requirement_squads). /статы с «с_отрядом» не проверяет плейт у игроков без
+    отряда; в модульном плейте действует отряд плейта-источника каждой строки."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stat_plate_squads (
+            guild_id INTEGER NOT NULL,
+            plate_name TEXT NOT NULL,
+            units_json TEXT NOT NULL,
+            PRIMARY KEY (guild_id, plate_name)
+        )
+    """)
+
+
+def set_stat_plate_squad(plate_name: str, units: list, guild_id: int = 1):
+    """Пустой units — состав убирается (плейт снова для всех)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_squads_table(cursor)
+    if units:
+        cursor.execute(
+            "INSERT OR REPLACE INTO stat_plate_squads (guild_id, plate_name, units_json) VALUES (?, ?, ?)",
+            (guild_id, plate_name, json.dumps(units, ensure_ascii=False)),
+        )
+    else:
+        cursor.execute("DELETE FROM stat_plate_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, plate_name))
+    conn.commit()
+    conn.close()
+
+
+def get_stat_plate_squads(guild_id: int = 1) -> dict:
+    """{plate_name: [units]} — все заданные отряды плейтов гильдии."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_stat_plate_squads_table(cursor)
+    conn.commit()
+    cursor.execute("SELECT plate_name, units_json FROM stat_plate_squads WHERE guild_id = ?", (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for plate_name, units_json in rows:
+        try:
+            units = json.loads(units_json)
+        except (TypeError, ValueError):
+            continue
+        if units:
+            result[plate_name] = units
+    return result
+
+
 def _is_modular_raw(plate_name: str, guild_id: int, cursor) -> bool:
     cursor.execute("SELECT is_modular FROM stat_plates WHERE guild_id = ? AND name = ?", (guild_id, plate_name))
     row = cursor.fetchone()
@@ -4399,6 +4449,11 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
             "UPDATE stat_plate_character_schemes SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
             (new_name, guild_id, old_name)
         )
+        _ensure_stat_plate_squads_table(cursor)
+        cursor.execute(
+            "UPDATE stat_plate_squads SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
+            (new_name, guild_id, old_name)
+        )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -4490,6 +4545,8 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?", (guild_id, name))
     _ensure_stat_plate_character_schemes_table(cursor)
     cursor.execute("DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
+    _ensure_stat_plate_squads_table(cursor)
+    cursor.execute("DELETE FROM stat_plate_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted

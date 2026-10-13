@@ -27,6 +27,8 @@ from cogs.datacron_requirements import (
     DATACRON_CHECK_COLOR_PARTIAL,
     DATACRON_CHECK_COLOR_NONE,
     _lines_to_embeds,
+    _squad_label,
+    squad_missing_reason_in_roster,
 )
 
 # Полный список названий статов у StatCalc (swgoh_comlink/helpers/_stat_data.py, таблица
@@ -584,11 +586,14 @@ def _resolve_scheme(rows: list, mod_primaries: dict, mod_set_counts: dict, force
     return active_scheme, scheme_label, is_forced
 
 
-def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
+def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1, skip_plates=None):
     """Общий префикс для обоих режимов расчёта: сохранённые требования персонажа в плейте,
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
+    skip_plates — плейты-источники, чьих отрядов у игрока нет (их строки отбрасываются).
     Возвращает None, если для этого персонажа нет сохранённых требований."""
     rows = database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
+    if skip_plates:
+        rows = [r for r in rows if r[1] not in skip_plates]
     if not rows:
         return None
     char_name = _unit_display_name(base_id)
@@ -599,7 +604,34 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1):
     return rows, char_name, required_relic, comments, legend
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None):
+def _missing_plate_squads(ally_code, guild_id: int, squads: dict | None = None) -> dict:
+    """{плейт: причина} — отряды плейтов (database.get_stat_plate_squads), которых у игрока
+    нет по кэшу ростера. Пусто, если отрядов не задано."""
+    squads = database.get_stat_plate_squads(guild_id) if squads is None else squads
+    if not squads:
+        return {}
+    roster = database.get_player_units(ally_code)
+    missing = {}
+    for plate, units in squads.items():
+        reason = squad_missing_reason_in_roster(units, roster)
+        if reason:
+            missing[plate] = reason
+    return missing
+
+
+def _char_squad_skip(plate_name: str, base_id: str, guild_id: int, missing: dict):
+    """(skip_plates, reason): плейты-источники строк персонажа без отряда у игрока; reason —
+    если отброшены ВСЕ строки (персонаж игроку не требуется), иначе None."""
+    if not missing:
+        return set(), None
+    leaves = {r[1] for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)}
+    skip = leaves & set(missing)
+    if leaves and skip == leaves:
+        return skip, missing[sorted(skip)[0]]
+    return skip, None
+
+
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None):
     """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total,
     active_scheme, scheme_label) для одного персонажа плейта у конкретного игрока — статы берутся
     из его реальных модов/шмота, прогноз на релик плейта. active_scheme/scheme_label — None,
@@ -629,8 +661,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     Omicron аналогично не проецируется, но в SCENARIO_UP строка с ним целиком исключается из
     "Итог"/matched-total (не считается ни пройденной, ни непройденной) — этот сценарий
     специально используется, чтобы смотреть билд/модуль в отрыве от факта разблокировки.
-    Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте)."""
-    loaded = _load_char_rows(plate_name, base_id, guild_id)
+    Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте).
+    skip_plates — см. _load_char_rows (отбор по отрядам, _char_squad_skip)."""
+    loaded = _load_char_rows(plate_name, base_id, guild_id, skip_plates=skip_plates)
     if loaded is None:
         return None
     rows, char_name, required_relic, comments, legend = loaded
@@ -979,7 +1012,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     return char_name, block, matched, total, updated_at, failed_required, required_total, active_scheme, scheme_label
 
 
-async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None) -> dict:
+async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, squad_only: bool = False) -> dict:
     """Гильдийский вариант _evaluate_character_player — прогоняет весь зарегистрированный
     ростер по каждому персонажу плейта (char_keys сужается снаружи, если проверяем один
     персонаж), используя уже закэшированные в player_unit_cache данные (player_units_sync_loop,
@@ -995,13 +1028,17 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
     Каждая запись problem[i]["chars"][j] несёт "failed_required" — тот же список
     {"stat", "current", "requirement"}, что возвращает _evaluate_character_player, — чтобы
     вызывающий код (веб-попап на /stats-check) мог показать конкретные невыполненные статы
-    персонажа, а не только дробь matched/total."""
+    персонажа, а не только дробь matched/total.
+
+    squad_only — игроки без отряда плейта (stat_plate_squads) уходят в "skipped" с причиной,
+    а строки источников модульного плейта без отряда не проверяются; по умолчанию — все."""
     roster = database.get_all_user_mappings(guild_id)
     if not roster:
         return {
             "error": "Никто из гильдии не зарегистрирован (/регистрация) — проверять некого.",
-            "total_players": 0, "compliant": [], "problem": [], "no_data": [],
+            "total_players": 0, "compliant": [], "problem": [], "no_data": [], "skipped": [],
         }
+    squads = database.get_stat_plate_squads(guild_id) if squad_only else {}
 
     # required_relic на персонажа — не меняется от игрока к игроку, считаем один раз
     # (не в цикле по ростеру) и приклеиваем к каждой "проблемной" строке ниже: пригодится
@@ -1013,17 +1050,28 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
         if loaded is not None:
             required_relic_by_char[base_id] = loaded[2]
 
-    compliant, problem, no_data = [], [], []
+    compliant, problem, no_data, skipped = [], [], [], []
     for _discord_id, ally_code, name in roster:
+        missing = _missing_plate_squads(ally_code, guild_id, squads) if squads else {}
+        if plate_name in missing:
+            skipped.append({"name": name, "ally_code": ally_code, "reason": missing[plate_name]})
+            continue
         rows_total = 0  # ВСЕ приоритеты — только чтобы понять, есть ли вообще данные (no_data)
         required_total_all = 0
         required_matched_all = 0
         char_problems = []
         has_failed_required = False
+        skip_reasons = []
+        evaluated = 0
         for base_id in char_keys:
-            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme)
+            skip_plates, skip_reason = _char_squad_skip(plate_name, base_id, guild_id, missing)
+            if skip_reason:
+                skip_reasons.append(skip_reason)
+                continue
+            result = await _evaluate_character_player(bot, plate_name, base_id, ally_code, False, name, guild_id=guild_id, scenario=scenario, forced_scheme=forced_scheme, skip_plates=skip_plates)
             if result is None:
                 continue
+            evaluated += 1
             char_name, _block, _matched, total, _updated_at, failed_required, required_total, _active_scheme, scheme_label = result
             rows_total += total
             required_matched = required_total - len(failed_required)
@@ -1057,7 +1105,9 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
             "matched": required_matched_all, "total": required_total_all,
             "chars": char_problems,
         }
-        if rows_total == 0:
+        if not evaluated and skip_reasons:
+            skipped.append({"name": name, "ally_code": ally_code, "reason": skip_reasons[0]})
+        elif rows_total == 0:
             no_data.append(entry)
         elif not has_failed_required:
             compliant.append(entry)
@@ -1078,7 +1128,11 @@ async def _build_guild_report(bot, plate_name: str, char_keys: list, guild_id: i
     problem.sort(key=lambda r: (r["matched"] - r["total"], r["name"].lower()))
     compliant.sort(key=lambda r: r["name"].lower())
     no_data.sort(key=lambda r: r["name"].lower())
-    return {"error": None, "total_players": len(roster), "compliant": compliant, "problem": problem, "no_data": no_data}
+    skipped.sort(key=lambda r: r["name"].lower())
+    return {
+        "error": None, "total_players": len(roster) - len(skipped),
+        "compliant": compliant, "problem": problem, "no_data": no_data, "skipped": skipped,
+    }
 
 
 async def _project_character_relic(bot, plate_name: str, base_id: str, target_relic: int, guild_id: int = 1, forced_scheme: int | None = None):
@@ -2474,6 +2528,7 @@ class StatRequirementsCog(commands.Cog):
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
         схема: str = commands.Param(default=None, description="Форсировать схему мод-билда вместо авто-детекта (не действует на персонажей без схем)", choices=FORCE_SCHEME_CHOICES),
+        с_отрядом: bool = commands.Param(default=False, description="Только у кого есть отряд плейта (состав задаётся на сайте). По умолчанию — все"),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
@@ -2504,7 +2559,7 @@ class StatRequirementsCog(commands.Cog):
                 await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
                 return
 
-            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme)
+            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, squad_only=с_отрядом)
             if report["error"]:
                 await inter.edit_original_response(f"❌ {report['error']}")
                 return
@@ -2518,6 +2573,8 @@ class StatRequirementsCog(commands.Cog):
                 lines.append("_(полный подгон релика к цели плейта — вверх и вниз)_")
             if report["no_data"]:
                 lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
+            if report["skipped"]:
+                lines.append(f"⚪ Не требуется — нет отряда: {len(report['skipped'])}")
             lines.append("")
             if report["compliant"]:
                 lines.append("✅ " + ", ".join(r["name"] for r in report["compliant"]))
@@ -2528,6 +2585,9 @@ class StatRequirementsCog(commands.Cog):
                     lines.append(f"❌ {r['name']} — обязательных {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
             else:
                 lines.append("Все закрыли все требования! 🎉")
+            if report["skipped"]:
+                lines.append("")
+                lines.append("⚪ Нет отряда: " + ", ".join(f"{r['name']} ({r['reason']})" for r in report["skipped"]))
 
             if not report["problem"]:
                 color = DATACRON_CHECK_COLOR_FULL
@@ -2574,14 +2634,30 @@ class StatRequirementsCog(commands.Cog):
             await guild_resolver.send_denied(inter, self_error)
             return
 
+        missing = {}
+        if с_отрядом:
+            if обновить:
+                units = await activity_diff.fetch_player_units(self.bot.comlink, ally_code)
+                if units:
+                    database.upsert_player_units(ally_code, units)
+            missing = _missing_plate_squads(ally_code, guild_id)
+            if плейт in missing:
+                await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отряда плейта {плейт} ({missing[плейт]}) — плейт ему не требуется.")
+                return
+
         lines = []
         matched_total = 0
         rows_total = 0
         updated_ats = []
         any_char_shown = False
         failed_required_by_char = []
+        skipped_chars = []
         for base_id in char_keys:
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme)
+            skip_plates, skip_reason = _char_squad_skip(плейт, base_id, guild_id, missing)
+            if skip_reason:
+                skipped_chars.append((_unit_display_name(base_id), skip_reason))
+                continue
+            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, skip_plates=skip_plates)
             if result is None:
                 continue
             char_name, block, matched, total, updated_at, failed_required, _required_total, _active_scheme, _scheme_label = result
@@ -2596,7 +2672,10 @@ class StatRequirementsCog(commands.Cog):
                 failed_required_by_char.append((char_name, failed_required))
 
         if not any_char_shown:
-            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+            if skipped_chars:
+                await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отрядов этого плейта — проверять нечего.")
+            else:
+                await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
 
         # Итоговый блок внизу отчёта: только ОБЯЗАТЕЛЬНЫЕ статы, не прошедшие норму по выбранному
@@ -2614,6 +2693,10 @@ class StatRequirementsCog(commands.Cog):
                     lines.append(f"❌ **{char_name}** — {item['stat']}: сейчас {item['current']}, нужно {item['requirement']}")
         else:
             lines.append("✅ Все обязательные статы в норме.")
+        if skipped_chars:
+            lines.append(f"## ⚪ Не требуется — нет отряда ({len(skipped_chars)})")
+            for char_name, reason in skipped_chars:
+                lines.append(f"**{char_name}** — {reason}")
 
         # Цвет по тому же признаку, что и текст "Итог" выше — обязательным статам
         # (failed_required_by_char), а не matched_total == rows_total: иначе цвет мог
