@@ -40,25 +40,9 @@ async def autocomplete_players(inter: disnake.ApplicationCommandInteraction, str
     string = string.lower()
     return [name for name in cache.keys() if string in name.lower()][:25]
 
-async def autocomplete_violations(inter: disnake.ApplicationCommandInteraction, string: str):
-    chosen_mode = inter.filled_options.get("режим")
-    if not chosen_mode:
-        return ["⚠️ СНАЧАЛА выберите режим (ТБ, ВГ или Рейд)!"]
-    if chosen_mode not in WARNS_STRUCTURE:
-        return ["❌ Ошибка: Выбран неизвестный режим."]
-        
-    options = WARNS_STRUCTURE[chosen_mode]
-    search_string = string.lower().strip()
-    matched_options = [opt for opt in options if search_string in opt.lower()]
-    
-    if not matched_options:
-        return options[:25]
-        
-    return matched_options[:25]
-
 # --- КОМПОНЕНТЫ ИНТЕРАКТИВНОГО МЕНЮ УДАЛЕНИЯ ДЛЯ /UNWARN ---
 class UnwarnSelectView(disnake.ui.View):
-    def __init__(self, ally_code, player_name, warns_list, guild_id=1):
+    def __init__(self, ally_code, player_name, warns_list, guild_id=1, panel=None):
         super().__init__(timeout=60)
         options = []
         for i, (warn_id, cat, subcat, d_str, comment) in enumerate(warns_list[:25]):
@@ -69,10 +53,11 @@ class UnwarnSelectView(disnake.ui.View):
 
             value = f"{i}|{cat}|{subcat}|{d_str}"
             options.append(disnake.SelectOption(label=label, value=value))
-        self.add_item(UnwarnSelect(options, ally_code, player_name, warns_list, guild_id))
+        self.add_item(UnwarnSelect(options, ally_code, player_name, warns_list, guild_id, panel))
 
 class UnwarnSelect(disnake.ui.Select):
-    def __init__(self, options, ally_code, player_name, warns_list, guild_id=1):
+    def __init__(self, options, ally_code, player_name, warns_list, guild_id=1, panel=None):
+        self.panel = panel
         self.ally_code = ally_code
         self.player_name = player_name
         self.guild_id = guild_id
@@ -84,6 +69,11 @@ class UnwarnSelect(disnake.ui.Select):
 
         await inter.response.edit_message(content="🔄 Изменения вносятся...", view=None)
         await inter.followup.send(f"🗑️ Нарушение за {d_str} ({cat}: {subcat}) у игрока **{self.player_name}** успешно удалено", ephemeral=False)
+        if self.panel is not None:
+            try:
+                await self.panel.refresh()  # досье на панели /нарушения — без удалённого
+            except disnake.HTTPException:
+                pass
 
 
 # =====================================================================
@@ -256,258 +246,243 @@ class ViolationsCog(commands.Cog):
     async def before_loop(self):
         await self.bot.wait_until_ready()
 
-    @commands.slash_command(name="нарушения", description="Учёт нарушений участников гильдии")
-    async def violations_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARN С 3 НАРУШЕНИЯМИ ЗА РАЗ ---
-    @violations_group.sub_command(name="добавить", description="Зафиксировать нарушение у игрока")
-    async def warn(
+    # ------------------ /нарушения — панель (2026-10-14) ------------------
+    # Одна команда вместо добавить/список/снять: режим и нарушения — выпадашками,
+    # игрок — параметром с подсказками или выпадашками (А–…/…–Я), запись — окно с датой
+    # и комментариями. Факт нарушения, как и раньше, публикуется в канал открыто.
+    @commands.slash_command(name="нарушения", description="Нарушения гильдии: таблица, досье игрока, добавить и снять")
+    async def violations_panel(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        режим: str = commands.Param(description="Игровое событие, в котором произошло нарушение", choices=["ТБ", "ВГ", "Рейд"]),
-        нарушение_1: str = commands.Param(description="Выберите основное нарушение", autocomplete=autocomplete_violations),
-        игрок: str = commands.Param(default=None, description="Игрок из состава гильдии (или укажите тег ниже)", autocomplete=autocomplete_players),
-        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
-        комментарий_1: str = commands.Param(description="Детали для первого нарушения (опционально)", default=None),
-        нарушение_2: str = commands.Param(description="Второе нарушение (опционально)", default=None, autocomplete=autocomplete_violations),
-        комментарий_2: str = commands.Param(description="Детали для второго нарушения (опционально)", default=None),
-        нарушение_3: str = commands.Param(description="Третье нарушение (опционально)", default=None, autocomplete=autocomplete_violations),
-        комментарий_3: str = commands.Param(description="Детали для третьего нарушения (опционально)", default=None),
-        дата: str = commands.Param(description="Формат: ДД.ММ или ДД.ММ.ГГГГ. По умолчанию — сегодня", default=None)
+        игрок: str = commands.Param(default=None, description="Необязательно: начните вводить ник — панель откроется на игроке",
+                                    autocomplete=autocomplete_players),
+        тег: disnake.User = commands.Param(default=None, description="Или Discord-тег игрока (у него должна быть /регистрация)"),
     ):
         guild_id = await guild_resolver.require_feature(inter, "violations")
         if guild_id is None:
             return
-
-        if дата is None:
-            final_date = datetime.now().strftime("%d.%m.%Y")
-        else:
-            дата = дата.strip()
-            if len(дата) <= 5:
-                final_date = f"{дата}.{datetime.now().year}"
-            else:
-                final_date = дата
-
+        cache = self.bot.guild_roster_caches.get(guild_id) or {}
+        if not cache:
+            await inter.response.send_message("❌ Состав ещё загружается. Попробуйте через минуту.", ephemeral=True)
+            return
+        players = sorted(((name, code) for name, code in dict(cache).items()), key=lambda p: p[0].lower())
+        panel = ViolationsPanel(self, guild_id, inter, players)
         if тег is not None:
             registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
             if not registration:
                 await inter.response.send_message(
-                    f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
-                    ephemeral=True,
-                )
+                    f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация` или выберите игрока по имени.",
+                    ephemeral=True)
                 return
-            ally_code, игрок = registration
+            panel.ally_code = registration[0]
         elif игрок:
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
-            if игрок not in cache:
-                await inter.response.send_message("❌ Ошибка: Игрок не найден в составе гильдии.", ephemeral=True)
-                return
-            ally_code = cache[игрок]
-        else:
-            await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
-            return
+            panel.ally_code = dict(cache).get(игрок) or next(
+                (code for name, code in players if игрок.strip().lower() in name.lower()), None)
+        await inter.response.send_message(panel.render(), view=panel.build(), ephemeral=True,
+                                          allowed_mentions=disnake.AllowedMentions.none())
 
-        pairs = [
-            {"violation": нарушение_1, "comment": комментарий_1},
-            {"violation": нарушение_2, "comment": комментарий_2},
-            {"violation": нарушение_3, "comment": комментарий_3}
-        ]
-
-        valid_pairs = []
-        for pair in pairs:
-            v = pair["violation"]
-            if v and v in WARNS_STRUCTURE[режим]:
-                valid_pairs.append(pair)
-
-        if not valid_pairs:
-            await inter.response.send_message("❌ Ошибка: Выбраны некорректные нарушения", ephemeral=True)
-            return
-
-        unique_pairs = []
-        seen_violations = set()
-        duplicate_warning = ""
-
-        for pair in valid_pairs:
-            v = pair["violation"]
-            if v not in seen_violations:
-                seen_violations.add(v)
-                unique_pairs.append(pair)
-            else:
-                duplicate_warning = "⚠️ *Внимание: Одинаковые пункты нарушений были автоматически объединены*\n\n"
-
-        for pair in unique_pairs:
-            v = pair["violation"]
-            c = pair["comment"].strip() if pair["comment"] else None
-            database.add_warn(ally_code, режим, v, final_date, c, guild_id=guild_id)
-
-        result_text = (
-            f"{duplicate_warning}✅ **Нарушение успешно зафиксировано!**\n"
-            f"👤 **Игрок:** {игрок} (Код: {ally_code})\n"
-            f"📅 **Дата:** {final_date}\n"
-            f"🗂 **Режим:** {режим}\n"
-            f"🛑 **Нарушения:**\n"
-        )
-        
-        formatted_list = []
-        for pair in unique_pairs:
-            v = pair["violation"]
-            c = pair["comment"]
-            if c:
-                formatted_list.append(f"• {v} | *📝 Комментарий: {c.strip()}*")
-            else:
-                formatted_list.append(f"• {v}")
-                
-            result_text += "\n".join(formatted_list)
-        await inter.response.send_message(result_text, ephemeral=False)
-
-    # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /WARNS С ТЕКСТОВОЙ ТАБЛИЦЕЙ СТАТИСТИКИ И ЗНАЧКАМИ 🚨 ---
-    @violations_group.sub_command(name="список", description="Общая таблица нарушений или досье игрока")
-    async def warns(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(description="Игрок для досье; пусто — общая таблица по гильдии", default=None, autocomplete=autocomplete_players),
-        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
-    ):
-        await inter.response.defer(ephemeral=False)
+    def guild_table(self, guild_id: int, cache: dict) -> str | None:
         three_months_ago = datetime.now() - timedelta(days=90)
+        stats = {name: {"ТБ": 0, "ВГ": 0, "Рейд": 0, "Recent": 0} for name in cache.keys()}
+        ally_map = {str(code): name for name, code in cache.items()}
+        for ally_code, cat, d_str in database.get_all_warns(guild_id=guild_id):
+            name = ally_map.get(str(ally_code))
+            if not name:
+                continue
+            try:
+                if datetime.strptime(d_str, "%d.%m.%Y") >= three_months_ago:
+                    stats[name]["Recent"] += 1
+                    if cat in stats[name]:
+                        stats[name][cat] += 1
+            except ValueError:
+                pass
+        rows = sorted(((n, d) for n, d in stats.items() if d["Recent"]), key=lambda item: item[1]["Recent"], reverse=True)
+        if not rows:
+            return None
+        table = "📋 НАРУШЕНИЯ ЗА ПОСЛЕДНИЕ 90 ДНЕЙ\n" + f"{'Игрок':<16} | ТБ | ВГ | Рд | Всего\n" + "-" * 40 + "\n"
+        for name, d in rows:
+            prefix = "🚨" if d["Recent"] >= self.bot.n_limit else "  "
+            table += f"{prefix}{name[:14]:<14} | {d['ТБ']:<2} | {d['ВГ']:<2} | {d['Рейд']:<2} | {d['Recent']}\n"
+        return table
 
-        guild_id = await guild_resolver.require_feature(inter, "violations")
-        if guild_id is None:
-            return
+    def dossier(self, guild_id: int, ally_code: str, name: str) -> tuple[str, int, int, list]:
+        """(текст истории, всего, за 90 дней, строки нарушений)."""
+        three_months_ago = datetime.now() - timedelta(days=90)
+        rows = database.get_player_warns(ally_code, guild_id=guild_id)
+        recent = 0
+        lines = []
+        for _warn_id, cat, subcat, d_str, comment in rows:
+            try:
+                if datetime.strptime(d_str, "%d.%m.%Y") >= three_months_ago:
+                    recent += 1
+            except ValueError:
+                pass
+            lines.append(f"• `{d_str}` — **{cat}** — {subcat}" + (f" | *📝 {comment}*" if comment else ""))
+        return "\n".join(lines), len(rows), recent, rows
 
-        if тег is not None or игрок:
-            if тег is not None:
-                registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
-                if not registration:
-                    await inter.followup.send(
-                        f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
-                        ephemeral=True,
-                    )
-                    return
-                ally_code, actual_name = registration
-            else:
-                row = database.get_user_mapping_for_name(guild_id, игрок)
 
-                if not row:
-                    await inter.followup.send(f"❌ Игрок '{игрок}' не найден.", ephemeral=True)
-                    return
+class ViolationsPanel(disnake.ui.View):
+    """Строки: 0 — режим, 1 — нарушения (до 3), 2-3 — игрок (по 25), 4 — кнопки."""
+    def __init__(self, cog, guild_id: int, inter: disnake.ApplicationCommandInteraction, players: list):
+        super().__init__(timeout=840)  # токен ответа на команду живёт 15 минут
+        self.cog = cog
+        self.guild_id = guild_id
+        self.inter = inter
+        self.author_id = inter.author.id
+        self.players = players            # [(name, ally_code)]
+        self.mode = "ТБ"
+        self.violations = []
+        self.ally_code = None
+        self.page = 0
 
-                ally_code, actual_name = row
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        return interaction.author.id == self.author_id
 
-            rows = database.get_player_warns(ally_code, guild_id=guild_id)
+    def _name(self) -> str | None:
+        return next((n for n, c in self.players if c == self.ally_code), None)
 
-            if not rows:
-                await inter.followup.send(f"😇 У игрока **{actual_name}** нет нарушений", ephemeral=False)
-                return
-
-            recent_count = 0
-            details = ""
-            for warn_id, cat, subcat, d_str, comment in rows:
-                try:
-                    w_date = datetime.strptime(d_str, "%d.%m.%Y")
-                    if w_date >= three_months_ago: recent_count += 1
-                except ValueError: pass
-                
-                if comment:
-                    details += f"• `{d_str}` — **{cat}** — {subcat} | *📝 {comment}*\n"
-                else:
-                    details += f"• `{d_str}` — **{cat}** — {subcat}\n"
-
-            embed = disnake.Embed(title=f"📊 Досье: {actual_name}", color=disnake.Color.red() if recent_count >= self.bot.n_limit else disnake.Color.orange())
-            embed.add_field(name="Всего нарушений", value=str(len(rows)), inline=True)
-            embed.add_field(name="За последние 90 дней", value=str(recent_count), inline=True)
-            embed.add_field(name="История:", value=details[:1000] if len(details) < 1000 else details[:997] + "...", inline=False)
-            await inter.followup.send(embed=embed, ephemeral=False)
-
+    def render(self) -> str:
+        if self.ally_code:
+            name = self._name() or self.ally_code
+            history, total, recent, _rows = self.cog.dossier(self.guild_id, self.ally_code, name)
+            mark = " 🚨" if recent >= self.cog.bot.n_limit else ""
+            text = f"📊 **Досье: {name}** — всего {total}, за 90 дней {recent}{mark}\n" + (history or "😇 Нарушений нет.")
         else:
-            cache = self.bot.guild_roster_caches.get(guild_id)
-            if not cache:
-                await inter.followup.send("❌ Состав еще загружается. Попробуйте через минуту", ephemeral=True)
-                return
+            table = self.cog.guild_table(self.guild_id, dict(self.players))
+            text = f"```text\n{table}\n```" if table else "😇 Нарушений в гильдии за последние 3 месяца нет."
+        hint = ("\n-# Выберите игрока, режим и нарушения → «Зафиксировать». Без игрока — таблица гильдии.")
+        return (text[:1800] + "\n…" if len(text) > 1800 else text) + hint
 
-            all_warns = database.get_all_warns(guild_id=guild_id)
-            stats = {name: {"ТБ": 0, "ВГ": 0, "Рейд": 0, "Recent": 0} for name in cache.keys()}
-            ally_map = {str(code): name for name, code in cache.items()}
+    def build(self):
+        self.clear_items()
+        mode_select = disnake.ui.Select(placeholder="Режим", row=0, options=[
+            disnake.SelectOption(label=m, value=m, default=m == self.mode) for m in WARNS_STRUCTURE])
+        mode_select.callback = self._on_mode
+        self.add_item(mode_select)
 
-            for ally_code, cat, d_str in all_warns:
-                name = ally_map.get(str(ally_code))
-                if not name: continue
+        options = WARNS_STRUCTURE[self.mode]
+        viol_select = disnake.ui.Select(
+            placeholder="Нарушения (можно несколько, до 3)", row=1, min_values=0, max_values=min(3, len(options)),
+            options=[disnake.SelectOption(label=v, value=v, default=v in self.violations) for v in options])
+        viol_select.callback = self._on_violations
+        self.add_item(viol_select)
 
-                try:
-                    w_date = datetime.strptime(d_str, "%d.%m.%Y")
-                    if w_date >= three_months_ago: 
-                        stats[name]["Recent"] += 1   
-                        if cat in stats[name]: 
-                            stats[name][cat] += 1    
-                except: 
-                    pass
+        page = self.players[self.page * 50:(self.page + 1) * 50]
+        for i in range(2):
+            chunk = page[i * 25:(i + 1) * 25]
+            if not chunk:
+                break
+            select = disnake.ui.Select(
+                placeholder=f"Игрок ({chunk[0][0][:1].upper()}–{chunk[-1][0][:1].upper()})", row=2 + i,
+                options=[disnake.SelectOption(label=n[:100], value=c, default=c == self.ally_code) for n, c in chunk])
+            select.callback = self._on_player
+            self.add_item(select)
 
-            table = "📋 НАРУШЕНИЯ ЗА ПОСЛЕДНИЕ 90 ДНЕЙ\n"
-            table += f"{'Игрок':<16} | ТБ | ВГ | Рд | Всего\n" + "-"*40 + "\n"
-            has_offenders = False
+        for label, style, callback, disabled in (
+            ("Зафиксировать", disnake.ButtonStyle.danger, self._on_add, not (self.ally_code and self.violations)),
+            ("Снять нарушение", disnake.ButtonStyle.secondary, self._on_remove, not self.ally_code),
+            ("Показать всем", disnake.ButtonStyle.secondary, self._on_publish, False),
+        ):
+            button = disnake.ui.Button(label=label, style=style, row=4, disabled=disabled)
+            button.callback = callback
+            self.add_item(button)
+        if self.ally_code:
+            reset = disnake.ui.Button(label="К таблице гильдии", style=disnake.ButtonStyle.secondary, row=4)
+            reset.callback = self._on_reset
+            self.add_item(reset)
+        if len(self.players) > 50:
+            nxt = disnake.ui.Button(label="Игроки ▶" if (self.page + 1) * 50 < len(self.players) else "◀ Игроки", row=4)
+            nxt.callback = self._on_page
+            self.add_item(nxt)
+        return self
 
-            sorted_stats = sorted(
-                stats.items(), 
-                key=lambda item: item[1]["Recent"], 
-                reverse=True
-            )
-
-            for name, data in sorted_stats:
-                if data["Recent"] == 0: 
-                    continue
-                    
-                has_offenders = True
-                prefix = "🚨" if data["Recent"] >= self.bot.n_limit else "  "
-                table += f"{prefix}{name[:14]:<14} | {data['ТБ']:<2} | {data['ВГ']:<2} | {data['Рейд']:<2} | {data['Recent']}\n"
-            
-            if not has_offenders:
-                await inter.followup.send("😇 Нарушений в гильдии за последние 3 месяца не найдено", ephemeral=False)
-                return
-                
-            await inter.followup.send(f"```text\n{table}\n```", ephemeral=False)
-
-    # --- ТВОЯ ОРИГИНАЛЬНАЯ КОМАНДА /UNWARN С ИНТЕРАКТИВНЫМ ВЫБОРОМ ИЗ СПИСКА ---
-    @violations_group.sub_command(name="снять", description="Удалить конкретное нарушение у выбранного игрока")
-    async def unwarn(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок, у которого хотите аннулировать нарушение (или укажите тег ниже)", autocomplete=autocomplete_players),
-        тег: disnake.User = commands.Param(default=None, description="Discord-тег игрока вместо имени (у игрока должна быть /регистрация)"),
-    ):
-        guild_id = await guild_resolver.require_feature(inter, "violations")
-        if guild_id is None:
-            return
-
-        if тег is not None:
-            registration = database.get_user_registration(str(тег.id), guild_id=guild_id)
-            if not registration:
-                await inter.response.send_message(
-                    f"❌ {тег.mention} ещё не зарегистрирован(а) — попросите выполнить `/регистрация`, либо укажите игрока по имени.",
-                    ephemeral=True,
-                )
-                return
-            ally_code, actual_name = registration
-        elif игрок:
-            row = database.get_user_mapping_for_name(guild_id, игрок)
-
-            if not row:
-                await inter.response.send_message("Игрок не найден в базе данных", ephemeral=True)
-                return
-
-            ally_code, actual_name = row
+    async def refresh(self, interaction: disnake.MessageInteraction | None = None):
+        kwargs = dict(content=self.render(), view=self.build(), allowed_mentions=disnake.AllowedMentions.none())
+        if interaction is not None:
+            await interaction.response.edit_message(**kwargs)
         else:
-            await inter.response.send_message("❌ Укажите игрока по имени или тегом.", ephemeral=True)
+            await self.inter.edit_original_response(**kwargs)
+
+    async def _on_mode(self, interaction):
+        self.mode = interaction.values[0]
+        self.violations = []
+        await self.refresh(interaction)
+
+    async def _on_violations(self, interaction):
+        self.violations = list(interaction.values)
+        await self.refresh(interaction)
+
+    async def _on_player(self, interaction):
+        self.ally_code = interaction.values[0]
+        await self.refresh(interaction)
+
+    async def _on_reset(self, interaction):
+        self.ally_code = None
+        await self.refresh(interaction)
+
+    async def _on_page(self, interaction):
+        self.page = self.page + 1 if (self.page + 1) * 50 < len(self.players) else 0
+        await self.refresh(interaction)
+
+    async def _on_add(self, interaction):
+        await interaction.response.send_modal(AddViolationModal(self))
+
+    async def _on_remove(self, interaction):
+        warns = database.get_player_warns(self.ally_code, guild_id=self.guild_id)
+        if not warns:
+            await interaction.response.send_message(f"У игрока **{self._name()}** нет нарушений.", ephemeral=True)
             return
+        await interaction.response.send_message(
+            f"Выберите нарушение игрока **{self._name()}**, которое нужно удалить:",
+            view=UnwarnSelectView(self.ally_code, self._name(), warns, guild_id=self.guild_id, panel=self), ephemeral=True)
 
-        player_warns = database.get_player_warns(ally_code, guild_id=guild_id)
-
-        if not player_warns:
-            await inter.response.send_message(f"У игрока **{actual_name}** нет нарушений для удаления", ephemeral=True)
+    async def _on_publish(self, interaction):
+        if self.ally_code:
+            history, total, recent, _rows = self.cog.dossier(self.guild_id, self.ally_code, self._name())
+            embed = disnake.Embed(title=f"📊 Досье: {self._name()}",
+                                  color=disnake.Color.red() if recent >= self.cog.bot.n_limit else disnake.Color.orange())
+            embed.add_field(name="Всего нарушений", value=str(total), inline=True)
+            embed.add_field(name="За последние 90 дней", value=str(recent), inline=True)
+            embed.add_field(name="История:", value=(history[:1000] if len(history) <= 1000 else history[:997] + "...") or "—", inline=False)
+            await interaction.response.send_message(embed=embed)
             return
+        table = self.cog.guild_table(self.guild_id, dict(self.players))
+        await interaction.response.send_message(f"```text\n{table}\n```" if table else "😇 Нарушений в гильдии за последние 3 месяца нет.")
 
-        view = UnwarnSelectView(ally_code, actual_name, player_warns, guild_id=guild_id)
-        await inter.response.send_message(f"Выберите, какое нарушение игрока **{actual_name}** нужно удалить:", view=view, ephemeral=True)
+
+class AddViolationModal(disnake.ui.Modal):
+    def __init__(self, panel: ViolationsPanel):
+        self.panel = panel
+        components = [disnake.ui.TextInput(label="Дата (ДД.ММ или ДД.ММ.ГГГГ)", custom_id="date", max_length=10,
+                                           value=datetime.now().strftime("%d.%m.%Y"))]
+        for i, violation in enumerate(panel.violations):
+            components.append(disnake.ui.TextInput(label=f"Комментарий: {violation}"[:45], custom_id=f"c{i}",
+                                                   required=False, max_length=300))
+        super().__init__(title=f"Нарушение: {panel._name()}"[:45], components=components)
+
+    async def callback(self, interaction: disnake.ModalInteraction):
+        panel = self.panel
+        date = interaction.text_values["date"].strip()
+        final_date = f"{date}.{datetime.now().year}" if len(date) <= 5 else date
+        try:
+            datetime.strptime(final_date, "%d.%m.%Y")
+        except ValueError:
+            await interaction.response.send_message("❌ Дата должна быть в формате ДД.ММ или ДД.ММ.ГГГГ.", ephemeral=True)
+            return
+        lines = []
+        for i, violation in enumerate(panel.violations):
+            comment = (interaction.text_values.get(f"c{i}") or "").strip() or None
+            database.add_warn(panel.ally_code, panel.mode, violation, final_date, comment, guild_id=panel.guild_id)
+            lines.append(f"• {violation}" + (f" | *📝 Комментарий: {comment}*" if comment else ""))
+        await interaction.response.send_message(
+            f"✅ **Нарушение успешно зафиксировано!**\n👤 **Игрок:** {panel._name()} (Код: {panel.ally_code})\n"
+            f"📅 **Дата:** {final_date}\n🗂 **Режим:** {panel.mode}\n🛑 **Нарушения:**\n" + "\n".join(lines))
+        panel.violations = []
+        try:
+            await panel.refresh()
+        except disnake.HTTPException:
+            pass  # панель старше 15 минут — нарушение уже записано
+
 
 def setup(bot):
     bot.add_cog(ViolationsCog(bot))

@@ -1615,43 +1615,6 @@ class StatRequirementsCog(commands.Cog):
         for e in embeds[1:]:
             await inter.followup.send(embed=e, ephemeral=True)
 
-    @stat_req.sub_command(name="модуль_список", description="Показать состав модульного плейта")
-    async def stat_req_module_list(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        плейт: str = commands.Param(description="Модульный плейт", autocomplete=autocomplete_stat_plate),
-    ):
-        await inter.response.defer(ephemeral=True)
-        guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
-        if guild_id is None:
-            return
-
-        if not database.is_stat_plate_modular(плейт, guild_id=guild_id):
-            await inter.edit_original_response(f"❌ «{плейт}» не модульный плейт.")
-            return
-
-        components = database.get_stat_plate_components(плейт, guild_id=guild_id)
-        if not components:
-            await inter.edit_original_response(f"❌ У модульного плейта «{плейт}» пока нет ни одного компонента — добавьте на сайте, на странице плейта.")
-            return
-
-        lines = []
-        for _id, source_plate, character_key in components:
-            if character_key:
-                lines.append(f"`{source_plate}` → {_unit_display_name(character_key)}")
-            else:
-                lines.append(f"`{source_plate}` → весь плейт")
-
-        char_count = len(database.get_stat_requirement_characters(плейт, guild_id=guild_id))
-        lines.append("")
-        lines.append(f"Итого развёрнуто персонажей: {char_count}")
-
-        embeds = _lines_to_embeds(f"🧩 {плейт} — состав", DATACRON_LIST_COLOR, lines)
-        await inter.edit_original_response(embed=embeds[0])
-        for e in embeds[1:]:
-            await inter.followup.send(embed=e, ephemeral=True)
-
-    # ------------------ /статы (открытая команда) ------------------
     @commands.slash_command(name="статы", description="Прогноз своих статов на релик плейта (чужие и вся гильдия — 🔒 офицеры)")
     async def stats_check(
         self,

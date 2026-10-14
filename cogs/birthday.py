@@ -186,88 +186,133 @@ class Birthday(commands.Cog):
     async def before_refresh_member_cache_loop(self):
         await self.bot.wait_until_ready()
 
-    # -------------------- Slash-команды --------------------
-    @commands.slash_command(name="др", description="Дни рождения участников гильдии")
+    # -------------------- /др — панель (2026-10-14) --------------------
+    # Одна команда вместо добавить/удалить/список: список по ближайшей дате в сообщении,
+    # участник — нативным списком Discord с поиском, дата — окном.
+    @commands.slash_command(name="др", description="Дни рождения участников гильдии — панель")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
-    async def birthday_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    @birthday_group.sub_command(name="добавить", description="Добавить/обновить день рождения")
-    async def add_birthday(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        user: disnake.User = commands.Param(description="Пользователь"),
-        date: str = commands.Param(description="Дата в формате ДД-ММ-ГГГГ или ДД-ММ")
-    ):
+    async def birthday_panel(self, inter: disnake.ApplicationCommandInteraction):
         guild_id = await guild_resolver.require_feature(inter, "birthdays")
         if guild_id is None:
             return
-
-        try:
-            day, month, year = parse_birthday(date)
-        except ValueError as e:
-            await inter.response.send_message(f"❌ {e}", ephemeral=True)
+        if inter.guild is None:
+            await inter.response.send_message("❌ Откройте `/др` на сервере гильдии — участник выбирается из списка сервера.",
+                                              ephemeral=True)
             return
+        panel = BirthdayPanel(self, guild_id, inter)
+        await inter.response.send_message(panel.render(), view=panel.build(), ephemeral=True,
+                                          allowed_mentions=disnake.AllowedMentions.none())
 
-        database.add_birthday(str(user.id), day, month, year, guild_id=guild_id)
-        date_str = f"{day:02d}-{month:02d}"
-        if year is not None:
-            date_str += f"-{year}"
-        reply = f"✅ День рождения {user.mention} сохранён: {date_str}"
-        warning = config_warning_text(database.get_guild_config(guild_id), "birthday")
-        if warning:
-            reply += f"\n{warning}"
-        await inter.response.send_message(reply, ephemeral=True)
-
-    @birthday_group.sub_command(name="удалить", description="Удалить день рождения")
-    async def remove_birthday(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        user: disnake.User = commands.Param(description="Пользователь")
-    ):
-        guild_id = await guild_resolver.require_feature(inter, "birthdays")
-        if guild_id is None:
-            return
-
-        database.remove_birthday(str(user.id), guild_id=guild_id)
-        await inter.response.send_message(f"День рождения {user.mention} удалён", ephemeral=True)
-
-    @birthday_group.sub_command(name="список", description="Список дней рождений гильдии")
-    async def birthday_list(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer()
-
-        guild_id = await guild_resolver.require_feature(inter, "birthdays")
-        if guild_id is None:
-            return
-
-        all_bdays = database.get_all_birthdays(guild_id=guild_id)
-        if not all_bdays:
-            await inter.edit_original_message("Нет сохранённых дней рождений.")
-            return
-
+    def birthday_lines(self, guild_id: int, guild) -> list[str]:
         today = datetime.now(MSK).date()
-        bday_list = []
-        for discord_id_str, day, month, year in all_bdays:
-            next_bday = next_birthday(day, month, year, today)
-            bday_list.append((discord_id_str, day, month, year, next_bday))
-
-        bday_list.sort(key=lambda x: x[4])
-
+        rows = []
+        for discord_id_str, day, month, year in database.get_all_birthdays(guild_id=guild_id):
+            if guild is not None and guild.get_member(int(discord_id_str)) is None:
+                continue  # ушёл с сервера
+            rows.append((next_birthday(day, month, year, today), discord_id_str, day, month, year))
+        rows.sort()
         lines = []
-        for discord_id_str, day, month, year, next_bday in bday_list:
-            member = inter.guild.get_member(int(discord_id_str))
-            if member is None:
-                continue
-            date_str = f"{day:02d}.{month:02d}"
-            if year is not None:
-                date_str += f".{year}"
-            lines.append(f"• {member.mention} — {date_str}")
+        for _next, discord_id_str, day, month, year in rows:
+            date_str = f"{day:02d}.{month:02d}" + (f".{year}" if year is not None else "")
+            lines.append(f"• <@{discord_id_str}> — {date_str}")
+        return lines
 
-        if not lines:
-            await inter.edit_original_message("Нет участников с сохранёнными днями рождения.")
+
+class BirthdayPanel(disnake.ui.View):
+    def __init__(self, cog, guild_id: int, inter: disnake.ApplicationCommandInteraction):
+        super().__init__(timeout=840)  # токен ответа на команду живёт 15 минут
+        self.cog = cog
+        self.guild_id = guild_id
+        self.inter = inter
+        self.author_id = inter.author.id
+        self.user = None
+        self.confirm_remove = False
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        return interaction.author.id == self.author_id
+
+    def _current(self):
+        if self.user is None:
+            return None
+        return next(((d, m, y) for did, d, m, y in database.get_all_birthdays(guild_id=self.guild_id)
+                     if did == str(self.user.id)), None)
+
+    def render(self) -> str:
+        lines = self.cog.birthday_lines(self.guild_id, self.inter.guild)
+        shown = lines[:40]
+        more = f"\n…и ещё {len(lines) - 40}" if len(lines) > 40 else ""
+        text = "🎂 **Дни рождения гильдии** (по ближайшей дате)\n" + ("\n".join(shown) + more if shown else "— пока никого —")
+        current = self._current()
+        if self.user is not None:
+            text += (f"\n\nВыбран {self.user.mention}: "
+                     + (f"{current[0]:02d}.{current[1]:02d}" + (f".{current[2]}" if current[2] else "") if current else "дата не задана"))
+        warning = config_warning_text(database.get_guild_config(self.guild_id), "birthday")
+        return text + (f"\n{warning}" if warning else "") + "\n-# Выберите участника → «Задать дату» или «Удалить»."
+
+    def build(self):
+        self.clear_items()
+        user_select = disnake.ui.UserSelect(
+            placeholder="Участник сервера", row=0,
+            default_values=[disnake.SelectDefaultValue(self.user.id, disnake.SelectDefaultValueType.user)] if self.user else None)
+        user_select.callback = self._on_user
+        self.add_item(user_select)
+        set_date = disnake.ui.Button(label="Задать дату", style=disnake.ButtonStyle.success, row=1, disabled=self.user is None)
+        set_date.callback = self._on_set
+        self.add_item(set_date)
+        remove = disnake.ui.Button(label="Точно удалить?" if self.confirm_remove else "Удалить",
+                                   style=disnake.ButtonStyle.danger, row=1, disabled=self._current() is None)
+        remove.callback = self._on_remove
+        self.add_item(remove)
+        return self
+
+    async def refresh(self, interaction=None):
+        kwargs = dict(content=self.render(), view=self.build(), allowed_mentions=disnake.AllowedMentions.none())
+        if interaction is not None:
+            await interaction.response.edit_message(**kwargs)
+        else:
+            await self.inter.edit_original_response(**kwargs)
+
+    async def _on_user(self, interaction):
+        self.user = interaction.resolved_values[0] if interaction.resolved_values else None
+        self.confirm_remove = False
+        await self.refresh(interaction)
+
+    async def _on_set(self, interaction):
+        await interaction.response.send_modal(BirthdayDateModal(self))
+
+    async def _on_remove(self, interaction):
+        if not self.confirm_remove:
+            self.confirm_remove = True
+            await self.refresh(interaction)
             return
+        self.confirm_remove = False
+        database.remove_birthday(str(self.user.id), guild_id=self.guild_id)
+        await self.refresh(interaction)
 
-        await inter.edit_original_message("**Дни рождения гильдии:**\n" + "\n".join(lines))
+
+class BirthdayDateModal(disnake.ui.Modal):
+    def __init__(self, panel: BirthdayPanel):
+        self.panel = panel
+        current = panel._current()
+        value = (f"{current[0]:02d}-{current[1]:02d}" + (f"-{current[2]}" if current[2] else "")) if current else None
+        super().__init__(title=f"День рождения: {panel.user.display_name}"[:45], components=[
+            disnake.ui.TextInput(label="Дата: ДД-ММ-ГГГГ или ДД-ММ", custom_id="date", max_length=10, value=value),
+        ])
+
+    async def callback(self, interaction: disnake.ModalInteraction):
+        try:
+            day, month, year = parse_birthday(interaction.text_values["date"].strip())
+        except ValueError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        database.add_birthday(str(self.panel.user.id), day, month, year, guild_id=self.panel.guild_id)
+        await interaction.response.send_message(
+            f"✅ День рождения {self.panel.user.mention} сохранён: {day:02d}-{month:02d}" + (f"-{year}" if year else ""),
+            ephemeral=True)
+        try:
+            await self.panel.refresh()
+        except disnake.HTTPException:
+            pass  # панель старше 15 минут — дата уже сохранена
 
 
 def setup(bot: commands.Bot):
