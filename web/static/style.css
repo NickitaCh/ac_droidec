@@ -923,6 +923,15 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
     font-weight: 400;
 }
 .segmented-toggle-options a:hover { background: var(--surface-2); }
+/* То же для кнопок — переключатель, меняющий настройку POST-формой (/mod-ku). */
+.segmented-toggle-options button {
+    padding: 0.3em 0.8em; border: none; border-radius: 0; background: none;
+    color: var(--fg-secondary); font: inherit; font-weight: 400; cursor: pointer;
+}
+.segmented-toggle-options button:hover { background: var(--surface-2); }
+.segmented-toggle-options strong + button,
+.segmented-toggle-options button + strong,
+.segmented-toggle-options button + button { border-left: 1px solid var(--border); }
 .segmented-toggle-options strong { background: var(--accent); color: white; font-weight: 600; }
 .segmented-toggle-options a + a,
 .segmented-toggle-options strong + a,

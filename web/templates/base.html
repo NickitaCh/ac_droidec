@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261012b">
+    <link rel="stylesheet" href="/static/style.css?v=20261014a">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -76,6 +76,9 @@
                             <a href="/mod-builder"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор</span></a>
                             <a href="/mod-search"><span class="nav-icon">🔍</span><span class="nav-label">Поиск модов</span></a>
                             <a href="/mod-analysis"><span class="nav-icon">📈</span><span class="nav-label">Анализ модинга</span></a>
+                            {% if user.has_mod_ku %}
+                                <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
+                            {% endif %}
                             {% if user.guild_id == 1 %}
                                 <a href="/mod-scan"><span class="nav-icon">📡</span><span class="nav-label">Скан модов</span></a>
                             {% endif %}

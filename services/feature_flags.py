@@ -14,7 +14,8 @@ database.py) — под ключом "feature:<key>" в бакете самой 
 "tasks_mention" — единственное исключение из opt-out модели: по явному решению
 пользователя (2026-09-21, тред "Гайд по АС Боту") выключено по умолчанию у всех
 гильдий, включено только там, где явно включили (сейчас — только GR, guild_id=3).
-Не показывать его как "по умолчанию включено" в UI/докстрингах команд.
+Не показывать его как "по умолчанию включено" в UI/докстрингах команд. Так же
+устроены mod_ku и mod_ku_plates (см. OPT_IN).
 
 Гранулярность — по функциональным блокам (см. command_catalog.py), крупные
 разделы (ТБ, мод-инструменты) разбиты на подпункты. Намеренно НЕ включены сюда
@@ -45,9 +46,16 @@ FEATURES: dict[str, dict] = {
     "mod_builder": {"label": "Калькулятор модов", "category": "Мод-инструменты"},
     "steal_build": {"label": "Стил-билд", "category": "Мод-инструменты"},
     "mod_analysis": {"label": "Анализ модинга гильдии", "category": "Мод-инструменты"},
+    "mod_ku": {"label": "МодКу — рейтинг модов", "category": "Мод-инструменты"},
+    "mod_ku_plates": {"label": "МодКу — режим «с учётом плейтов»", "category": "Мод-инструменты"},
     "gear_farm": {"label": "Фарм снаряжения", "category": "Прочее"},
     "antispam": {"label": "Антиспам", "category": "Прочее"},
 }
+
+
+# Выключено по умолчанию, включается явно. mod_ku/mod_ku_plates — решение пользователя
+# 2026-10-14: МодКу закрыт для всех, кроме АС (guild_id=1); режим по плейтам — тоже только АС.
+OPT_IN = {"tasks_mention", "mod_ku", "mod_ku_plates"}
 
 
 def label(key: str) -> str:
@@ -61,7 +69,7 @@ def is_enabled(guild_id: int, key: str) -> bool:
         cfg = database.get_guild_config(guild_id)
         return bool(cfg and cfg.get("antispam_enabled"))
     raw = database.get_bot_state(f"feature:{key}", guild_id=guild_id)
-    if key == "tasks_mention":
+    if key in OPT_IN:
         return raw == "1"  # opt-in — см. докстринг модуля
     return raw != "0"
 

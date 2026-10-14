@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}МодКу — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Моды и статы</p>
+                <h1>МодКу</h1>
+                <p class="page-hero-lead">Сколько скорости в среднем даёт один мод на G13-персонажах игрока. Атака в допах пересчитана в скорость.</p>
+            </div>
+        </div>
+    </section>
+
+    <div class="panel">
+        <div class="panel-title"><span>Как считается</span></div>
+        <ul>
+            {% for line in explanation %}<li>{{ line }}</li>{% endfor %}
+            {% if can_switch %}<li>{{ explanation_plates }}</li>{% endif %}
+        </ul>
+        {% if can_switch %}
+            <form method="post" action="/mod-ku/mode" class="segmented-toggle" style="flex-direction: row; align-items: center; max-width: none; white-space: nowrap; flex-wrap: wrap;">
+                <span class="muted">Режим:</span>
+                <span class="segmented-toggle-options">
+                    {% for key, mlabel in modes.items() %}
+                        {% if key == mode %}
+                            <strong>{{ mlabel }}</strong>
+                        {% else %}
+                            <button type="submit" name="mode" value="{{ key }}">{{ mlabel }}</button>
+                        {% endif %}
+                    {% endfor %}
+                </span>
+            </form>
+        {% endif %}
+    </div>
+
+    {% if detail %}
+        {% set r = detail.result %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>{{ detail.name }} — #{{ detail.place }}</span>
+                <a href="/mod-ku" class="panel-hint">закрыть</a>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-tile"><div class="stat-value">{{ r.modku }}</div><div class="stat-label">МодКу</div></div>
+                <div class="stat-tile"><div class="stat-value">+{{ r.speed_part }}</div><div class="stat-label">от скорости</div></div>
+                <div class="stat-tile"><div class="stat-value">+{{ r.attack_part }}</div><div class="stat-label">от атаки</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ r.coverage }}%</div><div class="stat-label">G13 со всеми модами ≥15 скорости</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ r.chars }}</div><div class="stat-label">G13-персонажей</div></div>
+            </div>
+            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(16em, 1fr)); align-items: start;">
+                <div>
+                    <h3>Скорость в допах</h3>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead><tr><th class="num">Скорость</th><th class="num">Модов</th><th class="num">Очков</th></tr></thead>
+                            <tbody>
+                                {% for row in r.speed_hist %}
+                                    <tr><td class="num">{{ row.speed }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.points }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <h3>Атака в допах</h3>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead><tr><th class="num">Атака, %</th><th class="num">Модов</th></tr></thead>
+                            <tbody>
+                                {% for row in r.attack_hist %}
+                                    <tr><td class="num">{{ row.pct }}–{{ row.pct + 1 }}</td><td class="num">{{ row.count }}</td></tr>
+                                {% else %}
+                                    <tr><td colspan="2" class="muted">нет</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <h3>Слабее всего заможены</h3>
+                    <div class="table-scroll">
+                        <table class="data">
+                            <thead><tr><th>Персонаж</th><th class="num">МодКу</th><th>Что не так</th></tr></thead>
+                            <tbody>
+                                {% for c in r.weakest %}
+                                    <tr>
+                                        <td>{{ unit_names.get(c.base_id, c.base_id) }}</td>
+                                        <td class="num">{{ '%.1f' % c.rating }}</td>
+                                        <td class="muted">
+                                            {% if c.empty %}пустых слотов: {{ c.empty }}{% endif %}
+                                            {% if c.empty and c.slow %} · {% endif %}
+                                            {% if c.slow %}модов &lt;15 скорости: {{ c.slow }}{% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title">
+            <span>Гильдия</span>
+            <span class="panel-hint">режим: {{ modes[mode] }} · нажмите на игрока для подробностей</span>
+        </div>
+        <div class="table-scroll">
+            <table class="data">
+                <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>Игрок</th>
+                        <th class="num">МодКу</th>
+                        <th class="num">Скорость</th>
+                        <th class="num">Атака</th>
+                        <th class="num">Покрытие</th>
+                        <th class="num">25+</th>
+                        <th class="num">20+</th>
+                        <th class="num">15+</th>
+                        <th class="num">Атака 6%+</th>
+                        <th class="num">Атака 4%+</th>
+                        <th class="num">G13</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        {% set r = row.result %}
+                        <tr>
+                            <td class="num">{{ row.place }}</td>
+                            {% if r %}
+                                <td><a href="/mod-ku?player={{ row.ally_code }}">{{ row.name }}</a></td>
+                                <td class="num"><strong>{{ r.modku }}</strong></td>
+                                <td class="num">+{{ r.speed_part }}</td>
+                                <td class="num">+{{ r.attack_part }}</td>
+                                <td class="num">{{ r.coverage }}%</td>
+                                <td class="num">{{ r.speed_ge[25] }}</td>
+                                <td class="num">{{ r.speed_ge[20] }}</td>
+                                <td class="num">{{ r.speed_ge[15] }}</td>
+                                <td class="num">{{ r.offense_ge[6] }}</td>
+                                <td class="num">{{ r.offense_ge[4] }}</td>
+                                <td class="num">{{ r.chars }}</td>
+                            {% else %}
+                                <td>{{ row.name }}</td>
+                                <td colspan="10" class="muted">нет данных о ростере</td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}
