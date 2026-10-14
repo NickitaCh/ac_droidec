@@ -116,7 +116,7 @@ def compute_tb_regressions(event_ids, by_member):
 # сверено с картой swgohrote.com: Датомир лежит на "красной" ветке карты, Кессель — на
 # "жёлто-оранжевой", что подтверждает постоянство ветки для каждой планеты.
 # Планеты, которых нет в справочнике (новые в ротации), авто-разбор пропускает — их
-# нужно доопределить вручную командой /тб_отчет план и одновременно дополнить справочник
+# нужно доопределить вручную на сайте (/tb/plan) и одновременно дополнить справочник
 # в коде, чтобы будущие анонсы с этой планетой разбирались автоматически.
 TB_PLAN_HEADER_RE = re.compile(r"Восход\s+Импери\w*\s*[—\-]\s*(\d+)\s*этап", re.IGNORECASE)
 TB_PLAN_CIRCLE_CHARS = "🔴🟠🟡🟢🔵🟣⚫⚪🟤"
@@ -290,7 +290,7 @@ class GuildEvents(commands.Cog):
         а не по цвету маркера строки и не по порядку строк — цвет маркера офицер
         выбирает произвольно, а порядок перечисления от анонса к анонсу может
         меняться. Планеты, которых нет в справочнике, пропускаются — их нужно
-        доопределить вручную через /тб_отчет план."""
+        доопределить вручную на сайте (/tb/plan)."""
         header = TB_PLAN_HEADER_RE.search(content or "")
         if not header:
             return None
@@ -1161,89 +1161,6 @@ class GuildEvents(commands.Cog):
         embed = disnake.Embed(title=f"📊 Сравнение по ТБ: {name}", color=0x9b59b6)
         embed.set_footer(text="Полная детализация отправлена файлом.")
         await inter.edit_original_message(embed=embed)
-
-    @tb_report.sub_command(
-        name="план",
-        description="Вручную задать/поправить планету для фазы и ветки (фолбэк, если авто-разбор анонса не сработал)"
-    )
-    async def tb_set_plan(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        этап: int = commands.Param(description="Номер фазы", ge=1, le=6),
-        ветка: str = commands.Param(
-            description="Ветка",
-            choices={
-                "Dark (красная)": "01",
-                "Mixed (жёлтая)": "02",
-                "Light (синяя)": "03",
-                "Бонус/ОЗ-зона": "bonus",
-            },
-        ),
-        планета: str = commands.Param(description="Название планеты"),
-    ):
-        guild_id = await guild_resolver.require_feature(inter, "tb_plan_order")
-        if guild_id is None:
-            return
-
-        planet_name = планета.strip()
-        database.set_tb_planet_name(str(этап), ветка, planet_name, source="manual", guild_id=guild_id)
-        await inter.response.send_message(
-            f"✅ Этап {этап}: сохранена планета «{planet_name}»", ephemeral=True
-        )
-
-    @tb_report.sub_command(name="синхронизация", description="Привязать Discord-пользователей к игровым аккаунтам")
-    async def tb_sync_members(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer(ephemeral=True)
-        guild_cfg = self._resolve_guild_config(inter)
-        if guild_cfg is None:
-            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
-            return
-        guild_id = guild_cfg["id"]
-
-        try:
-            guild = await asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"])
-        except Exception as e:
-            await inter.edit_original_message(f"Ошибка получения гильдии: {e}")
-            return
-
-        discord_guild = inter.guild
-        if not discord_guild:
-            await inter.edit_original_message("Команда доступна только на сервере.")
-            return
-
-        members = guild.get("member", [])
-        linked = 0
-        not_found = []
-        for m in members:
-            player_id = m.get("playerId")
-            player_name = m.get("playerName")
-            if not player_id or not player_name:
-                continue
-            try:
-                player = await asyncio.to_thread(self.bot.comlink.get_player, player_id=player_id)
-                allycode = player.get("allyCode")
-                if not allycode:
-                    continue
-            except Exception:
-                continue
-
-            normalized = re.sub(r'\W+', '', player_name).lower()
-            member_found = None
-            for discord_member in discord_guild.members:
-                if re.sub(r'\W+', '', discord_member.display_name).lower() == normalized:
-                    member_found = discord_member
-                    break
-            if not member_found:
-                not_found.append(player_name)
-                continue
-
-            database.set_user_mapping(str(member_found.id), str(allycode), player_name, guild_id=guild_id)
-            linked += 1
-
-        msg = f"✅ Привязано: {linked} игроков."
-        if not_found:
-            msg += f"\nНе найдены на сервере: {', '.join(not_found[:10])}"
-        await inter.edit_original_message(msg)
 
 
 def setup(bot: commands.Bot):
