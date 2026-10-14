@@ -1,6 +1,6 @@
 """Фарм деталей по картинке C3PO — веб-версия бывшей Discord-команды /фарм (убрана
 2026-10-14). Картинку можно загрузить файлом или дать ссылку на сообщение C3PO в Discord.
-Распознавание идёт до пары минут, поэтому в фоне: статус и результат — в bot_state
+Пока только для супер-админов (2026-10-14: «не нужна пока»). Распознавание идёт до пары минут, поэтому в фоне: статус и результат — в bot_state
 (ключ на пользователя), страница обновляется сама. Логика — services/gear_farm.py."""
 
 import asyncio
@@ -18,7 +18,8 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
 import database
-from services import feature_flags, gear_farm
+from services import gear_farm
+from web.deps import require_super_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -98,7 +99,7 @@ async def _run(user: dict, image: bytes | None, mime: str | None, link: str) -> 
 
 
 @router.get("", response_class=HTMLResponse)
-async def farm_page(request: Request, user: dict = Depends(feature_flags.require_feature("gear_farm"))):
+async def farm_page(request: Request, user: dict = Depends(require_super_admin)):
     job = _get_job(user)
     return templates.TemplateResponse(request, "gear_farm.html", {
         "user": user,
@@ -112,7 +113,7 @@ async def farm_page(request: Request, user: dict = Depends(feature_flags.require
 async def farm_start(
     link: str = Form(default=""),
     image: UploadFile | None = File(default=None),
-    user: dict = Depends(feature_flags.require_feature("gear_farm")),
+    user: dict = Depends(require_super_admin),
 ):
     from urllib.parse import urlencode
     from services.openrouter_vision import daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT

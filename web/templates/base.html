@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261014e">
+    <link rel="stylesheet" href="/static/style.css?v=20261014f">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -42,7 +42,7 @@
         <nav>
             <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
             <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
-            {% if user %}
+            {% if user and user.tier != "officer" %}
                 <a href="/subscribe" title="Подписка"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
             {% endif %}
             {% if user %}
@@ -67,7 +67,6 @@
                         </div>
                     </details>
                     <a href="/tasks" title="Задачи"><span class="nav-icon">✅</span><span class="nav-label">Задачи</span></a>
-                    <a href="/farm" title="Фарм деталей"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
                     <a href="/datacrons" title="Датакроны"><span class="nav-icon">🔮</span><span class="nav-label">Датакроны</span></a>
                     <details class="nav-dropdown">
                         <summary title="Модули"><span class="nav-icon">🧩</span><span class="nav-label">Модули</span></summary>
@@ -97,6 +96,7 @@
                             <a href="/registration"><span class="nav-icon">📝</span><span class="nav-label">Регистрация</span></a>
                             <a href="/access"><span class="nav-icon">🔑</span><span class="nav-label">Ручной доступ</span></a>
                             <a href="/settings"><span class="nav-icon">⚙️</span><span class="nav-label">Настройки</span></a>
+                            <a href="/subscribe"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
                         </div>
                     </details>
                     {# Только супер-админам (в режиме «смотреть как» скрыто, как у настоящих офицеров). #}
@@ -117,8 +117,22 @@
                             <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
                             <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
                             <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
+                            <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
                         </div>
                     </details>
+                    {% endif %}
+                    {% if user.subscription %}
+                        {% set sub = user.subscription %}
+                        <div class="nav-sub-widget{% if sub.urgent %} nav-sub-widget-urgent{% endif %}">
+                            <span class="nav-sub-title">💳 Подписка</span>
+                            {% if sub.unlimited %}
+                                <span class="nav-sub-days">бессрочно</span>
+                            {% else %}
+                                <span class="nav-sub-days">осталось {{ sub.days_left }} дн.</span>
+                                <span class="nav-sub-date">до {{ sub.date }}</span>
+                                <a class="button" href="/subscribe">Оплатить</a>
+                            {% endif %}
+                        </div>
                     {% endif %}
                 {% endif %}
             {% endif %}

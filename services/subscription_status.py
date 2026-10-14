@@ -29,6 +29,23 @@ def _prices() -> list[dict]:
             for days, price in sorted(PERIOD_CHOICES.items())]
 
 
+def info_for(guild_id: int | None) -> dict | None:
+    """Срок подписки для виджета в меню: {"unlimited": True} у гильдий, подключённых
+    вручную бессрочно, иначе {"days_left", "date", "urgent"}. None — гильдии нет/не активна."""
+    if guild_id is None:
+        return None
+    cfg = database.get_guild_config(guild_id) or {}
+    if not cfg.get("is_active"):
+        return None
+    expires = _parse(cfg.get("subscription_expires_at"))
+    if expires is None:
+        return {"unlimited": True}
+    seconds_left = (expires - datetime.now(timezone.utc)).total_seconds()
+    days_left = max(1, math.ceil(seconds_left / 86400))
+    return {"unlimited": False, "days_left": days_left, "date": expires.strftime("%d.%m.%Y"),
+            "urgent": days_left <= URGENT_DAYS}
+
+
 def warning_for(guild_id: int | None) -> dict | None:
     """{"days_left", "date", "urgent"} — если до конца оплаченной подписки ≤ 7 дней.
     Бессрочные (ручные, без subscription_expires_at) гильдии не предупреждаются."""

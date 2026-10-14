@@ -2377,3 +2377,19 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sub-expired-prices { display: flex; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; }
 .sub-expired-prices form { flex: 1 1 10rem; margin: 0; }
 .sub-expired-prices button.pricing-card { width: 100%; cursor: pointer; font: inherit; color: inherit; display: flex; flex-direction: column; align-items: center; gap: 0.2em; }
+
+/* Виджет срока подписки в боковом меню (base.html), под «СуперАдмин меню». */
+.nav-sub-widget {
+    display: flex; flex-direction: column; gap: 0.2em;
+    margin: 0.75em 0.5em 0.25em; padding: 0.6em 0.75em; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); font-size: 0.85em;
+}
+.nav-sub-title { font-weight: 600; }
+.nav-sub-days { font-size: 1.05em; }
+.nav-sub-date { color: var(--fg-muted); }
+.nav-sub-widget .button { margin-top: 0.35em; text-align: center; padding: 0.3em 0.6em; }
+.nav-sub-widget-urgent { border-color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 10%, var(--surface-2)); }
+.nav-sub-widget-urgent .nav-sub-days { color: var(--status-critical); font-weight: 600; }
+@media (min-width: 56.01em) {
+    html[data-sidebar="collapsed"] .nav-sub-widget { display: none; }
+}

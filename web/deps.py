@@ -62,7 +62,8 @@ def _with_subscription_status(user: dict) -> dict:
     офицеру/лидеру гильдии с уже истёкшей подпиской — данные для попапа «Продлить»."""
     from services import subscription_status
     if user.get("tier") == "officer":
-        return {**user, "subscription_warning": subscription_status.warning_for(user.get("guild_id"))}
+        return {**user, "subscription_warning": subscription_status.warning_for(user.get("guild_id")),
+                "subscription": subscription_status.info_for(user.get("guild_id"))}
     if user.get("tier") is None:
         return {**user, "expired_guild": subscription_status.expired_officer_guild(user["discord_id"])}
     return user
