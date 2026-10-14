@@ -162,7 +162,7 @@
                     <span class="hero-kpi-label">винрейт ВГ{% if tw_period %} · {{ tw_period.label }}{% endif %}</span>
                 </a>
                 <a class="hero-kpi" href="/tasks">
-                    <span class="hero-kpi-value">{{ widgets.tasks_summary.counts.ACTIVE }}{% if widgets.tasks_summary.counts.FAILED %} <span class="hero-kpi-delta down">{{ widgets.tasks_summary.counts.FAILED }} провалено</span>{% endif %}</span>
+                    <span class="hero-kpi-value">{{ widgets.tasks_summary.counts.ACTIVE }}{% if widgets.tasks_summary.counts.FAILED %} <span class="hero-kpi-delta down">{{ widgets.tasks_summary.counts.FAILED }} просрочено</span>{% endif %}</span>
                     <span class="hero-kpi-label">задач в работе</span>
                 </a>
             </div>
@@ -468,7 +468,7 @@
                         </div>
                         <div class="mini-stat status-danger">
                             <span class="mini-stat-value">{{ widgets.tasks_summary.counts.FAILED }}</span>
-                            <span class="mini-stat-label">Провалено</span>
+                            <span class="mini-stat-label">Просрочено</span>
                         </div>
                         <div class="mini-stat">
                             <span class="mini-stat-value">{{ widgets.tasks_summary.counts.COMPLETED }}</span>
@@ -476,7 +476,7 @@
                         </div>
                     </div>
                     {% if not widgets.tasks_summary.rows %}
-                        <p class="widget-empty">Активных или проваленных задач нет — всё чисто. 🎉</p>
+                        <p class="widget-empty">Активных или просроченных задач нет — всё чисто. 🎉</p>
                     {% else %}
                         <div class="table-scroll">
                             <table class="data">
@@ -498,11 +498,11 @@
                                             <td class="num">{{ r.deadline }}</td>
                                             <td>
                                                 {% if r.status == "FAILED" %}
-                                                    <span class="badge badge-danger">Провалено</span>
+                                                    <span class="badge badge-task-overdue">Просрочено</span>
                                                 {% elif r.in_progress %}
-                                                    <span class="badge badge-neutral">В работе</span>
+                                                    <span class="badge badge-task-progress">В работе</span>
                                                 {% else %}
-                                                    <span class="badge badge-neutral">Назначено</span>
+                                                    <span class="badge badge-task-assigned">Назначено</span>
                                                 {% endif %}
                                             </td>
                                         </tr>

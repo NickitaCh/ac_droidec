@@ -176,7 +176,7 @@ class TasksCog(commands.Cog):
         if status == "COMPLETED":
             return "✅", "Выполнено"
         if status == "FAILED":
-            return "❌", "Провалено"
+            return "⏰", "Просрочено"
         if status == "LEFT":
             return "📦", "Игрок выбыл"
         if in_progress:
@@ -249,7 +249,7 @@ class TasksCog(commands.Cog):
         о завершении/провале задачи. ЛС игроку намеренно не шлём (решено 2026-09-04,
         Discord-тред "Гайд по АС Боту") — только выбранный канал."""
         unit_name = database.get_game_unit_name(base_id) or base_id
-        verb = "выполнена 🎉" if status == "COMPLETED" else "провалена — истёк срок ⏰"
+        verb = "выполнена 🎉" if status == "COMPLETED" else "просрочена — истёк срок ⏰"
         target_label = self._format_target_label(target_type, target_value)
         text = f"Задача **{unit_name}** ({target_label}) для **{player_name}** {verb}"
 
@@ -633,18 +633,17 @@ class TasksCog(commands.Cog):
                 await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
                 return
 
-            # "Текущие" задачи — активные, или завершённые/проваленные не старше
-            # database.TASK_ARCHIVE_AFTER_DAYS дней (архивные не выводятся, см. пункт
-            # "Архив" из Discord-треда "Гайд по АС Боту"). Провальные включены
-            # намеренно — Ricardo: "Включая провальные".
+            # "Текущие" задачи — активные и просроченные, не перенесённые в архив
+            # (см. database.is_task_archived). Просроченные включены намеренно —
+            # Ricardo: "Включая провальные".
             departed_codes = set(database.get_departed_players(guild_id))
             rows = [
                 r for r in database.get_all_tasks(guild_id)
-                if r[6] in ("ACTIVE", "FAILED") and not database.is_task_archived(r[12], r[6])
+                if r[6] in ("ACTIVE", "FAILED") and not database.is_task_archived(r[12], r[6], r[13])
                 and r[1] not in departed_codes
             ]
             if not rows:
-                await inter.edit_original_response("🎉 Активных или проваленных задач нет — все чисто.")
+                await inter.edit_original_response("🎉 Активных или просроченных задач нет — все чисто.")
                 return
 
             # get_player_names, а не ростер-кэш — кэш знает только текущий состав, при
@@ -664,7 +663,7 @@ class TasksCog(commands.Cog):
                 if active_n:
                     parts.append(f"в работе: {active_n}")
                 if failed_n:
-                    parts.append(f"провалено: {failed_n}")
+                    parts.append(f"просрочено: {failed_n}")
                 lines.append(f"• {name} — {', '.join(parts)}")
 
             embeds = _lines_to_embeds("📋 Задачи — гильдия", DATACRON_LIST_COLOR, lines)
@@ -692,7 +691,7 @@ class TasksCog(commands.Cog):
                 await guild_resolver.send_denied(inter, self_error)
                 return
 
-        rows = [r for r in database.get_tasks_for_ally(ally_code, guild_id=guild_id) if not database.is_task_archived(r[11], r[6])]
+        rows = [r for r in database.get_tasks_for_ally(ally_code, guild_id=guild_id) if not database.is_task_archived(r[11], r[6], r[12])]
         if not rows:
             await inter.edit_original_response(f"У игрока **{игрок}** нет текущих задач.")
             return

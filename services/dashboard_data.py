@@ -98,7 +98,16 @@ def get_roster(guild_id: int) -> list[RosterRow]:
 # вместо дублирования этой логики здесь карточка просто ссылается на готовые страницы с
 # предзаполненным игроком.
 
-TASK_STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger", "LEFT": "badge-neutral"}
+def task_status_badge(status: str, in_progress) -> str:
+    """CSS-класс бейджа статуса задачи — цвета задал RicardoOneS (2026-10-14), см.
+    .badge-task-* в style.css. Общий для /tasks, главной и карточки игрока."""
+    if status == "COMPLETED":
+        return "badge-task-done"
+    if status == "FAILED":
+        return "badge-task-overdue"
+    if status == "ACTIVE" and in_progress:
+        return "badge-task-progress"
+    return "badge-task-assigned"
 
 
 def _task_status_label(status: str, in_progress) -> str:
@@ -108,7 +117,7 @@ def _task_status_label(status: str, in_progress) -> str:
     if status == "COMPLETED":
         return "Выполнено"
     if status == "FAILED":
-        return "Провалено"
+        return "Просрочено"
     if status == "LEFT":
         return "Игрок выбыл"
     return "В работе" if in_progress else "Назначено"
@@ -205,10 +214,10 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
     current_tasks = []
     archived_tasks_count = 0
     for (task_id, _ally_code, base_id, target_type, target_value, deadline, status,
-         initial_value, current_value, in_progress, _created_by, resolved_at) in task_rows:
+         initial_value, current_value, in_progress, _created_by, resolved_at, archived_at) in task_rows:
         # У выбывшего все задачи архивные (LEFT) — показываем их как есть, иначе
         # архивная карточка всегда была бы с пустым блоком задач.
-        if database.is_task_archived(resolved_at, status) and departed_at is None:
+        if database.is_task_archived(resolved_at, status, archived_at) and departed_at is None:
             archived_tasks_count += 1
             continue
         current_tasks.append(PlayerCardTask(
@@ -216,7 +225,7 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
             unit_name=unit_names.get(base_id) or base_id,
             target_label=_task_target_label(target_type, target_value),
             status_label=_task_status_label(status, in_progress),
-            status_badge=TASK_STATUS_BADGE.get(status, "badge-neutral"),
+            status_badge=task_status_badge(status, in_progress),
             progress=_task_progress_label(initial_value, current_value),
             deadline=deadline,
             base_id=base_id,

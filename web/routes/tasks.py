@@ -1,7 +1,8 @@
 """Веб-управление задачами на прокачку (аналог /задачи в Discord) — список с
-фильтром/группировкой по игроку, точечная и массовая постановка, редактирование
-(значение цели + дедлайн) и удаление (по одному и целой группой), плюс предзаполнение
-формы из гильдийского отчёта по плейту (кнопка "+ задача" на /stats-check).
+фильтром/группировкой по игроку, единая форма постановки (игроки + один юнит или цель
+«Руководства»), редактирование (значение цели + дедлайн), перенос в архив и удаление
+(по одному и целой группой), плюс предзаполнение формы из гильдийского отчёта по плейту
+(кнопка "+ задача" на /stats-check).
 Аудит выполнения остаётся только в боте (cogs/tasks.py::tasks_audit_loop); просрочка
 и напоминания — там же (tasks_notify_loop) — веб лишь читает уже проставленный ботом
 статус и настраивает время рассылки (guilds.tasks_notify_time, см. /settings)."""
@@ -21,6 +22,7 @@ import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
 from services import feature_flags, journey_guide
+from services.dashboard_data import task_status_badge
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -35,7 +37,15 @@ TARGET_TYPE_OPTIONS = [
 ]
 TARGET_TYPE_LABELS = dict(TARGET_TYPE_OPTIONS)
 
-STATUS_BADGE = {"ACTIVE": "badge-neutral", "COMPLETED": "badge-ok", "FAILED": "badge-danger", "LEFT": "badge-neutral"}
+# Фильтр по статусу (?status=) и счётчики в шапке. ACTIVE делится на «Назначено» /
+# «В работе» по in_progress; ACTIVE в ссылке (старые ссылки с главной) = оба сразу.
+STATE_KEYS = ("ASSIGNED", "IN_PROGRESS", "FAILED", "COMPLETED")
+
+
+def _task_state(status: str, in_progress) -> str:
+    if status == "ACTIVE":
+        return "IN_PROGRESS" if in_progress else "ASSIGNED"
+    return status
 
 
 def _status_label(status: str, in_progress) -> str:
@@ -46,7 +56,7 @@ def _status_label(status: str, in_progress) -> str:
     if status == "COMPLETED":
         return "Выполнено"
     if status == "FAILED":
-        return "Провалено"
+        return "Просрочено"
     if status == "LEFT":
         return "Игрок выбыл"
     return "В работе" if in_progress else "Назначено"
@@ -64,7 +74,7 @@ def _progress_label(initial_value, current_value) -> str:
 
 def _format_resolved_at(resolved_at: str | None) -> str | None:
     """resolved_at хранится как datetime('now') (UTC) — конвертируем в МСК для показа
-    времени завершения/провала задачи (Ricardo, тот же тред: "добавить информацию о
+    времени завершения/просрочки задачи (Ricardo, тот же тред: "добавить информацию о
     времени, когда задача была выполнена"). Тот же паттерн конвертации, что
     services/dashboard_data.py::_sync_status (last_sync)."""
     if not resolved_at:
@@ -198,44 +208,53 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     creator_ids = {r[11] for r in rows if r[11]}
     creator_names = {cid: (database.get_username_for_discord_id(cid) or cid) for cid in creator_ids}
 
-    all_ctx = [
-        {
+    all_ctx = []
+    for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
+         initial_value, current_value, in_progress, created_by, resolved_at, archived_at) in rows:
+        archived = database.is_task_archived(resolved_at, status, archived_at)
+        all_ctx.append({
             "task_id": task_id, "ally_code": ally_code, "base_id": base_id,
             "player_name": names_by_code.get(ally_code, ally_code),
             "unit_name": unit_names.get(base_id) or base_id,
             "target_type": target_type, "target_value": target_value,
             "target_label": _target_label(target_type, target_value),
             "deadline": deadline, "status": status,
+            "state": _task_state(status, in_progress),
             "status_label": _status_label(status, in_progress),
-            "status_badge": STATUS_BADGE.get(status, "badge-neutral"),
+            "status_badge": task_status_badge(status, in_progress),
             "progress": _progress_label(initial_value, current_value),
             "created_by_name": creator_names.get(created_by, "—"),
             "batch_id": batch_id,
-            "archived": database.is_task_archived(resolved_at, status),
+            "archived": archived,
+            "can_archive": status in ("COMPLETED", "FAILED") and not archived,
             "departed": ally_code in departed_codes,
             "resolved_at_text": _format_resolved_at(resolved_at),
-        }
-        for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-             initial_value, current_value, in_progress, created_by, resolved_at) in rows
-    ]
+        })
 
-    # "Архив" — отдельная вкладка (COMPLETED/FAILED старше database.TASK_ARCHIVE_AFTER_DAYS
-    # дней); везде остальное ("Список"/"По игрокам") — только текущие задачи, как и в
-    # отчётах бота (см. Discord-тред "Гайд по АС Боту", пункт "Архив").
+    # "Архив" — отдельная вкладка: выполненные через TASK_ARCHIVE_AFTER_DAYS дней или
+    # кнопкой, просроченные — только кнопкой (database.is_task_archived). "Список"/"По
+    # игрокам" — только текущие задачи, как и в отчётах бота.
     # Задачи выбывших из гильдии — своя вкладка "Выбывшие" (только они, любой статус),
     # ни в текущих, ни в "Архиве" их нет.
+    current = [t for t in all_ctx if not t["archived"] and not t["departed"]]
+    archived = [t for t in all_ctx if t["archived"] and not t["departed"]]
     if view == "departed":
         scope = [t for t in all_ctx if t["departed"]]
     elif view == "archive":
-        scope = [t for t in all_ctx if t["archived"] and not t["departed"]]
+        scope = archived
     else:
-        scope = [t for t in all_ctx if not t["archived"] and not t["departed"]]
+        scope = current
 
-    counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
-    for t in scope:
-        counts[t["status"]] = counts.get(t["status"], 0) + 1
+    # Счётчики в шапке — всегда по текущим задачам + размер архива, вне зависимости от вкладки.
+    counts = {key: 0 for key in STATE_KEYS}
+    for t in current:
+        counts[t["state"]] = counts.get(t["state"], 0) + 1
+    counts["ARCHIVE"] = len(archived)
 
-    tasks_ctx = [t for t in scope if not status_filter or t["status"] == status_filter]
+    if status_filter == "ACTIVE":
+        tasks_ctx = [t for t in scope if t["status"] == "ACTIVE"]
+    else:
+        tasks_ctx = [t for t in scope if not status_filter or t["state"] == status_filter]
 
     # Омикрон-варианты для инлайн-редактирования — только для реально показанных задач
     # этого типа, не весь справочник разом.
@@ -284,7 +303,6 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "value": request.query_params.get("prefill_value", ""),
     }
     prefill["active"] = bool(prefill["ally_code"] or prefill["unit"])
-    prefill["ally_name"] = names_by_code.get(prefill["ally_code"], prefill["ally_code"]) if prefill["ally_code"] else ""
     prefill["unit_name"] = (database.get_game_unit_name(prefill["unit"]) or prefill["unit"]) if prefill["unit"] else ""
 
     return templates.TemplateResponse(request, "tasks.html", {
@@ -303,6 +321,8 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "error": request.query_params.get("error"),
         "notice": request.query_params.get("notice"),
         "warn": request.query_params.get("warn"),
+        "status_labels": {"ASSIGNED": "Назначено", "IN_PROGRESS": "В работе", "FAILED": "Просрочено",
+                          "COMPLETED": "Выполнено", "ACTIVE": "Назначено и в работе"},
         "synced": request.query_params.get("synced"),
         "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
         "departed_count": len({t["ally_code"] for t in all_ctx if t["departed"]}),
@@ -340,62 +360,16 @@ async def omicron_skills(base_id: str = "", user: dict = Depends(feature_flags.r
     return _omicron_options(base_id)
 
 
-@router.post("/add", response_class=HTMLResponse)
-async def task_add(
-    ally_code: str = Form(...),
-    base_id: str = Form(...),
-    target_type: str = Form(...),
-    target_value: str = Form(...),
-    deadline: str = Form(...),
-    user: dict = Depends(feature_flags.require_feature("tasks")),
-):
-    guild_id = user["guild_id"]
-
-    unit_name = database.get_game_unit_name(base_id)
-    if not unit_name:
-        return RedirectResponse(f"/tasks?{urlencode({'error': f'Юнит {base_id} не найден в справочнике.'})}", status_code=303)
-
-    names_by_code = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-    if ally_code not in names_by_code:
-        return RedirectResponse(f"/tasks?{urlencode({'error': 'Игрок не найден в составе гильдии — выберите из подсказок.'})}", status_code=303)
-
-    err = _validate_target(base_id, target_type, target_value)
-    if err:
-        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
-
-    err = _validate_deadline(deadline)
-    if err:
-        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
-
-    # Запрет дублей — см. cogs/tasks.py::task_add за тем же правилом/обоснованием.
-    if database.get_active_task_for_unit(guild_id, ally_code, base_id):
-        return RedirectResponse(
-            f"/tasks?{urlencode({'error': f'Задача по юниту {unit_name} для {names_by_code[ally_code]} уже назначена.'})}",
-            status_code=303,
-        )
-
-    target_value = target_value.strip()
-    initial_value = None
-    try:
-        comlink = _get_comlink()
-        unit_data = _fetch_unit_data(comlink, ally_code, base_id)
-        if unit_data is not None:
-            skill_thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
-            if _is_target_completed(unit_data, target_type, target_value, skill_thresholds):
-                # Раньше шло через 'notice' (зелёный ✅) — вводило в заблуждение, задача
-                # ведь НЕ создана, а не "успех" (Ricardo, Discord-тред "Гайд по АС Боту",
-                # 2026-09-08). 'warn' рендерится в шаблоне бледно-красным.
-                return RedirectResponse(
-                    f"/tasks?{urlencode({'warn': f'{names_by_code[ally_code]}: цель уже выполнена, задача не создана.'})}",
-                    status_code=303,
-                )
-            initial_value = _current_progress_value(unit_data, target_type, target_value)
-    except Exception:
-        pass  # Comlink недоступен — создаём без снимка initial_value, не блокируем постановку
-
-    database.add_task(ally_code, base_id, target_type, target_value, deadline, str(user["discord_id"]),
-                       guild_id=guild_id, initial_value=initial_value)
-    return RedirectResponse("/tasks", status_code=303)
+@router.get("/api/guides", response_class=JSONResponse)
+async def guides_search(q: str = "", user: dict = Depends(feature_flags.require_feature("tasks"))):
+    """Поиск цели «Руководства» по имени (вместо длинного выпадающего списка)."""
+    q_lower = q.strip().lower()
+    if len(q_lower) < 2:
+        return []
+    return [
+        {"base_id": g["base_id"], "name": f"{g['name']} — {g['kind_label'].lower()}, героев: {g['count']}"}
+        for g in journey_guide.guide_options() if q_lower in g["name"].lower()
+    ][:20]
 
 
 @router.post("/api/bulk-preview", response_class=JSONResponse)
@@ -677,6 +651,17 @@ async def task_edit(
 
     database.update_task(task_id, target_value=target_value.strip(), deadline=deadline)
     return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача обновлена'})}", status_code=303)
+
+
+@router.post("/{task_id}/archive", response_class=HTMLResponse)
+async def task_archive(task_id: int, user: dict = Depends(feature_flags.require_feature("tasks"))):
+    task = database.get_task(task_id)
+    if not task or task[7] != user["guild_id"]:
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'Задача не найдена.'})}", status_code=303)
+    if task[6] not in ("COMPLETED", "FAILED"):
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'В архив переносятся только выполненные и просроченные задачи.'})}", status_code=303)
+    database.archive_task(task_id)
+    return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача перенесена в архив'})}", status_code=303)
 
 
 @router.post("/{task_id}/delete", response_class=HTMLResponse)

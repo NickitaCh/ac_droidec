@@ -7,13 +7,21 @@
             <div>
                 <p class="page-hero-eyebrow">Прокачка гильдии</p>
                 <h1>Задачи</h1>
-                <p class="page-hero-lead">Статус (в работе → выполнено/провалено) бот проверяет раз в час по данным игры. Уведомления о дедлайнах — в канал из /настройки задачи_канал, время рассылки — на <a href="/settings">Настройках</a>.</p>
+                <p class="page-hero-lead">Статус бот проверяет раз в час по данным игры. Выполненные уходят в архив через {{ archive_after_days }} дней, просроченные — кнопкой «В архив». Уведомления о дедлайнах — в канал из /настройки задачи_канал, время рассылки — на <a href="/settings">Настройках</a>.</p>
+            </div>
+            <div class="page-hero-sync">
+                <span>Справочник юнитов обновляется сам каждый час</span>
+                <form method="post" action="/tasks/sync-units">
+                    <button type="submit" title="Нужно, только если нового персонажа/корабля ещё нет в подсказках">🔄 Обновить</button>
+                </form>
             </div>
         </div>
         <div class="hero-kpis">
-            <a class="hero-kpi" href="/tasks?status=ACTIVE&view={{ view }}"><span class="hero-kpi-value">{{ counts.ACTIVE }}</span><span class="hero-kpi-label">в работе</span></a>
-            <a class="hero-kpi{% if counts.FAILED %} hero-kpi-danger{% endif %}" href="/tasks?status=FAILED&view={{ view }}"><span class="hero-kpi-value">{{ counts.FAILED }}</span><span class="hero-kpi-label">провалено</span></a>
-            <a class="hero-kpi hero-kpi-good" href="/tasks?status=COMPLETED&view={{ view }}"><span class="hero-kpi-value">{{ counts.COMPLETED }}</span><span class="hero-kpi-label">выполнено</span></a>
+            <a class="hero-kpi" href="/tasks?status=ASSIGNED"><span class="hero-kpi-value">{{ counts.ASSIGNED }}</span><span class="hero-kpi-label">назначено</span></a>
+            <a class="hero-kpi" href="/tasks?status=IN_PROGRESS"><span class="hero-kpi-value">{{ counts.IN_PROGRESS }}</span><span class="hero-kpi-label">в работе</span></a>
+            <a class="hero-kpi{% if counts.FAILED %} hero-kpi-danger{% endif %}" href="/tasks?status=FAILED"><span class="hero-kpi-value">{{ counts.FAILED }}</span><span class="hero-kpi-label">просрочено</span></a>
+            <a class="hero-kpi hero-kpi-good" href="/tasks?status=COMPLETED"><span class="hero-kpi-value">{{ counts.COMPLETED }}</span><span class="hero-kpi-label">выполнено</span></a>
+            <a class="hero-kpi" href="/tasks?view=archive"><span class="hero-kpi-value">{{ counts.ARCHIVE }}</span><span class="hero-kpi-label">в архиве</span></a>
         </div>
     </section>
 
@@ -34,37 +42,65 @@
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
 
-    <div class="panel" style="max-width: 32em;">
-        <div class="panel-title"><span>Новая задача — один игрок</span></div>
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Новая задача</span></div>
         {% if prefill.active %}
             <p class="muted">Предзаполнено из отчёта по плейту.</p>
         {% endif %}
-        <form method="post" action="/tasks/add" id="task-add-form">
+        <form method="post" action="/tasks/add-bulk" class="inline-form" id="task-form" style="flex-direction: column; align-items: stretch;">
             <label>
-                Игрок
-                <div class="unit-search" data-role="player-picker" data-live-search data-url="/tasks/api/players" data-value-field="ally_code" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя игрока…" autocomplete="off" required value="{{ prefill.ally_name }}">
-                    <input type="hidden" name="ally_code" class="unit-search-value" required value="{{ prefill.ally_code }}">
+                Игроки
+                <input type="search" placeholder="Фильтр по имени…" data-table-search="task-player-table">
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" id="task-select-all"> Выбрать всех
+            </label>
+            <div class="table-scroll" style="max-height: 16em;">
+                <table class="data" id="task-player-table">
+                    <tbody>
+                        {% for code, name in roster %}
+                            <tr data-search="{{ name|lower }}">
+                                <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"{% if code == prefill.ally_code %} checked{% endif %}> {{ name }}</label></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <label class="checkbox">
+                <input type="radio" name="mode" value="single" checked> Один персонаж/корабль
+            </label>
+            <div data-mode-block="single">
+                <div class="unit-search" data-role="unit-picker" data-live-search data-required="false" data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" value="{{ prefill.unit_name }}">
+                    <input type="hidden" name="base_id" class="unit-search-value" value="{{ prefill.unit }}">
                     <div class="unit-search-results"></div>
                 </div>
+            </div>
+
+            {% if guide_options %}
+            <label class="checkbox">
+                <input type="radio" name="mode" value="guide"> Из «Руководства» — все герои для ГЛ, флагмана или путешествия
             </label>
-            <label>
-                Персонаж/корабль
-                <div class="unit-search" data-role="unit-picker" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required value="{{ prefill.unit_name }}">
-                    <input type="hidden" name="base_id" class="unit-search-value" required value="{{ prefill.unit }}">
+            <div data-mode-block="guide">
+                <div class="unit-search" data-role="guide-picker" data-live-search data-required="false" data-url="/tasks/api/guides" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off">
+                    <input type="hidden" name="guide" class="unit-search-value">
                     <div class="unit-search-results"></div>
                 </div>
-            </label>
-            <label>
+                <div id="guide-reqs" class="muted"></div>
+            </div>
+            {% endif %}
+
+            <label data-mode-block="single">
                 Критерий прокачки
-                <select name="target_type" required>
+                <select name="target_type">
                     {% for value, label in target_type_options %}
                         <option value="{{ value }}" {% if value == prefill.type %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </label>
-            <label data-omicron-picker>
+            <label data-mode-block="single">
                 Целевое значение
                 <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)" value="{{ prefill.value }}">
                 <select name="target_value" class="target-value-select" style="display:none" disabled></select>
@@ -73,147 +109,29 @@
                 Дедлайн
                 <input type="date" name="deadline" required>
             </label>
-            <button type="submit">Поставить задачу</button>
+            <p class="muted" data-mode-block="guide">Задача ставится на каждого героя, который ещё не дотягивает до требования. Уже выполненное и уже назначенное пропускается.</p>
+            <button type="submit" id="task-submit-btn">Поставить задачу</button>
         </form>
     </div>
 
-    <div class="panel" style="max-width: 40em;">
-        <details>
-            <summary class="link-btn">Массовая постановка — несколько игроков сразу</summary>
-            <form method="post" action="/tasks/add-bulk" class="inline-form" id="task-add-bulk-form" style="flex-direction: column; align-items: stretch;">
-                <label>
-                    Игроки
-                    <input type="search" placeholder="Фильтр по имени…" data-table-search="bulk-player-table">
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" id="bulk-select-all"> Выбрать всех
-                </label>
-                <div class="table-scroll" style="max-height: 16em;">
-                    <table class="data" id="bulk-player-table">
-                        <tbody>
-                            {% for code, name in roster %}
-                                <tr data-search="{{ name|lower }}">
-                                    <td><label class="checkbox-label"><input type="checkbox" name="ally_codes" value="{{ code }}"> {{ name }}</label></td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <label>
-                    Персонаж/корабль
-                    <div class="unit-search" data-role="unit-picker" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
-                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" required>
-                        <input type="hidden" name="base_id" class="unit-search-value" required>
-                        <div class="unit-search-results"></div>
-                    </div>
-                </label>
-                <label>
-                    Критерий прокачки
-                    <select name="target_type" required>
-                        {% for value, label in target_type_options %}
-                            <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label data-omicron-picker>
-                    Целевое значение
-                    <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)">
-                    <select name="target_value" class="target-value-select" style="display:none" disabled></select>
-                </label>
-                <label>
-                    Дедлайн
-                    <input type="date" name="deadline" required>
-                </label>
-                <button type="submit" id="bulk-submit-btn">Поставить всем выбранным</button>
-            </form>
-        </details>
-    </div>
-
-    {% if guide_options %}
-    <div class="panel" style="max-width: 40em;">
-        <details>
-            <summary class="link-btn">По «Руководству» — все герои для ГЛ, флагмана или путешествия</summary>
-            <form method="post" action="/tasks/add-guide" class="inline-form" id="task-add-guide-form" style="flex-direction: column; align-items: stretch;">
-                <label>
-                    Цель
-                    <select name="guide" id="guide-select" required>
-                        <option value="">— выберите —</option>
-                        {% for kind_label, items in guide_options|groupby("kind_label", default="") %}
-                            <optgroup label="{{ kind_label }}">
-                                {% for g in items %}
-                                    <option value="{{ g.base_id }}">{{ g.name }} ({{ g.count }})</option>
-                                {% endfor %}
-                            </optgroup>
-                        {% endfor %}
-                    </select>
-                </label>
-                <div id="guide-reqs" class="muted"></div>
-                <label>
-                    Игроки
-                    <input type="search" placeholder="Фильтр по имени…" data-table-search="guide-player-table">
-                </label>
-                <label class="checkbox">
-                    <input type="checkbox" id="guide-select-all"> Выбрать всех
-                </label>
-                <div class="table-scroll" style="max-height: 16em;">
-                    <table class="data" id="guide-player-table">
-                        <tbody>
-                            {% for code, name in roster %}
-                                <tr data-search="{{ name|lower }}">
-                                    <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"> {{ name }}</label></td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <label>
-                    Дедлайн
-                    <input type="date" name="deadline" required>
-                </label>
-                <p class="muted">Задача ставится на каждого героя, который ещё не дотягивает до требования. Уже выполненное и уже назначенное пропускается.</p>
-                <button type="submit" id="guide-submit-btn">Поставить выбранным</button>
-            </form>
-        </details>
-    </div>
-
-    <dialog id="guide-confirm-dialog" class="confirm-dialog">
+    <dialog id="task-confirm-dialog" class="confirm-dialog">
         <h3>Подтверждение постановки</h3>
-        <div id="guide-confirm-body"></div>
+        <div id="task-confirm-body"></div>
         <div class="dialog-actions">
-            <button type="button" class="button-secondary" id="guide-confirm-cancel">Отмена</button>
-            <button type="button" id="guide-confirm-ok">Поставить</button>
+            <button type="button" class="button-secondary" id="task-confirm-cancel">Отмена</button>
+            <button type="button" id="task-confirm-ok">Поставить</button>
         </div>
     </dialog>
-    {% endif %}
-
-    <dialog id="bulk-confirm-dialog" class="confirm-dialog">
-        <h3>Подтверждение постановки</h3>
-        <div id="bulk-confirm-body"></div>
-        <div class="dialog-actions">
-            <button type="button" class="button-secondary" id="bulk-confirm-cancel">Отмена</button>
-            <button type="button" id="bulk-confirm-ok">Поставить</button>
-        </div>
-    </dialog>
-
-    <div class="panel" style="max-width: 24em;">
-        <div class="panel-title"><span>Справочник юнитов</span></div>
-        <p class="muted">Обычно обновляется ботом автоматически каждый час — жми только если нужен персонаж/корабль, которого ещё нет в подсказках выше.</p>
-        <form method="post" action="/tasks/sync-units">
-            <button type="submit">🔄 Обновить справочник юнитов</button>
-        </form>
-    </div>
 
     <div class="panel">
         <div class="table-toolbar">
             <input type="search" placeholder="Поиск по игроку…" data-table-search="tasks-table">
             <span class="panel-hint">
-                {% if status_filter %}<a href="/tasks?view={{ view }}">Все статусы</a>{% else %}Все статусы{% endif %}
-                ·
-                <a href="/tasks?status=ACTIVE&view={{ view }}">В работе</a>
-                ·
-                <a href="/tasks?status=COMPLETED&view={{ view }}">Выполнено</a>
-                ·
-                <a href="/tasks?status=FAILED&view={{ view }}">Провалено</a>
+                {% if status_filter %}<a href="/tasks?view={{ view }}">Все статусы</a>{% else %}<strong>Все статусы</strong>{% endif %}
+                {% for key in ("ASSIGNED", "IN_PROGRESS", "FAILED", "COMPLETED") %}
+                    ·
+                    {% if status_filter == key %}<strong>{{ status_labels[key] }}</strong>{% else %}<a href="/tasks?status={{ key }}&view={{ view }}">{{ status_labels[key] }}</a>{% endif %}
+                {% endfor %}
             </span>
         </div>
         <div class="segmented-toggle">
@@ -227,18 +145,18 @@
             </div>
         </div>
         {% if view == "archive" %}
-            <p class="muted">Задачи, завершённые или проваленные более {{ archive_after_days }} дней назад — не влияют на счётчики и отчёты бота.</p>
+            <p class="muted">Выполненные задачи попадают сюда сами через {{ archive_after_days }} дней или кнопкой «В архив», просроченные — только кнопкой. В отчётах бота архив не учитывается.</p>
         {% elif view == "departed" %}
             <p class="muted">Задачи игроков, выбывших из гильдии. При возвращении игрока активные задачи восстановятся.</p>
         {% endif %}
 
         {% if view == "players" %}
             {% if not players_view %}
-                <p class="empty-state">Активных или проваленных задач нет — все чисто. 🎉</p>
+                <p class="empty-state">Активных или просроченных задач нет — все чисто. 🎉</p>
             {% else %}
                 <div class="table-scroll">
                     <table class="data">
-                        <thead><tr><th>Игрок</th><th>В работе / провалено</th><th>Задачи</th></tr></thead>
+                        <thead><tr><th>Игрок</th><th>Активно / просрочено</th><th>Задачи</th></tr></thead>
                         <tbody>
                             {% for p in players_view %}
                                 <tr>
@@ -283,9 +201,11 @@
                                     <td>{{ t.deadline }}</td>
                                     <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span></td>
                                     <td>{{ t.created_by_name }}</td>
-                                    <td class="row-actions">
+                                    <td class="row-actions row-actions-icons">
                                         <details>
-                                            <summary class="link-btn">править</summary>
+                                            <summary class="icon-btn" title="Править" aria-label="Править">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                            </summary>
                                             <form method="post" action="/tasks/{{ t.task_id }}/edit" class="inline-form">
                                                 {% if t.target_type == "omicron" %}
                                                     <select name="target_value">
@@ -300,8 +220,17 @@
                                                 <button type="submit">Сохранить</button>
                                             </form>
                                         </details>
+                                        {% if not t.archived %}
+                                        <form method="post" action="/tasks/{{ t.task_id }}/archive">
+                                            <button type="submit" class="icon-btn" {% if t.can_archive %}title="В архив"{% else %}disabled title="В архив — только выполненные и просроченные"{% endif %} aria-label="В архив">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+                                            </button>
+                                        </form>
+                                        {% endif %}
                                         <form method="post" action="/tasks/{{ t.task_id }}/delete" onsubmit="return confirm('Удалить задачу «{{ t.unit_name }}» для {{ t.player_name }}?');">
-                                            <button type="submit" class="button-danger">Удалить</button>
+                                            <button type="submit" class="icon-btn icon-btn-danger" title="Удалить" aria-label="Удалить">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                                            </button>
                                         </form>
                                     </td>
                                 </tr>
@@ -342,292 +271,220 @@
 
     <script>
 document.addEventListener("DOMContentLoaded", () => {
-    // "Выбрать всех" в массовой постановке — отмечает все чекбоксы ростера разом.
-    const selectAll = document.getElementById("bulk-select-all");
-    if (selectAll) {
-        selectAll.addEventListener("change", () => {
-            document.querySelectorAll('#bulk-player-table input[name="ally_codes"]').forEach((cb) => {
-                cb.checked = selectAll.checked;
-            });
-        });
-    }
+    const form = document.getElementById("task-form");
+    if (!form) return;
+    const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-    // Переключение "Целевое значение" между свободным текстом (звёзды/реликвия) и
-    // выпадающим списком омикронов конкретного выбранного юнита (см. /tasks/api/omicron-skills)
-    // — общая логика для формы точечной и массовой постановки на этой странице.
-    document.querySelectorAll("[data-omicron-picker]").forEach((wrap) => {
-        const form = wrap.closest("form");
-        const typeSelect = form.querySelector('select[name="target_type"]');
-        const unitWrap = form.querySelector('[data-role="unit-picker"]');
-        const unitHidden = unitWrap ? unitWrap.querySelector(".unit-search-value") : null;
-        const textInput = wrap.querySelector(".target-value-text");
-        const selectInput = wrap.querySelector(".target-value-select");
-        if (!typeSelect || !textInput || !selectInput) return;
-
-        const fillSelect = (options) => {
-            selectInput.innerHTML = "";
-            if (options.length === 0) {
-                const opt = document.createElement("option");
-                opt.value = "";
-                opt.textContent = "— у юнита нет омикрона —";
-                selectInput.appendChild(opt);
-                return;
-            }
-            options.forEach((item) => {
-                const opt = document.createElement("option");
-                opt.value = item.skill_id;
-                opt.textContent = item.label;
-                selectInput.appendChild(opt);
-            });
-        };
-
-        const refresh = async () => {
-            if (typeSelect.value === "omicron") {
-                textInput.style.display = "none";
-                textInput.disabled = true;
-                textInput.required = false;
-                selectInput.style.display = "";
-                selectInput.disabled = false;
-                selectInput.required = true;
-                const baseId = unitHidden ? unitHidden.value : "";
-                if (!baseId) {
-                    selectInput.innerHTML = '<option value="">— сначала выберите юнита —</option>';
-                    return;
-                }
-                try {
-                    const resp = await fetch(`/tasks/api/omicron-skills?base_id=${encodeURIComponent(baseId)}`);
-                    fillSelect(resp.ok ? await resp.json() : []);
-                } catch {
-                    selectInput.innerHTML = '<option value="">— ошибка загрузки —</option>';
-                }
-            } else {
-                selectInput.style.display = "none";
-                selectInput.disabled = true;
-                selectInput.required = false;
-                textInput.style.display = "";
-                textInput.disabled = false;
-                textInput.required = true;
-            }
-        };
-
-        typeSelect.addEventListener("change", refresh);
-        if (unitHidden) unitHidden.addEventListener("change", refresh);
-        refresh();
+    const selectAll = document.getElementById("task-select-all");
+    selectAll.addEventListener("change", () => {
+        form.querySelectorAll('input[name="ally_codes"]').forEach((cb) => { cb.checked = selectAll.checked; });
     });
 
-    // Модалка подтверждения массовой постановки — перед реальной отправкой формы
-    // спрашивает /tasks/api/bulk-preview, сколько будет создано и сколько пропустится
-    // (дубль/уже выполнено), с именами игроков, вместо того чтобы узнавать это только
-    // из notice-сообщения постфактум (см. Discord-тред "Гайд по АС Боту").
-    const bulkForm = document.getElementById("task-add-bulk-form");
-    const bulkDialog = document.getElementById("bulk-confirm-dialog");
-    const bulkDialogBody = document.getElementById("bulk-confirm-body");
-    const bulkOkBtn = document.getElementById("bulk-confirm-ok");
-    const bulkCancelBtn = document.getElementById("bulk-confirm-cancel");
-    const bulkSubmitBtn = document.getElementById("bulk-submit-btn");
-    let bulkConfirmed = false;
+    // Режим постановки: один юнит или цель «Руководства». Поля неактивного режима
+    // выключаются (disabled не уходит в отправку и не валидируется браузером).
+    const unitWrap = form.querySelector('[data-role="unit-picker"]');
+    const unitHidden = unitWrap.querySelector(".unit-search-value");
+    const guideWrap = form.querySelector('[data-role="guide-picker"]');
+    const guideHidden = guideWrap ? guideWrap.querySelector(".unit-search-value") : null;
+    const guideReqs = document.getElementById("guide-reqs");
+    const typeSelect = form.querySelector('select[name="target_type"]');
+    const textInput = form.querySelector(".target-value-text");
+    const valueSelect = form.querySelector(".target-value-select");
+    const mode = () => (form.querySelector('input[name="mode"]:checked') || {}).value || "single";
 
-    const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const setBlock = (block, on) => {
+        block.classList.toggle("muted", !on);
+        block.querySelectorAll("input, select").forEach((el) => {
+            if (el.classList.contains("target-value-text") || el.classList.contains("target-value-select")) return;
+            el.disabled = !on;
+        });
+    };
 
-    if (bulkForm && bulkDialog) {
-        bulkForm.addEventListener("submit", async (e) => {
-            if (bulkConfirmed) {
-                bulkConfirmed = false;
-                return; // подтверждено в модалке — пропускаем на реальную отправку
+    // «Целевое значение»: число (звёзды/реликвия/снаряжение) или омикрон выбранного юнита.
+    const refreshValue = async () => {
+        const single = mode() === "single";
+        const omicron = typeSelect.value === "omicron";
+        textInput.style.display = omicron ? "none" : "";
+        textInput.disabled = !single || omicron;
+        textInput.required = single && !omicron;
+        valueSelect.style.display = omicron ? "" : "none";
+        valueSelect.disabled = !single || !omicron;
+        valueSelect.required = single && omicron;
+        if (!omicron) return;
+        if (!unitHidden.value) {
+            valueSelect.innerHTML = '<option value="">— сначала выберите юнита —</option>';
+            return;
+        }
+        try {
+            const resp = await fetch(`/tasks/api/omicron-skills?base_id=${encodeURIComponent(unitHidden.value)}`);
+            const options = resp.ok ? await resp.json() : [];
+            valueSelect.innerHTML = options.length
+                ? options.map((o) => `<option value="${escapeHtml(o.skill_id)}">${escapeHtml(o.label)}</option>`).join("")
+                : '<option value="">— у юнита нет омикрона —</option>';
+        } catch {
+            valueSelect.innerHTML = '<option value="">— ошибка загрузки —</option>';
+        }
+    };
+
+    const applyMode = () => {
+        const m = mode();
+        form.querySelectorAll("[data-mode-block]").forEach((block) => setBlock(block, block.dataset.modeBlock === m));
+        form.querySelectorAll('p[data-mode-block]').forEach((p) => { p.style.display = p.dataset.modeBlock === m ? "" : "none"; });
+        refreshValue();
+    };
+    form.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", applyMode));
+    typeSelect.addEventListener("change", refreshValue);
+    unitHidden.addEventListener("change", refreshValue);
+    applyMode();
+
+    // Требования выбранной цели «Руководства». Старые события без квестов: уровни —
+    // минимум для входа, гильдия может их поднять (/tasks/api/guide-levels). Редактор —
+    // без name у полей, в отправку формы не попадает.
+    const typeNames = { stars: "★", relic: "R", gear: "G" };
+    const unitPortrait = (r) => `<span class="unit-portrait unit-portrait-xs"><img src="/unit-img/${encodeURIComponent(r.base_id)}" alt="" loading="lazy"></span>`;
+
+    const renderGuide = (reqs) => {
+        const editable = reqs.some((r) => r.editable);
+        let html = reqs.map((r) =>
+            `<span class="badge ${r.overridden ? "badge-ok" : "badge-neutral"} badge-unit"${r.overridden ? ` title="Игровой минимум: ${escapeHtml(r.default_label)}"` : ""}>${unitPortrait(r)}${escapeHtml(r.name)} — ${escapeHtml(r.label)}</span>`
+        ).join(" ");
+        if (editable) {
+            html = `<p>Квестов у события нет — уровни взяты из условий входа в бои (минимум, не гарантия победы). Зелёные — заданы гильдией.</p>` + html +
+                ` <button type="button" class="link-btn" id="guide-levels-edit">Изменить уровни</button>`;
+        }
+        guideReqs.innerHTML = html;
+        const editBtn = document.getElementById("guide-levels-edit");
+        if (editBtn) editBtn.addEventListener("click", () => renderEditor(reqs));
+    };
+
+    const renderEditor = (reqs) => {
+        const rows = reqs.map((r) => `<tr data-unit="${escapeHtml(r.base_id)}">
+            <td><span class="unit-cell">${unitPortrait(r)}${escapeHtml(r.name)}</span></td>
+            <td><select data-f="type">${Object.entries(typeNames).map(([v, l]) => `<option value="${v}"${v === r.target_type ? " selected" : ""}>${l}</option>`).join("")}</select></td>
+            <td><input type="number" data-f="value" min="0" max="13" value="${escapeHtml(r.target_value)}" style="width: 4em;"></td>
+            <td class="muted">игра: ${escapeHtml(r.default_label)}</td></tr>`).join("");
+        guideReqs.innerHTML = `<div class="table-scroll"><table class="data"><tbody>${rows}</tbody></table></div>
+            <p><button type="button" id="guide-levels-save">Сохранить уровни</button>
+            <button type="button" class="button-secondary" id="guide-levels-reset">Вернуть игровые</button>
+            <button type="button" class="button-secondary" id="guide-levels-cancel">Отмена</button></p>`;
+        const send = async (reset) => {
+            const fd = new FormData();
+            fd.append("guide", guideHidden.value);
+            if (!reset) {
+                guideReqs.querySelectorAll("tr[data-unit]").forEach((tr) => {
+                    fd.append("unit", tr.dataset.unit);
+                    fd.append("target_type", tr.querySelector('[data-f="type"]').value);
+                    fd.append("target_value", tr.querySelector('[data-f="value"]').value);
+                });
             }
-            e.preventDefault();
-
-            const selected = bulkForm.querySelectorAll('input[name="ally_codes"]:checked');
-            if (selected.length === 0) {
-                alert("Не выбрано ни одного игрока.");
+            const resp = await fetch("/tasks/api/guide-levels", { method: "POST", body: fd });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                alert(data.error || "Не удалось сохранить.");
                 return;
             }
+            loadGuide();
+        };
+        document.getElementById("guide-levels-save").addEventListener("click", () => send(false));
+        document.getElementById("guide-levels-reset").addEventListener("click", () => send(true));
+        document.getElementById("guide-levels-cancel").addEventListener("click", () => renderGuide(reqs));
+    };
 
-            // Статус-индикатор на время проверки — раньше при большом числе игроков
-            // страница просто "висла" без обратной связи (Ricardo, Discord-тред "Гайд
-            // по АС Боту", 2026-09-08: "сайт виснет, и непонятно, что происходит").
-            const originalSubmitText = bulkSubmitBtn.textContent;
-            bulkSubmitBtn.disabled = true;
-            bulkSubmitBtn.textContent = "⏳ Проверяю...";
-
-            let preview;
-            try {
-                const resp = await fetch("/tasks/api/bulk-preview", { method: "POST", body: new FormData(bulkForm) });
-                preview = await resp.json();
-                if (!resp.ok) {
-                    bulkSubmitBtn.disabled = false;
-                    bulkSubmitBtn.textContent = originalSubmitText;
-                    alert(preview.error || "Не удалось проверить постановку.");
-                    return;
-                }
-            } catch {
-                // Предпросмотр недоступен — не блокируем постановку, отправляем как есть.
-                // Кнопку намеренно НЕ восстанавливаем — идёт реальная отправка/переход страницы.
-                bulkSubmitBtn.textContent = "⏳ Ставлю задачи...";
-                bulkConfirmed = true;
-                bulkForm.requestSubmit();
-                return;
-            }
-            bulkSubmitBtn.disabled = false;
-            bulkSubmitBtn.textContent = originalSubmitText;
-
-            const { create = [], duplicate = [], done = [] } = preview;
-            const parts = [`<p><strong>Будет поставлено: ${create.length}</strong>${create.length ? " — " + escapeHtml(create.join(", ")) : ""}</p>`];
-            if (duplicate.length) {
-                parts.push(`<p class="muted">Уже назначено, пропущено: ${duplicate.length} — ${escapeHtml(duplicate.join(", "))}</p>`);
-            }
-            if (done.length) {
-                parts.push(`<p class="muted">Цель уже достигнута, пропущено: ${done.length} — ${escapeHtml(done.join(", "))}</p>`);
-            }
-            bulkDialogBody.innerHTML = parts.join("");
-            bulkOkBtn.style.display = create.length ? "" : "none";
-            bulkOkBtn.textContent = `Поставить (${create.length})`;
-            bulkDialog.showModal();
-        });
-
-        bulkOkBtn.addEventListener("click", () => {
-            bulkDialog.close();
-            bulkOkBtn.disabled = true;
-            bulkCancelBtn.disabled = true;
-            bulkSubmitBtn.disabled = true;
-            bulkSubmitBtn.textContent = "⏳ Ставлю задачи...";
-            bulkConfirmed = true;
-            bulkForm.requestSubmit();
-        });
-        bulkCancelBtn.addEventListener("click", () => bulkDialog.close());
+    const loadGuide = async () => {
+        guideReqs.innerHTML = "";
+        if (!guideHidden.value) return;
+        try {
+            const resp = await fetch(`/tasks/api/guide?base_id=${encodeURIComponent(guideHidden.value)}`);
+            renderGuide(resp.ok ? await resp.json() : []);
+        } catch {
+            guideReqs.textContent = "Не удалось загрузить требования.";
+        }
+    };
+    if (guideHidden) {
+        guideHidden.addEventListener("change", loadGuide);
+        guideWrap.querySelector(".unit-search-input").addEventListener("input", () => { guideReqs.innerHTML = ""; });
     }
 
-    // Постановка по «Руководству»: список требований выбранной цели + предпросмотр
-    // по игрокам (сколько задач будет поставлено каждому) перед реальной отправкой.
-    const guideForm = document.getElementById("task-add-guide-form");
-    if (guideForm) {
-        const guideSelect = document.getElementById("guide-select");
-        const guideReqs = document.getElementById("guide-reqs");
-        const guideAll = document.getElementById("guide-select-all");
-        const guideDialog = document.getElementById("guide-confirm-dialog");
-        const guideBody = document.getElementById("guide-confirm-body");
-        const guideOk = document.getElementById("guide-confirm-ok");
-        const guideSubmit = document.getElementById("guide-submit-btn");
-        let guideConfirmed = false;
+    // Подтверждение: перед отправкой спрашиваем предпросмотр (сколько будет создано,
+    // что пропустится как дубль / уже выполненное), потом отправляем на нужный адрес.
+    const dialog = document.getElementById("task-confirm-dialog");
+    const dialogBody = document.getElementById("task-confirm-body");
+    const okBtn = document.getElementById("task-confirm-ok");
+    const submitBtn = document.getElementById("task-submit-btn");
+    let confirmed = false;
 
-        guideAll.addEventListener("change", () => {
-            guideForm.querySelectorAll('input[name="ally_codes"]').forEach((cb) => { cb.checked = guideAll.checked; });
-        });
+    const pickerError = (wrap, text) => {
+        const input = wrap.querySelector(".unit-search-input");
+        input.setCustomValidity(text);
+        input.reportValidity();
+        input.addEventListener("input", () => input.setCustomValidity(""), { once: true });
+    };
 
-        // Старые события без квестов: уровни — минимум для входа, гильдия может их поднять
-        // (/tasks/api/guide-levels). Редактор — без name у полей, в отправку формы не попадает.
-        const typeNames = { stars: "★", relic: "R", gear: "G" };
-        const unitPortrait = (r) => `<span class="unit-portrait unit-portrait-xs"><img src="/unit-img/${encodeURIComponent(r.base_id)}" alt="" loading="lazy"></span>`;
+    form.addEventListener("submit", async (e) => {
+        if (confirmed) {
+            confirmed = false;
+            return; // подтверждено в модалке — реальная отправка
+        }
+        e.preventDefault();
+        if (!form.querySelectorAll('input[name="ally_codes"]:checked').length) {
+            alert("Не выбрано ни одного игрока.");
+            return;
+        }
+        const guide = mode() === "guide";
+        if (guide && !guideHidden.value) return pickerError(guideWrap, "Выберите цель из подсказок");
+        if (!guide && !unitHidden.value) return pickerError(unitWrap, "Выберите юнита из подсказок");
+        form.action = guide ? "/tasks/add-guide" : "/tasks/add-bulk";
 
-        const renderGuide = (reqs) => {
-            const editable = reqs.some((r) => r.editable);
-            let html = reqs.map((r) =>
-                `<span class="badge ${r.overridden ? "badge-ok" : "badge-neutral"} badge-unit"${r.overridden ? ` title="Игровой минимум: ${escapeHtml(r.default_label)}"` : ""}>${unitPortrait(r)}${escapeHtml(r.name)} — ${escapeHtml(r.label)}</span>`
-            ).join(" ");
-            if (editable) {
-                html = `<p>Квестов у события нет — уровни взяты из условий входа в бои (минимум, не гарантия победы). Зелёные — заданы гильдией.</p>` + html +
-                    ` <button type="button" class="link-btn" id="guide-levels-edit">Изменить уровни</button>`;
-            }
-            guideReqs.innerHTML = html;
-            const editBtn = document.getElementById("guide-levels-edit");
-            if (editBtn) editBtn.addEventListener("click", () => renderEditor(reqs));
-        };
-
-        const renderEditor = (reqs) => {
-            const rows = reqs.map((r, i) => `<tr data-unit="${escapeHtml(r.base_id)}">
-                <td><span class="unit-cell">${unitPortrait(r)}${escapeHtml(r.name)}</span></td>
-                <td><select data-f="type">${Object.entries(typeNames).map(([v, l]) => `<option value="${v}"${v === r.target_type ? " selected" : ""}>${l}</option>`).join("")}</select></td>
-                <td><input type="number" data-f="value" min="0" max="13" value="${escapeHtml(r.target_value)}" style="width: 4em;"></td>
-                <td class="muted">игра: ${escapeHtml(r.default_label)}</td></tr>`).join("");
-            guideReqs.innerHTML = `<div class="table-scroll"><table class="data"><tbody>${rows}</tbody></table></div>
-                <p><button type="button" id="guide-levels-save">Сохранить уровни</button>
-                <button type="button" class="button-secondary" id="guide-levels-reset">Вернуть игровые</button>
-                <button type="button" class="button-secondary" id="guide-levels-cancel">Отмена</button></p>`;
-            const send = async (reset) => {
-                const fd = new FormData();
-                fd.append("guide", guideSelect.value);
-                if (!reset) {
-                    guideReqs.querySelectorAll("tr[data-unit]").forEach((tr) => {
-                        fd.append("unit", tr.dataset.unit);
-                        fd.append("target_type", tr.querySelector('[data-f="type"]').value);
-                        fd.append("target_value", tr.querySelector('[data-f="value"]').value);
-                    });
-                }
-                const resp = await fetch("/tasks/api/guide-levels", { method: "POST", body: fd });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) {
-                    alert(data.error || "Не удалось сохранить.");
-                    return;
-                }
-                loadGuide();
-            };
-            document.getElementById("guide-levels-save").addEventListener("click", () => send(false));
-            document.getElementById("guide-levels-reset").addEventListener("click", () => send(true));
-            document.getElementById("guide-levels-cancel").addEventListener("click", () => renderGuide(reqs));
-        };
-
-        const loadGuide = async () => {
-            guideReqs.innerHTML = "";
-            if (!guideSelect.value) return;
-            try {
-                const resp = await fetch(`/tasks/api/guide?base_id=${encodeURIComponent(guideSelect.value)}`);
-                renderGuide(resp.ok ? await resp.json() : []);
-            } catch {
-                guideReqs.textContent = "Не удалось загрузить требования.";
-            }
-        };
-        guideSelect.addEventListener("change", loadGuide);
-
-        guideForm.addEventListener("submit", async (e) => {
-            if (guideConfirmed) {
-                guideConfirmed = false;
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = guide ? "⏳ Проверяю ростеры..." : "⏳ Проверяю...";
+        let preview;
+        try {
+            const resp = await fetch(guide ? "/tasks/api/guide-preview" : "/tasks/api/bulk-preview", { method: "POST", body: new FormData(form) });
+            preview = await resp.json();
+            if (!resp.ok) {
+                alert(preview.error || "Не удалось проверить постановку.");
                 return;
             }
-            e.preventDefault();
-            if (!guideForm.querySelectorAll('input[name="ally_codes"]:checked').length) {
-                alert("Не выбрано ни одного игрока.");
-                return;
-            }
-            const originalText = guideSubmit.textContent;
-            guideSubmit.disabled = true;
-            guideSubmit.textContent = "⏳ Проверяю ростеры...";
-            let preview;
-            try {
-                const resp = await fetch("/tasks/api/guide-preview", { method: "POST", body: new FormData(guideForm) });
-                preview = await resp.json();
-                if (!resp.ok) {
-                    alert(preview.error || "Не удалось проверить постановку.");
-                    return;
-                }
-            } catch {
-                alert("Не удалось проверить постановку.");
-                return;
-            } finally {
-                guideSubmit.disabled = false;
-                guideSubmit.textContent = originalText;
-            }
+        } catch {
+            alert("Не удалось проверить постановку.");
+            return;
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
 
+        let total;
+        if (guide) {
+            total = preview.create;
             const rows = preview.players.map((p) =>
                 `<tr><td>${escapeHtml(p.name)}</td><td>${p.create}</td><td>${p.done}</td><td>${p.duplicate}</td></tr>`
             ).join("");
-            guideBody.innerHTML =
+            dialogBody.innerHTML =
                 `<p><strong>Будет поставлено задач: ${preview.create}</strong> (требований у цели: ${preview.total})</p>` +
                 `<div class="table-scroll" style="max-height: 20em;"><table class="data"><thead><tr><th>Игрок</th><th>Поставить</th><th>Уже выполнено</th><th>Уже назначено</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-            guideOk.style.display = preview.create ? "" : "none";
-            guideOk.textContent = `Поставить (${preview.create})`;
-            guideDialog.showModal();
-        });
+        } else {
+            const { create = [], duplicate = [], done = [] } = preview;
+            total = create.length;
+            const parts = [`<p><strong>Будет поставлено: ${create.length}</strong>${create.length ? " — " + escapeHtml(create.join(", ")) : ""}</p>`];
+            if (duplicate.length) parts.push(`<p class="muted">Уже назначено, пропущено: ${duplicate.length} — ${escapeHtml(duplicate.join(", "))}</p>`);
+            if (done.length) parts.push(`<p class="muted">Цель уже достигнута, пропущено: ${done.length} — ${escapeHtml(done.join(", "))}</p>`);
+            dialogBody.innerHTML = parts.join("");
+        }
+        okBtn.style.display = total ? "" : "none";
+        okBtn.textContent = `Поставить (${total})`;
+        dialog.showModal();
+    });
 
-        guideOk.addEventListener("click", () => {
-            guideDialog.close();
-            guideOk.disabled = true;
-            guideSubmit.disabled = true;
-            guideSubmit.textContent = "⏳ Ставлю задачи...";
-            guideConfirmed = true;
-            guideForm.requestSubmit();
-        });
-        document.getElementById("guide-confirm-cancel").addEventListener("click", () => guideDialog.close());
-    }
+    okBtn.addEventListener("click", () => {
+        dialog.close();
+        okBtn.disabled = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "⏳ Ставлю задачи...";
+        confirmed = true;
+        form.requestSubmit();
+    });
+    document.getElementById("task-confirm-cancel").addEventListener("click", () => dialog.close());
 });
 </script>
 {% endblock %}

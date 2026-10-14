@@ -19,7 +19,7 @@ PLAYER_STATS_SYNC_HOURS = 1
 # уходит из "текущего" списка в архив — и в вебе (/tasks), и в отчётах бота. Живёт
 # здесь по той же причине, что PLAYER_STATS_SYNC_HOURS выше: используется и веб-
 # процессом (web/routes/tasks.py), который не поднимает main.py/bot вообще.
-TASK_ARCHIVE_AFTER_DAYS = 7
+TASK_ARCHIVE_AFTER_DAYS = 14
 
 def init_db():
     """Создает все таблицы в единой БД, если они еще не созданы"""
@@ -127,6 +127,12 @@ def init_db():
         # Момент, когда status стал COMPLETED/FAILED — основа для архивации
         # (TASK_ARCHIVE_AFTER_DAYS дней спустя задача уходит из "текущего" списка).
         cursor.execute("ALTER TABLE tasks ADD COLUMN resolved_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Ручной перенос в архив кнопкой на /tasks. Выполненные уходят в архив и сами
+        # (TASK_ARCHIVE_AFTER_DAYS после resolved_at), просроченные — только так.
+        cursor.execute("ALTER TABLE tasks ADD COLUMN archived_at TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 
@@ -1962,7 +1968,7 @@ def get_all_tasks(guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-               initial_value, current_value, in_progress, created_by, resolved_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
         FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -1978,7 +1984,7 @@ def get_tasks_for_ally(ally_code, guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status,
-               initial_value, current_value, in_progress, created_by, resolved_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
         FROM tasks WHERE guild_id = ? AND ally_code = ? ORDER BY task_id DESC
     """, (guild_id, ally_code))
     rows = cursor.fetchall()
@@ -1995,7 +2001,7 @@ def get_task(task_id: int):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, guild_id, batch_id,
-               initial_value, current_value, in_progress, created_by, resolved_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
         FROM tasks WHERE task_id = ?
     """, (task_id,))
     row = cursor.fetchone()
@@ -2030,20 +2036,30 @@ def update_task_progress(task_id: int, current_value: str, in_progress: bool) ->
     conn.close()
 
 
-def is_task_archived(resolved_at: str | None, status: str | None = None) -> bool:
-    """resolved_at старше TASK_ARCHIVE_AFTER_DAYS дней — задача уходит из "текущего"
-    списка (веб /tasks, /задачи отчёт) в архив. ACTIVE-задачи (resolved_at is None)
-    никогда не архивные. LEFT (игрок выбыл из гильдии, см. mark_players_departed) —
-    в архиве сразу, без выдержки."""
-    if status == "LEFT":
+def is_task_archived(resolved_at: str | None, status: str | None = None, archived_at: str | None = None) -> bool:
+    """Задача ушла из "текущего" списка (веб /tasks, /задачи отчёт) в архив:
+    - LEFT (игрок выбыл из гильдии, см. mark_players_departed) — сразу;
+    - archived_at — офицер перенёс кнопкой (выполненную или просроченную);
+    - COMPLETED — сама, спустя TASK_ARCHIVE_AFTER_DAYS дней после resolved_at.
+    Просроченные (FAILED) сами в архив не уходят (RicardoOneS, 2026-10-14)."""
+    if status == "LEFT" or archived_at:
         return True
-    if not resolved_at:
+    if status != "COMPLETED" or not resolved_at:
         return False
     try:
         resolved = datetime.datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S")
     except (ValueError, TypeError):
         return False
     return (datetime.datetime.utcnow() - resolved).days >= TASK_ARCHIVE_AFTER_DAYS
+
+
+def archive_task(task_id: int) -> None:
+    """Ручной перенос в архив (только COMPLETED/FAILED — проверяет вызывающий)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tasks SET archived_at = datetime('now') WHERE task_id = ? AND archived_at IS NULL", (task_id,))
+    conn.commit()
+    conn.close()
 
 
 def update_task(task_id: int, base_id: str = None, target_type: str = None, target_value: str = None, deadline: str = None) -> None:
