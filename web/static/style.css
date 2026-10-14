@@ -2393,3 +2393,24 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 @media (min-width: 56.01em) {
     html[data-sidebar="collapsed"] .nav-sub-widget { display: none; }
 }
+
+/* /tasks: форма постановки в две колонки — слева игроки, справа юнит/цель/дедлайн. */
+.task-form-panel { max-width: 64em; }
+.task-form-grid { max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 1.25rem 1.75rem; align-items: start; }
+.task-form-col { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.task-form-col > label, .task-target-box > label { display: flex; flex-direction: column; gap: 0.3em; }
+.task-player-list { max-height: 26em; }
+.task-target-box { margin: 0; padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.task-form-col > button[type="submit"] { align-self: flex-start; }
+@media (max-width: 48em) {
+    .task-form-grid { grid-template-columns: minmax(0, 1fr); }
+    .task-player-list { max-height: 16em; }
+}
+
+/* /commands: фильтр команд по уровню доступа (кликабельные бейджи). */
+.docs-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; }
+.docs-filter-chip { cursor: pointer; opacity: 0.55; transition: opacity 0.15s ease, box-shadow 0.15s ease; }
+.docs-filter-chip:hover { opacity: 0.85; }
+.docs-filter-chip.is-active { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }
+.docs-filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.docs-command-list li[hidden], .docs-section[hidden], .docs-filter-empty[hidden] { display: none !important; }

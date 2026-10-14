@@ -177,7 +177,7 @@ class AntiSpamCog(commands.Cog):
                   + f"\n{timeout_note}",
             inline=False,
         )
-        embed.set_footer(text="Если это ложное срабатывание — снимите тайм-аут вручную и проверьте настройки /настройки антиспам")
+        embed.set_footer(text="Если это ложное срабатывание — снимите тайм-аут вручную и проверьте настройки: /настройки → «Антиспам»")
 
         alert_role_id = guild_cfg.get("antispam_alert_role_id")
         alert_content = _render_alert_message(

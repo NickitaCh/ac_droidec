@@ -1,17 +1,8 @@
-"""Даёт офицерам самим задавать per-guild каналы/роли (guilds.*_channel_id/
-*_role_id в database.py), которые раньше можно было прописать только прямой
-правкой БД при сидировании AbsoluteChaos в main.py — вторая обслуживаемая
-гильдия оставалась с этими полями NULL без ручного вмешательства в БД. Один
-общий /настройки со отдельными сабкомандами на каждое поле (по образцу уже
-существующего /омикрон_текст канал в stat_requirements.py) — не единая
-generic-команда с выбором типа настройки, это отдельная задача на будущее.
-
-Каналы задаются НЕ нативным disnake.TextChannel/Thread/ForumChannel-параметром
-(это позволяло выбрать любой канал сервера мимо ведома бота) — а строкой с
-автодополнением из guild_channels (database.py, см. cogs/channel_registry.py:
-/канал, только офицер/лидер). Выбор ограничен уже зарегистрированными каналами:
-серверная валидация в _set_channel_field отклоняет ID, которого нет в
-guild_channels, даже если его вписали руками мимо подсказки автодополнения."""
+"""/настройки — панель с per-guild каналами, ролями и модулями (guilds.*_channel_id/
+*_role_id, feature_flags). До 2026-10-14 это были 16 подкоманд с автодополнением
+каналов из guild_channels; теперь одна команда: раздел — выпадашкой, каналы и роли —
+нативными списками Discord с поиском, вкл/выкл — кнопками. Сайт (/settings) —
+полный эквивалент, плюс время рассылок и расписание тегов."""
 
 from datetime import datetime, timezone
 
@@ -23,32 +14,10 @@ import guild_resolver
 from services import feature_flags
 
 
-def _make_channel_autocomplete(allowed_types: set[str] | None = None):
-    """Фабрика автодополнения канала из guild_channels конкретной гильдии.
-    allowed_types сужает подсказку под ожидаемый тип канала для поля (напр.
-    только "forum" для форума гайдов ВГ) — сам guild_channels типы не
-    разграничивает при регистрации, /канал пишет туда что угодно."""
-    async def _autocomplete(inter: disnake.ApplicationCommandInteraction, user_input: str):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None:
-            return {}
-        channels = database.get_guild_channels(guild_id)
-        if allowed_types is not None:
-            channels = [c for c in channels if c["channel_type"] in allowed_types]
-        needle = user_input.lower()
-        matches = [c for c in channels if needle in c["channel_name"].lower()]
-        return {c["channel_name"]: c["channel_id"] for c in matches[:25]}
-    return _autocomplete
-
-
-autocomplete_text_channel = _make_channel_autocomplete({"text", "news"})
-autocomplete_thread_or_text_channel = _make_channel_autocomplete({"text", "news", "public_thread", "private_thread", "news_thread"})
-autocomplete_forum_channel = _make_channel_autocomplete({"forum"})
-
-# (поле в guilds, человекочитаемое название) — для /настройки список.
+# (поле в guilds, человекочитаемое название) — подписи полей (services/config_status.py).
 # "tb_ping"/"tb_plan_order" — НЕ колонки guilds, а services.feature_flags (см.
 # _FEATURE_FLAG_FIELDS ниже и settings_list) — оставлены здесь только чтобы
-# попасть в нужную секцию SETTINGS_GROUPS по порядку, показываются отдельной
+# идти по порядку рядом с полями своего раздела, показываются отдельной
 # веткой, не через guild_cfg.get(field).
 SETTINGS_FIELDS = [
     ("tb_ping", "Модуль тегов-напоминаний (взводы/ордер) включён"),
@@ -71,284 +40,93 @@ SETTINGS_FIELDS = [
     ("tasks_mention", "Тег игрока при постановке задачи включён"),
 ]
 
-# Те же поля, сгруппированные по режиму — используется только для отображения
-# в /настройки список (эмбед по секциям) и должно соответствовать
-# web/routes/guild_dashboard.py::GUILD_SETTINGS_GROUPS. Внутри ТБ раньше был
-# один блок на все 6 полей — разбит на тег/план+ордер/отчёт вслед за тем, как
-# уже названы сабкоманды (тб_ротация_*/тб_план_*/тб_ордер_*/тб_отчет_*), иначе
-# один блок на 6 разнородных полей читался плохо что в Discord, что в вебе.
-SETTINGS_GROUPS = [
-    ("ТБ — тег на подготовку", ["tb_ping", "ping_channel_id", "ping_role_id"]),
-    ("ТБ — план и ордер", ["tb_plan_order", "tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"]),
-    ("ТБ — итоговый отчёт", ["officer_channel_id"]),
-    ("День рождения", ["birthday_channel_id", "birthday_role_id"]),
-    ("Территориальная Война (ВГ)", ["tw_guide_forum_channel_id"]),
-    ("Антиспам (защита от компрометации)", [
-        "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
-        "antispam_alert_message", "antispam_timeout_minutes",
-    ]),
-    ("Задачи на прокачку", ["tasks_log_channel_id", "tasks_mention"]),
+
+# ---------------------------------------------------------------------------
+# /настройки — панель (2026-10-14): одна команда без параметров вместо 16 подкоманд.
+# Раздел выбирается в выпадашке, каналы и роли — нативными списками Discord с
+# поиском (ChannelSelect/RoleSelect, с текущим значением), вкл/выкл — кнопками.
+# Выбранный канал сам регистрируется в guild_channels (как /канал). Пустой выбор в
+# списке — сброс значения. Время рассылок и расписание тегов — только на сайте.
+# ---------------------------------------------------------------------------
+SITE_URL = "https://swgoh-sng.ru"
+TEXT_CHANNELS = [disnake.ChannelType.text, disnake.ChannelType.news]
+THREAD_TYPES = [disnake.ChannelType.public_thread, disnake.ChannelType.private_thread, disnake.ChannelType.news_thread]
+FEATURE_FLAG_FIELDS = {"tb_ping", "tb_plan_order", "tasks_mention"}
+
+# (ключ, название, поля [(вид, поле, подпись, типы каналов)], только супер-админу)
+SETTINGS_SECTIONS = [
+    ("tb_ping", "ТБ — тег на подготовку", [
+        ("flag", "tb_ping", "Тег-напоминания (взводы/ордер)", None),
+        ("channel", "ping_channel_id", "Канал для тега на ротацию/взводы", TEXT_CHANNELS),
+        ("role", "ping_role_id", "Роль, которую тегать", None),
+    ], False),
+    ("tb_plan", "ТБ — план и ордер", [
+        ("flag", "tb_plan_order", "Автопубликация плана/ордера", None),
+        ("channel", "tb_plan_channel_id", "Канал анонсов плана и автоордера", TEXT_CHANNELS),
+        ("channel", "tb_order_source_channel_id", "Канал/ветка со стратегией по этапам", TEXT_CHANNELS + THREAD_TYPES),
+        ("role", "tb_order_role_id", "Роль, которую тегать в ордере", None),
+    ], False),
+    ("tb_report", "ТБ — итоговый отчёт", [
+        ("channel", "officer_channel_id", "Канал автоотчёта и уведомлений по ТБ", TEXT_CHANNELS),
+    ], False),
+    ("birthday", "День рождения", [
+        ("channel", "birthday_channel_id", "Канал для поздравлений", TEXT_CHANNELS),
+        ("role", "birthday_role_id", "Роль имениннику", None),
+    ], False),
+    ("tw", "ВГ — гайды по контрам", [
+        ("channel", "tw_guide_forum_channel_id", "Форум-канал гайдов (для /вг_ордер)", [disnake.ChannelType.forum]),
+    ], False),
+    ("tasks", "Задачи на прокачку", [
+        ("channel", "tasks_log_channel_id", "Канал уведомлений по задачам", TEXT_CHANNELS),
+        ("flag", "tasks_mention", "Тег игрока при постановке задачи", None),
+    ], False),
+    ("antispam", "Антиспам (супер-админ)", [
+        ("flag", "antispam_enabled", "Антиспам-детектор", None),
+        ("channel", "antispam_alert_channel_id", "Канал алертов", TEXT_CHANNELS),
+        ("role", "antispam_alert_role_id", "Роль, которую тегать в алерте", None),
+    ], True),
 ]
-_SETTINGS_LABELS = dict(SETTINGS_FIELDS)
+
+
+def _flag_enabled(guild_id: int, field: str, guild_cfg: dict) -> bool:
+    if field in FEATURE_FLAG_FIELDS:
+        return feature_flags.is_enabled(guild_id, field)
+    return bool(guild_cfg.get(field))
+
+
+def _set_flag(guild_id: int, field: str, value: bool, author_id) -> None:
+    if field in FEATURE_FLAG_FIELDS:
+        feature_flags.set_enabled(guild_id, field, value, updated_by=str(author_id))
+    else:
+        database.update_guild_config(guild_id, **{field: int(value)})
 
 
 class GuildSettings(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _set_field(self, inter: disnake.ApplicationCommandInteraction, field: str, value, human_label: str):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        database.update_guild_config(guild_id, **{field: str(value.id)})
-        await inter.response.send_message(f"✅ {human_label} теперь: {value.mention}", ephemeral=True)
-
-    async def _set_channel_field(self, inter: disnake.ApplicationCommandInteraction, field: str, channel_id: str, human_label: str):
-        """Канал приходит строкой (id) из автодополнения guild_channels, а не
-        нативным disnake-типом — подсказку можно обойти, вписав произвольный
-        текст руками, Discord это не проверяет. Если ID не из подсказки, но
-        это реальный канал, который бот видит (тот же сервер, есть доступ) —
-        не отказываем, а регистрируем его сами (как будто там выполнили
-        /канал) и сохраняем: голый ID остаётся рабочим способом для тех, кому
-        так удобнее, просто без обязательного шага "сначала зайти и /канал"."""
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        channel_id = channel_id.strip()
-        if not channel_id.isdigit():
-            await inter.response.send_message(
-                "❌ Это не похоже на канал: выберите вариант из подсказки автодополнения, либо впишите числовой ID канала.",
-                ephemeral=True,
-            )
-            return
-        known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
-        if channel_id not in known_ids:
-            channel = self.bot.get_channel(int(channel_id))
-            if channel is None:
-                await inter.response.send_message(
-                    "❌ Бот не видит канал с таким ID (не на этом сервере или нет доступа). Выберите канал из "
-                    "подсказки автодополнения, либо зайдите в нужный канал/ветку и выполните там `/канал`.",
-                    ephemeral=True,
-                )
-                return
-            name = getattr(channel, "name", None) or channel_id
-            channel_type = channel.type.name if hasattr(channel, "type") else None
-            database.register_guild_channel(guild_id, channel_id, name, channel_type=channel_type, registered_by=inter.author.id)
-        database.update_guild_config(guild_id, **{field: channel_id})
-        channel = self.bot.get_channel(int(channel_id))
-        shown = channel.mention if channel else f"`{channel_id}`"
-        await inter.response.send_message(f"✅ {human_label} теперь: {shown}", ephemeral=True)
-
-    @commands.slash_command(name="настройки", description="Каналы и роли гильдии для авто-уведомлений бота (только офицеры)")
+    @commands.slash_command(name="настройки", description="Каналы, роли и модули гильдии для авто-уведомлений бота — панель")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
-    async def settings_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    @settings_group.sub_command(name="тб_ротация_канал", description="Канал, куда бот шлёт тег на ротацию/взводы перед ТБ")
-    async def set_ping_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал для тега на ротацию перед ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-    ):
-        await self._set_channel_field(inter, "ping_channel_id", канал, "Канал для тега на ротацию/взводы перед ТБ")
-
-    @settings_group.sub_command(name="тб_ротация_роль", description="Роль, которую бот тегает на ротацию/взводы перед ТБ")
-    async def set_ping_role(
-        self, inter: disnake.ApplicationCommandInteraction,
-        роль: disnake.Role = commands.Param(description="Тегаемая роль перед ТБ"),
-    ):
-        await self._set_field(inter, "ping_role_id", роль, "Роль, тегаемая на ротацию/взводы перед ТБ")
-
-    @settings_group.sub_command(name="др_канал", description="Канал, куда бот пишет поздравления с днём рождения")
-    async def set_birthday_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал для поздравлений (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-    ):
-        await self._set_channel_field(inter, "birthday_channel_id", канал, "Канал для поздравлений с ДР")
-
-    @settings_group.sub_command(name="др_роль", description="Роль, которую бот выдаёт имениннику на день рождения")
-    async def set_birthday_role(
-        self, inter: disnake.ApplicationCommandInteraction,
-        роль: disnake.Role = commands.Param(description="Роль именинника"),
-    ):
-        await self._set_field(inter, "birthday_role_id", роль, "Роль, выдаваемая в ДР")
-
-    @settings_group.sub_command(name="тб_отчет_канал", description="Канал, куда бот публикует автоотчёт по итогам ТБ и уведомления офицерам о ТБ")
-    async def set_officer_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал для автоотчёта и уведомлений по ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-    ):
-        await self._set_channel_field(inter, "officer_channel_id", канал, "Канал для автоотчёта и уведомлений по ТБ")
-
-    @settings_group.sub_command(name="тб_план_канал", description="Канал анонсов плана ТБ — планеты по фазам и автоордера")
-    async def set_tb_plan_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал анонсов плана ТБ (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-    ):
-        await self._set_channel_field(inter, "tb_plan_channel_id", канал, "Канал анонсов плана ТБ")
-
-    @settings_group.sub_command(name="тб_ордер_источник", description="Канал или ветка, откуда бот берёт стратегию по этапам ТБ")
-    async def set_tb_order_source(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал или ветка со стратегией (сначала зарегистрируйте /канал)", autocomplete=autocomplete_thread_or_text_channel),
-    ):
-        await self._set_channel_field(inter, "tb_order_source_channel_id", канал, "Канал/ветка-источник стратегии ТБ")
-
-    @settings_group.sub_command(name="тб_ордер_роль", description="Роль, которую бот тегает в автоматическом ордере на этап ТБ")
-    async def set_tb_order_role(
-        self, inter: disnake.ApplicationCommandInteraction,
-        роль: disnake.Role = commands.Param(description="Тегаемая роль в ордере"),
-    ):
-        await self._set_field(inter, "tb_order_role_id", роль, "Роль, тегаемая в автоордере ТБ")
-
-    @settings_group.sub_command(
-        name="тб_модуль",
-        description="Вкл/выкл тег-напоминания и автопубликацию плана/ордера ТБ (без потери настроек канала/роли)",
-    )
-    async def set_tb_module(
-        self, inter: disnake.ApplicationCommandInteraction,
-        тег: bool = commands.Param(default=None, description="Тег-напоминания (взводы/ордер) — True включить, False выключить"),
-        автоордер: bool = commands.Param(default=None, description="Автопубликация плана/ордера ТБ — True включить, False выключить"),
-    ):
+    async def settings(self, inter: disnake.ApplicationCommandInteraction):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        if тег is None and автоордер is None:
-            await inter.response.send_message("❌ Укажите хотя бы один параметр: тег или автоордер.", ephemeral=True)
-            return
-        lines = []
-        if тег is not None:
-            feature_flags.set_enabled(guild_id, "tb_ping", тег, updated_by=str(inter.author.id))
-            lines.append(f"Тег-напоминания (взводы/ордер): {'✅ включены' if тег else '❌ выключены'}")
-        if автоордер is not None:
-            feature_flags.set_enabled(guild_id, "tb_plan_order", автоордер, updated_by=str(inter.author.id))
-            lines.append(f"Автопубликация плана/ордера ТБ: {'✅ включена' if автоордер else '❌ выключена'}")
-        await inter.response.send_message("✅ " + "\n".join(lines), ephemeral=True)
-
-    @settings_group.sub_command(name="вг_гайды_канал", description="Форум-канал с гайдами по контрам ВГ, откуда бот берёт данные для /вг_ордер")
-    async def set_tw_guide_forum_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Форум-канал гайдов по контрам ВГ (сначала зарегистрируйте /канал в нём)", autocomplete=autocomplete_forum_channel),
-    ):
-        await self._set_channel_field(inter, "tw_guide_forum_channel_id", канал, "Форум-канал гайдов по контрам ВГ")
-
-    @settings_group.sub_command(name="задачи_канал", description="Канал, куда бот пишет о выполнении/провале задачи и напоминания о дедлайне")
-    async def set_tasks_log_channel(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(description="Канал для уведомлений по задачам (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-    ):
-        await self._set_channel_field(inter, "tasks_log_channel_id", канал, "Канал уведомлений о задачах на прокачку")
-
-    @settings_group.sub_command(
-        name="задачи_модуль",
-        description="Вкл/выкл тег игрока в объявлении о новой задаче на прокачку (запрос из GR, опционально по гильдии)",
-    )
-    async def set_tasks_module(
-        self, inter: disnake.ApplicationCommandInteraction,
-        тег_игрока: bool = commands.Param(description="Тегать игрока при постановке задачи — True включить, False выключить"),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        feature_flags.set_enabled(guild_id, "tasks_mention", тег_игрока, updated_by=str(inter.author.id))
-        await inter.response.send_message(
-            f"✅ Тег игрока при постановке задачи: {'✅ включён' if тег_игрока else '❌ выключен'}", ephemeral=True,
-        )
-
-    @settings_group.sub_command(name="антиспам_режим", description="Включить или выключить антиспам-детектор (только супер-админ)")
-    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
-    async def set_antispam_mode(
-        self, inter: disnake.ApplicationCommandInteraction,
-        включить: bool = commands.Param(description="True — включить детектор, False — выключить"),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        database.update_guild_config(guild_id, antispam_enabled=int(включить))
-        if включить:
+        guild_cfg = database.get_guild_config(guild_id) or {}
+        # Списки каналов и ролей Discord показывает только с того сервера, где вызвана
+        # команда, — значит, вызывать нужно на сервере гильдии.
+        if inter.guild is None or str(inter.guild.id) != str(guild_cfg.get("discord_guild_id")):
             await inter.response.send_message(
-                "✅ Антиспам-детектор включён. Проверьте, что задан канал алертов (`/настройки антиспам`) — без него сработавший "
-                "детектор всё равно удалит сообщения и выдаст тайм-аут, но алерт офицерам отправить будет некуда.",
-                ephemeral=True,
-            )
-        else:
-            await inter.response.send_message("✅ Антиспам-детектор выключен.", ephemeral=True)
-
-    @settings_group.sub_command(name="антиспам", description="Канал/роль/текст/таймаут алерта антиспама (только супер-админ)")
-    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
-    async def set_antispam(
-        self, inter: disnake.ApplicationCommandInteraction,
-        канал: str = commands.Param(default=None, description="Канал для алертов антиспама (сначала зарегистрируйте /канал)", autocomplete=autocomplete_text_channel),
-        роль: disnake.Role = commands.Param(default=None, description="Роль, тегаемая в алерте"),
-        таймаут: int = commands.Param(default=None, description="Длительность тайм-аута в минутах, 1–40320", min_value=1, max_value=40320),
-        текст: str = commands.Param(
-            default=None,
-            description="Свой текст алерта. Плейсхолдеры: {role} {member} {timeout} {reason} {channels} {count}",
-        ),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
+                "❌ Откройте `/настройки` на Discord-сервере вашей гильдии — каналы и роли выбираются из списка этого "
+                f"сервера. Или настройте всё на сайте: {SITE_URL}/settings", ephemeral=True)
             return
-        updates = {}
-        if канал is not None:
-            канал = канал.strip()
-            if not канал.isdigit():
-                await inter.response.send_message(
-                    "❌ Это не похоже на канал: выберите вариант из подсказки автодополнения, либо впишите числовой ID канала.",
-                    ephemeral=True,
-                )
-                return
-            known_ids = {c["channel_id"] for c in database.get_guild_channels(guild_id)}
-            if канал not in known_ids:
-                # ID не из подсказки — если бот всё равно видит такой канал,
-                # регистрируем его сами (как /канал) вместо отказа, см.
-                # _set_channel_field выше за тем же паттерном.
-                channel_obj = self.bot.get_channel(int(канал))
-                if channel_obj is None:
-                    await inter.response.send_message(
-                        "❌ Бот не видит канал с таким ID (не на этом сервере или нет доступа). Выберите канал из "
-                        "подсказки автодополнения, либо зайдите в нужный канал и выполните там `/канал`.",
-                        ephemeral=True,
-                    )
-                    return
-                name = getattr(channel_obj, "name", None) or канал
-                channel_type = channel_obj.type.name if hasattr(channel_obj, "type") else None
-                database.register_guild_channel(guild_id, канал, name, channel_type=channel_type, registered_by=inter.author.id)
-            updates["antispam_alert_channel_id"] = канал
-        if роль is not None:
-            updates["antispam_alert_role_id"] = str(роль.id)
-        if таймаут is not None:
-            updates["antispam_timeout_minutes"] = таймаут
-        if текст is not None:
-            updates["antispam_alert_message"] = текст
-        if not updates:
-            await inter.response.send_message("❌ Укажите хотя бы один параметр: канал, роль, таймаут или текст.", ephemeral=True)
-            return
-        database.update_guild_config(guild_id, **updates)
+        panel = SettingsPanel(self, guild_id, inter)
+        await inter.response.send_message(panel.render(), view=panel.build(), ephemeral=True,
+                                          allowed_mentions=disnake.AllowedMentions.none())
 
-        guild_cfg = database.get_guild_config(guild_id)
-        ch = self.bot.get_channel(int(guild_cfg["antispam_alert_channel_id"])) if guild_cfg.get("antispam_alert_channel_id") else None
-        r = inter.guild.get_role(int(guild_cfg["antispam_alert_role_id"])) if guild_cfg.get("antispam_alert_role_id") and inter.guild else None
-        lines = [
-            f"Канал: {ch.mention if ch else '*не задано*'}",
-            f"Роль: {r.mention if r else '*не задано*'}",
-            f"Таймаут: {guild_cfg.get('antispam_timeout_minutes') or 60} мин.",
-            f"Текст: {guild_cfg.get('antispam_alert_message') or '*по умолчанию*'}",
-        ]
-        await inter.response.send_message("✅ Настройки антиспама обновлены:\n" + "\n".join(lines), ephemeral=True)
-
-    @settings_group.sub_command(name="антиспам_история", description="Последние срабатывания антиспам-детектора (только супер-админ)")
-    @commands.check(lambda inter: guild_resolver.is_super_admin(inter.author))
-    async def antispam_history(
-        self, inter: disnake.ApplicationCommandInteraction,
-        лимит: int = commands.Param(default=10, description="Сколько последних записей показать", min_value=1, max_value=25),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        rows = database.get_antispam_log(guild_id, limit=лимит)
+    def antispam_history_embed(self, guild_id: int, limit: int = 10):
+        rows = database.get_antispam_log(guild_id, limit=limit)
         if not rows:
-            await inter.response.send_message("Пока нет ни одного срабатывания антиспам-детектора.", ephemeral=True)
-            return
+            return None
         embed = disnake.Embed(title=f"🚨 История антиспама (последние {len(rows)})", color=disnake.Color.orange())
         for row in rows:
             try:
@@ -364,41 +142,153 @@ class GuildSettings(commands.Cog):
                 + (f"\n📍 {row['channels']}" if row["channels"] else "")
             )
             embed.add_field(name=f"<@{row['discord_user_id']}> — {when}", value=value, inline=False)
-        await inter.response.send_message(embed=embed, ephemeral=True)
+        return embed
 
-    @settings_group.sub_command(name="список", description="Показать текущие настройки каналов и ролей гильдии")
-    async def settings_list(self, inter: disnake.ApplicationCommandInteraction):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        guild_cfg = database.get_guild_config(guild_id)
-        embed = disnake.Embed(title="⚙️ Настройки гильдии", color=disnake.Color.blurple())
-        for group_name, fields in SETTINGS_GROUPS:
-            lines = []
-            for field in fields:
-                label = _SETTINGS_LABELS[field]
-                if field in ("tb_ping", "tb_plan_order", "tasks_mention"):
-                    enabled = feature_flags.is_enabled(guild_id, field)
-                    lines.append(f"• {label}: {'✅ да' if enabled else '❌ нет'}")
-                    continue
-                raw = guild_cfg.get(field)
-                if field == "antispam_enabled":
-                    lines.append(f"• {label}: {'✅ да' if raw else '❌ нет'}")
-                    continue
-                if not raw:
-                    lines.append(f"• {label}: *не задано*")
-                    continue
-                if field.endswith("_role_id"):
-                    resolved = inter.guild.get_role(int(raw)) if inter.guild else None
-                    shown = resolved.mention if resolved else f"`{raw}` (не найден)"
-                elif field.endswith("_channel_id"):
-                    resolved = self.bot.get_channel(int(raw))
-                    shown = resolved.mention if resolved else f"`{raw}` (не найден)"
-                else:
-                    shown = raw
+
+class SettingsPanel(disnake.ui.View):
+    def __init__(self, cog: GuildSettings, guild_id: int, inter: disnake.ApplicationCommandInteraction):
+        super().__init__(timeout=840)  # токен ответа на команду живёт 15 минут
+        self.cog = cog
+        self.guild_id = guild_id
+        self.inter = inter
+        self.author_id = inter.author.id
+        self.is_super_admin = guild_resolver.is_super_admin(inter.author)
+        self.sections = [s for s in SETTINGS_SECTIONS if self.is_super_admin or not s[3]]
+        self.section_key = self.sections[0][0]
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        return interaction.author.id == self.author_id
+
+    def _section(self):
+        return next(s for s in self.sections if s[0] == self.section_key)
+
+    def render(self) -> str:
+        cfg = database.get_guild_config(self.guild_id) or {}
+        _key, title, fields, _super = self._section()
+        lines = [f"⚙️ **Настройки гильдии «{cfg.get('name', '')}»** — раздел **{title}**", ""]
+        for kind, field, label, _types in fields:
+            if kind == "flag":
+                lines.append(f"• {label}: {'✅ включено' if _flag_enabled(self.guild_id, field, cfg) else '❌ выключено'}")
+            else:
+                raw = cfg.get(field)
+                shown = (f"<#{raw}>" if kind == "channel" else f"<@&{raw}>") if raw else "*не задано*"
                 lines.append(f"• {label}: {shown}")
-            embed.add_field(name=group_name, value="\n".join(lines), inline=False)
-        await inter.response.send_message(embed=embed, ephemeral=True)
+        if self.section_key == "antispam":
+            lines.append(f"• Тайм-аут: {cfg.get('antispam_timeout_minutes') or 60} мин.")
+            lines.append(f"• Текст алерта: {cfg.get('antispam_alert_message') or '*по умолчанию*'}")
+        lines += ["", "-# Пустой выбор в списке — сбросить значение. Время рассылок и расписание тегов — на сайте."]
+        return "\n".join(lines)
+
+    def build(self):
+        self.clear_items()
+        cfg = database.get_guild_config(self.guild_id) or {}
+        section_select = disnake.ui.Select(
+            placeholder="Раздел настроек", row=0,
+            options=[disnake.SelectOption(label=title, value=key, default=key == self.section_key)
+                     for key, title, _f, _s in self.sections],
+        )
+        section_select.callback = self._on_section
+        self.add_item(section_select)
+
+        _key, _title, fields, _super = self._section()
+        row = 1
+        for kind, field, label, types in fields:
+            raw = cfg.get(field)
+            if kind == "channel":
+                select = disnake.ui.ChannelSelect(
+                    placeholder=label, row=row, min_values=0, max_values=1, channel_types=types,
+                    default_values=[disnake.SelectDefaultValue(int(raw), disnake.SelectDefaultValueType.channel)] if raw else None,
+                )
+            elif kind == "role":
+                select = disnake.ui.RoleSelect(
+                    placeholder=label, row=row, min_values=0, max_values=1,
+                    default_values=[disnake.SelectDefaultValue(int(raw), disnake.SelectDefaultValueType.role)] if raw else None,
+                )
+            else:
+                continue
+            select.callback = self._make_select_callback(kind, field)
+            self.add_item(select)
+            row += 1
+
+        for kind, field, label, _types in fields:
+            if kind != "flag":
+                continue
+            enabled = _flag_enabled(self.guild_id, field, cfg)
+            button = disnake.ui.Button(label=f"{label}: {'вкл' if enabled else 'выкл'}"[:80], row=4,
+                                       style=disnake.ButtonStyle.success if enabled else disnake.ButtonStyle.secondary)
+            button.callback = self._make_flag_callback(field, not enabled)
+            self.add_item(button)
+        if self.section_key == "antispam":
+            for label, callback in (("Тайм-аут и текст", self._on_antispam_modal), ("История", self._on_antispam_history)):
+                button = disnake.ui.Button(label=label, row=4, style=disnake.ButtonStyle.secondary)
+                button.callback = callback
+                self.add_item(button)
+        self.add_item(disnake.ui.Button(label="Все настройки на сайте", url=f"{SITE_URL}/settings", row=4))
+        return self
+
+    async def _rerender(self, interaction: disnake.MessageInteraction):
+        await interaction.response.edit_message(content=self.render(), view=self.build(),
+                                                allowed_mentions=disnake.AllowedMentions.none())
+
+    async def _on_section(self, interaction: disnake.MessageInteraction):
+        self.section_key = interaction.values[0]
+        await self._rerender(interaction)
+
+    def _make_select_callback(self, kind: str, field: str):
+        async def callback(interaction: disnake.MessageInteraction):
+            value = interaction.values[0] if interaction.values else None
+            if value and kind == "channel":
+                channel = next(iter(interaction.resolved_values), None)
+                channel_type = getattr(getattr(channel, "type", None), "name", None)
+                database.register_guild_channel(self.guild_id, value, getattr(channel, "name", None) or value,
+                                                channel_type=channel_type, registered_by=interaction.author.id)
+            database.update_guild_config(self.guild_id, **{field: value})
+            await self._rerender(interaction)
+        return callback
+
+    def _make_flag_callback(self, field: str, value: bool):
+        async def callback(interaction: disnake.MessageInteraction):
+            _set_flag(self.guild_id, field, value, interaction.author.id)
+            await self._rerender(interaction)
+        return callback
+
+    async def _on_antispam_modal(self, interaction: disnake.MessageInteraction):
+        await interaction.response.send_modal(AntispamModal(self))
+
+    async def _on_antispam_history(self, interaction: disnake.MessageInteraction):
+        embed = self.cog.antispam_history_embed(self.guild_id)
+        if embed is None:
+            await interaction.response.send_message("Пока нет ни одного срабатывания антиспам-детектора.", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class AntispamModal(disnake.ui.Modal):
+    def __init__(self, panel: SettingsPanel):
+        self.panel = panel
+        cfg = database.get_guild_config(panel.guild_id) or {}
+        super().__init__(title="Антиспам: тайм-аут и текст алерта", components=[
+            disnake.ui.TextInput(label="Тайм-аут, минут (1–40320)", custom_id="timeout", max_length=5,
+                                 value=str(cfg.get("antispam_timeout_minutes") or 60)),
+            disnake.ui.TextInput(label="Текст алерта (пусто — по умолчанию)", custom_id="text", required=False,
+                                 style=disnake.TextInputStyle.paragraph, max_length=1500,
+                                 value=cfg.get("antispam_alert_message") or "",
+                                 placeholder="Плейсхолдеры: {role} {member} {timeout} {reason} {channels} {count}"),
+        ])
+
+    async def callback(self, interaction: disnake.ModalInteraction):
+        raw = interaction.text_values["timeout"].strip()
+        if not raw.isdigit() or not 1 <= int(raw) <= 40320:
+            await interaction.response.send_message("❌ Тайм-аут — целое число минут от 1 до 40320.", ephemeral=True)
+            return
+        text = interaction.text_values["text"].strip() or None
+        database.update_guild_config(self.panel.guild_id, antispam_timeout_minutes=int(raw), antispam_alert_message=text)
+        await interaction.response.send_message("✅ Настройки антиспама сохранены.", ephemeral=True)
+        try:
+            await self.panel.inter.edit_original_response(content=self.panel.render(), view=self.panel.build(),
+                                                          allowed_mentions=disnake.AllowedMentions.none())
+        except disnake.HTTPException:
+            pass  # панель старше 15 минут — значения уже сохранены
 
 
 def setup(bot: commands.Bot):

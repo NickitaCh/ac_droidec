@@ -122,7 +122,6 @@ MEMBER_ACCESSIBLE_COMMANDS = {
 # Команды, закрытые супер-админом (@commands.check(is_super_admin) в коге) — для
 # пометки в описании; ключ — qualified_name или его группа целиком.
 SUPER_ADMIN_COMMANDS = {
-    "настройки антиспам_режим", "настройки антиспам", "настройки антиспам_история",
 }
 
 OFFICER_DESC_PREFIX = "🔒 Офицеры: "

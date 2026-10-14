@@ -12,18 +12,21 @@
         </div>
     </section>
 
-    <p class="docs-legend">
+    <p class="docs-legend docs-filter" aria-label="Фильтр по доступу">
+        <span class="muted">Показать:</span>
+        <span class="badge badge-neutral docs-filter-chip is-active" role="button" tabindex="0" data-access="">Все</span>
         {% for key, (label, css_class) in access_labels.items() %}
-            <span class="badge {{ css_class }}">{{ label }}</span>
+            <span class="badge {{ css_class }} docs-filter-chip" role="button" tabindex="0" data-access="{{ key }}">{{ label }}</span>
         {% endfor %}
     </p>
 
     {% for section in sections %}
+        <section class="docs-section">
         <h2>{{ section.title }}</h2>
         {% if section.intro %}<p class="muted">{{ section.intro }}</p>{% endif %}
         <ul class="docs-command-list">
             {% for cmd in section.commands %}
-                <li>
+                <li data-access="{{ cmd.access }}">
                     <code>{{ cmd.name }}</code>
                     <span class="badge {{ access_labels[cmd.access][1] }}">{{ access_labels[cmd.access][0] }}</span>
                     <span class="docs-command-desc">{{ cmd.desc }}</span>
@@ -35,13 +38,39 @@
                 </li>
             {% endfor %}
         </ul>
+        </section>
     {% endfor %}
+    <p class="empty-state docs-filter-empty" hidden>Команд с таким доступом нет.</p>
 
     <dialog id="docs-image-lightbox" class="docs-image-lightbox">
         <img id="docs-image-lightbox-img" src="" alt="">
     </dialog>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
+            // Фильтр по уровню доступа: прячет команды с другим бейджем и пустые разделы.
+            const chips = document.querySelectorAll(".docs-filter-chip");
+            const applyFilter = (access) => {
+                chips.forEach((c) => c.classList.toggle("is-active", c.dataset.access === access));
+                let anyVisible = false;
+                document.querySelectorAll(".docs-section").forEach((section) => {
+                    let visible = 0;
+                    section.querySelectorAll("li[data-access]").forEach((li) => {
+                        const show = !access || li.dataset.access === access;
+                        li.hidden = !show;
+                        if (show) visible += 1;
+                    });
+                    section.hidden = visible === 0;
+                    anyVisible = anyVisible || visible > 0;
+                });
+                document.querySelector(".docs-filter-empty").hidden = anyVisible;
+            };
+            chips.forEach((chip) => {
+                chip.addEventListener("click", () => applyFilter(chip.dataset.access));
+                chip.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); applyFilter(chip.dataset.access); }
+                });
+            });
+
             const dialog = document.getElementById("docs-image-lightbox");
             const dialogImg = document.getElementById("docs-image-lightbox-img");
             if (!dialog || !dialogImg) return;

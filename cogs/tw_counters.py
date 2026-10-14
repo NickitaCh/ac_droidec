@@ -475,7 +475,7 @@ class TWCounters(commands.Cog):
         guild_cfg = database.get_guild_config(guild_id)
         if not guild_cfg or not guild_cfg.get("tw_guide_forum_channel_id"):
             await inter.edit_original_response(
-                "❌ Не задан форум-канал гайдов ВГ — настройте его через `/настройки вг_гайды_канал`."
+                "❌ Не задан форум-канал гайдов ВГ — настройте его через `/настройки` → «ВГ — гайды по контрам» или на сайте (/settings)."
             )
             return
         try:

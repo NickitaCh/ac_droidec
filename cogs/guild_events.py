@@ -244,6 +244,20 @@ def _fmt_line(label, value, indent=0) -> str:
     return f"{prefix}{' ' * (TB_VALUE_COL - len(prefix))}{number:>12}"
 
 
+async def autocomplete_tb_history_players(inter: disnake.ApplicationCommandInteraction, user_input: str):
+    """Ники из сохранённой истории ТБ гильдии (вместе с ушедшими) — значение member_id."""
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    if guild_id is None:
+        return {}
+    events = database.get_recent_tb_events(guild_id=guild_id)
+    names = {}
+    for row in database.get_tb_player_summary_for_events([e[0] for e in events]):
+        names[row[1]] = row[2]
+    needle = (user_input or "").strip().lower()
+    matches = sorted((n, m) for m, n in names.items() if needle in n.lower())
+    return {n[:100]: m for n, m in matches[:25]}
+
+
 class GuildEvents(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -924,7 +938,12 @@ class GuildEvents(commands.Cog):
     # игрока, который уже ушёл из гильдии.
     @commands.slash_command(name="тб_отчет", description="Отчёты по ТБ: панель выбора отчёта, ТБ и игрока")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
-    async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
+    async def tb_report(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        игрок: str = commands.Param(default=None, description="Необязательно: начните вводить ник — панель откроется с этим игроком",
+                                    autocomplete=autocomplete_tb_history_players),
+    ):
         await inter.response.defer(ephemeral=True)
         guild_id = await guild_resolver.require_feature(inter, "tb_reports")
         if guild_id is None:
@@ -946,7 +965,17 @@ class GuildEvents(commands.Cog):
             key=lambda p: (p[2], p[1].lower()),
         )
         view = TBReportPanel(self, guild_id, inter.author.id, event_rows, players)
-        await inter.edit_original_message(content=view.header(), view=view)
+        note = ""
+        if игрок:
+            # Из подсказки приходит member_id; если ник вписан руками — ищем по вхождению.
+            needle = игрок.strip().lower()
+            found = next((p for p in players if p[0] == игрок.strip()), None) or next(
+                (p for p in players if needle in p[1].lower()), None)
+            if found:
+                view.select_player(found[0])
+            else:
+                note = f"\n\n⚠️ Игрок «{игрок}» не найден в сохранённых ТБ."
+        await inter.edit_original_message(content=view.header() + note, view=view)
 
     @staticmethod
     def _event_label(completed_at: str, stars) -> str:
@@ -1039,6 +1068,14 @@ class TBReportPanel(disnake.ui.View):
         self.member_id = None
         self.page = 0
         self.last = None              # (title, text, filename) — для «Показать всем»
+        self._build()
+
+    def select_player(self, member_id: str):
+        """Открыть панель сразу на игроке (параметр «игрок» команды)."""
+        self.kind = "player"
+        self.member_id = member_id
+        index = next(i for i, p in enumerate(self.players) if p[0] == member_id)
+        self.page = index // self.PAGE
         self._build()
 
     def header(self) -> str:

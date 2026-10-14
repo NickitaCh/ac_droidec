@@ -7,7 +7,7 @@
             <div>
                 <p class="page-hero-eyebrow">Прокачка гильдии</p>
                 <h1>Задачи</h1>
-                <p class="page-hero-lead">Статус бот проверяет раз в час по данным игры. Выполненные уходят в архив через {{ archive_after_days }} дней, просроченные — кнопкой «В архив». Уведомления о дедлайнах — в канал из /настройки задачи_канал, время рассылки — на <a href="/settings">Настройках</a>.</p>
+                <p class="page-hero-lead">Статус бот проверяет раз в час по данным игры. Выполненные уходят в архив через {{ archive_after_days }} дней, просроченные — кнопкой «В архив». Уведомления о дедлайнах — в канал из /настройки → «Задачи на прокачку», время рассылки — на <a href="/settings">Настройках</a>.</p>
             </div>
             <div class="page-hero-sync">
                 <span>Справочник юнитов обновляется сам каждый час</span>
@@ -42,75 +42,81 @@
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
 
-    <div class="panel" style="max-width: 40em;">
+    <div class="panel task-form-panel">
         <div class="panel-title"><span>Новая задача</span></div>
         {% if prefill.active %}
             <p class="muted">Предзаполнено из отчёта по плейту.</p>
         {% endif %}
-        <form method="post" action="/tasks/add-bulk" class="inline-form" id="task-form" style="flex-direction: column; align-items: stretch;">
-            <label>
-                Игроки
-                <input type="search" placeholder="Фильтр по имени…" data-table-search="task-player-table">
-            </label>
-            <label class="checkbox">
-                <input type="checkbox" id="task-select-all"> Выбрать всех
-            </label>
-            <div class="table-scroll" style="max-height: 16em;">
-                <table class="data" id="task-player-table">
-                    <tbody>
-                        {% for code, name in roster %}
-                            <tr data-search="{{ name|lower }}">
-                                <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"{% if code == prefill.ally_code %} checked{% endif %}> {{ name }}</label></td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-
-            <label class="checkbox">
-                <input type="radio" name="mode" value="single" checked> Один персонаж/корабль
-            </label>
-            <div data-mode-block="single">
-                <div class="unit-search" data-role="unit-picker" data-live-search data-required="false" data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" value="{{ prefill.unit_name }}">
-                    <input type="hidden" name="base_id" class="unit-search-value" value="{{ prefill.unit }}">
-                    <div class="unit-search-results"></div>
+        <form method="post" action="/tasks/add-bulk" class="task-form-grid" id="task-form">
+            <div class="task-form-col">
+                <label>
+                    Игроки
+                    <input type="search" placeholder="Фильтр по имени…" data-table-search="task-player-table">
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="task-select-all"> Выбрать всех
+                </label>
+                <div class="table-scroll task-player-list">
+                    <table class="data" id="task-player-table">
+                        <tbody>
+                            {% for code, name in roster %}
+                                <tr data-search="{{ name|lower }}">
+                                    <td><label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"{% if code == prefill.ally_code %} checked{% endif %}> {{ name }}</label></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            {% if guide_options %}
-            <label class="checkbox">
-                <input type="radio" name="mode" value="guide"> Из «Руководства» — все герои для ГЛ, флагмана или путешествия
-            </label>
-            <div data-mode-block="guide">
-                <div class="unit-search" data-role="guide-picker" data-live-search data-required="false" data-url="/tasks/api/guides" data-value-field="base_id" data-label-field="name" data-min-length="2">
-                    <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off">
-                    <input type="hidden" name="guide" class="unit-search-value">
-                    <div class="unit-search-results"></div>
+            <div class="task-form-col">
+                <label class="checkbox">
+                    <input type="radio" name="mode" value="single" checked> Один персонаж/корабль
+                </label>
+                <div data-mode-block="single">
+                    <div class="unit-search" data-role="unit-picker" data-live-search data-required="false" data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя юнита…" autocomplete="off" value="{{ prefill.unit_name }}">
+                        <input type="hidden" name="base_id" class="unit-search-value" value="{{ prefill.unit }}">
+                        <div class="unit-search-results"></div>
+                    </div>
                 </div>
-                <div id="guide-reqs" class="muted"></div>
-            </div>
-            {% endif %}
+                <fieldset class="task-target-box" data-mode-block="single">
+                    <label>
+                        Критерий прокачки
+                        <select name="target_type">
+                            {% for value, label in target_type_options %}
+                                <option value="{{ value }}" {% if value == prefill.type %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        Целевое значение
+                        <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)" value="{{ prefill.value }}">
+                        <select name="target_value" class="target-value-select" style="display:none" disabled></select>
+                    </label>
+                </fieldset>
 
-            <label data-mode-block="single">
-                Критерий прокачки
-                <select name="target_type">
-                    {% for value, label in target_type_options %}
-                        <option value="{{ value }}" {% if value == prefill.type %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label data-mode-block="single">
-                Целевое значение
-                <input type="text" name="target_value" class="target-value-text" placeholder="Число (звёзды/реликвия)" value="{{ prefill.value }}">
-                <select name="target_value" class="target-value-select" style="display:none" disabled></select>
-            </label>
-            <label>
-                Дедлайн
-                <input type="date" name="deadline" required>
-            </label>
-            <p class="muted" data-mode-block="guide">Задача ставится на каждого героя, который ещё не дотягивает до требования. Уже выполненное и уже назначенное пропускается.</p>
-            <button type="submit" id="task-submit-btn">Поставить задачу</button>
+                {% if guide_options %}
+                <label class="checkbox">
+                    <input type="radio" name="mode" value="guide"> Из «Руководства» — все герои для ГЛ, флагмана или путешествия
+                </label>
+                <div data-mode-block="guide">
+                    <div class="unit-search" data-role="guide-picker" data-live-search data-required="false" data-url="/tasks/api/guides" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                        <input type="text" class="unit-search-input" placeholder="Начните вводить имя персонажа…" autocomplete="off">
+                        <input type="hidden" name="guide" class="unit-search-value">
+                        <div class="unit-search-results"></div>
+                    </div>
+                    <div id="guide-reqs" class="muted"></div>
+                    <p class="muted">Задача ставится на каждого героя, который ещё не дотягивает до требования. Уже выполненное и уже назначенное пропускается.</p>
+                </div>
+                {% endif %}
+
+                <label>
+                    Дедлайн
+                    <input type="date" name="deadline" required>
+                </label>
+                <button type="submit" id="task-submit-btn">Поставить задачу</button>
+            </div>
         </form>
     </div>
 
@@ -329,7 +335,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const applyMode = () => {
         const m = mode();
         form.querySelectorAll("[data-mode-block]").forEach((block) => setBlock(block, block.dataset.modeBlock === m));
-        form.querySelectorAll('p[data-mode-block]').forEach((p) => { p.style.display = p.dataset.modeBlock === m ? "" : "none"; });
         refreshValue();
     };
     form.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", applyMode));
