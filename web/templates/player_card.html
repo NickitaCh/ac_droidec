@@ -126,24 +126,43 @@
         <div class="widget">
             <div class="widget-header">
                 <h2>💰 Потрачено ресурсов</h2>
-                <span class="segmented-toggle-options">
-                    {% for key, label in resources.period_labels.items() %}
-                        {% if key == resources.period %}<strong>{{ label }}</strong>{% else %}<a href="?res_period={{ key }}">{{ label }}</a>{% endif %}
-                    {% endfor %}
-                </span>
             </div>
+            <p class="res-periods">
+                {% for key, label in resources.period_labels.items() %}
+                    {% if key == resources.period %}<strong>{{ label }}</strong>{% else %}<a href="?res_period={{ key }}">{{ label }}</a>{% endif %}
+                {% endfor %}
+            </p>
             <div class="stats-grid">
                 <div class="stat-tile"><div class="stat-value">{{ resources.gear_total }}</div><div class="stat-label">Деталей снаряжения ({{ resources.gear_upgrades }} повыш.)</div></div>
                 <div class="stat-tile"><div class="stat-value">{{ resources.signals_total }}</div><div class="stat-label">Сигналов реликвии</div></div>
                 <div class="stat-tile"><div class="stat-value">{{ resources.craft_total }}</div><div class="stat-label">Крафт-материалов ({{ resources.relic_upgrades }} релик-повыш.)</div></div>
             </div>
-            {% if resources.gear_top or resources.signals_top %}
-                <details>
-                    <summary class="link-btn">Что именно потрачено</summary>
-                    <ul style="margin: 0.5em 0 0; padding-left: 1.2em;">
-                        {% for name, qty in resources.gear_top + resources.signals_top %}<li>{{ name }} — {{ qty }}</li>{% endfor %}
-                    </ul>
-                </details>
+            {% if resources.groups %}
+                <p><button type="button" class="link-btn" data-dialog-open="resource-detail-dialog">Что именно потрачено →</button></p>
+                <dialog id="resource-detail-dialog" class="stat-problem-dialog">
+                    <div class="stat-problem-dialog-header">
+                        <h3>{{ card.player_name }} — {{ resources.period_labels[resources.period] }}</h3>
+                        <button type="button" class="button-secondary" data-dialog-close>Закрыть</button>
+                    </div>
+                    {% for title, items in resources.groups %}
+                        <div class="stat-problem-char">
+                            <div class="stat-problem-char-title">{{ title }}</div>
+                            <ul class="equip-list">
+                                {% for it in items %}
+                                    <li><img class="equip-icon" src="/equip-img/{{ it.id }}" alt="" loading="lazy" width="32" height="32"><span>{{ it.name }}</span><span class="equip-qty">× {{ it.qty }}</span></li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endfor %}
+                </dialog>
+                <script>
+                    document.querySelectorAll("[data-dialog-open]").forEach((btn) => {
+                        const dialog = document.getElementById(btn.dataset.dialogOpen);
+                        btn.addEventListener("click", () => dialog.showModal());
+                        dialog.querySelector("[data-dialog-close]").addEventListener("click", () => dialog.close());
+                        dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+                    });
+                </script>
             {% endif %}
         </div>
         {% endif %}

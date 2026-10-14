@@ -132,7 +132,7 @@ def build_plan_text(data: dict) -> tuple[bool, str]:
             if choice:
                 ingredient_id, cost, locs = choice
                 qty = math.ceil(points_needed / cost)
-                recycled.append((name, ingredient_id, qty, points_needed))
+                recycled.append((name, ingredient_id, qty, points_needed, base_id))
                 base_id_locations[ingredient_id] = locs
                 continue
             no_location.append(f"{name} (есть рецепт переработки, но нет данных о фарме деталей под него)")
@@ -170,7 +170,7 @@ def build_plan_text(data: dict) -> tuple[bool, str]:
         lines.append("")
 
     direct_farm_lines = [
-        f"🔧 **{name}** — {location_by_id[base_id]}"
+        f"🔧 [[eq:{base_id}]]**{name}** — {location_by_id[base_id]}"
         for base_id, name in matched
         if base_id in location_by_id
     ]
@@ -181,12 +181,12 @@ def build_plan_text(data: dict) -> tuple[bool, str]:
 
     if recycled:
         lines.append("**Через переработку у Мусорщика:**")
-        for material_name, ingredient_id, qty, points_needed in recycled:
+        for material_name, ingredient_id, qty, points_needed, material_id in recycled:
             ingredient_name = names_by_base_id.get(ingredient_id, ingredient_id)
             ingredient_location = location_by_id.get(ingredient_id, "нет данных о фарме")
             lines.append(
-                f"♻️ **{material_name}** — нужно {points_needed} очк.: "
-                f"{qty}x {ingredient_name} — {ingredient_location}"
+                f"♻️ [[eq:{material_id}]]**{material_name}** — нужно {points_needed} очк.: "
+                f"{qty}x [[eq:{ingredient_id}]]{ingredient_name} — {ingredient_location}"
             )
         lines.append("")
 

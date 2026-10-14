@@ -192,6 +192,12 @@ def init_db():
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_equipment_locations_base ON game_equipment_locations(base_id)")
+    try:
+        # Ключ текстуры иконки детали/материала (Comlink iconKey, напр. tex.equip_weaponmod) —
+        # для /equip-img/<base_id> на сайте (web/routes/unit_images.py).
+        cursor.execute("ALTER TABLE game_equipment ADD COLUMN icon_key TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # Рецепты переработки у "Мусорщика" (scavengerConversionSet из Comlink) — часть релик-
     # материалов (game_equipment.base_id из коллекции material, не equipment — те же таблицы,
@@ -1518,14 +1524,15 @@ def get_unit_thumbnail(base_id: str) -> str | None:
 # ФУНКЦИИ ДЛЯ СПРАВОЧНИКА СНАРЯЖЕНИЯ (game_equipment) — см. /фарм, cogs/gear_farm.py
 # =====================================================================
 def upsert_game_equipment(equipment_dict: dict):
-    """equipment_dict: {base_id: (name_ru, name_en)} — INSERT OR REPLACE, тот же
+    """equipment_dict: {base_id: (name_ru, name_en, icon_key)} — INSERT OR REPLACE, тот же
     паттерн, что upsert_game_units."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    data = [(base_id, name_ru, name_en) for base_id, (name_ru, name_en) in equipment_dict.items()]
+    data = [(base_id, values[0], values[1], values[2] if len(values) > 2 else None)
+            for base_id, values in equipment_dict.items()]
     cursor.executemany("""
-        INSERT OR REPLACE INTO game_equipment (base_id, name_ru, name_en)
-        VALUES (?, ?, ?)
+        INSERT OR REPLACE INTO game_equipment (base_id, name_ru, name_en, icon_key)
+        VALUES (?, ?, ?, ?)
     """, data)
     conn.commit()
     conn.close()
@@ -1596,6 +1603,19 @@ def find_game_equipment_by_name_en(name: str) -> str | None:
         if " ".join(name_en.split()).lower() == key:
             return base_id
     return None
+
+
+def get_equipment_icon(base_id: str) -> str | None:
+    """Ключ текстуры иконки детали/материала (game_equipment.icon_key) — для /equip-img."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT icon_key FROM game_equipment WHERE base_id = ?", (base_id,))
+        row = cursor.fetchone()
+    except sqlite3.OperationalError:
+        row = None  # колонки ещё нет (init_db не запускался на этой БД)
+    conn.close()
+    return row[0] if row else None
 
 
 def get_game_equipment_names(base_ids: list[str]) -> dict[str, str]:

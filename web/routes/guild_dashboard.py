@@ -1675,7 +1675,7 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
 
     def _named_sorted(by_id: dict) -> list:
         return [
-            {"name": names.get(item_id, item_id), "qty": qty}
+            {"id": item_id, "name": names.get(item_id, item_id), "qty": qty}
             for item_id, qty in sorted(by_id.items(), key=lambda kv: kv[1], reverse=True)
         ]
 
@@ -1955,14 +1955,20 @@ def _player_resources(guild_id: int, ally_code: str, period: str) -> dict:
     ids = set(gear["by_equipment"]) | set(relic["signals"]["by_material"]) | set(relic["craft"]["by_material"])
     names = database.get_game_equipment_names(list(ids))
 
-    def top(by_id: dict, n: int = 8) -> list:
-        return [(names.get(i, i), q) for i, q in sorted(by_id.items(), key=lambda kv: kv[1], reverse=True)[:n]]
+    def items(by_id: dict) -> list:
+        return [{"id": i, "name": names.get(i, i), "qty": q}
+                for i, q in sorted(by_id.items(), key=lambda kv: kv[1], reverse=True)]
 
     return {
         "period": period, "period_labels": resource_spend.PERIOD_LABELS,
-        "gear_total": gear["total"], "gear_upgrades": gear["upgrades"], "gear_top": top(gear["by_equipment"]),
+        "gear_total": gear["total"], "gear_upgrades": gear["upgrades"],
         "signals_total": relic["signals"]["total"], "craft_total": relic["craft"]["total"],
-        "relic_upgrades": relic["upgrades"], "signals_top": top(relic["signals"]["by_material"]),
+        "relic_upgrades": relic["upgrades"],
+        "groups": [(title, lst) for title, lst in (
+            ("🔧 Детали снаряжения", items(gear["by_equipment"])),
+            ("📡 Сигналы", items(relic["signals"]["by_material"])),
+            ("♻️ Крафт-материалы", items(relic["craft"]["by_material"])),
+        ) if lst],
     }
 
 

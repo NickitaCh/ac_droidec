@@ -192,7 +192,7 @@ def _process_item_list(items: list, loc_ru_kv: dict, loc_en_kv: dict, mission_in
         name_key = item.get("nameKey", base_id)
         name_ru = loc_ru_kv.get(name_key, name_key)
         name_en = loc_en_kv.get(name_key, name_key)
-        item_to_db[base_id] = (name_ru, name_en)
+        item_to_db[base_id] = (name_ru, name_en, item.get("iconKey"))
 
         repeatable_labels = []  # обычные кампании — фармятся каждый день, всегда доступны
         event_labels = []  # EVENTS/ивенты/мифические квесты — не всегда активны

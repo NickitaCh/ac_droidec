@@ -56,8 +56,10 @@ def _set_job(user: dict, job: dict) -> None:
 
 
 def _render_text(text: str) -> Markup:
-    """**жирный** → <strong>, остальное экранируется."""
+    """**жирный** → <strong>, [[eq:ID]] → иконка детали, остальное экранируется."""
     escaped = html.escape(text)
+    escaped = re.sub(r"\[\[eq:([A-Za-z0-9_]{1,64})\]\]",
+                     r'<img class="equip-icon" src="/equip-img/\1" alt="" loading="lazy" width="32" height="32">', escaped)
     return Markup(re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped).replace("\n", "<br>"))
 
 

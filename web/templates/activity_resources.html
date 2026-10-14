@@ -84,8 +84,8 @@
 
             function renderList(heading, items) {
                 if (!items.length) return "";
-                const rows = items.map((it) => `<li>${escapeHtml(it.name)} × ${it.qty}</li>`).join("");
-                return `<div class="stat-problem-char"><div class="stat-problem-char-title">${heading}</div><ul class="stat-problem-list">${rows}</ul></div>`;
+                const rows = items.map((it) => `<li><img class="equip-icon" src="/equip-img/${encodeURIComponent(it.id)}" alt="" loading="lazy" width="32" height="32"><span>${escapeHtml(it.name)}</span><span class="equip-qty">× ${it.qty}</span></li>`).join("");
+                return `<div class="stat-problem-char"><div class="stat-problem-char-title">${heading}</div><ul class="equip-list">${rows}</ul></div>`;
             }
 
             function openPlayer(player) {
