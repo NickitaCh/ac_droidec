@@ -128,15 +128,17 @@
                 <h2>💰 Потрачено ресурсов</h2>
             </div>
             <p class="res-periods">
+                <span class="muted">За:</span>
                 {% for key, label in resources.period_labels.items() %}
                     {% if key == resources.period %}<strong>{{ label }}</strong>{% else %}<a href="?res_period={{ key }}">{{ label }}</a>{% endif %}
                 {% endfor %}
             </p>
-            <div class="stats-grid">
-                <div class="stat-tile"><div class="stat-value">{{ resources.gear_total }}</div><div class="stat-label">Деталей снаряжения ({{ resources.gear_upgrades }} повыш.)</div></div>
-                <div class="stat-tile"><div class="stat-value">{{ resources.signals_total }}</div><div class="stat-label">Сигналов реликвии</div></div>
-                <div class="stat-tile"><div class="stat-value">{{ resources.craft_total }}</div><div class="stat-label">Крафт-материалов ({{ resources.relic_upgrades }} релик-повыш.)</div></div>
-            </div>
+            <dl class="res-summary">
+                <dt>🔧 Деталей снаряжения</dt><dd>{{ resources.gear_total }}</dd>
+                <dt>📡 Сигналов реликвии</dt><dd>{{ resources.signals_total }}</dd>
+                <dt>♻️ Крафт-материалов</dt><dd>{{ resources.craft_total }}</dd>
+                <dt class="muted">Повышений: снаряжение / реликвия</dt><dd class="muted">{{ resources.gear_upgrades }} / {{ resources.relic_upgrades }}</dd>
+            </dl>
             {% if resources.groups %}
                 <p><button type="button" class="link-btn" data-dialog-open="resource-detail-dialog">Что именно потрачено →</button></p>
                 <dialog id="resource-detail-dialog" class="stat-problem-dialog">
