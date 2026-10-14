@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Фарм деталей — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Прокачка</p>
+                <h1>Фарм деталей</h1>
+                <p class="page-hero-lead">Картинка от бота C3PO (<code>inventory unit</code>) со списком недостающих деталей → на каких битвах их фармить. Список распознаёт ИИ, места фарма — из игровых данных.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="panel" style="max-width: 40em;">
+        <div class="panel-title"><span>Картинка C3PO</span></div>
+        <form method="post" action="/farm" enctype="multipart/form-data">
+            <label>
+                Загрузите скриншот
+                <input type="file" name="image" accept="image/*">
+            </label>
+            <label>
+                …или ссылка на сообщение C3PO в Discord
+                <input type="text" name="link" placeholder="https://discord.com/channels/…/…/…">
+            </label>
+            <button type="submit"{% if job and job.state == "running" %} disabled{% endif %}>Подобрать места фарма</button>
+        </form>
+        <p class="muted">Распознавание занимает до пары минут. Дневной лимит распознаваний общий на всех.</p>
+    </div>
+
+    {% if job %}
+        <div class="panel" style="max-width: 48em;">
+            <div class="panel-title"><span>Результат</span></div>
+            {% if job.state == "running" %}
+                <p class="badge badge-neutral">⏳ Распознаю картинку…</p>
+                <script>setTimeout(() => location.reload(), 6000);</script>
+            {% elif job.state == "error" %}
+                <p class="badge badge-danger" style="white-space: normal;">❌ {{ result_html }}</p>
+            {% else %}
+                <p class="farm-result">{{ result_html }}</p>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endblock %}

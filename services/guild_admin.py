@@ -35,10 +35,9 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: b
     (см. cogs/guild_subscription.py) заводит гильдию как неактивную «заявку»,
     её включает вебхук об оплате (services/payments.py) после платежа.
 
-    Если по этому swgoh_guild_id уже есть неактивная гильдия БЕЗ единого
-    успешного платежа (database.has_paid_payment) — это висящая неоплаченная
-    заявка, переиспользуем её id вместо отказа (не плодим дубликаты, если
-    гильдия просто ещё не заплатила или пробует снова)."""
+    Если по этому swgoh_guild_id уже есть неактивная гильдия (висящая неоплаченная
+    заявка или истёкшая подписка) — переиспользуем её id вместо новой записи: не плодим
+    дубликаты, после оплаты гильдия включается со всеми прежними настройками."""
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
         return GuildAddResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
@@ -63,8 +62,10 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: b
              if g["swgoh_guild_id"] == str(swgoh_guild_id) and not g["is_active"]),
             None,
         )
-        if existing is not None and database.has_paid_payment(existing["id"]):
-            existing = None  # была оплачена и потом истекла — не заявка, обычный конфликт
+        # Раньше гильдия с истёкшей ОПЛАЧЕННОЙ подпиской здесь отбрасывалась, и ниже
+        # заводилась новая запись-дубликат без настроек и истории (2026-10-14). Теперь
+        # любая неактивная запись — и неоплаченная заявка, и истёкшая подписка —
+        # переиспользуется: оплата просто включает её обратно со всеми данными.
     if existing is not None:
         if existing["is_active"]:
             return GuildAddResult(ok=False, error="Эта гильдия уже добавлена в список обслуживаемых.")

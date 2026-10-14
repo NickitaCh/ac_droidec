@@ -29,7 +29,7 @@ from services import tb_order_image
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
-from web.deps import require_guild_access
+from web.deps import require_guild_access, require_member_access
 # Переиспользуем построитель отчёта по датакронам одного игрока и кэш каталога сезонов
 # из web/routes/datacrons.py вместо дублирования — та же логика сопоставления,
 # что уже используется на /datacrons/check (см. модульный docstring того файла
@@ -1644,7 +1644,7 @@ async def activity_players(request: Request, user: dict = Depends(require_guild_
 
 
 @router.get("/activity/resources", response_class=HTMLResponse)
-async def activity_resources(request: Request, user: dict = Depends(require_guild_access)):
+async def activity_resources(request: Request, user: dict = Depends(require_member_access)):
     """Детали снаряжения + материалы реликвии, потраченные за период — веб-паритет
     /ресурсы (см. services/resource_spend.py), запрошен пользователем 2026-09-21 сразу
     после деплоя Discord-команды. period — "week"/"month"/"3months", те же ключи и
@@ -1660,7 +1660,12 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
     if period not in resource_spend.PERIOD_LABELS:
         period = "month"
 
-    rows = resource_spend.build_guild_report(guild_id, period)
+    # Участник (не офицер) видит только свои аккаунты — основной и альты из /регистрация
+    # (с 2026-10-14 это замена Discord-команды /ресурсы, которую убрали).
+    is_officer = user.get("tier") == "officer"
+    own_codes = None if is_officer else {
+        r[0] for r in database.get_user_registrations(str(user["discord_id"]), guild_id=guild_id)}
+    rows = resource_spend.build_guild_report(guild_id, period, only_ally_codes=own_codes)
     period_urls = {
         key: f"/activity/resources?{urlencode({'period': key})}"
         for key in resource_spend.PERIOD_LABELS
@@ -1707,6 +1712,7 @@ async def activity_resources(request: Request, user: dict = Depends(require_guil
         "period": period,
         "period_labels": resource_spend.PERIOD_LABELS,
         "period_urls": period_urls,
+        "is_officer": is_officer,
     })
 
 

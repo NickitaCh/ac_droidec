@@ -24,7 +24,7 @@ from services.guild_admin import (
     set_web_credential_password,
 )
 from web import audit
-from web.deps import require_super_admin
+from web.deps import VIEW_AS_LABELS, require_real_super_admin, require_super_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -53,7 +53,7 @@ async def guilds_page(request: Request, user: dict = Depends(require_super_admin
 # session["impersonate_guild_id"] и возвращаем на ту же страницу.
 # =====================================================================
 @router.post("/switch-guild", response_class=RedirectResponse)
-async def switch_guild(request: Request, guild_id: str = Form(...), user: dict = Depends(require_super_admin)):
+async def switch_guild(request: Request, guild_id: str = Form(...), user: dict = Depends(require_real_super_admin)):
     if guild_id == "__self__":
         request.session.pop("impersonate_guild_id", None)
     else:
@@ -65,6 +65,21 @@ async def switch_guild(request: Request, guild_id: str = Form(...), user: dict =
             return RedirectResponse(f"/admin/guilds?{urlencode({'error': 'Некорректная гильдия.'})}", status_code=303)
         request.session["impersonate_guild_id"] = gid
     referer = request.headers.get("referer") or "/"
+    return RedirectResponse(referer, status_code=303)
+
+
+@router.post("/view-as", response_class=RedirectResponse)
+async def view_as(request: Request, role: str = Form(default=""), user: dict = Depends(require_real_super_admin)):
+    """Переключатель «Смотреть как» в боковой панели (только супер-админ): сайт глазами
+    офицера или участника (web/deps.py::_apply_guild_switch). Пусто — свой вид."""
+    if role in VIEW_AS_LABELS:
+        request.session["view_as"] = role
+    else:
+        request.session.pop("view_as", None)
+    # Супер-админская страница в режиме «участник» отдала бы 403 — возвращаем на главную.
+    referer = request.headers.get("referer") or "/"
+    if role and "/admin" in referer:
+        referer = "/"
     return RedirectResponse(referer, status_code=303)
 
 
@@ -85,6 +100,16 @@ async def guilds_add(
 @router.post("/guilds/{guild_id}/deactivate", response_class=HTMLResponse)
 async def guilds_deactivate(guild_id: int, user: dict = Depends(require_super_admin)):
     deactivate_guild(guild_id)
+    return RedirectResponse("/admin/guilds", status_code=303)
+
+
+@router.post("/guilds/{guild_id}/subscription", response_class=HTMLResponse)
+async def guilds_extend_subscription(guild_id: int, days: int = Form(...), user: dict = Depends(require_super_admin)):
+    """Ручное продление подписки (бывшая Discord-команда /гильдия подписка): от текущего
+    остатка, включает гильдию — database.extend_guild_subscription."""
+    if database.get_guild_config(guild_id) is None or not 1 <= days <= 3650:
+        return RedirectResponse(f"/admin/guilds?{urlencode({'error': 'Гильдия не найдена или неверное число дней.'})}", status_code=303)
+    database.extend_guild_subscription(guild_id, days, source="manual")
     return RedirectResponse("/admin/guilds", status_code=303)
 
 
@@ -534,7 +559,7 @@ async def ai_models_page(request: Request, user: dict = Depends(require_super_ad
         await asyncio.to_thread(openrouter_router.free_models, True)
     now = _time.time()
     kinds = []
-    for kind, label in ((openrouter_router.KIND_VISION, "Картинки (/фарм, план ТБ)"), (openrouter_router.KIND_TEXT, "Текст (сокращения ДК)")):
+    for kind, label in ((openrouter_router.KIND_VISION, "Картинки (фарм деталей, ордер ТБ)"), (openrouter_router.KIND_TEXT, "Текст (сокращения ДК)")):
         ranked = await asyncio.to_thread(openrouter_router.ranked_candidates, kind)
         rows = []
         for model, h in ranked:

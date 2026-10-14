@@ -21,6 +21,9 @@ def _refresh_access(user: dict) -> dict:
     return {**user, "guild_id": fresh["guild_id"], "tier": fresh["tier"], "is_super_admin": fresh["is_super_admin"]}
 
 
+VIEW_AS_LABELS = {"officer": "Офицер", "member": "Участник"}
+
+
 def _apply_guild_switch(request: Request, user: dict) -> dict:
     """Даёт супер-админам временно "переключиться" на дашборд другой гильдии
     (см. /admin/switch-guild POST), не трогая исходную сессию логина —
@@ -42,6 +45,15 @@ def _apply_guild_switch(request: Request, user: dict) -> dict:
     if override is not None and override != user.get("guild_id"):
         result["guild_id"] = override
         result["tier"] = "officer"
+    # «Смотреть как» (/admin/view-as): супер-админ видит сайт глазами офицера или
+    # участника — без супер-админских пунктов и страниц (они отдают 403, как настоящим).
+    # real_super_admin остаётся True, чтобы сам переключатель и выбор гильдии работали.
+    result["real_super_admin"] = True
+    view_as = request.session.get("view_as")
+    if view_as in VIEW_AS_LABELS:
+        result["view_as"] = view_as
+        result["is_super_admin"] = False
+        result["tier"] = view_as
     return result
 
 
@@ -75,6 +87,24 @@ def require_officer_access(request: Request) -> dict:
 
 # Старое имя — оставлено алиасом, чтобы не трогать импорты в web/routes/*.py.
 require_guild_access = require_officer_access
+
+
+def require_member_access(request: Request) -> dict:
+    """Любой участник подключённой гильдии (member или officer) — для немногих страниц
+    «про себя», открытых участникам (с 2026-10-14: «Мои ресурсы» вместо Discord-команды
+    /ресурсы). Остальной веб по-прежнему только для офицеров (require_officer_access)."""
+    user = get_current_user(request)
+    if user.get("tier") not in ("officer", "member") or user.get("guild_id") is None:
+        raise HTTPException(status_code=403, detail="Страница доступна участникам подключённых гильдий")
+    return user
+
+
+def require_real_super_admin(request: Request) -> dict:
+    """Супер-админ даже в режиме «смотреть как» — для самого переключателя и выбора гильдии."""
+    user = get_current_user(request)
+    if not user.get("real_super_admin"):
+        raise HTTPException(status_code=403, detail="Доступ только для супер-админов")
+    return user
 
 
 def require_super_admin(request: Request) -> dict:

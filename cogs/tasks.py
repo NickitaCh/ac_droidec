@@ -15,14 +15,6 @@ from cogs.datacron_requirements import DATACRON_LIST_COLOR, _lines_to_embeds
 
 MSK = ZoneInfo("Europe/Moscow")
 
-# =====================================================================
-# АВТОКОМПЛИТЫ ДЛЯ КОМАНДЫ ПОСТАНОВКИ ЗАДАЧ (ВНЕ КЛАССА)
-# =====================================================================
-async def units_autocomplete(inter: disnake.ApplicationCommandInteraction, string: str):
-    """Ищет персонажей/корабли в локальном справочнике game_units (глобальный, не per-guild)"""
-    rows = database.search_game_units(string)
-    return [f"{name} [{bid}]" for bid, name in rows]
-
 
 class TasksCog(commands.Cog):
     def __init__(self, bot):

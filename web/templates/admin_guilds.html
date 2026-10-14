@@ -69,6 +69,11 @@
                                     {% endif %}
                                 </td>
                                 <td class="row-actions">
+                                    <form method="post" action="/admin/guilds/{{ g.id }}/subscription" class="inline-form"
+                                          title="Продлить подписку вручную, без оплаты — от текущего остатка; заодно включает гильдию">
+                                        <input type="number" name="days" min="1" max="3650" value="30" style="width: 5em;" aria-label="Дней">
+                                        <button type="submit" class="button-secondary">Продлить</button>
+                                    </form>
                                     {% if g.is_active %}
                                         <form method="post" action="/admin/guilds/{{ g.id }}/deactivate"
                                               onsubmit="return confirm('Деактивировать гильдию «{{ g.name }}»? Её участники потеряют доступ к дашборду и командам бота.');">

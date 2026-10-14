@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261014b">
+    <link rel="stylesheet" href="/static/style.css?v=20261014c">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -67,6 +67,7 @@
                         </div>
                     </details>
                     <a href="/tasks" title="Задачи"><span class="nav-icon">✅</span><span class="nav-label">Задачи</span></a>
+                    <a href="/farm" title="Фарм деталей"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
                     <a href="/datacrons" title="Датакроны"><span class="nav-icon">🔮</span><span class="nav-label">Датакроны</span></a>
                     <details class="nav-dropdown">
                         <summary title="Модули"><span class="nav-icon">🧩</span><span class="nav-label">Модули</span></summary>
@@ -76,9 +77,6 @@
                             <a href="/mod-builder"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор</span></a>
                             <a href="/mod-search"><span class="nav-icon">🔍</span><span class="nav-label">Поиск модов</span></a>
                             <a href="/mod-analysis"><span class="nav-icon">📈</span><span class="nav-label">Анализ модинга</span></a>
-                            {% if user.is_super_admin %}
-                                <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
-                            {% endif %}
                             {% if user.guild_id == 1 %}
                                 <a href="/mod-scan"><span class="nav-icon">📡</span><span class="nav-label">Скан модов</span></a>
                             {% endif %}
@@ -99,28 +97,47 @@
                             <a href="/registration"><span class="nav-icon">📝</span><span class="nav-label">Регистрация</span></a>
                             <a href="/access"><span class="nav-icon">🔑</span><span class="nav-label">Ручной доступ</span></a>
                             <a href="/settings"><span class="nav-icon">⚙️</span><span class="nav-label">Настройки</span></a>
-                            {% if user.is_super_admin %}
-                                <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии</span></a>
-                                <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
-                                <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
-                                <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
-                                <a href="/admin/audit"><span class="nav-icon">🕵️</span><span class="nav-label">Аудит действий</span></a>
-                                <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
-                                <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модов</span></a>
-                                <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>
-                                <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
-                                <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Фичи по гильдиям</span></a>
-                                <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
-                                <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
-                            {% endif %}
                         </div>
                     </details>
+                    {# Только супер-админам (в режиме «смотреть как» скрыто, как у настоящих офицеров). #}
+                    {% if user.is_super_admin %}
+                    <details class="nav-dropdown">
+                        <summary title="СуперАдмин меню"><span class="nav-icon">👑</span><span class="nav-label">СуперАдмин меню</span></summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии и подписки</span></a>
+                            <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
+                            <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
+                            <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
+                            <a href="/admin/audit"><span class="nav-icon">🕵️</span><span class="nav-label">Аудит действий</span></a>
+                            <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
+                            <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модов</span></a>
+                            <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>
+                            <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
+                            <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Фичи по гильдиям</span></a>
+                            <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
+                            <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
+                            <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
+                        </div>
+                    </details>
+                    {% endif %}
+                {% elif user.tier == "member" %}
+                    <a href="/activity/resources" title="Мои ресурсы"><span class="nav-icon">💰</span><span class="nav-label">Мои ресурсы</span></a>
                 {% endif %}
             {% endif %}
         </nav>
         <div class="sidebar-footer">
             {% if user %}
-                {% if user.is_super_admin and user.switchable_guilds %}
+                {% if user.real_super_admin %}
+                    <form method="post" action="/admin/view-as" class="guild-switch-form" title="Смотреть сайт глазами другой роли">
+                        <select name="role" onchange="this.form.submit()" aria-label="Смотреть как">
+                            <option value="" {% if not user.view_as %}selected{% endif %}>👑 Вид: супер-админ</option>
+                            <option value="officer" {% if user.view_as == "officer" %}selected{% endif %}>👁 Вид: офицер</option>
+                            <option value="member" {% if user.view_as == "member" %}selected{% endif %}>👁 Вид: участник</option>
+                        </select>
+                        <noscript><button type="submit">Применить</button></noscript>
+                    </form>
+                {% endif %}
+                {% if user.real_super_admin and user.switchable_guilds %}
                     <form method="post" action="/admin/switch-guild" class="guild-switch-form">
                         <select name="guild_id" onchange="this.form.submit()">
                             <option value="__self__" {% if user.guild_id == user.own_guild_id %}selected{% endif %}>— своя гильдия —</option>
@@ -150,6 +167,12 @@
             <a class="brand" href="/">AC Droidec</a>
         </header>
         <main class="{% block main_class %}{% endblock %}">
+            {% if user and user.view_as %}
+                <form method="post" action="/admin/view-as" class="view-as-banner">
+                    👁 Режим просмотра: <strong>{{ "офицер" if user.view_as == "officer" else "участник" }}</strong> — сайт как его видит эта роль.
+                    <button type="submit" class="link-btn">Вернуться к виду супер-админа</button>
+                </form>
+            {% endif %}
             {% block content %}{% endblock %}
         </main>
         {% if show_footer %}

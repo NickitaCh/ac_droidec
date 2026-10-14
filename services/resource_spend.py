@@ -146,7 +146,7 @@ def build_report(guild_id: int, ally_code: str, period: str) -> dict:
     }
 
 
-def build_guild_report(guild_id: int, period: str) -> list[dict]:
+def build_guild_report(guild_id: int, period: str, only_ally_codes: set | None = None) -> list[dict]:
     """[{"ally_code", "name", "gear", "relic"}, ...] — для веб-страницы
     /activity/resources, все зарегистрированные игроки гильдии разом, отсортировано по
     общей сумме (деталей+сигналов+крафт-материалов) по убыванию. gear/relic — те же
@@ -154,10 +154,13 @@ def build_guild_report(guild_id: int, period: str) -> list[dict]:
     by_equipment/by_material внутри — нужны для попапа с полным списком на клике по
     игроку, см. web/templates/activity_resources.html). N отдельных запросов (по одному
     на игрока) — тот же приемлемый паттерн, что уже используют другие гильдийские отчёты
-    в этом проекте (напр. _build_guild_report в cogs/stat_requirements.py)."""
+    в этом проекте (напр. _build_guild_report в cogs/stat_requirements.py).
+    only_ally_codes — только эти игроки (участник на сайте видит лишь свои аккаунты)."""
     date_from = period_date_from(period)
     rows = []
     for _discord_id, ally_code, name in database.get_all_user_mappings(guild_id):
+        if only_ally_codes is not None and ally_code not in only_ally_codes:
+            continue
         gear = gear_pieces_spent(guild_id, ally_code, date_from)
         relic = relic_materials_spent(guild_id, ally_code, date_from)
         rows.append({"ally_code": ally_code, "name": name, "gear": gear, "relic": relic})

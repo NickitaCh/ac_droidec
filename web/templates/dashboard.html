@@ -90,11 +90,14 @@
             <section class="lp-pricing">
                 <div class="lp-pricing-text">
                     <h2>Подключение гильдии</h2>
+                    <ol class="lp-meta">
+                        <li>Пригласите бота на Discord-сервер гильдии</li>
+                        <li>Подайте заявку и оплатите: на странице <a href="/subscribe">Подписка</a> (вход через Discord) или командой <code>/гильдия_заявка</code> на сервере гильдии</li>
+                        <li>Доступ откроется автоматически в течение минуты после оплаты</li>
+                        <li>Участники привязывают себя командой <code>/регистрация</code> — права берутся из игрового ранга</li>
+                    </ol>
                     <ul class="lp-meta">
-                        <li>Доступ открывается автоматически в течение минуты после оплаты</li>
-                        <li>Оплата картой на странице <a href="/subscribe">Подписка</a> (нужен вход через Discord)</li>
-                        <li><a href="/oferta">Публичная оферта</a></li>
-                        <li>Уже подключили бота? <a href="/start">Начало работы</a> · <a href="/commands">Документация</a></li>
+                        <li><a href="/oferta">Публичная оферта</a> · Подробно: <a href="/start">Начало работы</a> · <a href="/commands">Документация</a></li>
                     </ul>
                 </div>
                 <div class="lp-pricing-cards">
@@ -107,17 +110,18 @@
                         <div class="pricing-card-period">в год</div>
                     </div>
                     <div class="lp-pricing-actions">
-                        <a class="button" href="/subscribe">Подключить и оплатить</a>
                         {% if bot_invite_url %}
-                            <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">Пригласить бота на сервер</a>
+                            <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">1. Пригласить бота на сервер</a>
                         {% endif %}
+                        <a class="button" href="/subscribe">{% if bot_invite_url %}2. {% endif %}Подключить и оплатить</a>
                     </div>
                 </div>
             </section>
         </div>
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
-        <p class="error">{{ access_status_message|safe }}</p>
+        <p class="{% if user.tier == 'member' %}muted{% else %}error{% endif %}">{{ access_status_message|safe }}</p>
+        {% if user.tier == "member" %}<p><a class="button" href="/activity/resources">Мои ресурсы</a></p>{% endif %}
     {% elif not guild_cfg %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>

@@ -2,7 +2,6 @@ import asyncio
 import math
 import re
 from datetime import datetime
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import disnake
@@ -11,10 +10,8 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 import stat_engine
-from services import activity_diff, feature_flags, mod_search, omicron_priority, resource_spend
-from services.config_status import config_warning_text
+from services import activity_diff, feature_flags, mod_search, omicron_priority
 from cogs.violations import autocomplete_players
-from cogs.tasks import units_autocomplete
 
 MSK = ZoneInfo("Europe/Moscow")
 from cogs.datacron_requirements import (
@@ -143,8 +140,6 @@ MOD_SLOT_LABELS = {
     "circle": "Круг",
     "cross": "Крест",
 }
-MOD_SLOT_CHOICES = [disnake.OptionChoice(name=label, value=key) for key, label in MOD_SLOT_LABELS.items()]
-
 OPERATOR_CHOICES = [
     disnake.OptionChoice(name=">=", value=">="),
     disnake.OptionChoice(name="<=", value="<="),
@@ -201,13 +196,6 @@ SCENARIO_CHOICES = [
     disnake.OptionChoice(name="Как сейчас, без проекции (как в ХБ)", value=SCENARIO_RAW),
     disnake.OptionChoice(name="Релик вверх тем, кто ниже цели плейта", value=SCENARIO_UP),
     disnake.OptionChoice(name="Полный подгон релика (вверх и вниз)", value=SCENARIO_FULL),
-]
-
-# /ресурсы — период подсчёта потраченных деталей/сигналов (services/resource_spend.py).
-RESOURCE_PERIOD_CHOICES = [
-    disnake.OptionChoice(name="Неделя", value="week"),
-    disnake.OptionChoice(name="Месяц", value="month"),
-    disnake.OptionChoice(name="3 месяца", value="3months"),
 ]
 
 # Короткие подписи для колонки "Стат" в таблице /статы — полные названия (особенно
@@ -1904,107 +1892,6 @@ class StatRequirementsCog(commands.Cog):
             return
 
         embeds[-1].set_footer(text="Модель: плоская часть порога (роллы модов) не растёт, остальное масштабируется вместе с базой персонажа")
-
-        await inter.edit_original_response(embed=embeds[0])
-        for e in embeds[1:]:
-            await inter.followup.send(embed=e)
-
-    # ------------------ /ресурсы (потрачено деталей снаряжения + сигналов реликвии) ------------------
-    @commands.slash_command(name="ресурсы", description="Сколько деталей и сигналов реликвии вы потратили за период (чужие — 🔒 офицеры)")
-    async def resources_spent(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация). Чужой игрок — 🔒 только офицеры", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника вместо «игрок» (чужой — 🔒 только офицеры)"),
-        период: str = commands.Param(default="month", description="За какой период считать", choices=RESOURCE_PERIOD_CHOICES),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
-    ):
-        await inter.response.defer()
-
-        if альт:
-            alt = await guild_resolver.require_alt(inter, "stat_requirements", other_target=bool(игрок or аликод))
-            if alt is None:
-                return
-            guild_id, аликод = alt["guild_id"], alt["ally_code"]
-        else:
-            guild_id = await guild_resolver.require_feature(inter, "stat_requirements")
-            if guild_id is None:
-                return
-
-        if аликод is not None:
-            if игрок is not None:
-                await inter.edit_original_response("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
-                return
-            ally_code = guild_resolver.normalize_ally_code(аликод)
-            if ally_code is None:
-                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
-            игрок = cache.get(ally_code, ally_code)
-        elif игрок is None:
-            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not registration:
-                await inter.edit_original_response(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно "
-                    "или код союзника."
-                )
-                return
-            ally_code, игрок = registration
-        else:
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
-            ally_code = cache.get(игрок)
-            if not ally_code:
-                await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
-                return
-
-        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
-        if self_error:
-            await guild_resolver.send_denied(inter, self_error)
-            return
-
-        report = resource_spend.build_report(guild_id, ally_code, период)
-        gear, relic = report["gear"], report["relic"]
-        signals, craft = relic["signals"], relic["craft"]
-
-        # Полный список без усечения топ-N — по запросу пользователя 2026-09-21
-        # ("...и ещё 56 видов деталей тоже надо убрать и писать полный список, даже
-        # если он большой"): _lines_to_embeds сама режет на несколько embed'ов/
-        # followup-сообщений под лимит Discord, так что длина тут не проблема.
-        lines = [f"За {report['period_label']}, с {report['date_from']}:", ""]
-
-        if gear["upgrades"] == 0:
-            lines.append("🔧 Снаряжение: повышений тира не было")
-        else:
-            lines.append(f"🔧 Снаряжение: **{gear['total']}** деталей ({gear['upgrades']} повыш. тира)")
-            if gear["by_equipment"]:
-                names = database.get_game_equipment_names(list(gear["by_equipment"].keys()))
-                for equipment_id, qty in sorted(gear["by_equipment"].items(), key=lambda kv: kv[1], reverse=True):
-                    lines.append(f"  • {names.get(equipment_id, equipment_id)} × {qty}")
-
-        lines.append("")
-        if relic["upgrades"] == 0:
-            lines.append("📡 Реликвия: повышений тира не было")
-        else:
-            lines.append(f"📡 Реликвия: {relic['upgrades']} повыш. тира")
-            lines.append(f"  Сигналы: **{signals['total']}**")
-            if signals["by_material"]:
-                names = database.get_game_equipment_names(list(signals["by_material"].keys()))
-                for material_id, qty in sorted(signals["by_material"].items()):
-                    lines.append(f"  • {names.get(material_id, material_id)} × {qty}")
-            # Материалы "Мусорщика" — по запросу пользователя 2026-09-21: апгрейд
-            # реликвии тратит не только сигналы, но и крафтовые детали (SCV_xxx).
-            if craft["by_material"]:
-                lines.append(f"  Детали для крафта: **{craft['total']}**")
-                names = database.get_game_equipment_names(list(craft["by_material"].keys()))
-                for material_id, qty in sorted(craft["by_material"].items()):
-                    lines.append(f"  • {names.get(material_id, material_id)} × {qty}")
-
-        title = f"📦 Ресурсы — {игрок}"
-        embeds = _lines_to_embeds(title, DATACRON_LIST_COLOR, lines)
-        if not embeds:
-            await inter.edit_original_response("❌ Нечего показать.")
-            return
-        embeds[-1].set_footer(text="Точный расчёт по официальным рецептам тиров — не оценка")
 
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:
