@@ -3,7 +3,7 @@
 {% block title %}{{ card.player_name }} — Карточка игрока — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    <p><a href="/">← Состав гильдии</a></p>
+    {% if is_officer %}<p><a href="/">← Состав гильдии</a></p>{% endif %}
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
@@ -37,6 +37,32 @@
     </section>
     {% if card.departed_at %}
         <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ card.departed_at }}. Данные больше не обновляются.</p>
+    {% endif %}
+
+    {% if own_accounts is not none %}
+        <div class="panel my-accounts">
+            <div class="panel-title"><span>👤 Мой профиль — мои аккаунты</span></div>
+            <p class="my-accounts-list">
+                {% for code, name, is_main in own_accounts %}
+                    {% if code == card.ally_code %}
+                        <strong>{{ name }}</strong>
+                    {% else %}
+                        <a href="/player/{{ code }}">{{ name }}</a>
+                    {% endif %}
+                    <span class="muted">{{ "основной" if is_main else "альт" }}</span>{% if not loop.last %} · {% endif %}
+                {% endfor %}
+            </p>
+            {% if alt_added %}<p class="badge badge-ok">✅ Альт «{{ alt_added }}» привязан.</p>{% endif %}
+            {% if alt_error %}<p class="error">{{ alt_error }}</p>{% endif %}
+            <details>
+                <summary class="link-btn">➕ Добавить альт-аккаунт</summary>
+                <form method="post" action="/me/alt" class="inline-form">
+                    <input type="text" name="ally_code" placeholder="Код союзника альта, 9 цифр" pattern="[1-9]{9}" maxlength="9" inputmode="numeric" required>
+                    <button type="submit">Привязать</button>
+                </form>
+                <p class="muted">Альт должен состоять в гильдии, которую обслуживает бот. Отвязать — <code>/регистрация_отмена</code> в Discord.</p>
+            </details>
+        </div>
     {% endif %}
 
     <div class="dashboard-grid">
@@ -93,9 +119,36 @@
                     {% endfor %}
                 </ul>
             {% endif %}
-            <p><a href="{{ card.activity_url }}">→ Вся лента активности игрока</a></p>
+            {% if is_officer %}<p><a href="{{ card.activity_url }}">→ Вся лента активности игрока</a></p>{% endif %}
         </div>
 
+        {% if resources %}
+        <div class="widget">
+            <div class="widget-header">
+                <h2>💰 Потрачено ресурсов</h2>
+                <span class="segmented-toggle-options">
+                    {% for key, label in resources.period_labels.items() %}
+                        {% if key == resources.period %}<strong>{{ label }}</strong>{% else %}<a href="?res_period={{ key }}">{{ label }}</a>{% endif %}
+                    {% endfor %}
+                </span>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-tile"><div class="stat-value">{{ resources.gear_total }}</div><div class="stat-label">Деталей снаряжения ({{ resources.gear_upgrades }} повыш.)</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ resources.signals_total }}</div><div class="stat-label">Сигналов реликвии</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ resources.craft_total }}</div><div class="stat-label">Крафт-материалов ({{ resources.relic_upgrades }} релик-повыш.)</div></div>
+            </div>
+            {% if resources.gear_top or resources.signals_top %}
+                <details>
+                    <summary class="link-btn">Что именно потрачено</summary>
+                    <ul style="margin: 0.5em 0 0; padding-left: 1.2em;">
+                        {% for name, qty in resources.gear_top + resources.signals_top %}<li>{{ name }} — {{ qty }}</li>{% endfor %}
+                    </ul>
+                </details>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if is_officer %}
         <div class="widget">
             <div class="widget-header">
                 <h2>⚠️ Нарушения</h2>
@@ -112,7 +165,9 @@
             </div>
             <p><a href="{{ card.violations_url }}">→ Полное досье</a></p>
         </div>
+        {% endif %}
 
+        {% if is_officer %}
         <div class="widget">
             <div class="widget-header">
                 <h2>⚔️ Территориальная битва</h2>
@@ -156,6 +211,7 @@
             {% endif %}
             <p><a href="{{ card.tb_player_url }}">→ Подробно по фазам/планетам</a></p>
         </div>
+        {% endif %}
 
         {% if not card.departed_at %}
         <div class="widget">
@@ -173,7 +229,7 @@
                     {% endfor %}
                 </ul>
             {% endif %}
-            <p><a href="{{ card.omicron_report_url }}">→ Полный отчёт</a></p>
+            {% if is_officer %}<p><a href="{{ card.omicron_report_url }}">→ Полный отчёт</a></p>{% endif %}
         </div>
         {% endif %}
 

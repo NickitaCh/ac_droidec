@@ -29,7 +29,7 @@ from services import tb_order_image
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
-from web.deps import require_guild_access
+from web.deps import own_accounts, require_guild_access, require_member_access
 # Переиспользуем построитель отчёта по датакронам одного игрока и кэш каталога сезонов
 # из web/routes/datacrons.py вместо дублирования — та же логика сопоставления,
 # что уже используется на /datacrons/check (см. модульный docstring того файла
@@ -1828,9 +1828,38 @@ async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: s
     return {"loading": False, "results": results, "failed_required": failed_required}
 
 
+@router.get("/me", response_class=HTMLResponse)
+async def my_profile(request: Request, user: dict = Depends(require_member_access)):
+    """«Мой профиль» — карточка игрока на своём основном аккаунте (альты — переключателем
+    в самой карточке). Без привязки — подсказка про /регистрация."""
+    accounts = own_accounts(user)
+    if not accounts:
+        return templates.TemplateResponse(request, "my_profile_empty.html", {"user": user})
+    return RedirectResponse(f"/player/{accounts[0][0]}", status_code=303)
+
+
+@router.post("/me/alt", response_class=HTMLResponse)
+async def my_profile_add_alt(ally_code: str = Form(...), user: dict = Depends(require_member_access)):
+    """Привязать альт-аккаунт к себе — то же, что /регистрация альт:True в Discord."""
+    from services.registration import register_player
+    from swgoh_comlink import SwgohComlink
+    accounts = own_accounts(user)
+    back = f"/player/{accounts[0][0]}" if accounts else "/me"
+    result = await register_player(SwgohComlink(url="http://localhost:3000"), str(user["discord_id"]), ally_code, is_alt=True)
+    if not result.ok:
+        return RedirectResponse(f"{back}?{urlencode({'alt_error': result.error})}", status_code=303)
+    return RedirectResponse(f"/player/{result.ally_code}?{urlencode({'alt_added': result.ingame_name})}", status_code=303)
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
-async def player_card(request: Request, ally_code: str, user: dict = Depends(require_guild_access)):
+async def player_card(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
     guild_id = user["guild_id"]
+    # Офицер видит карточку любого игрока; участник — только свои аккаунты («Мой профиль»).
+    is_officer = user.get("tier") == "officer"
+    accounts = own_accounts(user)
+    own_codes = {a[0] for a in accounts}
+    if not is_officer and ally_code not in own_codes:
+        return RedirectResponse("/me", status_code=303)
     card = dashboard_data.get_player_card(guild_id, ally_code)
     if card is None:
         raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
@@ -1890,7 +1919,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
 
     # ---- ТБ: прогресс/просадка от ТБ к ТБ — переиспользуем гильдийский расчёт
     # (get_tb_report уже строит спарклайн/regressed на игрока), просто достаём свою строку. ----
-    tb_report = dashboard_data.get_tb_report(guild_id)
+    tb_report = dashboard_data.get_tb_report(guild_id) if is_officer else None
     tb_row = None
     if tb_report:
         name_lower = card.player_name.strip().lower()
@@ -1908,7 +1937,33 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "omicron_missing": omicron_missing, "has_omicron_priority": has_omicron_priority,
         "tb_report_events": tb_report.events if tb_report else [],
         "tb_row": tb_row,
+        "is_officer": is_officer,
+        "own_accounts": accounts if ally_code in own_codes else None,
+        "resources": _player_resources(guild_id, ally_code, request.query_params.get("res_period") or "month") if not card.departed_at else None,
+        "alt_error": request.query_params.get("alt_error"),
+        "alt_added": request.query_params.get("alt_added"),
     })
+
+
+def _player_resources(guild_id: int, ally_code: str, period: str) -> dict:
+    """Потрачено деталей/сигналов/крафта за период — для карточки (бывшая /ресурсы)."""
+    if period not in resource_spend.PERIOD_LABELS:
+        period = "month"
+    date_from = resource_spend.period_date_from(period)
+    gear = resource_spend.gear_pieces_spent(guild_id, ally_code, date_from)
+    relic = resource_spend.relic_materials_spent(guild_id, ally_code, date_from)
+    ids = set(gear["by_equipment"]) | set(relic["signals"]["by_material"]) | set(relic["craft"]["by_material"])
+    names = database.get_game_equipment_names(list(ids))
+
+    def top(by_id: dict, n: int = 8) -> list:
+        return [(names.get(i, i), q) for i, q in sorted(by_id.items(), key=lambda kv: kv[1], reverse=True)[:n]]
+
+    return {
+        "period": period, "period_labels": resource_spend.PERIOD_LABELS,
+        "gear_total": gear["total"], "gear_upgrades": gear["upgrades"], "gear_top": top(gear["by_equipment"]),
+        "signals_total": relic["signals"]["total"], "craft_total": relic["craft"]["total"],
+        "relic_upgrades": relic["upgrades"], "signals_top": top(relic["signals"]["by_material"]),
+    }
 
 
 @router.get("/violations/{ally_code}", response_class=HTMLResponse)

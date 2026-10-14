@@ -120,7 +120,8 @@
         </div>
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
-        <p class="error">{{ access_status_message|safe }}</p>
+        <p class="{% if user.tier == 'member' %}muted{% else %}error{% endif %}">{{ access_status_message|safe }}</p>
+        {% if user.tier == "member" %}<p><a class="button" href="/me">👤 Мой профиль</a></p>{% endif %}
     {% elif not guild_cfg %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>

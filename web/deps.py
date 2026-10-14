@@ -101,6 +101,21 @@ def require_officer_access(request: Request) -> dict:
 require_guild_access = require_officer_access
 
 
+def require_member_access(request: Request) -> dict:
+    """Участник или офицер подключённой гильдии — только для «Моего профиля»
+    (карточка игрока на своих аккаунтах, 2026-10-14). Остальной сайт — офицерам."""
+    user = get_current_user(request)
+    if user.get("tier") not in ("officer", "member") or user.get("guild_id") is None:
+        raise HTTPException(status_code=403, detail="Страница доступна участникам подключённых гильдий")
+    return user
+
+
+def own_accounts(user: dict) -> list:
+    """[(ally_code, ingame_name, is_main), ...] — свои аккаунты из /регистрация в текущей гильдии."""
+    import database
+    return database.get_user_registrations(str(user["discord_id"]), guild_id=user["guild_id"])
+
+
 def require_real_super_admin(request: Request) -> dict:
     """Супер-админ даже в режиме «смотреть как» — для самого переключателя и выбора гильдии."""
     user = get_current_user(request)
