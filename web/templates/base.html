@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261014c">
+    <link rel="stylesheet" href="/static/style.css?v=20261014e">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -120,8 +120,6 @@
                         </div>
                     </details>
                     {% endif %}
-                {% elif user.tier == "member" %}
-                    <a href="/activity/resources" title="Мои ресурсы"><span class="nav-icon">💰</span><span class="nav-label">Мои ресурсы</span></a>
                 {% endif %}
             {% endif %}
         </nav>
@@ -161,12 +159,45 @@
         </div>
     </aside>
     <label for="nav-toggle" class="nav-backdrop" aria-hidden="true"></label>
+    {# Не на странице оплаты/оферты — иначе попап закроет саму ссылку на оплату. #}
+    {% if user and user.expired_guild and not request.url.path.startswith("/subscribe") and request.url.path != "/oferta" %}
+        {% set eg = user.expired_guild %}
+        <div class="sub-expired-overlay" role="dialog" aria-modal="true" aria-labelledby="sub-expired-title">
+            <div class="sub-expired-card">
+                <h2 id="sub-expired-title">Подписка закончилась</h2>
+                <p>Подписка гильдии <strong>{{ eg.name }}</strong> на бота закончилась{% if eg.expired_date %} {{ eg.expired_date }}{% endif %} — бот и сайт для гильдии отключены.</p>
+                <p class="muted">Продлите — всё включится обратно с прежними настройками, регистрациями и историей.</p>
+                <div class="sub-expired-prices">
+                    {% for p in eg.prices %}
+                        <form method="post" action="/subscribe">
+                            <input type="hidden" name="renew_guild_id" value="{{ eg.id }}">
+                            <input type="hidden" name="period" value="{{ p.days }}">
+                            <button type="submit" class="pricing-card{% if p.days == 365 %} pricing-card-accent{% endif %}">
+                                <span class="pricing-card-price">{{ p.price }} ₽</span>
+                                <span class="pricing-card-period">продлить на {{ "месяц" if p.days == 30 else "год" }}</span>
+                            </button>
+                        </form>
+                    {% endfor %}
+                </div>
+                <p class="muted"><a href="/logout">Выйти</a></p>
+            </div>
+        </div>
+    {% endif %}
     <div class="main-area">
         <header class="mobile-topbar">
             <label for="nav-toggle" class="nav-toggle-btn" aria-label="Меню">☰</label>
             <a class="brand" href="/">AC Droidec</a>
         </header>
         <main class="{% block main_class %}{% endblock %}">
+            {% if user and user.subscription_warning %}
+                {% set sw = user.subscription_warning %}
+                <div class="sub-warning{% if sw.urgent %} sub-warning-urgent{% endif %}">
+                    ⏳ Подписка гильдии на бота заканчивается <strong>{{ sw.date }}</strong>
+                    (осталось {{ sw.days_left }} дн.).
+                    После этого бот и сайт для гильдии отключатся.
+                    <a class="button" href="/subscribe">Продлить</a>
+                </div>
+            {% endif %}
             {% if user and user.view_as %}
                 <form method="post" action="/admin/view-as" class="view-as-banner">
                     👁 Режим просмотра: <strong>{{ "офицер" if user.view_as == "officer" else "участник" }}</strong> — сайт как его видит эта роль.

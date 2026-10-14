@@ -2353,3 +2353,27 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
     border: 1px dashed var(--status-warning); background: color-mix(in srgb, var(--status-warning) 10%, transparent);
     font-size: 0.9em;
 }
+
+/* Подписка гильдии: баннер «скоро закончится» офицерам и попап «закончилась» (base.html). */
+.sub-warning {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 0.75em;
+    margin: 0 0 1rem; padding: 0.65em 0.9em; border-radius: 10px;
+    border: 1px solid var(--status-warning); background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+}
+.sub-warning .button { margin-left: auto; }
+.sub-warning-urgent { border-color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 12%, transparent); }
+.sub-expired-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(7, 11, 22, 0.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.sub-expired-card {
+    width: 100%; max-width: 30rem; padding: 1.5rem; border-radius: 16px;
+    background: var(--surface); color: var(--fg); border: 1px solid var(--border);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.sub-expired-card h2 { margin-top: 0; }
+.sub-expired-prices { display: flex; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; }
+.sub-expired-prices form { flex: 1 1 10rem; margin: 0; }
+.sub-expired-prices button.pricing-card { width: 100%; cursor: pointer; font: inherit; color: inherit; display: flex; flex-direction: column; align-items: center; gap: 0.2em; }

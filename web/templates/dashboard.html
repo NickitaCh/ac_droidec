@@ -92,7 +92,7 @@
                     <h2>Подключение гильдии</h2>
                     <ol class="lp-meta">
                         <li>Пригласите бота на Discord-сервер гильдии</li>
-                        <li>Подайте заявку и оплатите: на странице <a href="/subscribe">Подписка</a> (вход через Discord) или командой <code>/гильдия_заявка</code> на сервере гильдии</li>
+                        <li>Подайте заявку и оплатите на странице <a href="/subscribe">Подписка</a> (вход через Discord; ссылку с уже подставленным сервером даёт команда <code>/подписка</code>)</li>
                         <li>Доступ откроется автоматически в течение минуты после оплаты</li>
                         <li>Участники привязывают себя командой <code>/регистрация</code> — права берутся из игрового ранга</li>
                     </ol>
@@ -120,8 +120,7 @@
         </div>
     {% elif user.tier != "officer" %}
         <h1>Привет, {{ user.username }}</h1>
-        <p class="{% if user.tier == 'member' %}muted{% else %}error{% endif %}">{{ access_status_message|safe }}</p>
-        {% if user.tier == "member" %}<p><a class="button" href="/activity/resources">Мои ресурсы</a></p>{% endif %}
+        <p class="error">{{ access_status_message|safe }}</p>
     {% elif not guild_cfg %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>

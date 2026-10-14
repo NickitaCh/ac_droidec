@@ -1,5 +1,5 @@
 """Веб-версия самообслуживания подписки — /subscribe (веб-аналог Discord-команды
-`/гильдия_заявка`, cogs/guild_subscription.py). Существовала только в Discord —
+бывшей `/гильдия_заявка`; с 2026-10-14 заявка только здесь, `/подписка` даёт ссылку). Существовала только в Discord —
 онбординг-тексты (services/dashboard_data.py::access_status_message,
 main.py::_access_denied_message) годами обещали "подключить и оплатить можно
 на сайте", а реальной страницы для этого не было, только ссылка на корень
@@ -82,6 +82,11 @@ async def _verify_bot_in_guild(discord_guild_id: str) -> tuple[bool, str | None]
 
 
 def _renewal_guild(user: dict) -> dict | None:
+    # Офицер/лидер гильдии с уже истёкшей подпиской (сайт его как офицера больше не
+    # видит) — продлевает ту же гильдию из попапа в base.html, без повторной заявки.
+    expired = user.get("expired_guild")
+    if expired:
+        return {"id": expired["id"], "name": expired["name"], "expires_at": None, "expired": True}
     if user.get("tier") != "officer" or user.get("guild_id") is None:
         return None
     cfg = database.get_guild_config(user["guild_id"])
@@ -98,6 +103,8 @@ async def subscribe_form(request: Request, user: dict = Depends(get_current_user
         "renewal_guild": _renewal_guild(user),
         "result": None,
         "error": request.query_params.get("error"),
+        # /подписка в Discord подставляет ID сервера, где её вызвали.
+        "prefill_discord_guild_id": "".join(filter(str.isdigit, request.query_params.get("discord_guild_id", "")))[:20],
     })
 
 

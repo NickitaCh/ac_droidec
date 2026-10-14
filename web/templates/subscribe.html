@@ -29,8 +29,13 @@
             <div class="panel" style="max-width: 34em;">
                 <div class="panel-title"><span>Продлить подписку</span></div>
                 <p class="muted">
+                    {% if renewal_guild.expired %}
+                        Подписка гильдии «{{ renewal_guild.name }}» закончилась — после оплаты всё включится обратно с прежними настройками.
+                    {% else %}
                     Ваша гильдия «{{ renewal_guild.name }}» уже подключена.
-                    {% if renewal_guild.expires_at %}
+                    {% endif %}
+                    {% if renewal_guild.expired %}
+                    {% elif renewal_guild.expires_at %}
                         Подписка активна до <code>{{ renewal_guild.expires_at[:10] }}</code>.
                     {% else %}
                         Подписка сейчас бессрочная (подключена вручную).
@@ -66,7 +71,7 @@
                 </label>
                 <label>
                     ID Discord-сервера
-                    <input type="text" name="discord_guild_id" placeholder="123456789012345678"
+                    <input type="text" name="discord_guild_id" placeholder="123456789012345678" value="{{ prefill_discord_guild_id or '' }}"
                            pattern="[0-9]{17,20}" maxlength="20" inputmode="numeric"
                            title="17-20 цифр — ПКМ по иконке сервера → Копировать ID" required>
                 </label>

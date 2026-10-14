@@ -47,9 +47,8 @@ def access_status_message(user: dict) -> str:
     tier = user.get("tier")
     if tier == "member":
         return (
-            "У вас уровень обычного участника: на сайте вам доступна страница "
-            '<a href="/activity/resources">«Мои ресурсы»</a>, остальной дашборд — только офицерам/лидерам. '
-            "В Discord доступна часть команд бота (например <code>/статы</code>, "
+            "Сайт доступен только офицерам и лидеру гильдии — у вас уровень обычного участника. "
+            "В Discord вам доступна часть команд бота (например <code>/статы</code>, "
             '<code>/дк_требования проверить</code>) — полный список на странице <a href="/commands">Документация</a>.'
         )
     if database.discord_id_has_any_registration(user["discord_id"]):

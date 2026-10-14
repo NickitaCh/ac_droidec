@@ -57,11 +57,22 @@ def _apply_guild_switch(request: Request, user: dict) -> dict:
     return result
 
 
+def _with_subscription_status(user: dict) -> dict:
+    """Офицерам — предупреждение о скором конце подписки (баннер в base.html);
+    офицеру/лидеру гильдии с уже истёкшей подпиской — данные для попапа «Продлить»."""
+    from services import subscription_status
+    if user.get("tier") == "officer":
+        return {**user, "subscription_warning": subscription_status.warning_for(user.get("guild_id"))}
+    if user.get("tier") is None:
+        return {**user, "expired_guild": subscription_status.expired_officer_guild(user["discord_id"])}
+    return user
+
+
 def get_current_user(request: Request) -> dict:
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
-    return _apply_guild_switch(request, _refresh_access(user))
+    return _with_subscription_status(_apply_guild_switch(request, _refresh_access(user)))
 
 
 def get_current_user_optional(request: Request) -> dict | None:
@@ -87,16 +98,6 @@ def require_officer_access(request: Request) -> dict:
 
 # Старое имя — оставлено алиасом, чтобы не трогать импорты в web/routes/*.py.
 require_guild_access = require_officer_access
-
-
-def require_member_access(request: Request) -> dict:
-    """Любой участник подключённой гильдии (member или officer) — для немногих страниц
-    «про себя», открытых участникам (с 2026-10-14: «Мои ресурсы» вместо Discord-команды
-    /ресурсы). Остальной веб по-прежнему только для офицеров (require_officer_access)."""
-    user = get_current_user(request)
-    if user.get("tier") not in ("officer", "member") or user.get("guild_id") is None:
-        raise HTTPException(status_code=403, detail="Страница доступна участникам подключённых гильдий")
-    return user
 
 
 def require_real_super_admin(request: Request) -> dict:
