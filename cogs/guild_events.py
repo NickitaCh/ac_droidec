@@ -5,11 +5,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import hashlib
+import io
 import json
 import re
 import database
 import guild_resolver
-from cogs.violations import autocomplete_players
 from services import feature_flags, tb_schedule
 import tempfile
 
@@ -916,251 +916,250 @@ class GuildEvents(commands.Cog):
         return "\n".join(lines)
 
     # ------------------ Slash-команды ------------------
-    @commands.slash_command(name="тб_отчет", description="Отчёты по ТБ")
+    # ------------------ /тб_отчет — панель (2026-10-14) ------------------
+    # Одна команда без параметров: выпадающие списки «отчёт / ТБ / игрок» + кнопка
+    # «Показать», отчёт подставляется в то же скрытое сообщение файлом. Всё строится из
+    # сохранённой истории ТБ (tb_events / tb_player_summary / tb_player_detail, последние
+    # TB_HISTORY_KEEP), а не из живого Comlink — поэтому можно выбрать любую из них и
+    # игрока, который уже ушёл из гильдии.
+    @commands.slash_command(name="тб_отчет", description="Отчёты по ТБ: панель выбора отчёта, ТБ и игрока")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def tb_report(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    def _resolve_guild_config(self, inter):
-        """Общий шаг для команд /тб_отчет: резолвит guild_id по роли автора и
-        достаёт конфиг гильдии. Возвращает None, если не удалось (нет роли ни
-        одной гильдии, для гильдии ещё не резолвлен swgoh_guild_id, либо
-        фича "tb_reports" выключена для гильдии через /admin/features) —
-        вызывающий код не различает эти случаи, все показывают один и тот же
-        текст ошибки."""
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None:
-            return None
-        if not feature_flags.is_enabled(guild_id, "tb_reports"):
-            return None
-        guild_cfg = database.get_guild_config(guild_id)
-        if not guild_cfg or not guild_cfg.get("swgoh_guild_id"):
-            return None
-        return guild_cfg
-
-    @tb_report.sub_command(name="последняя", description="Сводка последней завершённой ТБ")
-    async def tb_last(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer()
-        guild_cfg = self._resolve_guild_config(inter)
-        if guild_cfg is None:
-            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
-            return
-        try:
-            guild = await asyncio.wait_for(
-                asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"], include_recent_guild_activity_info=True),
-                timeout=15.0
-            )
-        except asyncio.TimeoutError:
-            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
-            return
-        except Exception as e:
-            await inter.edit_original_message(f"Ошибка получения данных: {e}")
-            return
-
-        result = guild.get("recentTerritoryBattleResult", [])
-        if not result:
-            await inter.edit_original_message("Нет данных о последней ТБ.")
-            return
-
-        members = guild.get("member", [])
-        player_names = {m["playerId"]: m["playerName"] for m in members if "playerId" in m and "playerName" in m}
-        stats = self._collect_guild_stats(result, player_names)
-        if not stats:
-            await inter.edit_original_message("Нет очков в последней ТБ.")
-            return
-
-        report = self._format_stats_table("📊 **Итоги последней ТБ (автоотчёт)**", stats)
-        await self.send_as_file(inter.channel, report, "tb_report.txt")
-        await inter.edit_original_message("Отчёт отправлен файлом.")
-
-    @tb_report.sub_command(name="игрок", description="Статистика игрока за последнюю ТБ по фазам и планетам")
-    async def tb_player(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(default=None, description="Игрок — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — например для недавно вышедшего из гильдии игрока, вместо параметра «name»"),
-    ):
-        await inter.response.defer()
-
-        guild_cfg = self._resolve_guild_config(inter)
-        if guild_cfg is None:
-            await inter.edit_original_message("❌ Не удалось определить гильдию (роль) или для неё не настроен Comlink guild_id.")
-            return
-        guild_id = guild_cfg["id"]
-
-        if аликод is not None:
-            if name is not None:
-                await inter.edit_original_message("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
-                return
-            allycode = guild_resolver.normalize_ally_code(аликод)
-            if allycode is None:
-                await inter.edit_original_message("❌ Код союзника должен состоять из 9 цифр.")
-                return
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
-            name = cache.get(allycode, allycode)
-        elif name is None:
-            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not registration:
-                await inter.edit_original_message(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно "
-                    "или код союзника."
-                )
-                return
-            allycode, name = registration
-        else:
-            cache = self.bot.guild_roster_caches.get(guild_id, {})
-            if not cache or name not in cache:
-                await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
-                return
-            allycode = cache[name]
-
-        try:
-            player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
-            player_id = player.get("playerId")
-            if not player_id:
-                await inter.edit_original_message("Не удалось определить игровой ID.")
-                return
-            if аликод is not None and player.get("name"):
-                name = player["name"]
-
-            guild = await asyncio.wait_for(
-                asyncio.to_thread(self.bot.comlink.get_guild, guild_cfg["swgoh_guild_id"], include_recent_guild_activity_info=True),
-                timeout=15.0
-            )
-            result = guild.get("recentTerritoryBattleResult", [])
-            if not result:
-                await inter.edit_original_message("Нет данных о последней ТБ.")
-                return
-
-            zone_data, global_totals, round_totals, raw_keys, unrecognized = self._decode_tb_stats(result, player_id)
-            if not zone_data and not round_totals and not global_totals:
-                await inter.edit_original_message(f"{name} не участвовал в последней ТБ.")
-                return
-
-            planet_map = database.get_tb_planet_names(guild_id=guild_id)
-            report = self._format_tb_player_report(name, zone_data, global_totals, round_totals, raw_keys, planet_map)
-            if unrecognized:
-                report += "\n\nНераспознанные ключи (новая механика?):\n"
-                report += "\n".join(f"  {k}: {v}" for k, v in unrecognized.items())
-
-            await self.send_as_file(inter.channel, report, f"tb_{name}.txt")
-            embed = disnake.Embed(title=f"📊 ТБ по фазам и планетам: {name}", color=0x3498db)
-            embed.set_footer(text="Полная детализация отправлена файлом.")
-            await inter.edit_original_message(embed=embed)
-
-        except asyncio.TimeoutError:
-            await inter.edit_original_message("⏰ Запрос к Comlink занял слишком много времени.")
-        except Exception as e:
-            await inter.edit_original_message(f"Ошибка: {e}")
-
-    @tb_report.sub_command(name="сравнение_по_тб", description="Сравнение игроков по гильдии за последние ТБ, с пометкой просевших")
-    async def tb_compare(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer()
-
+        await inter.response.defer(ephemeral=True)
         guild_id = await guild_resolver.require_feature(inter, "tb_reports")
         if guild_id is None:
             return
-
         events = database.get_recent_tb_events(guild_id=guild_id)
         if not events:
-            await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
+            await inter.edit_original_message("Пока нет сохранённых ТБ — отчёты появятся после первой завершённой ТБ.")
             return
+        stars = database.get_tb_event_stars([e[0] for e in events])
+        # get_recent_tb_events — от старых к новым; в панели последняя ТБ первой и выбрана сразу.
+        event_rows = [(eid, completed_at, stars.get(eid)) for eid, completed_at in reversed(events)]
 
-        summary_rows = database.get_tb_player_summary_for_events([e[0] for e in events])
-        if not summary_rows:
-            await inter.edit_original_message("Нет сохранённых данных игроков для сравнения.")
-            return
-
-        # Выбывших из гильдии в сводке за несколько ТБ не показываем (как и на вебе /tb).
         roster_pids = set(database.get_roster_by_player_id(guild_id))
-        roster_names = database.get_roster_name_set(guild_id)
-        if roster_names:
-            summary_rows = [r for r in summary_rows if r[1] in roster_pids or r[2].strip().lower() in roster_names]
+        names = {}
+        for row in database.get_tb_player_summary_for_events([e[0] for e in events]):
+            names[row[1]] = row[2]  # новее перезаписывает — последнее имя игрока
+        players = sorted(
+            ((mid, name, bool(roster_pids) and mid not in roster_pids) for mid, name in names.items()),
+            key=lambda p: (p[2], p[1].lower()),
+        )
+        view = TBReportPanel(self, guild_id, inter.author.id, event_rows, players)
+        await inter.edit_original_message(content=view.header(), view=view)
 
-        report = self._format_tb_compare_table(events, summary_rows)
-        title = f"📊 Сравнение по ТБ (последние {len(events)}: " + ", ".join(e[1][:10] for e in events) + ")"
-        await self.send_as_file(inter.channel, title + "\n\n" + report, "tb_compare.txt")
-        await inter.edit_original_message("Отчёт сравнения отправлен файлом.")
+    @staticmethod
+    def _event_label(completed_at: str, stars) -> str:
+        date = f"{completed_at[8:10]}.{completed_at[5:7]}.{completed_at[0:4]}" if len(completed_at) >= 10 else completed_at
+        return f"ТБ от {date}" + (f" — {stars} ★" if stars is not None else "")
 
-    @tb_report.sub_command(name="сравнение_по_игроку", description="Сравнение статистики игрока по фазам за последние ТБ")
-    async def tb_player_compare(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        name: str = commands.Param(default=None, description="Игрок — если не указан, берётся ваша регистрация (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника — например для недавно вышедшего из гильдии игрока, вместо параметра «name»"),
-    ):
-        await inter.response.defer()
-
-        guild_id = await guild_resolver.require_feature(inter, "tb_reports")
-        if guild_id is None:
-            return
-
-        cache = self.bot.guild_roster_caches.get(guild_id, {})
-        if аликод is not None:
-            if name is not None:
-                await inter.edit_original_message("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
-                return
-            allycode = guild_resolver.normalize_ally_code(аликод)
-            if allycode is None:
-                await inter.edit_original_message("❌ Код союзника должен состоять из 9 цифр.")
-                return
-            name = cache.get(allycode, allycode)
-        elif name is None:
-            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not registration:
-                await inter.edit_original_message(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока явно "
-                    "или код союзника."
-                )
-                return
-            allycode, name = registration
-        else:
-            if not cache or name not in cache:
-                await inter.edit_original_message("Ошибка: игрок не найден в кэше состава.")
-                return
-            allycode = cache[name]
-
-        try:
-            player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=allycode)
-            player_id = player.get("playerId")
-            if not player_id:
-                await inter.edit_original_message("Не удалось определить игровой ID.")
-                return
-            if аликод is not None and player.get("name"):
-                name = player["name"]
-        except Exception as e:
-            await inter.edit_original_message(f"Ошибка: {e}")
-            return
-
+    def build_tb_report(self, guild_id: int, kind: str, event, member_id: str | None, player_name: str | None):
+        """(заголовок, текст отчёта) либо (None, текст ошибки). event — (id, completed_at, stars)."""
         events = database.get_recent_tb_events(guild_id=guild_id)
-        if not events:
-            await inter.edit_original_message("Пока нет накопленной истории ТБ для сравнения.")
+        if kind == "event":
+            rows = database.get_tb_player_summary_for_events([event[0]])
+            stats = {
+                r[1]: {"name": r[2], "summary": r[3], "unit_donated": r[4], "covert_attempt": r[5],
+                       "strike_encounter": r[6], "strike_attempt": r[7]}
+                for r in rows
+            }
+            if not stats:
+                return None, "В этой ТБ нет сохранённых очков игроков."
+            title = f"📊 Итоги: {self._event_label(event[1], event[2])}"
+            return title, self._format_stats_table(title, stats)
+
+        if kind == "player":
+            row = database.get_tb_player_detail(event[0], member_id)
+            if not row:
+                return None, f"{player_name} не участвовал в этой ТБ."
+            zone_data, global_totals, round_totals, raw_keys = (json.loads(x) for x in row)
+            planet_map = database.get_tb_event_planet_names(event[0])
+            title = f"📊 {player_name} — {self._event_label(event[1], event[2])}"
+            report = self._format_tb_player_report(player_name, zone_data, global_totals, round_totals, raw_keys, planet_map)
+            return title, report
+
+        if kind == "compare":
+            summary_rows = database.get_tb_player_summary_for_events([e[0] for e in events])
+            if not summary_rows:
+                return None, "Нет сохранённых данных игроков для сравнения."
+            # Выбывших из гильдии в сводке за несколько ТБ не показываем (как и на вебе /tb).
+            roster_pids = set(database.get_roster_by_player_id(guild_id))
+            roster_names = database.get_roster_name_set(guild_id)
+            if roster_names:
+                summary_rows = [r for r in summary_rows if r[1] in roster_pids or r[2].strip().lower() in roster_names]
+            title = f"📊 Сравнение по ТБ (последние {len(events)}: " + ", ".join(e[1][:10] for e in events) + ")"
+            return title, title + "\n\n" + self._format_tb_compare_table(events, summary_rows)
+
+        if kind == "player_compare":
+            per_event = []
+            for event_id, _ in events:
+                row = database.get_tb_player_detail(event_id, member_id)
+                if row:
+                    zone_data_json, global_totals_json, round_totals_json, raw_keys_json = row
+                    per_event.append({
+                        "zone_data": json.loads(zone_data_json),
+                        "global_totals": json.loads(global_totals_json),
+                        "round_totals": json.loads(round_totals_json),
+                        "raw_keys": json.loads(raw_keys_json),
+                    })
+                else:
+                    per_event.append(None)
+            if all(e is None for e in per_event):
+                return None, f"{player_name} не участвовал ни в одной из сохранённых последних ТБ."
+            planet_maps = [database.get_tb_event_planet_names(event_id) for event_id, _ in events]
+            title = f"📊 Сравнение по ТБ: {player_name}"
+            return title, self._format_tb_player_compare_report(player_name, events, per_event, planet_maps)
+
+        return None, "Неизвестный вид отчёта."
+
+
+TB_REPORT_KINDS = [
+    ("event", "Сводка гильдии за ТБ", "Очки, взводы, ОЗ и БЗ каждого игрока"),
+    ("player", "Игрок за ТБ", "По фазам и планетам"),
+    ("compare", "Гильдия: сравнение по последним ТБ", "С пометкой просевших"),
+    ("player_compare", "Игрок: сравнение по последним ТБ", "По фазам"),
+]
+
+
+class TBReportPanel(disnake.ui.View):
+    """Панель /тб_отчет: строки 0 — вид отчёта, 1 — ТБ, 2-3 — игрок (по 25, Discord не
+    даёт больше в одном списке; в гильдии до 50 человек), 4 — кнопки. Сообщение скрытое,
+    но кнопки всё равно проверяют автора."""
+    PAGE = 50
+
+    def __init__(self, cog, guild_id: int, author_id: int, events: list, players: list):
+        super().__init__(timeout=840)  # токен ответа на команду живёт 15 минут
+        self.cog = cog
+        self.guild_id = guild_id
+        self.author_id = author_id
+        self.events = events          # [(event_id, completed_at, stars)] — новые первыми
+        self.players = players        # [(member_id, name, departed)]
+        self.kind = "event"
+        self.event_id = events[0][0]
+        self.member_id = None
+        self.page = 0
+        self.last = None              # (title, text, filename) — для «Показать всем»
+        self._build()
+
+    def header(self) -> str:
+        return ("📊 **Отчёты по ТБ** — выберите отчёт, ТБ и игрока и нажмите «Показать». "
+                "Отчёт придёт сюда же файлом; «Показать всем» — опубликовать его в канал.")
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        return interaction.author.id == self.author_id
+
+    def _needs_event(self):
+        return self.kind in ("event", "player")
+
+    def _needs_player(self):
+        return self.kind in ("player", "player_compare")
+
+    def _build(self):
+        self.clear_items()
+        kind_select = disnake.ui.Select(
+            placeholder="Отчёт", row=0,
+            options=[disnake.SelectOption(label=label, value=key, description=desc, default=key == self.kind)
+                     for key, label, desc in TB_REPORT_KINDS],
+        )
+        kind_select.callback = self._on_kind
+        self.add_item(kind_select)
+
+        event_select = disnake.ui.Select(
+            placeholder="ТБ" if self._needs_event() else "ТБ — для сравнения берутся все сохранённые",
+            row=1, disabled=not self._needs_event(),
+            options=[disnake.SelectOption(label=self.cog._event_label(c, s), value=str(eid), default=eid == self.event_id)
+                     for eid, c, s in self.events],
+        )
+        event_select.callback = self._on_event
+        self.add_item(event_select)
+
+        page_players = self.players[self.page * self.PAGE:(self.page + 1) * self.PAGE]
+        for i in range(2):
+            chunk = page_players[i * 25:(i + 1) * 25]
+            if not chunk:
+                break
+            first, last = chunk[0][1][:1].upper(), chunk[-1][1][:1].upper()
+            select = disnake.ui.Select(
+                placeholder=(f"Игрок ({first}–{last})" if self._needs_player() else "Игрок — не нужен для этого отчёта"),
+                row=2 + i, disabled=not self._needs_player(),
+                options=[disnake.SelectOption(label=name[:100], value=mid, description="выбыл из гильдии" if departed else None,
+                                              default=mid == self.member_id)
+                         for mid, name, departed in chunk],
+            )
+            select.callback = self._on_player
+            self.add_item(select)
+
+        show = disnake.ui.Button(label="Показать", style=disnake.ButtonStyle.primary, row=4)
+        show.callback = self._on_show
+        self.add_item(show)
+        publish = disnake.ui.Button(label="Показать всем", style=disnake.ButtonStyle.secondary, row=4,
+                                    disabled=self.last is None)
+        publish.callback = self._on_publish
+        self.add_item(publish)
+        if len(self.players) > self.PAGE:
+            prev = disnake.ui.Button(label="◀ Игроки", row=4, disabled=self.page == 0)
+            prev.callback = self._on_prev
+            self.add_item(prev)
+            nxt = disnake.ui.Button(label="Игроки ▶", row=4, disabled=(self.page + 1) * self.PAGE >= len(self.players))
+            nxt.callback = self._on_next
+            self.add_item(nxt)
+        return self
+
+    async def _on_kind(self, interaction: disnake.MessageInteraction):
+        self.kind = interaction.values[0]
+        await interaction.response.edit_message(view=self._build())
+
+    async def _on_event(self, interaction: disnake.MessageInteraction):
+        self.event_id = int(interaction.values[0])
+        await interaction.response.edit_message(view=self._build())
+
+    async def _on_player(self, interaction: disnake.MessageInteraction):
+        self.member_id = interaction.values[0]
+        await interaction.response.edit_message(view=self._build())
+
+    async def _on_prev(self, interaction: disnake.MessageInteraction):
+        self.page -= 1
+        await interaction.response.edit_message(view=self._build())
+
+    async def _on_next(self, interaction: disnake.MessageInteraction):
+        self.page += 1
+        await interaction.response.edit_message(view=self._build())
+
+    async def _on_show(self, interaction: disnake.MessageInteraction):
+        if self._needs_player() and not self.member_id:
+            await interaction.response.send_message("Выберите игрока.", ephemeral=True)
             return
-
-        per_event = []
-        for event_id, _ in events:
-            row = database.get_tb_player_detail(event_id, player_id)
-            if row:
-                zone_data_json, global_totals_json, round_totals_json, raw_keys_json = row
-                per_event.append({
-                    "zone_data": json.loads(zone_data_json),
-                    "global_totals": json.loads(global_totals_json),
-                    "round_totals": json.loads(round_totals_json),
-                    "raw_keys": json.loads(raw_keys_json),
-                })
-            else:
-                per_event.append(None)
-
-        if all(e is None for e in per_event):
-            await inter.edit_original_message(f"{name} не участвовал ни в одной из сохранённых последних ТБ.")
+        await interaction.response.defer()
+        event = next(e for e in self.events if e[0] == self.event_id)
+        name = next((n for mid, n, _ in self.players if mid == self.member_id), None)
+        title, text = self.cog.build_tb_report(self.guild_id, self.kind, event, self.member_id, name)
+        if title is None:
+            self.last = None
+            await interaction.edit_original_message(content=f"{self.header()}\n\n⚠️ {text}", embed=None,
+                                                    attachments=[], view=self._build())
             return
+        filename = f"tb_{self.kind}.txt"
+        self.last = (title, text, filename)
+        await interaction.edit_original_message(
+            content=f"{self.header()}\n\n**{title}** — файл ниже.", embed=None,
+            file=_report_file(text, filename), attachments=[], view=self._build(),
+        )
 
-        planet_maps = [database.get_tb_event_planet_names(event_id) for event_id, _ in events]
-        report = self._format_tb_player_compare_report(name, events, per_event, planet_maps)
-        await self.send_as_file(inter.channel, report, f"tb_compare_{name}.txt")
-        embed = disnake.Embed(title=f"📊 Сравнение по ТБ: {name}", color=0x9b59b6)
-        embed.set_footer(text="Полная детализация отправлена файлом.")
-        await inter.edit_original_message(embed=embed)
+    async def _on_publish(self, interaction: disnake.MessageInteraction):
+        if not self.last:
+            await interaction.response.defer()
+            return
+        title, text, filename = self.last
+        try:
+            await interaction.channel.send(content=f"**{title}**", file=_report_file(text, filename))
+        except disnake.Forbidden:
+            await interaction.response.send_message("❌ У бота нет права писать в этот канал.", ephemeral=True)
+            return
+        await interaction.response.send_message("✅ Отчёт опубликован в канале.", ephemeral=True)
+
+
+def _report_file(text: str, filename: str) -> disnake.File:
+    return disnake.File(io.BytesIO(text.encode("utf-8")), filename=filename)
 
 
 def setup(bot: commands.Bot):

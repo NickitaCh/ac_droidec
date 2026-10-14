@@ -112,14 +112,6 @@ async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
     return sorted(phases)
 
 
-async def autocomplete_tb_plans(inter: disnake.ApplicationCommandInteraction, user_input: str):
-    guild_id = guild_resolver.resolve_guild_id(inter.author)
-    if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-        return []
-    user_input = (user_input or "").lower()
-    return [p["name"] for p in database.get_tb_saved_plans(guild_id) if user_input in p["name"].lower()][:25]
-
-
 class TBOrderImage(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -133,7 +125,7 @@ class TBOrderImage(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         ссылка: str = commands.Param(description="Ссылка на тред с картинкой Strategy Summary в первом сообщении"),
-        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план выбрать"),
+        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план"),
         звёзды: int = commands.Param(description="Total Stars с картинки — для проверки, что распознано верно"),
         принудительно: bool = commands.Param(
             default=False,
@@ -272,81 +264,36 @@ class TBOrderImage(commands.Cog):
         await inter.edit_original_response(
             f"{warning}✅ Опубликовано 6 сообщений в тред «{thread.name}».\n"
             f"💾 План сохранён как «{название}» ({total} ★) — выбрать его для ежедневной публикации: "
-            f"`/тб_план выбрать`."
+            f"`/тб_план`."
             f"{autofill_note}"
         )
 
 
-    # ------------------ Управление сохранёнными планами ------------------
-    @commands.slash_command(name="тб_план", description="Управление сохранёнными планами ордера ТБ")
+    # ------------------ /тб_план — панель (2026-10-14) ------------------
+    # Одна команда без параметров вместо 6 подкоманд: в сообщении — список планов,
+    # выпадашки «план» и «этап», кнопки действий. Ответы на действия — отдельными
+    # скрытыми сообщениями, сама панель обновляется на месте.
+    @commands.slash_command(name="тб_план", description="Планы ордера ТБ: выбрать активный, предпросмотр, взводы, сохранить ветку")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
-    async def tb_plan_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    @tb_plan_group.sub_command(name="список", description="Список сохранённых планов ордера ТБ")
-    async def tb_plan_list(self, inter: disnake.ApplicationCommandInteraction):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            guild_id = None
-        plans = database.get_tb_saved_plans(guild_id)
-        if not plans:
-            await inter.response.send_message(
-                "Сохранённых планов пока нет — соберите ордер через `/тб_ордер_из_картинки`.", ephemeral=True
-            )
-            return
-        guild_cfg = database.get_guild_config(guild_id) or {}
-        active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
-        lines = []
-        for p in plans:
-            mark = " — 🟢 активен" if p["id"] == active_id else ""
-            lines.append(f"**{p['name']}** — {p['total_stars']} ★, <#{p['thread_id']}>{mark}")
-        await inter.response.send_message("\n".join(lines), ephemeral=True)
-
-    @tb_plan_group.sub_command(
-        name="предпросмотр",
-        description="Показать, что сейчас распознаётся для всех 6 этапов плана — без публикации в канал",
-    )
-    async def tb_plan_preview(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        название: str = commands.Param(default=None, description="План — по умолчанию текущий активный", autocomplete=autocomplete_tb_plans),
-    ):
+    async def tb_plan_panel(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
         guild_id = guild_resolver.resolve_guild_id(inter.author)
         if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
             await inter.edit_original_response("❌ Не удалось определить гильдию, либо функция плана/ордера ТБ отключена для неё.")
             return
+        view = TBPlanPanel(self, guild_id, inter)
+        await inter.edit_original_response(content=view.render(), view=view.build())
 
-        if название:
-            plan = database.get_tb_saved_plan_by_name(guild_id, название)
-            if plan is None:
-                await inter.edit_original_response(f"❌ План «{название}» не найден.")
-                return
-        else:
-            guild_cfg = database.get_guild_config(guild_id) or {}
-            if not guild_cfg.get("tb_active_plan_id"):
-                await inter.edit_original_response(
-                    "❌ Нет активного плана — укажите название или выберите его через `/тб_план выбрать`."
-                )
-                return
-            plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
-            if plan is None:
-                await inter.edit_original_response("❌ Активный план не найден (возможно, удалён) — укажите название явно.")
-                return
-
+    async def plan_preview_chunks(self, plan: dict) -> list[str]:
         thread_id = int(plan["thread_id"])
         try:
             thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
         except disnake.NotFound:
-            await inter.edit_original_response("❌ Ветка плана не найдена — возможно, удалена.")
-            return
+            return ["❌ Ветка плана не найдена — возможно, удалена."]
         except disnake.Forbidden:
-            await inter.edit_original_response("❌ Нет доступа к ветке плана.")
-            return
-
+            return ["❌ Нет доступа к ветке плана."]
         messages = await fetch_tb_order_source_messages(self.bot, thread_id)
-        blocks = []
-        missing = []
+        blocks, missing = [], []
         for phase in range(1, 7):
             block = extract_tb_order_block(messages, str(phase))
             if block:
@@ -354,162 +301,208 @@ class TBOrderImage(commands.Cog):
             else:
                 missing.append(phase)
                 blocks.append(f"**— Этап {phase} —**\n⚠️ не нашёл в ветке")
-
         status = f"⚠️ Не хватает этапов: {', '.join(map(str, missing))}" if missing else "✅ Все 6 этапов найдены."
         header = (
             f"🔍 Предпросмотр плана «{plan['name']}» (<#{thread.id}>) — так уйдёт в канал ежедневным "
             f"автоордером, публикации в канал не было.\n{status}\n\n"
         )
-        chunks = chunk_tb_order_message(header + "\n\n".join(blocks))
-        await inter.edit_original_response(chunks[0])
-        for c in chunks[1:]:
-            await inter.followup.send(c, ephemeral=True)
+        return chunk_tb_order_message(header + "\n\n".join(blocks))
 
-    @tb_plan_group.sub_command(
-        name="выбрать", description="Выбрать план, из которого будет постится ежедневный ордер ТБ"
-    )
-    async def tb_plan_select(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
-    ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            guild_id = None
-        plan = database.get_tb_saved_plan_by_name(guild_id, название)
-        if plan is None:
-            await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
-            return
-        database.update_guild_config(guild_id, tb_active_plan_id=plan["id"])
-        reply = (
-            f"✅ Активный план ордера ТБ: «{plan['name']}» ({plan['total_stars']} ★, <#{plan['thread_id']}>). "
-            "Ежедневная публикация будет брать текст этапов из этой ветки."
-        )
-        warning = config_warning_text(database.get_guild_config(guild_id), "tb_plan_order")
-        if warning:
-            reply += f"\n{warning}"
-        await inter.response.send_message(reply, ephemeral=True)
-
-    @tb_plan_group.sub_command(
-        name="сохранить",
-        description="Сохранить как план уже готовую ветку с ордером на 6 этапов (например, дописанную вручную)",
-    )
-    async def tb_plan_save_manual(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        ссылка: str = commands.Param(description="Ссылка на тред, где уже есть ордер на все 6 этапов"),
-        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план выбрать"),
-        звёзды: int = commands.Param(description="Total Stars по этому плану — для списка планов"),
-    ):
-        await inter.response.defer(ephemeral=True)
-
-        channel_id = extract_channel_id(ссылка)
+    async def save_thread_plan(self, guild_id: int, link: str, name: str, stars: int, author_id: int) -> str:
+        """Регистрирует готовую ветку как план — с проверкой, что в ней есть все 6 этапов."""
+        channel_id = extract_channel_id(link)
         if channel_id is None:
-            await inter.edit_original_response("❌ Не удалось распознать ссылку на тред.")
-            return
-
+            return "❌ Не удалось распознать ссылку на тред."
         try:
             thread = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         except disnake.NotFound:
-            await inter.edit_original_response("❌ Тред не найден — проверьте ссылку.")
-            return
+            return "❌ Тред не найден — проверьте ссылку."
         except disnake.Forbidden:
-            await inter.edit_original_response("❌ Нет доступа к этому треду.")
-            return
-
+            return "❌ Нет доступа к этому треду."
         posted_phases = await _find_posted_phases_any_author(thread)
         if posted_phases != [1, 2, 3, 4, 5, 6]:
             missing = sorted(set(range(1, 7)) - set(posted_phases))
             found = ", ".join(map(str, posted_phases)) or "ни одного"
-            await inter.edit_original_response(
+            return (
                 f"⚠️ В треде нашлись заголовки этапов: {found}. Не хватает: {', '.join(map(str, missing))}. "
                 "План не сохранён — в треде должен быть текст ордера на все 6 этапов "
                 "(в каждом сообщении должен быть виден номер этапа, например «1 этап» или «этап 1»)."
             )
-            return
+        database.save_tb_plan(guild_id, name, thread.id, stars, created_by=str(author_id))
+        return f"💾 План сохранён как «{name}» ({stars} ★, <#{thread.id}>)."
 
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            guild_id = None
-        database.save_tb_plan(guild_id, название, thread.id, звёзды, created_by=str(inter.author.id))
-        await inter.edit_original_response(
-            f"💾 План сохранён как «{название}» ({звёзды} ★, <#{thread.id}>) — выбрать его для ежедневной "
-            f"публикации: `/тб_план выбрать`."
-        )
 
-    @tb_plan_group.sub_command(
-        name="разослать_взводы",
-        description="Разослать назначенным игрокам их взводы на этап в личку Discord",
-    )
-    async def tb_plan_notify(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        этап: int = commands.Param(min_value=1, max_value=6, description="Номер этапа (1-6)"),
-        название: str = commands.Param(default=None, description="План — по умолчанию текущий активный", autocomplete=autocomplete_tb_plans),
-    ):
-        await inter.response.defer(ephemeral=True)
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is None or not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            await inter.edit_original_response("❌ Не удалось определить гильдию, либо функция плана/ордера ТБ отключена для неё.")
-            return
+class TBPlanPanel(disnake.ui.View):
+    def __init__(self, cog, guild_id: int, inter: disnake.ApplicationCommandInteraction):
+        super().__init__(timeout=840)  # токен ответа на команду живёт 15 минут
+        self.cog = cog
+        self.guild_id = guild_id
+        self.inter = inter
+        self.author_id = inter.author.id
+        self.stage = 1
+        self.confirm_delete = None
+        self.plan_id = None
+        self._load()
 
-        if название:
-            plan = database.get_tb_saved_plan_by_name(guild_id, название)
-            if plan is None:
-                await inter.edit_original_response(f"❌ План «{название}» не найден.")
-                return
-        else:
-            guild_cfg = database.get_guild_config(guild_id) or {}
-            if not guild_cfg.get("tb_active_plan_id"):
-                await inter.edit_original_response(
-                    "❌ Нет активного плана — укажите название или выберите его через `/тб_план выбрать`."
-                )
-                return
-            plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
-            if plan is None:
-                await inter.edit_original_response("❌ Активный план не найден (возможно, удалён) — укажите название явно.")
-                return
+    def _load(self):
+        self.plans = database.get_tb_saved_plans(self.guild_id)
+        cfg = database.get_guild_config(self.guild_id) or {}
+        self.active_id = int(cfg["tb_active_plan_id"]) if cfg.get("tb_active_plan_id") else None
+        ids = [p["id"] for p in self.plans]
+        if self.plan_id not in ids:
+            self.plan_id = self.active_id if self.active_id in ids else (ids[0] if ids else None)
 
-        rows = await tb_platoon_notify.build_player_rows(guild_id, plan, этап)
+    def _plan(self):
+        return next((p for p in self.plans if p["id"] == self.plan_id), None)
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        return interaction.author.id == self.author_id
+
+    def render(self) -> str:
+        if not self.plans:
+            return ("🗺️ **Планы ордера ТБ** — сохранённых планов пока нет. Соберите ордер командой "
+                    "`/тб_ордер_из_картинки` (или на сайте, /tb/order-plans) либо сохраните готовую ветку кнопкой ниже.")
+        lines = ["🗺️ **Планы ордера ТБ** — активный план бот публикует по этапам в канал плана ТБ."]
+        for p in self.plans[:25]:
+            mark = " — 🟢 **активный**" if p["id"] == self.active_id else ""
+            lines.append(f"• **{p['name']}** — {p['total_stars']} ★, <#{p['thread_id']}>{mark}")
+        if len(self.plans) > 25:
+            lines.append(f"…и ещё {len(self.plans) - 25} — удалите старые, в списке помещается 25.")
+        return "\n".join(lines)
+
+    def build(self):
+        self.clear_items()
+        has_plans = bool(self.plans)
+        if has_plans:
+            plan_select = disnake.ui.Select(
+                placeholder="План", row=0,
+                options=[disnake.SelectOption(label=p["name"][:100], value=str(p["id"]),
+                                              description=f"{p['total_stars']} ★" + (" · активный" if p["id"] == self.active_id else ""),
+                                              default=p["id"] == self.plan_id)
+                         for p in self.plans[:25]],
+            )
+            plan_select.callback = self._on_plan
+            self.add_item(plan_select)
+            stage_select = disnake.ui.Select(
+                placeholder="Этап (для рассылки взводов)", row=1,
+                options=[disnake.SelectOption(label=f"Этап {n}", value=str(n), default=n == self.stage) for n in range(1, 7)],
+            )
+            stage_select.callback = self._on_stage
+            self.add_item(stage_select)
+
+        buttons = []
+        if has_plans:
+            buttons += [
+                ("Сделать активным", disnake.ButtonStyle.success, self._on_activate, 2, self.plan_id == self.active_id),
+                ("Предпросмотр", disnake.ButtonStyle.secondary, self._on_preview, 2, False),
+                ("Разослать взводы", disnake.ButtonStyle.primary, self._on_notify, 2, False),
+            ]
+            plan = self._plan()
+            delete_label = (f"Точно удалить «{plan['name']}»?"[:80] if self.confirm_delete == self.plan_id and plan else "Удалить")
+            buttons.append((delete_label, disnake.ButtonStyle.danger, self._on_delete, 3, False))
+        buttons.append(("➕ Сохранить ветку", disnake.ButtonStyle.secondary, self._on_save, 3, False))
+        for label, style, callback, row, disabled in buttons:
+            button = disnake.ui.Button(label=label, style=style, row=row, disabled=disabled)
+            button.callback = callback
+            self.add_item(button)
+        return self
+
+    async def refresh(self):
+        self._load()
+        await self.inter.edit_original_response(content=self.render(), view=self.build())
+
+    async def _on_plan(self, interaction: disnake.MessageInteraction):
+        self.plan_id = int(interaction.values[0])
+        self.confirm_delete = None
+        await interaction.response.edit_message(content=self.render(), view=self.build())
+
+    async def _on_stage(self, interaction: disnake.MessageInteraction):
+        self.stage = int(interaction.values[0])
+        await interaction.response.edit_message(view=self.build())
+
+    async def _on_activate(self, interaction: disnake.MessageInteraction):
+        plan = self._plan()
+        database.update_guild_config(self.guild_id, tb_active_plan_id=plan["id"])
+        self._load()
+        await interaction.response.edit_message(content=self.render(), view=self.build())
+        warning = config_warning_text(database.get_guild_config(self.guild_id), "tb_plan_order")
+        await interaction.followup.send(
+            f"✅ Активный план: «{plan['name']}» — ежедневная публикация берёт этапы из этой ветки."
+            + (f"\n{warning}" if warning else ""), ephemeral=True)
+
+    async def _on_preview(self, interaction: disnake.MessageInteraction):
+        await interaction.response.defer(ephemeral=True)
+        for chunk in await self.cog.plan_preview_chunks(self._plan()):
+            await interaction.followup.send(chunk, ephemeral=True)
+
+    async def _on_notify(self, interaction: disnake.MessageInteraction):
+        await interaction.response.defer(ephemeral=True)
+        plan = self._plan()
+        rows = await tb_platoon_notify.build_player_rows(self.guild_id, plan, self.stage)
         if not rows:
-            await inter.edit_original_response(f"На этапе {этап} плана «{plan['name']}» никому не назначено ни одного слота.")
+            await interaction.followup.send(f"На этапе {self.stage} плана «{plan['name']}» никому не назначено ни одного слота.", ephemeral=True)
             return
-
         eligible = [r for r in rows if r["discord_id"]]
         skipped = [r for r in rows if not r["discord_id"]]
         if not eligible:
-            await inter.edit_original_response(
-                f"На этапе {этап} назначено {len(rows)} игрок(ов), но ни у кого из них нет привязки Discord "
-                f"(`/регистрация`) — рассылка невозможна."
-            )
+            await interaction.followup.send(
+                f"На этапе {self.stage} назначено {len(rows)} игрок(ов), но ни у кого из них нет привязки Discord "
+                f"(`/регистрация`) — рассылка невозможна.", ephemeral=True)
             return
-
-        summary = f"Этап {этап}, план «{plan['name']}» — получат сообщение: {len(eligible)} игрок(ов)."
+        summary = f"Этап {self.stage}, план «{plan['name']}» — получат сообщение: {len(eligible)} игрок(ов)."
         if skipped:
             summary += f" Без привязки Discord (пропущены всегда): {len(skipped)}."
         summary += "\nМожно исключить конкретных игроков из выпадающих списков ниже — например тех, кто уже задонатил."
+        await interaction.followup.send(summary, view=PlatoonNotifyView(self.guild_id, plan, self.stage, rows), ephemeral=True)
 
-        view = PlatoonNotifyView(guild_id, plan, этап, rows)
-        await inter.edit_original_response(content=summary, view=view)
-
-    @tb_plan_group.sub_command(name="удалить", description="Удалить сохранённый план ордера ТБ")
-    async def tb_plan_delete(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        название: str = commands.Param(description="Название сохранённого плана", autocomplete=autocomplete_tb_plans),
-    ):
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            guild_id = None
-        deleted = database.delete_tb_saved_plan(guild_id, название)
-        if not deleted:
-            await inter.response.send_message(f"❌ План «{название}» не найден.", ephemeral=True)
+    async def _on_delete(self, interaction: disnake.MessageInteraction):
+        plan = self._plan()
+        if self.confirm_delete != self.plan_id:
+            self.confirm_delete = self.plan_id
+            await interaction.response.edit_message(view=self.build())
             return
-        await inter.response.send_message(f"🗑️ План «{название}» удалён.", ephemeral=True)
+        database.delete_tb_saved_plan(self.guild_id, plan["name"])
+        self.confirm_delete = None
+        self._load()
+        await interaction.response.edit_message(content=self.render(), view=self.build())
+        await interaction.followup.send(f"🗑️ План «{plan['name']}» удалён.", ephemeral=True)
+
+    async def _on_save(self, interaction: disnake.MessageInteraction):
+        await interaction.response.send_modal(SaveTBPlanModal(self))
+
+
+class SaveTBPlanModal(disnake.ui.Modal):
+    def __init__(self, panel: TBPlanPanel):
+        self.panel = panel
+        super().__init__(title="Сохранить ветку как план", components=[
+            disnake.ui.TextInput(label="Ссылка на ветку с ордером на 6 этапов", custom_id="link",
+                                 placeholder="https://discord.com/channels/…/…", max_length=200),
+            disnake.ui.TextInput(label="Название плана", custom_id="name", max_length=80),
+            disnake.ui.TextInput(label="Total Stars по плану", custom_id="stars", max_length=3, placeholder="например 44"),
+        ])
+
+    async def callback(self, interaction: disnake.ModalInteraction):
+        await interaction.response.defer(ephemeral=True)
+        values = interaction.text_values
+        stars_raw = values["stars"].strip()
+        if not stars_raw.isdigit():
+            await interaction.followup.send("❌ Total Stars — целое число.", ephemeral=True)
+            return
+        name = values["name"].strip()
+        if not name:
+            await interaction.followup.send("❌ Название не может быть пустым.", ephemeral=True)
+            return
+        message = await self.panel.cog.save_thread_plan(self.panel.guild_id, values["link"], name, int(stars_raw),
+                                                         interaction.author.id)
+        await interaction.followup.send(message, ephemeral=True)
+        try:
+            await self.panel.refresh()
+        except disnake.HTTPException:
+            pass  # панель старше 15 минут — сам план уже сохранён
 
 
 # =====================================================================
-# Окно выбора получателей перед рассылкой взводов в личку (/тб_план разослать_взводы) —
+# Окно выбора получателей перед рассылкой взводов в личку (/тб_план → «Разослать взводы») —
 # по прямому запросу пользователя 2026-09-14: "окно, где можно указать, кому отправить
 # или кому НЕ отправлять, например при повторной отправке не тем, кто уже задонатил".
 # Бот не знает, кто реально уже задонатил в игре (Comlink это не отдаёт надёжно) —
