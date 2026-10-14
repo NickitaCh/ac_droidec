@@ -1,6 +1,4 @@
 import asyncio
-import re
-import uuid
 import disnake
 from disnake.ext import commands, tasks
 from datetime import datetime
@@ -11,7 +9,6 @@ from services import feature_flags
 from services.units_sync import sync_units
 from services import journey_guide
 from services.equipment_sync import sync_equipment
-from services.config_status import config_warning_text
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
 from cogs.datacron_requirements import DATACRON_LIST_COLOR, _lines_to_embeds
@@ -25,66 +22,6 @@ async def units_autocomplete(inter: disnake.ApplicationCommandInteraction, strin
     """Ищет персонажей/корабли в локальном справочнике game_units (глобальный, не per-guild)"""
     rows = database.search_game_units(string)
     return [f"{name} [{bid}]" for bid, name in rows]
-
-
-def _parse_unit_base_id(unit_field: str) -> str:
-    m = re.search(r"\[(.*?)\]", unit_field or "")
-    return m.group(1) if m else (unit_field or "").strip().upper()
-
-
-def _parse_deadline_input(text: str) -> str | None:
-    """Дедлайн вводится вручную датой (не количеством дней, см. Discord-тред "Гайд
-    по АС Боту", 2026-09-04) — принимает ГГГГ-ММ-ДД или ДД.ММ.ГГГГ, возвращает ISO-
-    строку для хранения или None, если формат не распознан/дата в прошлом."""
-    text = (text or "").strip()
-    parsed = None
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
-        try:
-            parsed = datetime.strptime(text, fmt).date()
-            break
-        except ValueError:
-            continue
-    if parsed is None or parsed < datetime.now().date():
-        return None
-    return parsed.strftime("%Y-%m-%d")
-
-
-async def autocomplete_task_target_value(inter: disnake.ApplicationCommandInteraction, string: str):
-    """Для звёзд/реликвии значение вводится вручную (число) — автокомплит не нужен.
-    Для омикрона нельзя просто ввести число: у юнита может быть больше одного омикрона,
-    и аудит должен знать, ЗА КАКУЮ КОНКРЕТНО способность проверять tier (см. баг, из-за
-    которого омикрон-задачи раньше не завершались никогда — cogs/tasks.py::tasks_audit_loop).
-    Поэтому при тип_цели=omicron подсказывает конкретные омикроны выбранного юнита, а
-    сохраняется реальный skill_id (не название)."""
-    if inter.filled_options.get("тип_цели") != "omicron":
-        return []
-    unit_field = inter.filled_options.get("юнит")
-    if not unit_field:
-        return ["⚠️ Сначала выберите юнита"]
-    base_id = _parse_unit_base_id(unit_field)
-    skill_ids = database.get_all_unit_omicron_skills().get(base_id, [])
-    if not skill_ids:
-        return ["❌ У этого юнита нет омикрона"]
-    info = database.get_skill_display_info(skill_ids)
-    search = string.lower().strip()
-    options = []
-    for skill_id in skill_ids:
-        name, _ability_id, ability_type, _omicron_mode = info.get(skill_id, (skill_id, None, None, None))
-        label = f"{name or skill_id}" + (f" ({ability_type})" if ability_type else "")
-        if not search or search in label.lower():
-            options.append(disnake.OptionChoice(name=label[:100], value=skill_id))
-    return options[:25]
-
-
-async def autocomplete_journey_guide(inter: disnake.ApplicationCommandInteraction, string: str):
-    """Цели «Руководства» (ГЛ / флагманы / путешествия) из справочника journey_guide."""
-    search = string.lower().strip()
-    options = []
-    for g in journey_guide.guide_options():
-        label = f"{g['name']} — {g['kind_label']} ({g['count']})"
-        if not search or search in label.lower() or search in g["base_id"].lower():
-            options.append(disnake.OptionChoice(name=label[:100], value=g["base_id"]))
-    return options[:25]
 
 
 class TasksCog(commands.Cog):
@@ -406,205 +343,9 @@ class TasksCog(commands.Cog):
     # =====================================================================
     # ГРУППА /задачи
     # =====================================================================
-    @commands.slash_command(name="задачи", description="Постановка и проверка задач на прокачку")
+    @commands.slash_command(name="задачи", description="Прогресс по задачам на прокачку (постановка — на сайте)")
     async def tasks_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
-
-    @tasks_group.sub_command(name="добавить", description="Поставить задачу игроку на прокачку юнита")
-    async def task_add(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(desc="Выберите игрока", autocomplete=autocomplete_players),
-        юнит: str = commands.Param(desc="Выберите персонажа/корабль", autocomplete=units_autocomplete),
-        тип_цели: str = commands.Param(
-            desc="Критерий прокачки",
-            choices=[
-                disnake.OptionChoice(name="⭐ Звёзды (1-7)", value="stars"),
-                disnake.OptionChoice(name="♦️ Реликвия (0-10)", value="relic"),
-                disnake.OptionChoice(name="⚙️ Снаряжение (1-13)", value="gear"),
-                disnake.OptionChoice(name="🧬 Омикрон", value="omicron")
-            ]
-        ),
-        значение: str = commands.Param(
-            desc="Число для звёзд/реликвии/снаряжения, либо способность для омикрона — выберите из подсказки",
-            autocomplete=autocomplete_task_target_value,
-        ),
-        дедлайн: str = commands.Param(desc="Дата дедлайна: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ"),
-    ):
-        await inter.response.defer()
-
-        guild_id = await guild_resolver.require_feature(inter, "tasks")
-        if guild_id is None:
-            return
-
-        cache = self.bot.guild_roster_caches.get(guild_id, {})
-        ally_code = cache.get(игрок)
-
-        if not ally_code:
-            row = database.get_user_mapping_for_name(guild_id, игрок)
-            if row:
-                ally_code = row[0]
-
-        if not ally_code:
-            await inter.edit_original_response("❌ Ошибка: Не удалось определить Ally Code выбранного игрока.")
-            return
-
-        player_name = cache.get(ally_code, игрок)
-
-        base_id = _parse_unit_base_id(юнит)
-        unit_name = database.get_game_unit_name(base_id)
-        if not unit_name:
-            await inter.edit_original_response(f"❌ Юнит `{base_id}` не найден в справочнике.")
-            return
-
-        значение = значение.strip()
-        if тип_цели == "omicron":
-            valid_skills = database.get_all_unit_omicron_skills().get(base_id, [])
-            if значение not in valid_skills:
-                await inter.edit_original_response("❌ Для омикрона выберите конкретную способность из подсказки автокомплита (не свободный текст).")
-                return
-        elif not значение.isdigit():
-            await inter.edit_original_response("❌ Для звёзд/реликвии/снаряжения значение должно быть числом.")
-            return
-
-        deadline_date = _parse_deadline_input(дедлайн)
-        if deadline_date is None:
-            await inter.edit_original_response("❌ Некорректная или прошедшая дата. Формат: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.")
-            return
-
-        # Запрет дублей — если у игрока уже есть активная задача на этот же юнит
-        # (независимо от типа/значения цели), новую не ставим (решено 2026-09-04,
-        # Discord-тред "Гайд по АС Боту").
-        if database.get_active_task_for_unit(guild_id, ally_code, base_id):
-            await inter.edit_original_response(f"❌ Задача по юниту **{unit_name}** для **{player_name}** уже назначена.")
-            return
-
-        # Не создаём задачу, если цель уже выполнена на момент постановки (финальное
-        # решение в том же треде: "можно вообще задачу в список не добавлять, если
-        # условия по ней уже выполнены" / "зачем плодить сущности"). Comlink
-        # недоступен/юнит не в ростере — не блокируем постановку, просто без
-        # initial_value для отслеживания прогресса.
-        target_label = self._format_target_label(тип_цели, значение)
-        initial_value = None
-        unit_data = await self._fetch_unit_data(ally_code, base_id)
-        if unit_data is not None:
-            skill_thresholds = database.get_all_skill_tier_thresholds() if тип_цели == "omicron" else {}
-            if self._is_target_completed(unit_data, тип_цели, значение, skill_thresholds):
-                await inter.edit_original_response(
-                    f"❕ У **{player_name}** юнит **{unit_name}** уже соответствует цели ({target_label}) — задача не создана."
-                )
-                return
-            initial_value = self._current_progress_value(unit_data, тип_цели, значение)
-
-        database.add_task(ally_code, base_id, тип_цели, значение, deadline_date, str(inter.author.id),
-                           guild_id=guild_id, initial_value=initial_value)
-
-        embed = disnake.Embed(
-            title="🎯 Задача на прокачку успешно поставлена",
-            description=f"**Игрок:** {player_name} ({ally_code})\n"
-                        f"**Юнит:** {unit_name}\n\n"
-                        f"📊 **Цель:** {target_label}\n"
-                        f"⏱ **Срок:** до {deadline_date}",
-            color=disnake.Color.blue()
-        )
-        warning = config_warning_text(database.get_guild_config(guild_id), "tasks")
-        if warning:
-            embed.add_field(name="Внимание", value=warning, inline=False)
-
-        # Тег игрока — опционально по гильдии (запрос из офицерского чата GR
-        # 2026-09-20: "хочу видеть, что игрок увидел", но не всем гильдиям это нужно —
-        # AC оставляет выключенным, GR включает себе через /настройки задачи_модуль).
-        content = None
-        if feature_flags.is_enabled(guild_id, "tasks_mention"):
-            discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
-            if discord_id:
-                content = f"<@{discord_id}>"
-        await inter.edit_original_response(content=content, embed=embed, allowed_mentions=disnake.AllowedMentions(users=True))
-
-    @tasks_group.sub_command(name="руководство", description="Задачи на всех героев для ГЛ, флагмана или путешествия из «Руководства»")
-    async def task_add_guide(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        цель: str = commands.Param(desc="ГЛ / флагман / путешествие из «Руководства»", autocomplete=autocomplete_journey_guide),
-        игрок: str = commands.Param(desc="Выберите игрока", autocomplete=autocomplete_players),
-        дедлайн: str = commands.Param(desc="Дата дедлайна: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ"),
-    ):
-        await inter.response.defer()
-
-        guild_id = await guild_resolver.require_feature(inter, "tasks")
-        if guild_id is None:
-            return
-
-        requirements = database.get_journey_guide_requirements(цель, guild_id)
-        if not requirements:
-            await inter.edit_original_response("❌ Выберите цель из подсказки — для неё нет требований в справочнике.")
-            return
-
-        cache = self.bot.guild_roster_caches.get(guild_id, {})
-        ally_code = cache.get(игрок)
-        if not ally_code:
-            row = database.get_user_mapping_for_name(guild_id, игрок)
-            if row:
-                ally_code = row[0]
-        if not ally_code:
-            await inter.edit_original_response("❌ Ошибка: Не удалось определить Ally Code выбранного игрока.")
-            return
-        player_name = cache.get(ally_code, игрок)
-
-        deadline_date = _parse_deadline_input(дедлайн)
-        if deadline_date is None:
-            await inter.edit_original_response("❌ Некорректная или прошедшая дата. Формат: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.")
-            return
-
-        try:
-            player_data = await asyncio.to_thread(self.bot.comlink.get_player, ally_code)
-            roster = journey_guide.roster_index(player_data)
-        except Exception:
-            roster = None
-        plan = journey_guide.plan_player(guild_id, ally_code, requirements, roster)
-
-        batch_id = uuid.uuid4().hex[:12]
-        for unit_id, target_type, target_value, initial in plan["create"]:
-            database.add_task(ally_code, unit_id, target_type, target_value, deadline_date, str(inter.author.id),
-                              guild_id=guild_id, batch_id=batch_id, initial_value=initial)
-
-        all_ids = [r[0] for r in requirements] + [цель]
-        names = database.get_game_unit_names(all_ids)
-        goal = next((g for g in journey_guide.guide_options() if g["base_id"] == цель), {})
-        goal_name = goal.get("name", цель)
-        lines = [f"**Игрок:** {player_name} ({ally_code}) · **Срок:** до {deadline_date}", ""]
-        if goal.get("entry"):
-            lines.insert(1, "ℹ️ Квестов открытия у события нет — уровни взяты из условий входа в бои "
-                            "(или заданы гильдией на сайте, /tasks).")
-        if plan["create"]:
-            lines.append(f"🎯 **Поставлено: {len(plan['create'])}**")
-            for unit_id, target_type, target_value, initial in plan["create"]:
-                now = f" (сейчас {initial})" if initial is not None else " (не открыт)" if roster is not None else ""
-                lines.append(f"• {names.get(unit_id, unit_id)} — {journey_guide.short_label(target_type, target_value)}{now}")
-        else:
-            lines.append("Новых задач нет.")
-        if plan["done"]:
-            lines.append("")
-            lines.append(f"✅ Уже выполнено: {len(plan['done'])} — " + ", ".join(names.get(u, u) for u in plan["done"]))
-        if plan["duplicate"]:
-            lines.append(f"🔁 Уже есть задача: {len(plan['duplicate'])} — " + ", ".join(names.get(u, u) for u in plan["duplicate"]))
-        if roster is None:
-            lines.append("")
-            lines.append("⚠️ Данные игрока не загрузились — выполненное не отсеяно, задачи поставлены без снимка прогресса.")
-
-        embeds = _lines_to_embeds(f"📘 Руководство: {goal_name}", disnake.Color.blue(), lines)
-        warning = config_warning_text(database.get_guild_config(guild_id), "tasks")
-        if warning:
-            embeds[-1].add_field(name="Внимание", value=warning, inline=False)
-
-        content = None
-        if plan["create"] and feature_flags.is_enabled(guild_id, "tasks_mention"):
-            discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
-            if discord_id:
-                content = f"<@{discord_id}>"
-        await inter.edit_original_response(content=content, embed=embeds[0], allowed_mentions=disnake.AllowedMentions(users=True))
-        for e in embeds[1:]:
-            await inter.followup.send(embed=e)
 
     @tasks_group.sub_command(name="отчёт", description="Прогресс по своим задачам (чужие и по всей гильдии — 🔒 офицеры)")
     async def tasks_report(
@@ -713,17 +454,6 @@ class TasksCog(commands.Cog):
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:
             await inter.followup.send(embed=e)
-
-    @tasks_group.sub_command(name="синхронизировать_юниты", description="Принудительно обновить справочник персонажей/кораблей")
-    async def sync_units_cmd(self, inter: disnake.ApplicationCommandInteraction):
-        await inter.response.defer()
-        try:
-            total = await self._do_units_synchronization()
-            guide_rows = await journey_guide.sync_journey_guide(self.bot.comlink)
-            await inter.edit_original_response(
-                f"✅ Справочник успешно обновлен вручную! Записано юнитов: **{total}**, требований «Руководства»: **{guide_rows}**.")
-        except Exception as e:
-            await inter.edit_original_response(f"❌ Ошибка при обновлении: `{e}`")
 
 
 def setup(bot):

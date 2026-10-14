@@ -12,9 +12,8 @@
         </div>
     </section>
     <p class="muted">
-        Канала нет в списке? Зайдите в него на сервере Discord и напишите <code>/канал</code> —
-        бот запомнит его имя и ID, и он появится здесь. Либо впишите ID канала вручную в поле под
-        списком — бот сам его зарегистрирует, и дальше он будет и в списке тоже. Для роли всё ещё
+        В списке сначала каналы гильдии, ниже — все остальные каналы сервера. Ветки (треды) в список
+        не попадают: для них впишите ID вручную в поле под списком или напишите <code>/канал</code> прямо в ветке. Для роли всё ещё
         нужен голый ID (включите режим разработчика в Discord — Настройки пользователя → Расширенные
         — чтобы скопировать его правой кнопкой).
     </p>
@@ -69,9 +68,17 @@
                         {% elif row.kind == 'channel' %}
                             <select name="{{ row.field }}">
                                 <option value="" {% if not row.value %}selected{% endif %}>— не задано —</option>
-                                {% for opt in row.channel_options %}
+                                {% for opt in row.channel_options if opt.group != "server" %}
                                     <option value="{{ opt.id }}" {% if opt.id == row.value %}selected{% endif %}>{{ opt.label }}</option>
                                 {% endfor %}
+                                {% set server_opts = row.channel_options|selectattr("group", "equalto", "server")|list %}
+                                {% if server_opts %}
+                                    <optgroup label="Остальные каналы сервера">
+                                        {% for opt in server_opts %}
+                                            <option value="{{ opt.id }}" {% if opt.id == row.value %}selected{% endif %}>{{ opt.label }}</option>
+                                        {% endfor %}
+                                    </optgroup>
+                                {% endif %}
                             </select>
                             <input
                                 type="text"

@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
-from services import feature_flags, journey_guide
+from services import discord_rest, feature_flags, journey_guide
 from services.dashboard_data import task_status_badge
 from web.deps import require_officer_access
 
@@ -176,6 +176,28 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
     elif not target_value.isdigit():
         return "Для звёзд/реликвии/снаряжения значение должно быть числом."
     return None
+
+
+async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
+    """Тег игроков в канале задач о новых задачах — по флагу tasks_mention (включают
+    гильдии сами, у AC выключен). Раньше это делала Discord-команда /задачи добавить;
+    постановка теперь только на сайте (2026-10-14). Сбой отправки задачу не отменяет."""
+    if not lines_by_code or not feature_flags.is_enabled(guild_id, "tasks_mention"):
+        return
+    channel_id = (database.get_guild_config(guild_id) or {}).get("tasks_log_channel_id")
+    if not channel_id:
+        return
+    lines, mention_ids = [], []
+    for code, text in lines_by_code.items():
+        discord_id = database.get_discord_id_for_ally(code, guild_id=guild_id)
+        if discord_id:
+            mention_ids.append(str(discord_id))
+            lines.append(f"<@{discord_id}> — {text}")
+    try:
+        for chunk in discord_rest.chunk_lines("📝 Новые задачи на прокачку:", lines):
+            await discord_rest.send_message(str(channel_id), chunk, mention_ids)
+    except Exception as e:
+        print(f"⚠️ [web/tasks] Не удалось тегнуть игроков о новых задачах: {e}")
 
 
 def _validate_deadline(deadline: str) -> str | None:
@@ -463,6 +485,7 @@ async def task_add_bulk(
         comlink = None
 
     created, skipped_dup, skipped_done = 0, 0, 0
+    created_codes = []
     for code in valid_codes:
         # Дубль — уже есть активная задача на этот юнит для этого игрока (пропускаем
         # молча при массовой постановке, см. Ricardo 2026-09-04: "просто не добавлять
@@ -486,6 +509,10 @@ async def task_add_bulk(
         database.add_task(code, base_id, target_type, target_value, deadline, str(user["discord_id"]),
                            guild_id=guild_id, batch_id=batch_id, initial_value=initial_value)
         created += 1
+        created_codes.append(code)
+
+    target_text = f"{unit_name}: {_target_label(target_type, target_value)}, срок до {deadline}"
+    await _mention_new_tasks(guild_id, {code: target_text for code in created_codes})
 
     parts = [f"поставлено: {created}"]
     if skipped_dup:
@@ -610,14 +637,20 @@ async def task_add_guide(
 
     plans = await _guide_plans(guild_id, valid_codes, requirements)
     batch_id = uuid.uuid4().hex[:12]
+    guide_name = database.get_game_unit_name(guide) or guide
+    mention_lines = {}
     created = done = duplicate = 0
     for code, plan in plans.items():
         for unit_id, target_type, target_value, initial in plan["create"]:
             database.add_task(code, unit_id, target_type, target_value, deadline, str(user["discord_id"]),
                               guild_id=guild_id, batch_id=batch_id, initial_value=initial)
         created += len(plan["create"])
+        if plan["create"]:
+            mention_lines[code] = (f"«Руководство» {guide_name}: задач {len(plan['create'])}, "
+                                   f"срок до {deadline}")
         done += len(plan["done"])
         duplicate += len(plan["duplicate"])
+    await _mention_new_tasks(guild_id, mention_lines)
 
     parts = [f"поставлено: {created}"]
     if duplicate:

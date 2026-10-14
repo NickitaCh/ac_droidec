@@ -19,6 +19,28 @@
         {% endif %}
     {% endcall %}
 
+    {% if guides_sync %}
+        <div class="panel tw-guides-sync">
+            <div class="panel-title"><span>База контр из форума гайдов</span></div>
+            <p class="muted">
+                {% if guides_sync.pending %}
+                    ⏳ Синхронизация запрошена — бот выполнит её в течение минуты, страница обновится сама.
+                {% elif guides_sync.result.error %}
+                    ❌ Последний запуск ({{ guides_sync.result.finished_text or "—" }}): {{ guides_sync.result.error }}
+                {% elif guides_sync.result.finished_text %}
+                    Обновлено {{ guides_sync.result.finished_text }}: тредов {{ guides_sync.result.threads }}, сообщений {{ guides_sync.result.messages }}, распознано {{ guides_sync.result.parsed_ok }}{% if guides_sync.result.parsed_fail %}, не распознано {{ guides_sync.result.parsed_fail }}{% endif %}{% if guides_sync.result.removed %}, удалено устаревших {{ guides_sync.result.removed }}{% endif %}.
+                    {% if guides_sync.result.suspect_partial %}<br>⚠️ Похоже, обработаны не все треды — запустите ещё раз.{% endif %}
+                {% else %}
+                    Бот обновляет базу сам раз в 6 часов. Новый гайд в форуме попадёт в /вг_ордер после синхронизации.
+                {% endif %}
+            </p>
+            <form method="post" action="/tw/guides-sync">
+                <button type="submit"{% if guides_sync.pending %} disabled{% endif %}>🔄 Синхронизировать сейчас</button>
+            </form>
+            {% if guides_sync.pending %}<script>setTimeout(() => location.reload(), 10000);</script>{% endif %}
+        </div>
+    {% endif %}
+
     {% if not rows %}
         <p class="empty-state">История ВГ пока пуста — бот сохраняет её из данных Comlink каждые 5 минут, первая запись появится после ближайшего опроса.</p>
     {% else %}

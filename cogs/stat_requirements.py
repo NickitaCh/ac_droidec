@@ -1267,41 +1267,6 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
     return options[:25]
 
 
-async def autocomplete_omicron_phrase_character(inter: disnake.ApplicationCommandInteraction, string: str):
-    rows = database.get_all_omicron_phrases()
-    if not rows:
-        return ["❌ Список пуст — фразы ещё не заданы."]
-    search = string.lower().strip()
-    options = []
-    seen = set()
-    for _, base_id, _skill_id, _phrase, _, _ in rows:
-        if base_id in seen:
-            continue
-        seen.add(base_id)
-        label = f"{_unit_display_name(base_id)} [{base_id}]"
-        if not search or search in label.lower():
-            options.append(disnake.OptionChoice(name=label[:100], value=label))
-    return options[:25]
-
-
-async def autocomplete_omicron_capable_character(inter: disnake.ApplicationCommandInteraction, string: str):
-    """Только персонажи/корабли, у которых омикрон реально существует В ИГРЕ (game_units.
-    has_omicron, обновляется в services/units_sync.py::sync_units из Comlink
-    SkillDefinitions) — не привязано к тому, разблокировал ли его кто-то в этой
-    конкретной гильдии (могли ещё не выдать), и не весь справочник game_units, где
-    омикрона у большинства юнитов нет вовсе."""
-    rows = database.get_all_omicron_capable_units()
-    if not rows:
-        return ["❌ Пока нет данных — справочник юнитов ещё не синхронизировался."]
-    search = string.lower().strip()
-    options = []
-    for base_id, name in rows:
-        label = f"{name} [{base_id}]"
-        if not search or search in label.lower():
-            options.append(disnake.OptionChoice(name=label[:100], value=label))
-    return options[:25]
-
-
 # Кнопка «Показать всем» на скрытых (ephemeral) отчётах этого модуля — по образцу
 # cogs/datacron_requirements.py::DatacronCheckRevealView (тот же паттерн, что и там:
 # небольшое локальное дублирование класса вместо общего импорта — уже устоявшаяся
@@ -1529,77 +1494,6 @@ class StatRequirementsCog(commands.Cog):
                         database.mark_activity_event_announced(event_id)
                     except Exception as e:
                         print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
-
-    # ------------------ /омикрон_текст (автообъявления о выдаче омикронов) ------------------
-    # Сама выдача детектится автоматически в player_units_sync_loop/_announce_omicrons
-    # (сравнение снимков ростера, см. services/activity_diff.py) — эти команды только
-    # настраивают канал и фразы-приписки к нему, ничего не публикуют напрямую.
-    @commands.slash_command(name="омикрон_текст", description="Настройка автообъявлений о выдаче омикронов")
-    async def omicron_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    @omicron_group.sub_command(name="канал", description="Задать канал, куда бот пишет объявления о выдаче омикронов")
-    async def omicron_channel_set(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        канал: disnake.TextChannel = commands.Param(description="Канал для объявлений"),
-    ):
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
-        database.update_guild_config(guild_id, omicron_channel_id=str(канал.id))
-        await inter.response.send_message(f"✅ Объявления о выдаче омикронов теперь идут в {канал.mention}.", ephemeral=True)
-
-    @omicron_group.sub_command(name="фраза", description="Задать/обновить фразу-приписку для омикрона персонажа")
-    async def omicron_phrase_set(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_omicron_capable_character),
-        текст: str = commands.Param(description="Текст, который бот допишет после шаблонного объявления"),
-    ):
-        base_id = _parse_bracket_id(персонаж)
-        char_name = _unit_display_name(base_id)
-        текст = текст.strip()
-        database.set_omicron_phrase(base_id, текст, str(inter.author.id))
-        reply = f"✅ Фраза для омикрона «{char_name}» сохранена: {текст}"
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        warning = config_warning_text(database.get_guild_config(guild_id) if guild_id else None, "omicron")
-        if warning:
-            reply += f"\n{warning}"
-        await inter.response.send_message(reply, ephemeral=True)
-
-    @omicron_group.sub_command(name="удалить_фразу", description="Убрать фразу-приписку для омикрона персонажа")
-    async def omicron_phrase_delete(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        персонаж: str = commands.Param(description="Персонаж", autocomplete=autocomplete_omicron_phrase_character),
-    ):
-        base_id = _parse_bracket_id(персонаж)
-        char_name = _unit_display_name(base_id)
-        if database.delete_omicron_phrase(base_id):
-            await inter.response.send_message(f"✅ Фраза для «{char_name}» удалена.", ephemeral=True)
-        else:
-            await inter.response.send_message(f"❌ Для «{char_name}» фраза не была задана.", ephemeral=True)
-
-    @omicron_group.sub_command(name="список", description="Показать все настроенные фразы для омикронов")
-    async def omicron_phrase_list(self, inter: disnake.ApplicationCommandInteraction):
-        rows = database.get_all_omicron_phrases()
-        if not rows:
-            await inter.response.send_message("Список пуст — фразы ещё не заданы.", ephemeral=True)
-            return
-        skill_info = database.get_skill_display_info([skill_id for _, _, skill_id, _, _, _ in rows if skill_id])
-        lines = []
-        for _, char_key, skill_id, phrase, _, _ in rows:
-            char_name = _unit_display_name(char_key)
-            if skill_id:
-                ability_name, _ability_id, _ability_type, _omicron_mode = skill_info.get(skill_id, (skill_id, None, None, None))
-                lines.append(f"**{char_name}** ({ability_name}) — {phrase}")
-            else:
-                lines.append(f"**{char_name}** (по умолчанию) — {phrase}")
-        embeds = _lines_to_embeds("Фразы для омикронов", DATACRON_LIST_COLOR, lines)
-        await inter.response.send_message(embed=embeds[0], ephemeral=True)
-        for extra in embeds[1:]:
-            await inter.followup.send(embed=extra, ephemeral=True)
 
     # ------------------ /омикроны отчёт (запрос из офицерского чата гильдии GR,
     # 2026-09-20: рекомендации "что поставить" были видны только в веб-дашборде

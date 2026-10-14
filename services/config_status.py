@@ -67,7 +67,7 @@ def config_warning_text(guild_cfg: dict, feature: str) -> str | None:
     if not missing:
         return None
     items = "; ".join(missing)
-    return f"⚠️ Не настроено: {items}. Настройте через `/настройки` (или `/омикрон_текст канал`) — до этого функция не будет работать."
+    return f"⚠️ Не настроено: {items}. Настройте через `/настройки` или на сайте (/settings) — до этого функция не будет работать."
 
 
 def missing_summary(guild_cfg: dict) -> list[dict]:

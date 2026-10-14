@@ -10,7 +10,9 @@ channel_id) и нашу контру на него (автокомплит, за
 него, либо на конкретный вариант пака, если сообщение начинается со своего
 "## <вариант>" — см. _parse_counter_message)."""
 
+import json
 import re
+from datetime import datetime, timezone
 
 import disnake
 from disnake.ext import commands, tasks
@@ -286,9 +288,11 @@ class TWCounters(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.sync_loop.start()
+        self.web_sync_requests_loop.start()
 
     def cog_unload(self):
         self.sync_loop.cancel()
+        self.web_sync_requests_loop.cancel()
 
     # ------------------ Синхронизация форум-канала гайдов ------------------
     async def _sync_guild(self, guild_cfg: dict) -> dict:
@@ -315,7 +319,14 @@ class TWCounters(commands.Cog):
         stats = await self._sync_guild_once(guild_cfg)
         if "threads" not in stats:
             return stats  # skipped / error — нечего сравнивать
+        stats = await self._sync_guild_checked(guild_cfg, gid, baselines, _is_suspect, stats)
+        public = {k: v for k, v in stats.items() if not k.startswith("_")}
+        public["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        database.set_bot_state("tw_sync_result", json.dumps(public, ensure_ascii=False), guild_id=gid)
+        return stats
 
+    async def _sync_guild_checked(self, guild_cfg, gid, baselines, _is_suspect, stats) -> dict:
+        """Проверка на частичный синк + чистка удалённых гайдов (см. _sync_guild)."""
         suspect = _is_suspect(stats)
         if suspect:
             retry_stats = await self._sync_guild_once(guild_cfg)
@@ -404,6 +415,34 @@ class TWCounters(commands.Cog):
                 stats["messages"] += 1
                 stats["parsed_ok" if parsed["parsed_ok"] else "parsed_fail"] += 1
         return stats
+
+    @tasks.loop(seconds=20)
+    async def web_sync_requests_loop(self):
+        """Кнопка «Синхронизировать» на сайте (/tw) пишет в bot_state tw_sync_request
+        метку времени — веб не видит шлюз Discord, поэтому сам синк делает бот."""
+        for guild_cfg in database.get_all_guild_configs():
+            gid = guild_cfg["id"]
+            request = database.get_bot_state("tw_sync_request", guild_id=gid)
+            if not request or request == database.get_bot_state("tw_sync_request_done", guild_id=gid):
+                continue
+            database.set_bot_state("tw_sync_request_done", request, guild_id=gid)
+            try:
+                stats = await self._sync_guild(guild_cfg)
+                if "threads" not in stats:  # канал не задан / не форум — тоже показать на сайте
+                    database.set_bot_state("tw_sync_result", json.dumps({
+                        "error": stats.get("error") or stats.get("skipped") or "синк пропущен",
+                        "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    }, ensure_ascii=False), guild_id=gid)
+            except Exception as e:
+                database.set_bot_state("tw_sync_result", json.dumps({
+                    "error": str(e)[:300],
+                    "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                }, ensure_ascii=False), guild_id=gid)
+                print(f"❌ [TWCounters] [{guild_cfg['name']}] синк гайдов ВГ по запросу с сайта: {e}")
+
+    @web_sync_requests_loop.before_loop
+    async def _before_web_sync_requests_loop(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(hours=6)
     async def sync_loop(self):

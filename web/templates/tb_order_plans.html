@@ -94,6 +94,42 @@
         </div>
     {% endif %}
 
+    <div class="panel" style="max-width: 32em;" id="from-image">
+        <div class="panel-title"><span>Ордер из картинки</span></div>
+        <p class="muted">
+            Ссылка на тред, где в первом сообщении — картинка Strategy Summary из планировщика ТБ.
+            Бот распознает её, опубликует в тред 6 сообщений по этапам, сохранит план и расставит взводы.
+        </p>
+        {% if image_job %}
+            {% if image_job.state == "running" %}
+                <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>
+                <script>setTimeout(() => location.reload(), 8000);</script>
+            {% elif image_job.state == "done" %}
+                <p class="badge badge-ok" style="white-space: pre-line;">{{ image_job.message }}</p>
+            {% elif image_job.state == "error" %}
+                <p class="badge badge-danger" style="white-space: pre-line;">❌ «{{ image_job.plan_name }}»: {{ image_job.message }}</p>
+            {% endif %}
+        {% endif %}
+        <form method="post" action="/tb/order-plans/from-image">
+            <label>
+                Название плана
+                <input type="text" name="name" required>
+            </label>
+            <label>
+                Ссылка на тред с картинкой
+                <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
+            </label>
+            <label>
+                Total Stars с картинки (для проверки распознавания)
+                <input type="number" name="stars" min="0" required>
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" name="force" value="1"> Опубликовать заново, даже если ордер в треде уже есть (будут дубли)
+            </label>
+            <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и опубликовать</button>
+        </form>
+    </div>
+
     <div class="panel" style="max-width: 32em;">
         <div class="panel-title"><span>Зарегистрировать готовую ветку</span></div>
         <p class="muted">

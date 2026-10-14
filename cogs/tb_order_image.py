@@ -59,7 +59,6 @@ Dark=🔴, Mixed=🟡 (жёлтый, не оранжевый), Light=🔵, Bonus
 
 import asyncio
 import os
-import re
 
 import disnake
 from disnake.ext import commands
@@ -79,67 +78,11 @@ from cogs.guild_events import (
 from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
-
-ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
-
-ZONE_EMOJI = {"dark": "🔴", "mixed": "🟡", "light": "🔵", "bonus": "⚪"}
-
-# Известные планеты "Восхода Империи" — русские названия сверены с TB_PLANET_CONFLICT
-# в cogs/guild_events.py (для планет, которые там уже есть) плюс несколько новых.
-PLANET_RU = {
-    "mustafar": "Мустафар",
-    "geonosis": "Джеонозис",
-    "dathomir": "Датомир",
-    "haven-class medical station": "Медстанция",
-    "medical station": "Медстанция",
-    "corellia": "Кореллия",
-    "felucia": "Фелуция",
-    "tatooine": "Татуин",
-    "kessel": "Кессель",
-    "vandor": "Вандор",
-    "coruscant": "Корусант",
-    "bracca": "Бракка",
-    "kashyyyk": "Кашик",
-    "lothal": "Лотал",
-    "ring of kafrene": "Кольцо Кафрены",
-    "scarif": "Скариф",
-    "zeffo": "Зеффо",
-    "mandalore": "Мандалор",
-    "malachor": "Малахор",
-}
-
-PROMPT = """На картинке — скриншот вкладки "Strategy Summary" планировщика ТБ (Star Wars:
-Galaxy of Heroes, "Восход Империи"). Таблица: строки Dark/Mixed/Light/Bonus,
-колонки Round 1..Round 6.
-
-В каждой заполненной ячейке — название планеты сверху (например "R5: Mustafar" —
-верни только "Mustafar", без префикса "R#:"), и под ним три строки чисел. Нужно
-только:
-1. Название планеты (английское, как написано, без префикса "R#:").
-2. Итоговый рейтинг ★ в правой нижней части ячейки (0-3 звезды). Если там пусто,
-   стоит только число без иконок звёзд, или ячейка пустая — это 0 звёзд.
-Всё остальное (проценты, "M"-значения, "Sandbagged"/"Mission Req" внизу) не нужно
-и должно игнорироваться.
-
-Для строки Bonus: если в колонке стоит "???" — зона ещё не открыта, верни для неё
-пустой список. Если в колонке одна или несколько планет (может быть до 2, одна
-под другой) — верни все, сверху вниз.
-
-Верни СТРОГО JSON без markdown-обрамления (без ```), ровно такой структуры:
-{
-  "total_stars_header": <число из заголовка "Total Stars: N">,
-  "rounds": [
-    {
-      "round": 1,
-      "dark": {"planet": "...", "stars": 0} или null,
-      "mixed": {"planet": "...", "stars": 0} или null,
-      "light": {"planet": "...", "stars": 0} или null,
-      "bonus": [{"planet": "...", "stars": 0}]
-    }
-  ]
-}
-Массив "rounds" должен содержать ровно 6 элементов (round: 1..6)."""
-
+# Промпт и сборка 6 этапов — общие с сайтом (/tb/order-plans, «Ордер из картинки»).
+from services.tb_order_image import (
+    ORDER_HEADER_RE, PROMPT, summarize_autofill as _summarize_autofill,
+    build_order_blocks as _build_order_blocks, validate_response as _validate_response,
+)
 
 async def _find_existing_order_phases(thread: disnake.Thread, bot_user_id: int) -> list:
     """Сканирует историю треда на уже опубликованные блоки ордера (заголовки
@@ -153,83 +96,6 @@ async def _find_existing_order_phases(thread: disnake.Thread, bot_user_id: int) 
         if m:
             phases.add(int(m.group(1)))
     return sorted(phases)
-
-
-def _translate_planet(name: str) -> str:
-    key = (name or "").strip().lower()
-    key = re.sub(r"^r\d+:\s*", "", key)
-    return PLANET_RU.get(key, (name or "?").strip())
-
-
-def _stars_word(n: int) -> str:
-    if n <= 0:
-        return "0 звёзд"
-    if n == 1:
-        return "1 звезда"
-    return f"{n} звезды"
-
-
-def _overall_contribution(zone: str, stars: int) -> int:
-    # Подтверждено пользователем: бонусная планета даёт 1 звезду в общий зачёт
-    # только при полных 3★ на ней, иначе 0 (1-2★ там — другие награды).
-    if zone == "bonus":
-        return 1 if stars >= 3 else 0
-    return max(0, stars)
-
-
-def _validate_response(data: dict):
-    """Для роутера (services/openrouter_router.py): ответ, из которого не собираются 6
-    этапов, отбраковывается — пробуем другую модель (не больше 2 отбракованных ответов,
-    чтобы не жечь суточный лимит, если картинка и правда не та)."""
-    try:
-        blocks, _total = _build_order_blocks(data)
-    except Exception as e:
-        return f"не разобрать этапы: {e}"
-    return True if len(blocks) == 6 else f"этапов {len(blocks)} вместо 6"
-
-
-def _build_order_blocks(data: dict):
-    """Возвращает (список из 6 текстов этапов, сумма звёзд в общий зачёт)."""
-    rounds = data.get("rounds") or []
-    blocks = []
-    total = 0
-    for round_data in rounds:
-        phase = round_data.get("round")
-        entries = []
-        for zone in ("dark", "mixed", "light"):
-            cell = round_data.get(zone)
-            if cell and cell.get("planet"):
-                entries.append((zone, cell.get("planet"), int(cell.get("stars") or 0)))
-        for cell in round_data.get("bonus") or []:
-            if cell and cell.get("planet"):
-                entries.append(("bonus", cell.get("planet"), int(cell.get("stars") or 0)))
-
-        active = []
-        for zone, planet, stars in entries:
-            total += _overall_contribution(zone, stars)
-            if phase == 6 and stars <= 0:
-                continue
-            active.append((zone, planet, stars))
-
-        lines = [f"## Восход Империи — {phase} этап"]
-        if not active:
-            lines.append("> (нет активных планет на этом этапе)")
-        for i, (zone, planet, stars) in enumerate(active):
-            if stars > 0:
-                vzvod = "все"
-            elif zone == "bonus":
-                vzvod = "только по боту"
-            else:
-                vzvod = "по боту"
-            lines.append(f"> {ZONE_EMOJI[zone]} **{_translate_planet(planet)}**")
-            lines.append(f"> **Цель:** {_stars_word(stars)}")
-            lines.append(f"> **Взводы:** {vzvod}")
-            lines.append("> **БЗ:** обязательно")
-            if i != len(active) - 1:
-                lines.append("> ")
-                lines.append("> ")
-        blocks.append("\n".join(lines))
-    return blocks, total
 
 
 async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
@@ -398,21 +264,7 @@ class TBOrderImage(commands.Cog):
         autofill_note = ""
         try:
             result = await tb_platoon_autofill.autofill_plan(guild_id, plan_id)
-            reasons = {}
-            for outcome in result.unfilled:
-                if outcome.reason == "held_back":
-                    continue
-                reasons[outcome.reason] = reasons.get(outcome.reason, 0) + 1
-            labels = {
-                "no_owner": "нет владельцев", "no_eligible_owner": "нет подходящих доноров",
-                "unit_excluded": "юнит исключён фильтром", "unit_not_resolved": "юнит не распознан",
-            }
-            autofill_note = f"\n🧩 Взводы подготовлены: {result.filled_slots}/{result.total_slots} слотов занято"
-            if result.held_back:
-                autofill_note += f", {result.held_back} намеренно не добито («держим»)"
-            if reasons:
-                parts = [f"{labels.get(r, r)}: {c}" for r, c in reasons.items()]
-                autofill_note += " — не хватает (" + ", ".join(parts) + ")"
+            autofill_note = "\n" + _summarize_autofill(result)
             autofill_note += "\nПроверить/скорректировать: /tb/platoons на сайте."
         except (ValueError, RuntimeError) as e:
             autofill_note = f"\n⚠️ Не удалось автоматически расставить взводы: {e}. План сохранён, расставьте вручную на /tb/platoons."

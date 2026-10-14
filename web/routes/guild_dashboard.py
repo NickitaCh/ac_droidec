@@ -4,7 +4,7 @@ import json
 import os
 import re
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
@@ -24,7 +24,8 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data, feature_flags, omicron_priority, resource_spend, tb_schedule
+from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
+from services import tb_order_image
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -134,6 +135,24 @@ def _extract_thread_id(value: str) -> int | None:
     return None
 
 
+def _tw_guides_sync_status(guild_id: int) -> dict | None:
+    """Последний синк базы контр из форума гайдов (пишет cogs/tw_counters.py) и есть ли
+    невыполненная заявка с сайта. None — форум гайдов у гильдии не задан."""
+    cfg = database.get_guild_config(guild_id) or {}
+    if not cfg.get("tw_guide_forum_channel_id"):
+        return None
+    try:
+        result = json.loads(database.get_bot_state("tw_sync_result", guild_id=guild_id) or "{}")
+    except ValueError:
+        result = {}
+    if result.get("finished_at"):
+        finished = datetime.strptime(result["finished_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        result["finished_text"] = finished.astimezone(MSK).strftime("%d.%m %H:%M МСК")
+    request = database.get_bot_state("tw_sync_request", guild_id=guild_id)
+    pending = bool(request) and request != database.get_bot_state("tw_sync_request_done", guild_id=guild_id)
+    return {"result": result, "pending": pending}
+
+
 @router.get("/tw", response_class=HTMLResponse)
 async def tw_report(request: Request, user: dict = Depends(feature_flags.require_feature("tw_order"))):
     rows = dashboard_data.get_recent_tw_results(user["guild_id"], limit=50)
@@ -143,7 +162,16 @@ async def tw_report(request: Request, user: dict = Depends(feature_flags.require
         "rows": rows,
         "wins": wins,
         "tw_stats": dashboard_data.get_tw_stats(user["guild_id"]),
+        "guides_sync": _tw_guides_sync_status(user["guild_id"]),
     })
+
+
+@router.post("/tw/guides-sync", response_class=HTMLResponse)
+async def tw_guides_sync(user: dict = Depends(feature_flags.require_feature("tw_order"))):
+    """Аналог /вг_гайды_синхронизация: заявка боту, он подхватит её за ~20 секунд
+    (cogs/tw_counters.py::web_sync_requests_loop)."""
+    database.set_bot_state("tw_sync_request", datetime.now(timezone.utc).isoformat(), guild_id=user["guild_id"])
+    return RedirectResponse("/tw", status_code=303)
 
 
 def _parse_event_id(request: Request) -> int | None:
@@ -267,6 +295,7 @@ async def tb_order_plans(request: Request, user: dict = Depends(feature_flags.re
         "preview": preview,
         "preview_plan": preview_plan,
         "preview_error": preview_error,
+        "image_job": tb_order_image.get_job(guild_id),
     })
 
 
@@ -283,6 +312,33 @@ async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(f
 async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     database.delete_tb_saved_plan(user["guild_id"], name)
     return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+
+
+# Фоновые задачи «ордер из картинки» — держим ссылки, чтобы asyncio не собрал их сборщиком мусора.
+_BACKGROUND_TASKS = set()
+
+
+@router.post("/tb/order-plans/from-image", response_class=HTMLResponse)
+async def tb_order_plans_from_image(
+    name: str = Form(...),
+    thread_link: str = Form(...),
+    stars: int = Form(...),
+    force: str = Form(default=""),
+    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
+):
+    """Веб-версия /тб_ордер_из_картинки: распознавание идёт в фоне
+    (services/tb_order_image.py::run_web_job), статус — на этой же странице."""
+    guild_id = user["guild_id"]
+    name = name.strip()
+    if not name:
+        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+    if not tb_order_image.start_job(guild_id, name):
+        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
+    task = asyncio.create_task(tb_order_image.run_web_job(
+        guild_id, thread_link, name, stars, bool(force), f"web:{user['discord_id']}"))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return RedirectResponse("/tb/order-plans#from-image", status_code=303)
 
 
 @router.post("/tb/order-plans/save", response_class=HTMLResponse)
@@ -1956,7 +2012,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "Омикроны",
-        "hint": "Канал, куда бот пишет автообъявления о выдаче омикронов (то же самое, что /омикрон_текст канал в Discord).",
+        "hint": "Канал, куда бот пишет автообъявления о выдаче омикронов.",
         "fields": [
             ("omicron_channel_id", "Канал для автообъявлений об омикронах", "channel"),
         ],
@@ -2064,14 +2120,33 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
     guild_cfg = database.get_guild_config(user["guild_id"])
     known_channels = database.get_guild_channels(user["guild_id"])
     known_channel_ids = {c["channel_id"] for c in known_channels}
+    # Все каналы Discord-сервера гильдии — живым запросом к Discord, чтобы канал можно
+    # было выбрать сразу, без /канал в Discord (2026-10-14). Выбранный отсюда канал
+    # при сохранении регистрируется сам (см. guild_settings_save). Discord недоступен —
+    # остаётся список зарегистрированных + ручной ввод ID.
+    server_channels = []
+    if guild_cfg and guild_cfg.get("discord_guild_id"):
+        try:
+            server_channels = [
+                c for c in await discord_rest.list_guild_channels(guild_cfg["discord_guild_id"])
+                if c["id"] not in known_channel_ids
+            ]
+        except Exception as e:
+            print(f"⚠️ [web/settings] Не удалось получить каналы сервера: {e}")
+    server_channel_ids = {c["id"] for c in server_channels}
 
     async def _channel_options(current_value: str):
         options = [{"id": c["channel_id"], "label": c["channel_name"]} for c in known_channels]
+        options += [
+            {"id": c["id"], "label": (f"{c['category']} / " if c["category"] else "") + f"#{c['name']}",
+             "group": "server"}
+            for c in server_channels
+        ]
         # Уже сохранённое значение может ссылаться на канал, который никто ещё не
         # зарегистрировал через /канал (старые гильдии, засеянные напрямую в БД,
         # или канал переименовали/удалили) — не терять его молча, показать реальное
         # имя (через живой запрос к Discord), а не голый ID.
-        if current_value and current_value not in known_channel_ids:
+        if current_value and current_value not in known_channel_ids and current_value not in server_channel_ids:
             resolved_name = await _resolve_unregistered_channel_name(current_value)
             label = resolved_name or f"Канал не найден (`{current_value}`)"
             options.append({"id": current_value, "label": label})
