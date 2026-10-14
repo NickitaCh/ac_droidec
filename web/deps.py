@@ -49,11 +49,7 @@ def get_current_user(request: Request) -> dict:
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
-    user = _apply_guild_switch(request, _refresh_access(user))
-    # Для пункта меню МодКу в base.html — фича закрыта флагом (opt-in, сейчас только АС).
-    from services import feature_flags
-    user["has_mod_ku"] = feature_flags.is_enabled(user.get("guild_id"), "mod_ku")
-    return user
+    return _apply_guild_switch(request, _refresh_access(user))
 
 
 def get_current_user_optional(request: Request) -> dict | None:
