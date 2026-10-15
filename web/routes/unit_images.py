@@ -19,7 +19,7 @@ CACHE_DIR = Path("cache/unit_img")
 CDN_URL = "https://game-assets.swgoh.gg/textures/{name}.png"
 FALLBACK_URL = "/static/img/game/portrait-fallback.svg"
 _BASE_ID_RE = re.compile(r"^[A-Z0-9_]{1,64}$")
-_TEXTURE_RE = re.compile(r"^tex\.[a-z0-9_]{1,80}$")
+_TEXTURE_RE = re.compile(r"^tex\.[A-Za-z0-9_-]{1,80}$")  # бывают дефис (tex.charui_ig-90) и заглавные
 _CACHE_HEADERS = {"Cache-Control": "public, max-age=604800"}
 _locks: dict[str, asyncio.Lock] = {}
 
