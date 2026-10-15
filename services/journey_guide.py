@@ -56,6 +56,11 @@ def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+# Минимальные цели поверх игровых: {guide: {target_type: value}} для всех героев цели.
+# Ротта: в игре сейчас уровень Эпохи 125 = R4, но к следующему событию нужно будет R6
+# (RicardoOneS, тред «Гайд по АС Боту», 2026-10-15). Берётся максимум с игровым значением.
+GUIDE_MIN_TARGETS = {"RACCOON": {"relic": 6}}
+
 # Порядок выбора цели юнита: сначала реликвия (самая тяжёлая), потом снаряжение, звёзды.
 TARGET_PRIORITY = {"relic": 0, "gear": 1, "stars": 2}
 
@@ -176,6 +181,10 @@ def parse_guide_requirements(guides: list, requirements: list, challenges: list,
         guide_id = entry["unitBaseId"]
         if guide_id == "TBA" and req:  # анонс ещё не вышедшей цели — юнита в справочнике нет
             guide_id = req["id"].replace("_JOURNEY_GUIDE_REQUIREMENT", "")
+        for target_type, min_value in GUIDE_MIN_TARGETS.get(guide_id, {}).items():
+            for unit_id in {u for u, _t in units}:
+                key = (unit_id, target_type)
+                units[key] = max(units.get(key, 0), min_value)
         # Реликвия уже включает G13 — снаряжение из младших ярусов эпохи лишнее.
         units = {k: v for k, v in units.items() if not (k[1] == "gear" and (k[0], "relic") in units)}
         unit_order = list(dict.fromkeys(unit_id for unit_id, _t in units))
