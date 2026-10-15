@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}Задачи — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -6,22 +7,21 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Прокачка гильдии</p>
-                <h1>Задачи</h1>
-                <p class="page-hero-lead">Статус бот проверяет раз в час по данным игры. Выполненные уходят в архив через {{ archive_after_days }} дней, просроченные — кнопкой «В архив». Уведомления о дедлайнах — в канал из /настройки → «Задачи на прокачку», время рассылки — на <a href="/settings">Настройках</a>.</p>
+                <h1>Задачи{% call ui.help(side="left") %}<p>Статус бот проверяет раз в час по данным игры.</p><p>Выполненные уходят в архив через {{ archive_after_days }} дней, просроченные — кнопкой «В архив».</p><p>Уведомления о дедлайнах — в канал из «Задачи на прокачку» на <a href="/settings">Настройках</a>, там же время рассылки.</p>{% endcall %}</h1>
             </div>
             <div class="page-hero-sync">
-                <span>Справочник юнитов обновляется сам каждый час</span>
+                <span>База данных автообновляется каждый час</span>
                 <form method="post" action="/tasks/sync-units">
                     <button type="submit" title="Нужно, только если нового персонажа/корабля ещё нет в подсказках">🔄 Обновить</button>
                 </form>
             </div>
         </div>
         <div class="hero-kpis">
-            <a class="hero-kpi" href="/tasks?status=ASSIGNED"><span class="hero-kpi-value">{{ counts.ASSIGNED }}</span><span class="hero-kpi-label">назначено</span></a>
-            <a class="hero-kpi" href="/tasks?status=IN_PROGRESS"><span class="hero-kpi-value">{{ counts.IN_PROGRESS }}</span><span class="hero-kpi-label">в работе</span></a>
-            <a class="hero-kpi{% if counts.FAILED %} hero-kpi-danger{% endif %}" href="/tasks?status=FAILED"><span class="hero-kpi-value">{{ counts.FAILED }}</span><span class="hero-kpi-label">просрочено</span></a>
-            <a class="hero-kpi hero-kpi-good" href="/tasks?status=COMPLETED"><span class="hero-kpi-value">{{ counts.COMPLETED }}</span><span class="hero-kpi-label">выполнено</span></a>
-            <a class="hero-kpi" href="/tasks?view=archive"><span class="hero-kpi-value">{{ counts.ARCHIVE }}</span><span class="hero-kpi-label">в архиве</span></a>
+            <a class="hero-kpi" href="/tasks?status=ASSIGNED" data-ajax-swap="tasks-module"><span class="hero-kpi-value">{{ counts.ASSIGNED }}</span><span class="hero-kpi-label">назначено</span></a>
+            <a class="hero-kpi" href="/tasks?status=IN_PROGRESS" data-ajax-swap="tasks-module"><span class="hero-kpi-value">{{ counts.IN_PROGRESS }}</span><span class="hero-kpi-label">в работе</span></a>
+            <a class="hero-kpi{% if counts.FAILED %} hero-kpi-danger{% endif %}" href="/tasks?status=FAILED" data-ajax-swap="tasks-module"><span class="hero-kpi-value">{{ counts.FAILED }}</span><span class="hero-kpi-label">просрочено</span></a>
+            <a class="hero-kpi hero-kpi-good" href="/tasks?status=COMPLETED" data-ajax-swap="tasks-module"><span class="hero-kpi-value">{{ counts.COMPLETED }}</span><span class="hero-kpi-label">выполнено</span></a>
+            <a class="hero-kpi" href="/tasks?view=archive" data-ajax-swap="tasks-module"><span class="hero-kpi-value">{{ counts.ARCHIVE }}</span><span class="hero-kpi-label">в архиве</span></a>
         </div>
     </section>
 
@@ -129,24 +129,24 @@
         </div>
     </dialog>
 
-    <div class="panel">
+    <div class="panel" id="tasks-module">
         <div class="table-toolbar">
             <input type="search" placeholder="Поиск по игроку…" data-table-search="tasks-table">
             <span class="panel-hint">
-                {% if status_filter %}<a href="/tasks?view={{ view }}">Все статусы</a>{% else %}<strong>Все статусы</strong>{% endif %}
+                {% if status_filter %}<a data-ajax-swap="tasks-module" href="/tasks?view={{ view }}">Все статусы</a>{% else %}<strong>Все статусы</strong>{% endif %}
                 {% for key in ("ASSIGNED", "IN_PROGRESS", "FAILED", "COMPLETED") %}
                     ·
-                    {% if status_filter == key %}<strong>{{ status_labels[key] }}</strong>{% else %}<a href="/tasks?status={{ key }}&view={{ view }}">{{ status_labels[key] }}</a>{% endif %}
+                    {% if status_filter == key %}<strong>{{ status_labels[key] }}</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?status={{ key }}&view={{ view }}">{{ status_labels[key] }}</a>{% endif %}
                 {% endfor %}
             </span>
         </div>
         <div class="segmented-toggle">
             <div class="segmented-toggle-options">
-                {% if view == "flat" or not view %}<strong>Список</strong>{% else %}<a href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% endif %}
-                {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
-                {% if view == "archive" %}<strong>Архив</strong>{% else %}<a href="/tasks?view=archive{% if status_filter %}&status={{ status_filter }}{% endif %}">Архив</a>{% endif %}
+                {% if view == "flat" or not view %}<strong>Список</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% endif %}
+                {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
+                {% if view == "archive" %}<strong>Архив</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=archive{% if status_filter %}&status={{ status_filter }}{% endif %}">Архив</a>{% endif %}
                 {% if departed_count or view == "departed" %}
-                    {% if view == "departed" %}<strong>Выбывшие ({{ departed_count }})</strong>{% else %}<a href="/tasks?view=departed">Выбывшие ({{ departed_count }})</a>{% endif %}
+                    {% if view == "departed" %}<strong>Выбывшие ({{ departed_count }})</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=departed">Выбывшие ({{ departed_count }})</a>{% endif %}
                 {% endif %}
             </div>
         </div>
@@ -202,9 +202,9 @@
                                 <tr data-search="{{ t.player_name|lower }}">
                                     <td>{{ t.player_name }}</td>
                                     <td><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ t.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ t.unit_name }}</span></td>
-                                    <td>{{ t.target_label }}</td>
+                                    <td class="nowrap">{{ t.target_label }}</td>
                                     <td>{{ t.progress }}</td>
-                                    <td>{{ t.deadline }}</td>
+                                    <td class="nowrap">{{ t.deadline }}</td>
                                     <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span></td>
                                     <td>{{ t.created_by_name }}</td>
                                     <td class="row-actions row-actions-icons">
@@ -259,7 +259,7 @@
                             <tr>
                                 <td>{{ b.units|join(", ") }}</td>
                                 <td>{{ b.targets|join(", ") }}</td>
-                                <td>{{ b.deadline }}</td>
+                                <td class="nowrap">{{ b.deadline }}</td>
                                 <td>{{ b.players|join(", ") }}</td>
                                 <td>{{ b.count }}</td>
                                 <td>

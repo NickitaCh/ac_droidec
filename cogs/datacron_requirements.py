@@ -29,7 +29,7 @@ DATACRON_LEVELS = (3, 6, 9)
 DATACRON_ANY = "ANY"
 DATACRON_NONE = "NONE"
 DATACRON_ANY_LABEL = "Любой (тир разблокирован, бонус неважен)"
-DATACRON_NONE_LABEL = "- (не проверять этот уровень)"
+DATACRON_NONE_LABEL = "— не проверять"
 
 PRIORITY_REQUIRED = "required"
 PRIORITY_OPTIONAL = "optional"

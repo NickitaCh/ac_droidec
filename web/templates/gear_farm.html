@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}Фарм деталей — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -6,8 +7,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Прокачка</p>
-                <h1>Фарм деталей</h1>
-                <p class="page-hero-lead">Картинка от бота C3PO (<code>inventory unit</code>) со списком недостающих деталей → на каких битвах их фармить. Список распознаёт ИИ, места фарма — из игровых данных.</p>
+                <h1>Фарм деталей{% call ui.help(side="left") %}Картинка от бота C3PO (<code>inventory unit</code>) со списком недостающих деталей → на каких битвах их фармить. Список распознаёт ИИ, места фарма — из игровых данных.{% endcall %}</h1>
             </div>
         </div>
     </section>

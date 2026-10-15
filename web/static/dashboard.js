@@ -61,22 +61,27 @@ document.addEventListener("DOMContentLoaded", () => {
     // через пробел — строка "по умолчанию" совпадает, если ЛЮБОЙ из омикронов персонажа
     // подходит под выбранный режим). Оба условия учитываются вместе, а не по отдельности,
     // чтобы поиск и фильтр не перетирали видимость друг друга.
-    document.querySelectorAll("[data-table-search]").forEach((input) => {
+    // Делегировано на document: таблица/поле могут быть заменены модулем (data-ajax-swap).
+    const applyTableSearch = (input) => {
         const table = document.getElementById(input.dataset.tableSearch);
-        if (!table) return;
-        const rows = () => table.tBodies[0].rows;
+        if (!table || !table.tBodies[0]) return;
         const filterSelect = document.querySelector(`[data-table-filter="${input.dataset.tableSearch}"]`);
-        const apply = () => {
-            const q = input.value.trim().toLowerCase();
-            const mode = filterSelect ? filterSelect.value : "";
-            for (const row of rows()) {
-                const matchesSearch = !q || row.dataset.search.includes(q);
-                const matchesMode = !mode || (row.dataset.mode || "").split(" ").includes(mode);
-                row.style.display = matchesSearch && matchesMode ? "" : "none";
-            }
-        };
-        input.addEventListener("input", apply);
-        if (filterSelect) filterSelect.addEventListener("change", apply);
+        const q = input.value.trim().toLowerCase();
+        const mode = filterSelect ? filterSelect.value : "";
+        for (const row of table.tBodies[0].rows) {
+            const matchesSearch = !q || (row.dataset.search || "").includes(q);
+            const matchesMode = !mode || (row.dataset.mode || "").split(" ").includes(mode);
+            row.style.display = matchesSearch && matchesMode ? "" : "none";
+        }
+    };
+    document.addEventListener("input", (e) => {
+        if (e.target.matches && e.target.matches("[data-table-search]")) applyTableSearch(e.target);
+    });
+    document.addEventListener("change", (e) => {
+        const id = e.target.dataset && e.target.dataset.tableFilter;
+        if (!id) return;
+        const input = document.querySelector(`[data-table-search="${id}"]`);
+        if (input) applyTableSearch(input);
     });
 
     // Поиск по ленте активности (/activity) — структура там не таблица, а вложенные
@@ -104,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    document.querySelectorAll("table.data").forEach((table) => {
+    const initTableSort = (root) => root.querySelectorAll("table.data").forEach((table) => {
         const headers = table.querySelectorAll("th[data-sort]");
         headers.forEach((th, colIndex) => {
             th.addEventListener("click", () => {
@@ -117,8 +122,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     let va = a.cells[colIndex].dataset.value ?? a.cells[colIndex].textContent.trim();
                     let vb = b.cells[colIndex].dataset.value ?? b.cells[colIndex].textContent.trim();
                     if (type === "num") {
-                        va = parseFloat(va) || 0;
-                        vb = parseFloat(vb) || 0;
+                        // Числа выводятся с пробелами между разрядами и запятой («32 447», «5,1»).
+                        const toNum = (v) => parseFloat(String(v).replace(/[\s  ]/g, "").replace(",", ".")) || 0;
+                        va = toNum(va);
+                        vb = toNum(vb);
                         return asc ? va - vb : vb - va;
                     }
                     return asc ? String(va).localeCompare(String(vb), "ru") : String(vb).localeCompare(String(va), "ru");
@@ -134,6 +141,42 @@ document.addEventListener("DOMContentLoaded", () => {
                 rows.forEach((row) => tbody.appendChild(row));
             });
         });
+    });
+    initTableSort(document);
+
+    // Обновление модуля страницы без перезагрузки: <a data-ajax-swap="<id>"> подгружает
+    // ссылку и подменяет только элемент с этим id (фильтры статусов и т.п. — без прыжка
+    // наверх). Ссылки внутри нового содержимого работают так же (делегирование).
+    const swapModule = async (url, id, push) => {
+        const current = document.getElementById(id);
+        if (!current) { window.location.href = url; return; }
+        current.classList.add("is-loading");
+        try {
+            const resp = await fetch(url, { credentials: "same-origin" });
+            const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+            const fresh = doc.getElementById(id);
+            if (!resp.ok || !fresh) { window.location.href = url; return; }
+            current.replaceWith(fresh);
+            initTableSort(fresh);
+            fresh.querySelectorAll("[data-table-search]").forEach((input) => applyTableSearch(input));
+            if (push) history.pushState({ ajaxSwap: id }, "", url);
+            return fresh;
+        } catch (err) {
+            window.location.href = url;
+        }
+    };
+    document.addEventListener("click", async (e) => {
+        const link = e.target.closest && e.target.closest("a[data-ajax-swap]");
+        if (!link || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        const id = link.dataset.ajaxSwap;
+        const fromOutside = !link.closest(`#${id}`);
+        const fresh = await swapModule(link.href, id, true);
+        if (fresh && fromOutside) fresh.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    window.addEventListener("popstate", (e) => {
+        if (e.state && e.state.ajaxSwap) swapModule(window.location.href, e.state.ajaxSwap, false);
+        else if (document.querySelector("[data-ajax-swap]")) window.location.reload();
     });
 
     // Живой поиск (персонаж для формы плейта, игрок для формы нарушения и т.п.) —

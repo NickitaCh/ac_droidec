@@ -24,7 +24,7 @@ SCENARIO_LABELS = {
 
 # Форсирует схему мод-билда персонажа (см. cogs/stat_requirements.py::SCHEME_CHOICES) вместо
 # авто-детекта по фактическим модам игрока — не действует на персонажей без схем вовсе.
-SCHEME_LABELS = {"": "Авто", "1": "Схема 1", "2": "Схема 2"}
+SCHEME_LABELS = {"": "Авто", "1": "Вариант 1", "2": "Вариант 2"}
 
 
 def _parse_scheme_param(value: str) -> int | None:

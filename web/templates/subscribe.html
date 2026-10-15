@@ -16,75 +16,84 @@
     {% endif %}
 
     {% if result %}
-        <div class="panel" style="max-width: 34em;">
-            <div class="panel-title"><span>💳 Ссылка на оплату готова</span></div>
-            <p><strong>Гильдия:</strong> {{ result.guild_name }}</p>
-            <p><strong>Период:</strong> {{ result.period_label }}</p>
-            <p><strong>Сумма:</strong> {{ result.price }} ₽</p>
-            <p><a href="{{ result.url }}" class="button" style="display:inline-block; margin-top: .5em;">Перейти к оплате →</a></p>
-            <p class="muted">Доступ откроется автоматически в течение минуты после оплаты.</p>
+        <div class="subscribe-grid">
+            <div class="panel">
+                <div class="panel-title"><span>💳 Ссылка на оплату готова</span></div>
+                <dl class="subscribe-summary">
+                    <dt>Гильдия</dt><dd>{{ result.guild_name }}</dd>
+                    <dt>Период</dt><dd>{{ result.period_label }}</dd>
+                    <dt>Сумма</dt><dd>{{ result.price }} ₽</dd>
+                </dl>
+                <p><a href="{{ result.url }}" class="button">Перейти к оплате</a></p>
+                <p class="muted">Доступ откроется автоматически в течение минуты после оплаты.</p>
+            </div>
         </div>
     {% else %}
-        {% if renewal_guild %}
-            <div class="panel" style="max-width: 34em;">
-                <div class="panel-title"><span>Продлить подписку</span></div>
-                <p class="muted">
-                    {% if renewal_guild.expired %}
-                        Подписка гильдии «{{ renewal_guild.name }}» закончилась — после оплаты всё включится обратно с прежними настройками.
-                    {% else %}
-                    Ваша гильдия «{{ renewal_guild.name }}» уже подключена.
-                    {% endif %}
-                    {% if renewal_guild.expired %}
-                    {% elif renewal_guild.expires_at %}
-                        Подписка активна до <code>{{ renewal_guild.expires_at[:10] }}</code>.
-                    {% else %}
-                        Подписка сейчас бессрочная (подключена вручную).
-                    {% endif %}
-                </p>
-                <form method="post" action="/subscribe" class="inline-form">
-                    <input type="hidden" name="renew_guild_id" value="{{ renewal_guild.id }}">
-                    <select name="period" required>
-                        {% for days, label, price in period_options %}
-                            <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
-                        {% endfor %}
-                    </select>
+        <div class="subscribe-grid">
+            {% if renewal_guild %}
+                <div class="panel subscribe-renew">
+                    <div class="panel-title"><span>🔁 Продлить подписку — «{{ renewal_guild.name }}»</span></div>
+                    <p class="muted">
+                        {% if renewal_guild.expired %}
+                            Подписка закончилась — после оплаты всё включится обратно с прежними настройками.
+                        {% elif renewal_guild.expires_at %}
+                            Подписка активна до <code>{{ renewal_guild.expires_at[:10] }}</code>.
+                        {% else %}
+                            Подписка сейчас бессрочная (подключена вручную).
+                        {% endif %}
+                    </p>
+                    <form method="post" action="/subscribe" class="filter-row">
+                        <input type="hidden" name="renew_guild_id" value="{{ renewal_guild.id }}">
+                        <label>
+                            Период
+                            <select name="period" required>
+                                {% for days, label, price in period_options %}
+                                    <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit">Получить ссылку на оплату</button>
+                    </form>
+                </div>
+            {% endif %}
+
+            <div class="panel">
+                <div class="panel-title"><span>{% if prefill and prefill.guild_name %}Подключить или продлить гильдию{% else %}Подключить гильдию{% endif %}</span></div>
+                {% if prefill and prefill.guild_name %}
+                    <p class="muted">Подставлены данные из вашей регистрации (гильдия «{{ prefill.guild_name }}») — для продления просто выберите период. Для другой гильдии поменяйте значения.</p>
+                {% endif %}
+                <form method="post" action="/subscribe" class="subscribe-form">
+                    <label>
+                        Код союзника
+                        <input type="text" name="ally_code" placeholder="123456789" pattern="[1-9]{9}" maxlength="9" value="{{ prefill.ally_code if prefill else '' }}"
+                               inputmode="numeric" title="9 цифр без нуля (1-9)" required>
+                    </label>
+                    <label>
+                        ID Discord-сервера
+                        <input type="text" name="discord_guild_id" placeholder="123456789012345678" value="{{ prefill.discord_guild_id if prefill else '' }}"
+                               pattern="[0-9]{17,20}" maxlength="20" inputmode="numeric"
+                               title="17-20 цифр — ПКМ по иконке сервера → Копировать ID" required>
+                    </label>
+                    <label>
+                        Период
+                        <select name="period" required>
+                            {% for days, label, price in period_options %}
+                                <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
+                            {% endfor %}
+                        </select>
+                    </label>
                     <button type="submit">Получить ссылку на оплату</button>
                 </form>
             </div>
-        {% endif %}
 
-        <div class="panel" style="max-width: 34em;">
-            <div class="panel-title"><span>Подключить новую гильдию</span></div>
-            <p class="muted">
-                Код союзника любого участника гильдии — по нему бот сам определит саму
-                гильдию SWGOH. Плюс ID Discord-сервера, на котором вы хотите пользоваться
-                ботом (ПКМ по иконке сервера → «Копировать ID сервера»; для этого в Discord
-                должен быть включён режим разработчика: Настройки → Расширенные).
-                Бот должен уже быть на этом сервере — сначала пригласите его.
-            </p>
-            <p class="muted">Подписка истекла? Заполните эту же форму — после оплаты гильдия включится обратно со всеми прежними настройками и данными.</p>
-            <form method="post" action="/subscribe" class="requirement-form">
-                <label>
-                    Код союзника
-                    <input type="text" name="ally_code" placeholder="123456789" pattern="[1-9]{9}" maxlength="9"
-                           inputmode="numeric" title="9 цифр без нуля (1-9)" required>
-                </label>
-                <label>
-                    ID Discord-сервера
-                    <input type="text" name="discord_guild_id" placeholder="123456789012345678" value="{{ prefill_discord_guild_id or '' }}"
-                           pattern="[0-9]{17,20}" maxlength="20" inputmode="numeric"
-                           title="17-20 цифр — ПКМ по иконке сервера → Копировать ID" required>
-                </label>
-                <label>
-                    Период
-                    <select name="period" required>
-                        {% for days, label, price in period_options %}
-                            <option value="{{ days }}">{{ label }} — {{ price }} ₽</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <button type="submit">Получить ссылку на оплату</button>
-            </form>
+            <div class="panel subscribe-help">
+                <div class="panel-title"><span>Как это работает</span></div>
+                <ol class="subscribe-steps">
+                    <li><strong>Код союзника</strong> любого участника — по нему бот сам определит гильдию SWGOH.</li>
+                    <li><strong>ID Discord-сервера</strong>, где будет работать бот: ПКМ по иконке сервера → «Копировать ID сервера» (нужен режим разработчика: Настройки → Расширенные). Бот уже должен быть на сервере.</li>
+                    <li><strong>Оплата</strong> — доступ включится в течение минуты. Если подписка истекла, гильдия вернётся со всеми прежними настройками и данными.</li>
+                </ol>
+            </div>
         </div>
     {% endif %}
 

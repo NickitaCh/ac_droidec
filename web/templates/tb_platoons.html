@@ -5,14 +5,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     {{ tbui.tb_hero("Конструктор взводов", "platoons") }}
-    <p class="muted"><a href="/tb/platoons/filters">Фильтры автозаполнения →</a></p>
-    <p class="muted">
-        Списки юнитов-подсказок — топ-кандидаты из живого плана HotUtils гильдии на момент
-        снятия (2026-08-27), не жёсткое игровое требование — можно ставить и других юнитов.
-        R — минимальная реликвия для донат-слота на этапе, реальное игровое требование.
-        У кораблей реликвии нет — для них требование 7★ вместо релика.
-        Нажмите на юнита, чтобы раскрыть список кандидатов и закрепить игрока за слотом.
-    </p>
+    <nav class="hero-links" style="margin: 0 0 1em;"><a class="hero-link" href="/tb/platoons/filters"><span class="hero-link-icon">⚙️</span>Фильтры автозаполнения</a></nav>
 
     <div class="platoon-switchers">
         {% if saved_plans %}

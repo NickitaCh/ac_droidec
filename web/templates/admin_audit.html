@@ -12,7 +12,7 @@
         </div>
     </section>
 
-    <form method="get" action="/admin/audit" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+    <form method="get" action="/admin/audit" class="table-toolbar filter-bar">
         <select name="guild_id" onchange="this.form.submit()">
             <option value="">Все гильдии</option>
             {% for g in guild_options %}

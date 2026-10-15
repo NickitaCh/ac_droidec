@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_tb.html" as tbui %}
+{% import "_ui.html" as ui %}
 {% block title %}ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -12,9 +13,9 @@
         {% set regressed = report.history|rejectattr("departed")|selectattr("regressed")|list|length %}
         {% call tbui.tb_hero("Отчёт по ТБ", "report") %}
             <div class="hero-kpis">
-                <div class="hero-kpi"><span class="hero-kpi-value">{{ latest_event[1][:10] }}</span><span class="hero-kpi-label">последняя ТБ</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value nowrap">{{ latest_event[1][:10] }}</span><span class="hero-kpi-label">последняя ТБ</span></div>
                 <div class="hero-kpi"><span class="hero-kpi-value">{{ report.latest_participant_count }}</span><span class="hero-kpi-label">участников</span></div>
-                <div class="hero-kpi"><span class="hero-kpi-value" title="{{ report.latest_points_total }}">{% set pts = report.latest_points_total %}{% if pts is number and pts >= 1000000000 %}{{ "%.2f"|format(pts / 1000000000) }}B{% elif pts is number and pts >= 1000000 %}{{ "%.1f"|format(pts / 1000000) }}M{% else %}{{ pts }}{% endif %}</span><span class="hero-kpi-label">очков территории всего</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value nowrap" title="{{ ui.num(report.latest_points_total) }}">{% set pts = report.latest_points_total %}{% if pts is number and pts >= 1000000000 %}{{ ("%.2f"|format(pts / 1000000000))|replace(".", ",") }} млрд{% elif pts is number and pts >= 1000000 %}{{ ("%.1f"|format(pts / 1000000))|replace(".", ",") }} млн{% else %}{{ ui.num(pts) }}{% endif %}</span><span class="hero-kpi-label">очков территории всего</span></div>
                 <div class="hero-kpi{% if regressed %} hero-kpi-danger{% endif %}"><span class="hero-kpi-value">{{ regressed }}</span><span class="hero-kpi-label">🚨 просадка vs среднего</span></div>
             </div>
         {% endcall %}
@@ -32,12 +33,12 @@
                             <polyline points="{{ report.trend_points }}" vector-effect="non-scaling-stroke"></polyline>
                         </svg>
                         {% for x, y, completed_at, value in report.trend_coords %}
-                            <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ value }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
+                            <div class="trend-dot" data-tip="{{ completed_at[:10] }}: {{ ui.num(value) }}" style="left: {{ x }}%; top: {{ y / 40 * 100 }}%;"></div>
                         {% endfor %}
                     </div>
                     <div class="trend-chart-labels">
                         {% for completed_at, value in report.event_totals %}
-                            <span>{{ completed_at[:10] }}</span>
+                            <span class="nowrap">{{ completed_at[:10] }}</span>
                         {% endfor %}
                     </div>
                 </div>
@@ -69,9 +70,9 @@
                     <div class="bar-chart-row">
                         <div class="bar-chart-name">{{ p.name }}</div>
                         <div class="bar-chart-track">
-                            <div class="bar-chart-fill" data-tip="{{ p.name }}: {{ p.summary }}" style="width: {{ (p.summary / max_summary * 100) if max_summary else 0 }}%;"></div>
+                            <div class="bar-chart-fill" data-tip="{{ p.name }}: {{ ui.num(p.summary) }}" style="width: {{ (p.summary / max_summary * 100) if max_summary else 0 }}%;"></div>
                         </div>
-                        <div class="bar-chart-value">{{ p.summary }}</div>
+                        <div class="bar-chart-value">{{ ui.num(p.summary) }}</div>
                     </div>
                 {% endfor %}
             </div>
@@ -94,8 +95,8 @@
                         {% for p in report.latest %}
                             <tr data-search="{{ p.name|lower }}">
                                 <td><a href="/tb/player/{{ p.name | urlencode }}{% if not report.is_latest_selected %}?event_id={{ report.selected_event_id }}{% endif %}">{{ p.name }}</a></td>
-                                <td class="num">{{ p.summary }}</td>
-                                <td class="num">{{ p.unit_donated }}</td>
+                                <td class="num nowrap">{{ ui.num(p.summary) }}</td>
+                                <td class="num">{{ ui.num(p.unit_donated) }}</td>
                                 <td class="num">{{ p.covert_attempt }}</td>
                                 <td class="num">{{ p.strike_encounter }}</td>
                                 <td class="num">{{ p.strike_attempt }}</td>
@@ -148,11 +149,11 @@
                                                 <polyline points="{{ row.sparkline_points }}"></polyline>
                                                 {% for x, y, completed_at, value in row.sparkline_hits %}
                                                     <circle cx="{{ x }}" cy="{{ y }}" r="{{ '2.4' if loop.last else '5' }}" opacity="{{ '1' if loop.last else '0' }}">
-                                                        <title>{{ completed_at[:10] }}: {{ value }} очков</title>
+                                                        <title>{{ completed_at[:10] }}: {{ ui.num(value) }} очков</title>
                                                     </circle>
                                                 {% endfor %}
                                             </svg>
-                                            <span>{{ row.last_value if row.last_value is not none else "—" }}</span>
+                                            <span class="nowrap">{{ ui.num(row.last_value) if row.last_value is not none else "—" }}</span>
                                         </div>
                                     </td>
                                     <td class="row-actions">
@@ -176,8 +177,8 @@
                                                         {% for event_id, completed_at in report.events %}
                                                             {% set s = row.per_event.get(event_id) %}
                                                             <tr>
-                                                                <td>{{ completed_at[:10] }}</td>
-                                                                <td class="num">{{ s.summary if s else "—" }}</td>
+                                                                <td class="nowrap">{{ completed_at[:10] }}</td>
+                                                                <td class="num nowrap">{{ ui.num(s.summary) if s else "—" }}</td>
                                                                 <td class="num">{{ s.unit_donated if s else "—" }}</td>
                                                                 <td class="num">{{ s.covert_attempt if s else "—" }}</td>
                                                                 <td class="num">{{ s.strike_encounter if s else "—" }}</td>

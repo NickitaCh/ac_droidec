@@ -1,0 +1,13 @@
+{# Общие UI-макросы. Подключение: {% import "_ui.html" as ui %} #}
+
+{# Значок «?» с подсказкой при наведении/фокусе. Текст — аргументом или телом
+   {% call ui.help() %}…{% endcall %} (тогда можно с разметкой). side="right" — пузырь
+   прижат к правому краю (для значков у правого края блока). #}
+{% macro help(text="", side="") -%}
+<span class="help-q{% if side %} help-q--{{ side }}{% endif %}" tabindex="0" role="note" aria-label="Подсказка">?<span class="help-q-bubble">{% if caller %}{{ caller() }}{% else %}{{ text }}{% endif %}</span></span>
+{%- endmacro %}
+
+{# Целое число с пробелами между разрядами: 32447 → «32 447». Не-число выводится как есть. #}
+{% macro num(n) -%}
+{% if n is number %}{{ "{:,}".format(n|round|int)|replace(",", " ") }}{% else %}{{ n }}{% endif %}
+{%- endmacro %}

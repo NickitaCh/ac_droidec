@@ -221,6 +221,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_ally ON tasks(ally_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_guild_status ON tasks(guild_id, status)")
+    # Подписи вариантов мод-билда «Схема N» → «Вариант N» (миграция внутри).
+    _ensure_stat_plate_character_schemes_table(cursor)
 
     conn.commit()
     conn.close()
@@ -2548,6 +2550,27 @@ def discord_id_has_any_registration(discord_id: str) -> bool:
     return row is not None
 
 
+def get_subscription_prefill(discord_id: str) -> dict | None:
+    """Автозаполнение формы /subscribe: основной аккаунт пользователя (в любой гильдии,
+    активной или нет — неактивные первыми, их и продлевают) + Discord-сервер этой гильдии.
+    None, если пользователь нигде не регистрировался."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        """SELECT r.ally_code, g.discord_guild_id, g.name FROM user_registration r
+           JOIN guilds g ON g.id = r.guild_id
+           WHERE r.discord_id = ?
+           ORDER BY g.is_active ASC, r.is_main DESC, r.registered_at DESC LIMIT 1""",
+        (str(discord_id),),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"ally_code": row[0], "discord_guild_id": row[1] or "", "guild_name": row[2]}
+
+
 def get_user_registrations(discord_id: str, guild_id: int = 1):
     """Возвращает все привязанные в этой гильдии аккаунты: [(ally_code, ingame_name, is_main), ...],
     основной — первым."""
@@ -4136,6 +4159,14 @@ def _ensure_stat_plate_character_schemes_table(cursor):
             PRIMARY KEY (guild_id, plate_name, character_key, scheme_num)
         )
     """)
+    # 2026-10-15: в UI «Схема N» переименована в «Вариант N» — переводим неизменённые
+    # дефолтные подписи (свои названия вроде "КД" не трогаем).
+    cursor.execute(
+        "UPDATE stat_plate_character_schemes SET label = 'Вариант ' || scheme_num "
+        "WHERE label = 'Схема ' || scheme_num"
+    )
+    if cursor.rowcount:
+        cursor.connection.commit()
 
 
 def _ensure_stat_plate_character_order_table(cursor):
@@ -4670,7 +4701,7 @@ def _ensure_default_scheme_label(plate_name: str, character_key: str, scheme_num
     _ensure_stat_plate_character_schemes_table(cursor)
     cursor.execute(
         "INSERT OR IGNORE INTO stat_plate_character_schemes (guild_id, plate_name, character_key, scheme_num, label) VALUES (?, ?, ?, ?, ?)",
-        (guild_id, plate_name, character_key, scheme_num, f"Схема {scheme_num}"),
+        (guild_id, plate_name, character_key, scheme_num, f"Вариант {scheme_num}"),
     )
     conn.commit()
     conn.close()

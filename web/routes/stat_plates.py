@@ -34,7 +34,7 @@ MOD_SLOT_OPTIONS = list(MOD_SLOT_LABELS.items())
 SET_OPTIONS = [(c.name, c.value) for c in SET_CHOICES]
 # Веб-эквивалент cogs/stat_requirements.py::SCHEME_CHOICES — "" означает "общее для обеих схем"
 # (NULL в stat_requirements.scheme_num).
-SCHEME_OPTIONS = [("Обе схемы", ""), ("Схема 1", "1"), ("Схема 2", "2")]
+SCHEME_OPTIONS = [("Оба варианта", ""), ("Вариант 1", "1"), ("Вариант 2", "2")]
 
 
 def _parse_scheme_form(value: str) -> int | None:
@@ -368,8 +368,8 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
             "base_id": base_id, "name": _unit_name(base_id), "requirements": reqs,
             "has_schemes": has_schemes,
             "scheme_leaf_plate": scheme_leaf_plate,
-            "scheme1_label": scheme_labels.get(1, "Схема 1"),
-            "scheme2_label": scheme_labels.get(2, "Схема 2"),
+            "scheme1_label": scheme_labels.get(1, "Вариант 1"),
+            "scheme2_label": scheme_labels.get(2, "Вариант 2"),
             "scheme1_reqs": scheme1_reqs,
             "scheme2_reqs": scheme2_reqs,
             "loadout": _mod_loadout(reqs),

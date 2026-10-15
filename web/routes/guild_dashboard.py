@@ -47,7 +47,7 @@ MSK = ZoneInfo("Europe/Moscow")
 # Независимая копия web/routes/stat_forecast.py::SCHEME_LABELS (тот же принцип, что
 # MSK/COMLINK_URL дублируются по проекту, см. CLAUDE.md) — форсирует схему мод-билда
 # персонажа на карточке игрока вместо авто-детекта.
-SCHEME_LABELS = {"": "Авто", "1": "Схема 1", "2": "Схема 2"}
+SCHEME_LABELS = {"": "Авто", "1": "Вариант 1", "2": "Вариант 2"}
 
 
 def _get_comlink():
@@ -111,11 +111,13 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 # вебом. Не путать с TB_CONFLICT_LABELS (cogs/guild_events.py) — тот словарь используется
 # только как fallback-подпись в отчётах на чтение и расходится с этими ("01"->Dark там,
 # "01"->Light здесь) — это существовавшее расхождение в самом боте, не веб-баг.
+# Порядок и подписи — как cogs/guild_events.py::TB_CONFLICT_LABELS (01 = тёмная ветка:
+# Мустафар/Джеонозис…, 02 = смешанная, 03 = светлая), колонками на странице «План».
 TB_PLAN_CONFLICT_OPTIONS = [
-    {"value": "01", "label": "Light (красная)"},
-    {"value": "02", "label": "Dark (жёлтая)"},
-    {"value": "03", "label": "Mixed (синяя)"},
-    {"value": "bonus", "label": "Бонус/ОЗ-зона"},
+    {"value": "01", "label": "Тёмная"},
+    {"value": "02", "label": "Смешанная"},
+    {"value": "03", "label": "Светлая"},
+    {"value": "bonus", "label": "Бонус"},
 ]
 
 # Тот же паттерн, что и cogs/tb_order_image.py::LINK_RE — продублирован, а не
@@ -216,26 +218,79 @@ async def tb_compare_player(name: str, request: Request, user: dict = Depends(fe
     return templates.TemplateResponse(request, "tb_compare_player.html", {"user": user, "compare": compare})
 
 
+def _tb_plan_grid(guild_id: int) -> tuple[list, bool]:
+    """Текущий план ТБ сеткой: строка = этап 1-6, колонки = ветки (TB_PLAN_CONFLICT_OPTIONS)."""
+    current = database.get_tb_planet_names(guild_id)
+    has_bonus = any(conflict_key == "bonus" for _, conflict_key in current)
+    grid = []
+    for phase in range(1, 7):
+        cells = {opt["value"]: current.get((str(phase), opt["value"])) for opt in TB_PLAN_CONFLICT_OPTIONS}
+        grid.append({"phase": phase, "cells": cells, "empty": not any(cells.values())})
+    return grid, has_bonus
+
+
 @router.get("/tb/plan", response_class=HTMLResponse)
 async def tb_plan(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    current = database.get_tb_planet_names(user["guild_id"])
-    conflict_label_map = {opt["value"]: opt["label"] for opt in TB_PLAN_CONFLICT_OPTIONS}
-    rows = [
-        {
-            "phase": phase,
-            "conflict_key": conflict_key,
-            "conflict_label": conflict_label_map.get(conflict_key, conflict_key),
-            "planet_name": planet_name,
-        }
-        for (phase, conflict_key), planet_name in sorted(current.items())
-    ]
+    """Единая страница «План» (2026-10-15): текущий план планет по этапам + планы ордера
+    (раньше — отдельные /tb/plan и /tb/order-plans)."""
+    guild_id = user["guild_id"]
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    grid, has_bonus = _tb_plan_grid(guild_id)
+    active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
+    discord_guild_id = guild_cfg.get("discord_guild_id")
+    plans = []
+    for p in database.get_tb_saved_plans(guild_id):
+        plans.append({
+            **p,
+            "active": p["id"] == active_id,
+            "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
+        })
+
+    preview = None
+    preview_plan = None
+    preview_error = None
+    preview_plan_id = request.query_params.get("preview_plan_id")
+    if preview_plan_id:
+        try:
+            preview_plan = database.get_tb_saved_plan(int(preview_plan_id))
+        except ValueError:
+            preview_plan = None
+        if preview_plan is None or preview_plan["guild_id"] != guild_id:
+            preview_error = "План не найден."
+            preview_plan = None
+        else:
+            preview, preview_error = await tb_plan_reader.fetch_order_preview(preview_plan)
+
     return templates.TemplateResponse(request, "tb_plan.html", {
         "user": user,
-        "rows": rows,
+        "grid": grid,
+        "has_bonus": has_bonus,
         "conflict_options": TB_PLAN_CONFLICT_OPTIONS,
+        "plans": plans,
+        "active_plan": next((p for p in plans if p["active"]), None),
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
+        "config_warning": config_warning_html(guild_cfg, "tb_plan_order"),
+        "preview": preview,
+        "preview_plan": preview_plan,
+        "preview_error": preview_error,
+        "image_job": tb_order_image.get_job(guild_id),
     })
+
+
+@router.get("/tb/plan/api/stage-messages")
+async def tb_plan_stage_messages(user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Тексты этапов из активного плана ордера — то, что бот опубликует на этап
+    (попап по клику на строку плана)."""
+    guild_cfg = database.get_guild_config(user["guild_id"]) or {}
+    plan_id = guild_cfg.get("tb_active_plan_id")
+    plan = database.get_tb_saved_plan(int(plan_id)) if plan_id else None
+    if plan is None or plan["guild_id"] != user["guild_id"]:
+        return JSONResponse({"error": "Активный план ордера не выбран — выберите его в блоке «Планы ордера»."})
+    preview, error = await tb_plan_reader.fetch_order_preview(plan)
+    if error:
+        return JSONResponse({"error": error})
+    return JSONResponse({"plan": plan["name"], "stages": {str(p["phase"]): p["block"] for p in preview}})
 
 
 @router.post("/tb/plan", response_class=HTMLResponse)
@@ -259,59 +314,24 @@ async def tb_plan_save(
 
 @router.get("/tb/order-plans", response_class=HTMLResponse)
 async def tb_order_plans(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    guild_id = user["guild_id"]
-    guild_cfg = database.get_guild_config(guild_id) or {}
-    active_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
-    discord_guild_id = guild_cfg.get("discord_guild_id")
-    rows = []
-    for p in database.get_tb_saved_plans(guild_id):
-        rows.append({
-            **p,
-            "active": p["id"] == active_id,
-            "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
-        })
-
-    preview = None
-    preview_plan = None
-    preview_error = None
-    preview_plan_id = request.query_params.get("preview_plan_id")
-    if preview_plan_id:
-        try:
-            preview_plan = database.get_tb_saved_plan(int(preview_plan_id))
-        except ValueError:
-            preview_plan = None
-        if preview_plan is None or preview_plan["guild_id"] != guild_id:
-            preview_error = "План не найден."
-            preview_plan = None
-        else:
-            preview, preview_error = await tb_plan_reader.fetch_order_preview(preview_plan)
-
-    return templates.TemplateResponse(request, "tb_order_plans.html", {
-        "user": user,
-        "rows": rows,
-        "error": request.query_params.get("error"),
-        "saved": request.query_params.get("saved"),
-        "config_warning": config_warning_html(guild_cfg, "tb_plan_order"),
-        "preview": preview,
-        "preview_plan": preview_plan,
-        "preview_error": preview_error,
-        "image_job": tb_order_image.get_job(guild_id),
-    })
+    # Объединено с «Планом» (/tb/plan) — старые ссылки/закладки ведут туда же.
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(f"/tb/plan{query}", status_code=307)
 
 
 @router.post("/tb/order-plans/select", response_class=HTMLResponse)
 async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     plan = database.get_tb_saved_plan(plan_id)
     if plan is None or plan["guild_id"] != user["guild_id"]:
-        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'План не найден'})}", status_code=303)
+        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'План не найден'})}", status_code=303)
     database.update_guild_config(user["guild_id"], tb_active_plan_id=plan_id)
-    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+    return RedirectResponse("/tb/plan?saved=1", status_code=303)
 
 
 @router.post("/tb/order-plans/delete", response_class=HTMLResponse)
 async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     database.delete_tb_saved_plan(user["guild_id"], name)
-    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+    return RedirectResponse("/tb/plan?saved=1", status_code=303)
 
 
 # Фоновые задачи «ордер из картинки» — держим ссылки, чтобы asyncio не собрал их сборщиком мусора.
@@ -331,14 +351,14 @@ async def tb_order_plans_from_image(
     guild_id = user["guild_id"]
     name = name.strip()
     if not name:
-        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
     if not tb_order_image.start_job(guild_id, name):
-        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
+        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
     task = asyncio.create_task(tb_order_image.run_web_job(
         guild_id, thread_link, name, stars, bool(force), f"web:{user['discord_id']}"))
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
-    return RedirectResponse("/tb/order-plans#from-image", status_code=303)
+    return RedirectResponse("/tb/plan#from-image", status_code=303)
 
 
 @router.post("/tb/order-plans/save", response_class=HTMLResponse)
@@ -354,14 +374,14 @@ async def tb_order_plans_save_manual(
     # синтаксическая валидация ссылки. Шаблон явно предупреждает об этом.
     name = name.strip()
     if not name:
-        return RedirectResponse(f"/tb/order-plans?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
     thread_id = _extract_thread_id(thread_link)
     if thread_id is None:
         return RedirectResponse(
-            f"/tb/order-plans?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
+            f"/tb/plan?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
         )
     database.save_tb_plan(user["guild_id"], name, thread_id, stars, created_by=f"web:{user['discord_id']}")
-    return RedirectResponse("/tb/order-plans?saved=1", status_code=303)
+    return RedirectResponse("/tb/plan?saved=1", status_code=303)
 
 
 # =====================================================================

@@ -8,7 +8,23 @@
                 <p class="page-hero-eyebrow">Дисциплина</p>
                 <h1>Нарушения</h1>
             </div>
+            <div class="page-hero-actions">
+                <button type="button" data-modal-open="violation-add-modal">➕ Зафиксировать нарушение</button>
+            </div>
         </div>
+        {% if not show_departed %}
+            {% set flagged_count = rows|selectattr("flagged")|list|length %}
+            <div class="hero-kpis">
+                <div class="hero-kpi">
+                    <span class="hero-kpi-value">{{ rows|length }}</span>
+                    <span class="hero-kpi-label">{{ "игроков в списке" if show_all else "с нарушениями за 90 дней" }}</span>
+                </div>
+                <div class="hero-kpi{% if flagged_count %} hero-kpi-danger{% endif %}">
+                    <span class="hero-kpi-value">{{ flagged_count }}</span>
+                    <span class="hero-kpi-label">🚨 на пороге ({{ n_limit }}+ за 90 дней)</span>
+                </div>
+            </div>
+        {% endif %}
     </section>
 
     {% if error %}
@@ -26,17 +42,6 @@
     {% if show_departed %}
         <p class="muted">Архив нарушений игроков, выбывших из гильдии. При возвращении игрока в гильдию он снова появится в текущем составе.</p>
     {% else %}
-        <div class="stats-grid">
-            <div class="stat-tile">
-                <div class="stat-value">{{ rows|length }}</div>
-                <div class="stat-label">{{ "Игроков в списке" if show_all else "С нарушениями за 90 дней" }}</div>
-            </div>
-            <div class="stat-tile {% if rows|selectattr('flagged')|list|length > 0 %}status-danger{% endif %}">
-                <div class="stat-value">{{ rows|selectattr("flagged")|list|length }}</div>
-                <div class="stat-label">🚨 На пороге ({{ n_limit }}+ за 90 дней)</div>
-            </div>
-        </div>
-
         <p>
             {% if show_all %}
                 <a href="/violations">Показать только с нарушениями за 90 дней</a>
@@ -125,9 +130,13 @@
         </div>
     {% endif %}
 
-    <div class="panel" style="max-width: 36em;">
-        <div class="panel-title"><span>Зафиксировать нарушение</span></div>
-        <form method="post" action="/violations/add" class="requirement-form">
+    <dialog class="edit-modal" id="violation-add-modal">
+        <form method="post" action="/violations/add">
+            <div class="edit-modal-header">
+                <h3>Зафиксировать нарушение</h3>
+                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+            </div>
+            <div class="edit-modal-body requirement-form">
             <label>
                 Игрок
                 <div class="unit-search" data-live-search data-url="/violations/api/players" data-value-field="ally_code" data-label-field="name">
@@ -169,8 +178,12 @@
                     </label>
                 </div>
             {% endfor %}
-            <p class="muted">Выбирайте пункты из группы, соответствующей выбранному режиму — остальные будут проигнорированы при сохранении.</p>
-            <button type="submit">Зафиксировать</button>
+            <p class="muted" style="margin:0;font-size:0.85em;flex-basis:100%;">Выбирайте пункты из группы выбранного режима — остальные не сохранятся.</p>
+            </div>
+            <div class="edit-modal-footer">
+                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                <button type="submit">Зафиксировать</button>
+            </div>
         </form>
-    </div>
+    </dialog>
 {% endblock %}

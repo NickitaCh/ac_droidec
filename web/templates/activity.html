@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}Активность гильдии — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -7,7 +8,7 @@
             <div>
                 <p class="page-hero-eyebrow">Прокачка гильдии</p>
                 <h1>Активность</h1>
-                <p class="page-hero-links"><a href="/activity/players">Статистика по игрокам →</a> · <a href="/activity/resources">Потрачено ресурсов →</a></p>
+                <nav class="hero-links"><a class="hero-link" href="/activity/players"><span class="hero-link-icon">📊</span>Статистика по игрокам</a><a class="hero-link" href="/activity/resources"><span class="hero-link-icon">💰</span>Потрачено ресурсов</a></nav>
             </div>
             <div class="page-hero-sync">
                 <span>
@@ -29,7 +30,7 @@
         {% if players %}
             <div class="hero-kpis">
                 <div class="hero-kpi">
-                    <span class="hero-kpi-value">{{ total_count }}</span>
+                    <span class="hero-kpi-value">{{ ui.num(total_count) }}</span>
                     <span class="hero-kpi-label">{{ "событий по фильтру" if (player_filter or action_type_filter or period) else "событий всего" }}</span>
                 </div>
                 <div class="hero-kpi">
@@ -38,7 +39,7 @@
                 </div>
                 {% for label, count in breakdown_rows[:3] %}
                     <div class="hero-kpi">
-                        <span class="hero-kpi-value">{{ count }}</span>
+                        <span class="hero-kpi-value">{{ ui.num(count) }}</span>
                         <span class="hero-kpi-label">{{ label|lower }}</span>
                     </div>
                 {% endfor %}
@@ -76,16 +77,16 @@
                         <div class="bar-chart-row">
                             <div class="bar-chart-name">{{ label }}</div>
                             <div class="bar-chart-track">
-                                <div class="bar-chart-fill" data-tip="{{ label }}: {{ count }}" style="width: {{ (count / max_breakdown * 100) if max_breakdown else 0 }}%;"></div>
+                                <div class="bar-chart-fill" data-tip="{{ label }}: {{ ui.num(count) }}" style="width: {{ (count / max_breakdown * 100) if max_breakdown else 0 }}%;"></div>
                             </div>
-                            <div class="bar-chart-value">{{ count }}</div>
+                            <div class="bar-chart-value">{{ ui.num(count) }}</div>
                         </div>
                     {% endfor %}
                 </div>
             </div>
         {% endif %}
 
-        <form method="get" action="/activity" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+        <form method="get" action="/activity" class="table-toolbar filter-bar">
             <select name="player">
                 <option value="">Все игроки</option>
                 {% for ally_code, name in players %}
@@ -112,7 +113,7 @@
             {% endif %}
             <button type="submit">Применить</button>
             {% if player_filter or action_type_filter or period %}
-                <a href="{{ reset_url }}">Сбросить фильтр</a>
+                <a class="filter-bar-reset" href="{{ reset_url }}">Сбросить</a>
             {% endif %}
         </form>
 

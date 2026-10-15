@@ -1,18 +1,26 @@
+{% import "_ui.html" as ui %}
 {# Шапка раздела ВГ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
 {% macro tw_hero(title, active, lead="") -%}
 <section class="page-hero page-hero-dark">
     <div class="page-hero-top">
         <div>
             <p class="page-hero-eyebrow">Территориальные войны</p>
-            <h1>{{ title }}</h1>
-            {% if lead %}<p class="page-hero-lead">{{ lead }}</p>{% endif %}
+            <h1>{{ title }}{% if lead %}{{ ui.help(lead, side="left") }}{% endif %}</h1>
         </div>
     </div>
+    {# «Деф» — одна группа: расстановка + библиотека паков (подвкладки). #}
+    {% set in_def = active in ("plans", "squads") %}
     <nav class="hero-tabs">
-        {% for href, key, label in [("/tw", "history", "История"), ("/tw/def/squads", "squads", "Деф-паки"), ("/tw/def/plans", "plans", "Расстановка дефа")] %}
-            {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
-        {% endfor %}
+        {% if active == "history" %}<strong>История</strong>{% else %}<a href="/tw">История</a>{% endif %}
+        {% if in_def %}<strong>Деф</strong>{% else %}<a href="/tw/def/plans">Деф</a>{% endif %}
     </nav>
+    {% if in_def %}
+        <nav class="hero-subtabs">
+            {% for href, key, label in [("/tw/def/plans", "plans", "Расстановка"), ("/tw/def/squads", "squads", "Деф-паки")] %}
+                {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
+            {% endfor %}
+        </nav>
+    {% endif %}
     {% if caller %}{{ caller() }}{% endif %}
 </section>
 {%- endmacro %}

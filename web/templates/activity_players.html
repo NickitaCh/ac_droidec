@@ -12,7 +12,7 @@
         </div>
     </section>
 
-    <form method="get" action="/activity/players" class="table-toolbar" style="flex-wrap: wrap; gap: 0.6em; margin-bottom: 1em;">
+    <form method="get" action="/activity/players" class="table-toolbar filter-bar">
         <select name="period" onchange="this.form.submit()">
             <option value="" {% if not period %}selected{% endif %}>Всё время</option>
             <option value="7" {% if period == '7' %}selected{% endif %}>7 дней</option>

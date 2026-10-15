@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}Дашборд — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -119,9 +120,25 @@
             </section>
         </div>
     {% elif user.tier != "officer" %}
-        <h1>Привет, {{ user.username }}</h1>
-        <p class="{% if user.tier == 'member' %}muted{% else %}error{% endif %}">{{ access_status_message|safe }}</p>
-        {% if user.tier == "member" %}<p><a class="button" href="/me">👤 Мой профиль</a></p>{% endif %}
+        {% if user.tier == "member" %}
+            <section class="page-hero page-hero-light">
+                <div class="page-hero-top">
+                    <div>
+                        <p class="page-hero-eyebrow">Добро пожаловать</p>
+                        <h1>Привет, {{ user.username }}! 👋</h1>
+                        <p class="page-hero-lead">{{ access_status_message|safe }}</p>
+                        <nav class="hero-links">
+                            <a class="hero-link" href="/me"><span class="hero-link-icon">👤</span>Мой профиль</a>
+                            <a class="hero-link" href="/commands"><span class="hero-link-icon">📖</span>Команды бота</a>
+                            <a class="hero-link" href="/start"><span class="hero-link-icon">🚀</span>Начало работы</a>
+                        </nav>
+                    </div>
+                </div>
+            </section>
+        {% else %}
+            <h1>Привет, {{ user.username }}</h1>
+            <p class="error">{{ access_status_message|safe }}</p>
+        {% endif %}
     {% elif not guild_cfg %}
         <h1>Привет, {{ user.username }}</h1>
         <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>
@@ -196,7 +213,7 @@
             <div class="widget widget-roster">
                 <div class="widget-header">
                     <h2>Состав гильдии</h2>
-                    <span class="muted">{{ widgets.roster_rows|length }} игроков · {{ widgets.registered_count }} привязали Discord</span>
+                    <span class="muted">{{ widgets.registered_count }}/{{ widgets.roster_rows|length }} игроков привязали Discord</span>
                 </div>
                 {% if link_error %}
                     <p class="error">{{ link_error }}</p>
@@ -208,7 +225,7 @@
                     <p class="widget-empty">Состав пуст — кэш ростера ещё не синхронизировался с Comlink.</p>
                 {% else %}
                     <div class="table-toolbar" style="margin-bottom: 0.6em;">
-                        <input type="search" placeholder="Поиск по имени или коду союзника…" data-table-search="dashboard-roster-table">
+                        <input type="search" placeholder="Имя или код союзника…" data-table-search="dashboard-roster-table">
                     </div>
                     <div class="table-scroll">
                         <table class="data" id="dashboard-roster-table">
@@ -444,7 +461,7 @@
                                         <tr>
                                             <td>{{ row.date_label }}</td>
                                             <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
-                                            <td class="num">{{ row.own_score }}:{{ row.opponent_score }}</td>
+                                            <td class="num nowrap">{{ ui.num(row.own_score) }} : {{ ui.num(row.opponent_score) }}</td>
                                             <td>
                                                 {% if row.opponent_url %}
                                                     <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
@@ -498,8 +515,8 @@
                                         <tr>
                                             <td>{{ r.player_name }}</td>
                                             <td><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ r.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ r.unit_name }}</span></td>
-                                            <td>{{ r.target_label }}</td>
-                                            <td class="num">{{ r.deadline }}</td>
+                                            <td class="nowrap">{{ r.target_label }}</td>
+                                            <td class="num nowrap">{{ r.deadline }}</td>
                                             <td>
                                                 {% if r.status == "FAILED" %}
                                                     <span class="badge badge-task-overdue">Просрочено</span>

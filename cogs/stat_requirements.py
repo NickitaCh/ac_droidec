@@ -164,16 +164,16 @@ COMPARE_OPERATORS = {c.value for c in COMPARE_OPERATOR_CHOICES}
 # до этой фичи). Человекочитаемые названия схем ("Скорость"/"КД" и т.п.) — отдельно, per
 # персонаж, в stat_plate_character_schemes/схема_переименовать; тут только номер слота.
 SCHEME_CHOICES = [
-    disnake.OptionChoice(name="Обе схемы", value=""),
-    disnake.OptionChoice(name="Схема 1", value="1"),
-    disnake.OptionChoice(name="Схема 2", value="2"),
+    disnake.OptionChoice(name="Оба варианта", value=""),
+    disnake.OptionChoice(name="Вариант 1", value="1"),
+    disnake.OptionChoice(name="Вариант 2", value="2"),
 ]
 # Для /статы/статы_релик — форсирует, под какую схему проверять/пересчитывать, вместо
 # авто-определения (значение "" = авто).
 FORCE_SCHEME_CHOICES = [
     disnake.OptionChoice(name="Авто (по фактическим модам игрока)", value=""),
-    disnake.OptionChoice(name="Схема 1", value="1"),
-    disnake.OptionChoice(name="Схема 2", value="2"),
+    disnake.OptionChoice(name="Вариант 1", value="1"),
+    disnake.OptionChoice(name="Вариант 2", value="2"),
 ]
 
 
@@ -563,7 +563,7 @@ def _resolve_scheme(rows: list, mod_primaries: dict, mod_set_counts: dict, force
             active_scheme = 1 if primary_scores[1] >= primary_scores[2] else 2
         is_forced = False
 
-    scheme_label = scheme_labels.get(active_scheme, f"Схема {active_scheme}")
+    scheme_label = scheme_labels.get(active_scheme, f"Вариант {active_scheme}")
     return active_scheme, scheme_label, is_forced
 
 
@@ -612,7 +612,7 @@ def _char_squad_skip(plate_name: str, base_id: str, guild_id: int, missing: dict
     return skip, None
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None):
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None, only_failed: bool = False):
     """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total,
     active_scheme, scheme_label) для одного персонажа плейта у конкретного игрока — статы берутся
     из его реальных модов/шмота, прогноз на релик плейта. active_scheme/scheme_label — None,
@@ -643,7 +643,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     "Итог"/matched-total (не считается ни пройденной, ни непройденной) — этот сценарий
     специально используется, чтобы смотреть билд/модуль в отрыве от факта разблокировки.
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте).
-    skip_plates — см. _load_char_rows (отбор по отрядам, _char_squad_skip)."""
+    skip_plates — см. _load_char_rows (отбор по отрядам, _char_squad_skip).
+    only_failed — в блок попадают только строки с ❌ (режим «только кресты» в /статы);
+    подсчёты matched/total/failed_required от него не зависят."""
     loaded = _load_char_rows(plate_name, base_id, guild_id, skip_plates=skip_plates)
     if loaded is None:
         return None
@@ -742,7 +744,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             caption += f" → плейт требует {target_relic} (у игрока выше)"
     if active_scheme is not None:
         source = "вручную" if scheme_is_forced else "авто"
-        caption += f" · Схема: {scheme_label} ({source})"
+        caption += f" · Вариант: {scheme_label} ({source})"
     caption += legend
     if show_projection:
         headers = ["Стат", "Сейчас", "Нужно", f"Релик {target_relic}", "Норма"]
@@ -976,6 +978,16 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
                 "requirement": requirement_text,
             })
 
+    if only_failed:
+        table_rows = [r for r in table_rows if any("❌" in str(c) for c in r)]
+        omicron_lines = [l for l in omicron_lines if "❌" in l]
+        mod_primary_lines = [l for l in mod_primary_lines if "❌" in l]
+        mod_set_lines = [l for l in mod_set_lines if "❌" in l]
+        compare_lines = [l for l in compare_lines if "❌" in l]
+        comments = []
+        if not (table_rows or omicron_lines or mod_primary_lines or mod_set_lines or compare_lines):
+            caption += "\n✅ Крестов нет"
+
     block = caption
     if table_rows:
         block += "\n" + _build_table(headers, table_rows)
@@ -1139,7 +1151,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
     scheme_label = None
     if active_scheme is not None:
         scheme_leaf_plate = next((r[1] for r in rows if r[14]), plate_name)
-        scheme_label = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id).get(active_scheme, f"Схема {active_scheme}")
+        scheme_label = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id).get(active_scheme, f"Вариант {active_scheme}")
 
     if required_relic is None:
         block = "⚠️ В требованиях плейта нет строки Relic — не от чего считать прибавку."
@@ -1214,7 +1226,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
         projected = tgt_val * multiplier + flat
         table_rows.append([label, orig_cell, f"{operator} {_fmt_compact(projected)}"])
 
-    scheme_part = f" · Схема: {scheme_label}" if active_scheme is not None else ""
+    scheme_part = f" · Вариант: {scheme_label}" if active_scheme is not None else ""
     block = f"Норма пересчитана с релика {required_relic} на {target_relic} (плоская часть + пропорциональный рост базы){scheme_part}" + legend + "\n" + _build_table(headers, table_rows)
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
@@ -1278,6 +1290,66 @@ class StatsRevealView(disnake.ui.View):
         await interaction.response.edit_message(view=self)
         for e in self.embeds:
             await interaction.channel.send(embed=e)
+
+
+# Листалка /статы (просьба Егора 2026-10-15: «чтобы на одной странице был один ТП», по
+# образцу пагинации других ботов): одно сообщение, страница = итог или один персонаж
+# плейта, кнопки ⏮ ◀ ▶ ⏭ и ✖ (убрать кнопки). Листать может только тот, кто вызвал.
+class StatsPagerView(disnake.ui.View):
+    def __init__(self, pages: list, author_id: int):
+        super().__init__(timeout=1800)
+        self.pages = pages
+        self.author_id = author_id
+        self.index = 0
+        self.message = None
+        for i, e in enumerate(pages):
+            footer = e.footer.text if e.footer and e.footer.text else ""
+            e.set_footer(text=f"Страница {i + 1} из {len(pages)}" + (f" · {footer}" if footer else ""))
+        self._sync()
+
+    def _sync(self):
+        last = len(self.pages) - 1
+        self.first.disabled = self.prev.disabled = self.index == 0
+        self.next.disabled = self.last.disabled = self.index == last
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id != self.author_id:
+            await interaction.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
+            return False
+        return True
+
+    async def _show(self, interaction: disnake.MessageInteraction, index: int):
+        self.index = max(0, min(index, len(self.pages) - 1))
+        self._sync()
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @disnake.ui.button(emoji="⏮", style=disnake.ButtonStyle.secondary)
+    async def first(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        await self._show(interaction, 0)
+
+    @disnake.ui.button(emoji="◀", style=disnake.ButtonStyle.secondary)
+    async def prev(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        await self._show(interaction, self.index - 1)
+
+    @disnake.ui.button(emoji="▶", style=disnake.ButtonStyle.secondary)
+    async def next(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        await self._show(interaction, self.index + 1)
+
+    @disnake.ui.button(emoji="⏭", style=disnake.ButtonStyle.secondary)
+    async def last(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        await self._show(interaction, len(self.pages) - 1)
+
+    @disnake.ui.button(emoji="✖", style=disnake.ButtonStyle.danger)
+    async def close(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        self.stop()
+        await interaction.response.edit_message(view=None)
+
+    async def on_timeout(self):
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)
+            except disnake.HTTPException:
+                pass
 
 
 # =====================================================================
@@ -1581,7 +1653,7 @@ class StatRequirementsCog(commands.Cog):
             for row in rows:
                 req_id, _, _, _, _, _, priority, raw_text, comment, _, _, _, _, _, scheme_num = row
                 comment_part = f" · _{comment}_" if comment else ""
-                scheme_part = f" · [{scheme_labels.get(scheme_num, f'Схема {scheme_num}')}]" if scheme_num else ""
+                scheme_part = f" · [{scheme_labels.get(scheme_num, f'Вариант {scheme_num}')}]" if scheme_num else ""
                 lines.append(f"`#{req_id}` {PRIORITY_EMOJI.get(priority, '')} {raw_text}{comment_part}{scheme_part}")
 
         embeds = _lines_to_embeds(f"📋 {плейт}", DATACRON_LIST_COLOR, lines)
@@ -1626,8 +1698,9 @@ class StatRequirementsCog(commands.Cog):
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
-        схема: str = commands.Param(default=None, description="Форсировать схему мод-билда вместо авто-детекта (не действует на персонажей без схем)", choices=FORCE_SCHEME_CHOICES),
+        вариант: str = commands.Param(default=None, description="Форсировать вариант мод-билда вместо авто-детекта (не действует на персонажей без вариантов)", choices=FORCE_SCHEME_CHOICES),
         с_отрядом: bool = commands.Param(default=False, description="Только у кого есть отряд плейта (состав задаётся на сайте). По умолчанию — все"),
+        только_кресты: bool = commands.Param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
@@ -1646,7 +1719,7 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
             return
 
-        forced_scheme = _parse_scheme_param(схема)
+        forced_scheme = _parse_scheme_param(вариант)
 
         char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
         if not char_keys:
@@ -1744,11 +1817,11 @@ class StatRequirementsCog(commands.Cog):
                 await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отряда плейта {плейт} ({missing[плейт]}) — плейт ему не требуется.")
                 return
 
-        lines = []
+        char_pages = []  # (char_name, block)
+        summary_rows = []  # (char_name, matched, total, has_failed_required)
         matched_total = 0
         rows_total = 0
         updated_ats = []
-        any_char_shown = False
         failed_required_by_char = []
         skipped_chars = []
         for base_id in char_keys:
@@ -1756,13 +1829,14 @@ class StatRequirementsCog(commands.Cog):
             if skip_reason:
                 skipped_chars.append((_unit_display_name(base_id), skip_reason))
                 continue
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, skip_plates=skip_plates)
+            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, skip_plates=skip_plates, only_failed=только_кресты)
             if result is None:
                 continue
             char_name, block, matched, total, updated_at, failed_required, _required_total, _active_scheme, _scheme_label = result
-            any_char_shown = True
-            lines.append(f"## {char_name}")
-            lines.append(block)
+            summary_rows.append((char_name, matched, total, bool(failed_required)))
+            # «Только кресты»: персонаж без единого ❌ отдельной страницы не получает.
+            if not (только_кресты and matched == total and "❌" not in block):
+                char_pages.append((char_name, block))
             matched_total += matched
             rows_total += total
             if updated_at:
@@ -1770,37 +1844,41 @@ class StatRequirementsCog(commands.Cog):
             if failed_required:
                 failed_required_by_char.append((char_name, failed_required))
 
-        if not any_char_shown:
+        if not summary_rows:
             if skipped_chars:
                 await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отрядов этого плейта — проверять нечего.")
             else:
                 await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
             return
 
-        # Итоговый блок внизу отчёта: только ОБЯЗАТЕЛЬНЫЕ статы, не прошедшие норму по выбранному
-        # сценарию (см. failed_required в _evaluate_character_player) — раньше этот блок ВСЕГДА
-        # считал по полному подгону релика независимо от параметра, теперь честно следует за ним.
+        # Первая страница — итог: персонажи плейта с дробью + обязательные статы, не прошедшие
+        # норму по выбранному сценарию (failed_required в _evaluate_character_player).
         _scenario_titles = {
             SCENARIO_RAW: "как есть, без проекции — как в ХБ",
             SCENARIO_UP: "релик поднят только тем, кто ниже цели",
             SCENARIO_FULL: "с полным подгоном релика на цель плейта",
         }
-        lines.append(f"## ⚠️ Итог: обязательные статы ({_scenario_titles[сценарий]})")
+        summary = [f"**Персонажи** ({len(summary_rows)}) — дальше по странице на каждого:"]
+        for char_name, matched, total, has_failed in summary_rows:
+            icon = "❌" if has_failed else ("✅" if matched == total else "⚠️")
+            summary.append(f"{icon} {char_name} — {matched}/{total}")
+        summary.append("")
+        summary.append(f"## ⚠️ Обязательные статы ({_scenario_titles[сценарий]})")
         if failed_required_by_char:
             for char_name, failed_items in failed_required_by_char:
                 for item in failed_items:
-                    lines.append(f"❌ **{char_name}** — {item['stat']}: сейчас {item['current']}, нужно {item['requirement']}")
+                    summary.append(f"❌ **{char_name}** — {item['stat']}: сейчас {item['current']}, нужно {item['requirement']}")
         else:
-            lines.append("✅ Все обязательные статы в норме.")
+            summary.append("✅ Все обязательные статы в норме.")
         if skipped_chars:
-            lines.append(f"## ⚪ Не требуется — нет отряда ({len(skipped_chars)})")
+            summary.append(f"## ⚪ Не требуется — нет отряда ({len(skipped_chars)})")
             for char_name, reason in skipped_chars:
-                lines.append(f"**{char_name}** — {reason}")
+                summary.append(f"**{char_name}** — {reason}")
+        if только_кресты:
+            summary.append("")
+            summary.append("_Режим «только кресты»: на страницах персонажей — только невыполненное._")
 
-        # Цвет по тому же признаку, что и текст "Итог" выше — обязательным статам
-        # (failed_required_by_char), а не matched_total == rows_total: иначе цвет мог
-        # уйти в "частично" из-за невыполненного стата с приоритетом "по желанию"/
-        # "полезно", хотя текст тут же говорит "все обязательные статы в норме".
+        # Цвет — по обязательным статам (как и текст итога), а не matched_total == rows_total.
         if not failed_required_by_char:
             color = DATACRON_CHECK_COLOR_FULL
         elif matched_total == 0:
@@ -1809,17 +1887,19 @@ class StatRequirementsCog(commands.Cog):
             color = DATACRON_CHECK_COLOR_PARTIAL
 
         title = f"📋 {плейт} (игрок: {игрок})"
-        embeds = _lines_to_embeds(title, color, lines)
-        if not embeds:
-            await inter.edit_original_response("❌ Нечего показать.")
+        footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
+        pages = _lines_to_embeds(title + " — итог", color, summary)
+        for char_name, block in char_pages:
+            pages += _lines_to_embeds(f"{title} — {char_name}", color, block.split("\n"))
+        for e in pages:
+            e.set_footer(text=footer)
+
+        if len(pages) == 1:
+            await inter.edit_original_response(embed=pages[0])
             return
-
-        footer = f"Данные игрока обновлены: {updated_ats[0]}" if updated_ats else "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
-        embeds[-1].set_footer(text=footer)
-
-        await inter.edit_original_response(embed=embeds[0])
-        for e in embeds[1:]:
-            await inter.followup.send(embed=e)
+        view = StatsPagerView(pages, inter.author.id)
+        await inter.edit_original_response(embed=pages[0], view=view)
+        view.message = await inter.original_response()
 
     # ------------------ /статы_релик (пересчёт нормы плейта на другой релик) ------------------
     @commands.slash_command(name="статы_релик", description="Пересчитать уже заданную в плейте норму персонажа на другой релик")
@@ -1829,7 +1909,7 @@ class StatRequirementsCog(commands.Cog):
         плейт: str = commands.Param(description="Плейт (набор требований)", autocomplete=autocomplete_stat_plate),
         персонаж: str = commands.Param(description="Персонаж из плейта", autocomplete=autocomplete_stat_character),
         релик: int = commands.Param(description="Целевой уровень реликвии", ge=0, le=10),
-        схема: str = commands.Param(default=None, description="Какую схему показывать, если у персонажа их две (нет живого игрока — по умолчанию схема 1)", choices=SCHEME_CHOICES),
+        вариант: str = commands.Param(default=None, description="Какой вариант мод-билда показывать, если у персонажа их два (по умолчанию вариант 1)", choices=SCHEME_CHOICES),
     ):
         await inter.response.defer()
 
@@ -1842,7 +1922,7 @@ class StatRequirementsCog(commands.Cog):
             return
 
         base_id = _parse_bracket_id(персонаж)
-        result = await _project_character_relic(self.bot, плейт, base_id, релик, guild_id=guild_id, forced_scheme=_parse_scheme_param(схема))
+        result = await _project_character_relic(self.bot, плейт, base_id, релик, guild_id=guild_id, forced_scheme=_parse_scheme_param(вариант))
         if result is None:
             await inter.edit_original_response("❌ Нет сохранённых требований для этого персонажа в плейте.")
             return

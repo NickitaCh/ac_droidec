@@ -1,11 +1,11 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}{{ display_name }} — Датакроны — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
 {% macro squad_fields(rows) %}
     <div class="edit-modal-section">
-        <h4>Состав пака — если у игрока его нет, ДК не требуется</h4>
-        <p class="muted" style="margin:0;font-size:0.85em;">Ключевые персонажи (до {{ rows|length }}). Релик пусто — достаточно, что персонаж открыт. Пустой состав — требование для всех.</p>
+        <h4>Состав пака — если у игрока его нет, ДК не требуется{{ ui.help("Ключевые персонажи (до " ~ rows|length ~ "). Релик пусто — достаточно, что персонаж открыт. Пустой состав — требование для всех.") }}</h4>
         {% for u in rows %}
             <div class="edit-modal-row">
                 <div class="unit-search" data-live-search data-url="/datacrons/api/units" data-value-field="base_id" data-label-field="name" data-required="false" style="flex:1 1 14em;">
@@ -47,13 +47,13 @@
         </div>
     </div>
 
-    <p><a href="/datacrons/check?season={{ set_id }}">Проверить игрока/гильдию по этому сезону →</a>{% if user.is_super_admin %} · <a href="/admin/datacron-shorts?season={{ set_id }}">Сокращения бонусов</a>{% endif %}</p>
+    <nav class="hero-links" style="margin: 0 0 1em;"><a class="hero-link" href="/datacrons/check?season={{ set_id }}"><span class="hero-link-icon">🔍</span>Проверить игрока/гильдию по сезону</a>{% if user.is_super_admin %}<a class="hero-link" href="/admin/datacron-shorts?season={{ set_id }}"><span class="hero-link-icon">✏️</span>Сокращения бонусов</a>{% endif %}</nav>
 
     <div class="panel">
-        <div class="panel-title"><span>Добавить обычное требование</span></div>
+        <div class="panel-title"><span>Добавить обычное требование</span>{% call ui.help(side="right") %}<p>Для каждого уровня выберите бонус из списка (или оставьте «не проверять»). Несколько допустимых альтернатив на один уровень и состав пака — в «править» у уже созданного требования.</p><p>«Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования.</p><p>Мин. % статов: датакрон засчитывается по уровням независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>{% endcall %}</div>
         <form method="post" action="/datacrons/{{ set_id }}/add" class="requirement-form">
             <label>
-                Отряд/персонаж (справочно)
+                Название
                 <input type="text" name="pack">
             </label>
             <label>
@@ -85,7 +85,7 @@
                 <input type="text" name="stats" placeholder="Например: crit dmg / crit chance">
             </label>
             <fieldset class="stat-req-fieldset">
-                <legend>Мин. % статов — мягкая проверка, до {{ stat_slots|length }} шт. (необязательно)</legend>
+                <legend>Мин. % статов — до {{ stat_slots|length }} шт. (необязательно)</legend>
                 {% for i in stat_slots %}
                     <div class="stat-req-slot">
                         <select name="stat{{ i }}">
@@ -104,7 +104,6 @@
             </label>
             <button type="submit">Добавить</button>
         </form>
-        <p class="muted" style="margin-top:0.5em;">Для каждого уровня выберите бонус из списка (или оставьте «- (не проверять)»). Несколько допустимых альтернатив на один уровень и состав пака — в «править» у уже созданного требования. «Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования. Стат-проверка мягкая: датакрон засчитывается по уровням/способностям независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>
     </div>
 
     {% if not base_reqs %}
@@ -116,7 +115,7 @@
                 <table class="data">
                     <thead>
                         <tr>
-                            <th>Отряд</th>
+                            <th>Название</th>
                             <th class="dc-level-col">3 уровень</th>
                             <th class="dc-level-col">6 уровень</th>
                             <th class="dc-level-col">9 уровень</th>
@@ -154,7 +153,7 @@
                                             </div>
                                             <div class="edit-modal-body">
                                                 <div class="edit-modal-grid">
-                                                    <label>Отряд <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
+                                                    <label>Название <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
                                                     <label>Приоритет
                                                         <select name="priority">
                                                             {% for label, value in priority_options %}
@@ -245,7 +244,7 @@
                     </select>
                 </label>
                 <label>
-                    Отряд (справочно)
+                    Название
                     <input type="text" name="pack">
                 </label>
                 <label>
@@ -264,7 +263,7 @@
                 <table class="data">
                     <thead>
                         <tr>
-                            <th>Отряд</th>
+                            <th>Название</th>
                             <th>Персонаж</th>
                             <th class="num">Нужен уровень</th>
                             <th>Приоритет</th>
@@ -291,7 +290,7 @@
                                             <div class="edit-modal-body">
                                                 <div class="edit-modal-grid">
                                                     <label>Нужный уровень <input type="number" name="required_level" min="1" max="20" value="{{ r.required_level }}" required></label>
-                                                    <label>Отряд <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
+                                                    <label>Название <input type="text" name="pack" value="{{ r.pack or '' }}"></label>
                                                     <label>Приоритет
                                                         <select name="priority">
                                                             {% for label, value in priority_options %}

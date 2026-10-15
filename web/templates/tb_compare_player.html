@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}ТБ сравнение: {{ compare.player_name }} — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -8,7 +9,7 @@
             <div>
                 <p class="page-hero-eyebrow">Территориальные битвы</p>
                 <h1>Сравнение по ТБ — {{ compare.player_name }}</h1>
-                <p class="page-hero-lead"><a href="/tb/player/{{ compare.player_name | urlencode }}">Подробно за последнюю ТБ →</a></p>
+                <nav class="hero-links"><a class="hero-link" href="/tb/player/{{ compare.player_name | urlencode }}"><span class="hero-link-icon">📋</span>Подробно за последнюю ТБ</a></nav>
             </div>
         </div>
     </section>
@@ -24,7 +25,7 @@
                     {% for row in compare.global_rows %}
                         <tr>
                             <td>{{ row.label }}</td>
-                            {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                            {% for v in row.values %}<td class="num nowrap">{{ ui.num(v) if v is not none else "—" }}</td>{% endfor %}
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -45,7 +46,7 @@
                             {% for row in phase.round_rows %}
                                 <tr>
                                     <td>{{ row.label }}</td>
-                                    {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                                    {% for v in row.values %}<td class="num nowrap">{{ ui.num(v) if v is not none else "—" }}</td>{% endfor %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -63,7 +64,7 @@
                             {% for row in planet.rows %}
                                 <tr>
                                     <td>{{ row.label }}</td>
-                                    {% for v in row.values %}<td class="num">{{ v if v is not none else "—" }}</td>{% endfor %}
+                                    {% for v in row.values %}<td class="num nowrap">{{ ui.num(v) if v is not none else "—" }}</td>{% endfor %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -87,7 +88,7 @@
                 <thead><tr><th>ТБ</th><th>Ключ</th><th class="num">Значение</th></tr></thead>
                 <tbody>
                     {% for event_label, raw_key, value in compare.hidden_entries %}
-                        <tr><td>{{ event_label }}</td><td><code>{{ raw_key }}</code></td><td class="num">{{ value }}</td></tr>
+                        <tr><td>{{ event_label }}</td><td><code>{{ raw_key }}</code></td><td class="num nowrap">{{ ui.num(value) }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

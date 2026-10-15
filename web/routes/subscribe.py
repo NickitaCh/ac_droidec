@@ -95,6 +95,17 @@ def _renewal_guild(user: dict) -> dict | None:
     return {"id": cfg["id"], "name": cfg["name"], "expires_at": cfg.get("subscription_expires_at")}
 
 
+def _prefill(user: dict, discord_guild_id: str = "", ally_code: str = "") -> dict:
+    """Значения формы «Подключить гильдию»: введённое/из ссылки /подписка — иначе из
+    регистрации пользователя (продление истёкшей гильдии без ручного ввода)."""
+    reg = database.get_subscription_prefill(user["discord_id"]) if user.get("discord_id") else None
+    return {
+        "ally_code": ally_code or (reg["ally_code"] if reg else ""),
+        "discord_guild_id": discord_guild_id or (reg["discord_guild_id"] if reg else ""),
+        "guild_name": reg["guild_name"] if reg and not (ally_code or discord_guild_id) else None,
+    }
+
+
 @router.get("/subscribe", response_class=HTMLResponse)
 async def subscribe_form(request: Request, user: dict = Depends(get_current_user)):
     return templates.TemplateResponse(request, "subscribe.html", {
@@ -104,7 +115,7 @@ async def subscribe_form(request: Request, user: dict = Depends(get_current_user
         "result": None,
         "error": request.query_params.get("error"),
         # /подписка в Discord подставляет ID сервера, где её вызвали.
-        "prefill_discord_guild_id": "".join(filter(str.isdigit, request.query_params.get("discord_guild_id", "")))[:20],
+        "prefill": _prefill(user, "".join(filter(str.isdigit, request.query_params.get("discord_guild_id", "")))[:20]),
     })
 
 
@@ -121,6 +132,7 @@ async def subscribe_submit(
     context = {
         "user": user, "period_options": PERIOD_OPTIONS, "renewal_guild": renewal_guild,
         "result": None, "error": None,
+        "prefill": {"ally_code": ally_code, "discord_guild_id": discord_guild_id, "guild_name": None},
     }
 
     if period not in PERIOD_CHOICES:

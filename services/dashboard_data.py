@@ -47,10 +47,10 @@ def access_status_message(user: dict) -> str:
     tier = user.get("tier")
     if tier == "member":
         return (
-            "У вас уровень обычного участника: на сайте вам доступен «Мой профиль» — свои статы, датакроны, "
-            "задачи, омикроны, ресурсы и альты; остальной сайт — офицерам и лидеру. "
-            "В Discord доступна часть команд бота (например <code>/статы</code>, "
-            '<code>/дк_требования проверить</code>) — полный список на странице <a href="/commands">Документация</a>.'
+            "Рады вас видеть! В «Моём профиле» собрано всё о вашем аккаунте: статы по нормам гильдии, "
+            "датакроны, задачи на прокачку, омикроны, потраченные ресурсы и альты. "
+            "Бот в Discord тоже всегда под рукой — попробуйте <code>/статы</code> или "
+            "<code>/дк_требования проверить</code>."
         )
     if database.discord_id_has_any_registration(user["discord_id"]):
         return (
@@ -355,16 +355,20 @@ def _points_str(coords: list) -> str:
     return " ".join(f"{x},{y}" for x, y in coords)
 
 
+# Русские сокращения (2026-10-15: «5.1B» → «5,1 млрд»); неразрывный пробел перед суффиксом.
+COMPACT_SUFFIXES = ((1_000_000_000, " млрд"), (1_000_000, " млн"), (1_000, " тыс."))
+
+
 def _compact_number(value: float) -> str:
     """5002331105 -> "5.0B", 1234567 -> "1.2M" — гильдийские суммы очков ТБ легко уходят
     в миллиарды (десятки игроков × очки за весь ивент), полное число прямой подписью
     над столбцом было бы нечитаемо; точное значение остаётся в тултипе (data-tip)."""
     n = abs(value)
     sign = "-" if value < 0 else ""
-    for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+    for threshold, suffix in COMPACT_SUFFIXES:
         if n >= threshold:
             scaled = n / threshold
-            text = f"{scaled:.1f}".rstrip("0").rstrip(".")
+            text = f"{scaled:.1f}".rstrip("0").rstrip(".").replace(".", ",")
             return f"{sign}{text}{suffix}"
     return f"{sign}{int(n)}"
 
@@ -404,13 +408,13 @@ def _format_axis_ticks(ticks: list[float]) -> list[str]:
     1 знаком все деления превратились бы в одинаковую подпись ("5.0B" вместо 5.00/5.01/
     5.02B). Подбирает минимум знаков, при котором все подписи различаются, до 4 знаков."""
     ref = max((abs(t) for t in ticks), default=0) or 1
-    for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+    for threshold, suffix in COMPACT_SUFFIXES:
         if ref >= threshold:
             decimals = 0
-            labels = [f"{t / threshold:.{decimals}f}{suffix}" for t in ticks]
+            labels = [f"{t / threshold:.{decimals}f}".replace(".", ",") + suffix for t in ticks]
             while len(set(labels)) < len(labels) and decimals < 4:
                 decimals += 1
-                labels = [f"{t / threshold:.{decimals}f}{suffix}" for t in ticks]
+                labels = [f"{t / threshold:.{decimals}f}".replace(".", ",") + suffix for t in ticks]
             return labels
     return [f"{int(round(t))}" for t in ticks]
 
@@ -540,7 +544,7 @@ def get_tb_report(guild_id: int, event_id: int | None = None) -> TbReport | None
                 delta_label, delta_class = "±0%", "flat"
             else:
                 arrow = "▲" if delta_pct > 0 else "▼"
-                delta_label = f"{arrow}{abs(delta_pct):.1f}%"
+                delta_label = f"{arrow}{abs(delta_pct):.1f}%".replace(".", ",")
                 delta_class = "up" if delta_pct > 0 else "down"
         chart_bars.append((
             completed_at, total, _to_pct(total), _compact_number(total),

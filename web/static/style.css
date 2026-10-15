@@ -1240,7 +1240,7 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
     transition: width 0.4s ease;
 }
 .bar-chart-fill.regressed { background: var(--status-critical); }
-.bar-chart-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.92em; min-width: 3.5em; text-align: right; }
+.bar-chart-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.92em; min-width: 3.5em; text-align: right; white-space: nowrap; }
 
 /* ---- Стековый бар (композиция по категориям, часть-от-целого) ---- */
 .stack-legend { display: flex; gap: 1.25em; flex-wrap: wrap; margin-bottom: 1em; font-size: 0.85em; color: var(--fg-secondary); }
@@ -2101,7 +2101,7 @@ label.checkbox .mod-icon { vertical-align: middle; }
 .page-hero code { background: rgba(255, 255, 255, 0.1); color: var(--hero-fg); padding: 0.1em 0.35em; border-radius: 4px; }
 .page-hero-lead strong { color: var(--hero-fg); }
 /* Текстовые значения KPI («2 победы подряд») переносятся, а не вылезают из плитки */
-.hero-kpi-value { white-space: normal; overflow-wrap: anywhere; }
+.hero-kpi-value { white-space: normal; overflow-wrap: break-word; }
 .page-hero + .config-warning, .page-hero + p.error { margin-top: 0; }
 /* Страницы на всю ширину, но сплошной текст — не длиннее ~90 символов в строке */
 main.wide > p, main.wide > ul, main.wide > ol, main.wide.docs-page h2 + p { max-width: 62em; }
@@ -2425,3 +2425,141 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 .res-summary { display: grid; grid-template-columns: 1fr auto; gap: 0.35em 0.75em; margin: 0 0 0.6em; }
 .res-summary dt { margin: 0; }
 .res-summary dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---- 2026-10-15: правки по страницам ---- */
+/* Значок «?» с подсказкой (макрос ui.help в _ui.html). */
+.help-q {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 1.15em; height: 1.15em; margin-left: 0.3em; border-radius: 50%;
+    border: 1px solid var(--border-strong); color: var(--fg-muted);
+    font-size: 0.8rem; font-weight: 700; line-height: 1; cursor: help;
+    vertical-align: middle; flex: 0 0 auto; text-transform: none; letter-spacing: normal;
+}
+.help-q:hover, .help-q:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+.help-q-bubble {
+    display: none; position: absolute; top: calc(100% + 0.5em); left: 50%; transform: translateX(-50%);
+    width: max-content; max-width: min(24rem, 80vw); padding: 0.6em 0.8em;
+    background: var(--surface); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); font-size: 0.85rem; font-weight: 400; line-height: 1.45;
+    text-align: left; white-space: normal; z-index: 30;
+}
+.help-q-bubble p { margin: 0 0 0.4em; }
+.help-q-bubble p:last-child { margin-bottom: 0; }
+.help-q:hover .help-q-bubble, .help-q:focus .help-q-bubble { display: block; }
+.help-q--right .help-q-bubble { left: auto; right: 0; transform: none; }
+.help-q--left .help-q-bubble { left: 0; transform: none; }
+/* Заголовок блока с «?» в правом углу. */
+.panel-title .help-q, .widget-header .help-q { margin-left: auto; }
+
+.nowrap { white-space: nowrap; }
+.num-group { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Поиск в тулбаре таблиц — не обрезать плейсхолдер. */
+.table-toolbar input[type="search"] { flex: 0 1 22em; min-width: min(16em, 100%); }
+
+/* Ссылки-переходы в шапке страницы (вместо «Текст →»). */
+.hero-links { display: flex; flex-wrap: wrap; gap: 0.5em; margin-top: 0.8em; }
+.hero-link {
+    display: inline-flex; align-items: center; gap: 0.45em; padding: 0.4em 0.85em;
+    border: 1px solid var(--hero-border, var(--border)); border-radius: 999px;
+    background: var(--hero-chip-bg, rgba(255, 255, 255, 0.06)); color: inherit;
+    font-size: 0.88rem; text-decoration: none; white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.hero-link:hover { border-color: var(--accent); background: rgba(255, 255, 255, 0.12); text-decoration: none; }
+.hero-link-icon { font-size: 1em; line-height: 1; }
+
+/* Форма-фильтр в одну строку (карточка игрока: плейт/вариант/обновить/кнопка). */
+form.filter-row { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 0.8em; max-width: none; margin-bottom: 0.8em; }
+form.filter-row > label:not(.checkbox) { flex: 1 1 12em; min-width: 0; }
+form.filter-row > label:not(.checkbox) select { width: 100%; }
+form.filter-row > label.checkbox { flex: 0 0 auto; min-height: 2.4em; white-space: nowrap; }
+form.filter-row > button { flex: 0 0 auto; }
+.filter-row-label { display: inline-flex; align-items: center; }
+
+/* Проверка датакронов карточками (_datacron.html) — без горизонтального скролла. */
+.dc-req-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19em), 1fr)); gap: 0.7em; }
+.dc-req { border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; padding: 0.6em 0.8em; min-width: 0; }
+.dc-req-ok { border-left-color: var(--status-good); }
+.dc-req-warn { border-left-color: var(--status-warning); }
+.dc-req-miss { border-left-color: var(--status-critical); }
+.dc-req-head { display: flex; align-items: center; gap: 0.45em; margin-bottom: 0.45em; flex-wrap: wrap; }
+.dc-req-icon { flex: 0 0 auto; }
+.dc-req-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.3em 0.75em; margin: 0; font-size: 0.9em; }
+.dc-req-body dt { color: var(--fg-muted); }
+.dc-req-body dd { margin: 0; overflow-wrap: anywhere; }
+.dc-levels > div + div { margin-top: 0.15em; }
+.dc-level-num { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.dc-skipped { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 0.25em; }
+
+/* /subscribe — на всю ширину: форма + «как это работает». */
+.subscribe-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1em; align-items: start; }
+.subscribe-grid > .panel { margin: 0; }
+.subscribe-renew { grid-column: 1 / -1; }
+.subscribe-form { max-width: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14em), 1fr)); gap: 0.9em; align-items: end; }
+.subscribe-form > button { grid-column: 1 / -1; justify-self: start; }
+.subscribe-form input, .subscribe-form select { width: 100%; box-sizing: border-box; }
+.subscribe-steps { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 0.6em; line-height: 1.5; }
+.subscribe-summary { display: grid; grid-template-columns: auto 1fr; gap: 0.35em 1em; margin: 0 0 1em; }
+.subscribe-summary dt { color: var(--fg-muted); }
+.subscribe-summary dd { margin: 0; font-weight: 600; }
+@media (max-width: 48em) { .subscribe-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Подзаголовок шапки: без «висящих» слов и разрыва ссылок посередине. */
+.page-hero-lead { text-wrap: pretty; }
+.page-hero-lead a { white-space: nowrap; }
+/* Пузырь «?» в шапке не должен обрезаться (фон скругляется и без overflow:hidden). */
+.page-hero { overflow: visible; }
+.page-hero h1 .help-q { font-size: 0.85rem; vertical-align: 0.35em; color: var(--hero-fg-muted); border-color: var(--hero-fg-muted); }
+.page-hero .help-q-bubble { color: var(--fg); }
+#tasks-module.is-loading, [id].is-loading { opacity: 0.55; transition: opacity 0.15s ease; pointer-events: none; }
+
+/* Компактная панель фильтров (/activity и др.) — не растягивается на всю ширину. */
+form.filter-bar {
+    justify-content: flex-start; align-items: center; gap: 0.6em; flex-wrap: wrap;
+    width: fit-content; max-width: 100%; margin-bottom: 1em; padding: 0.6em 0.7em;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+}
+form.filter-bar select { flex: 0 1 13em; min-width: 9em; }
+.filter-bar-reset { font-size: 0.88em; color: var(--fg-muted); }
+@media (max-width: 40em) { form.filter-bar { width: auto; } form.filter-bar select { flex: 1 1 100%; } }
+.edit-modal-body.requirement-form { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+.page-hero-actions { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: center; }
+
+/* /tb/plan — сетка «этап × ветка», попап сообщения этапа, формы рядом. */
+.panel-actions { display: inline-flex; gap: 0.5em; font-weight: 400; }
+.tb-plan-hint { margin: -0.4em 0 0.8em; font-size: 0.88em; }
+.tb-plan-grid { table-layout: fixed; }
+.tb-plan-grid th:first-child, .tb-plan-grid td.tb-plan-phase { width: 4.5em; text-align: center; }
+.tb-plan-grid td.tb-plan-phase { font-weight: 700; font-size: 1.1em; }
+.tb-plan-row { cursor: pointer; transition: background 0.12s ease; }
+.tb-plan-row:hover, .tb-plan-row:focus-visible { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: none; }
+.tb-plan-row.is-empty td { color: var(--fg-muted); }
+.tb-stage-text { white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; margin: 0; padding: 0.8em; background: var(--page); border: 1px solid var(--border); border-radius: 8px; max-height: 60vh; overflow-y: auto; }
+.tb-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22em), 1fr)); gap: 0.8em; }
+.tb-preview-stage { border: 1px solid var(--border); border-radius: 10px; padding: 0.7em 0.8em; min-width: 0; }
+.tb-plan-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24em), 1fr)); gap: 1em; align-items: start; }
+.tb-plan-forms > .panel { margin: 0; }
+.tb-plan-forms form { max-width: none; }
+/* Подвкладки внутри группы шапки (ВГ → Деф: расстановка / паки). */
+.hero-subtabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.55rem; padding-top: 0.55rem; border-top: 1px solid var(--hero-line); }
+.hero-subtabs a, .hero-subtabs strong { padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.85rem; text-decoration: none; }
+.hero-subtabs a { color: var(--hero-fg-secondary); }
+.hero-subtabs a:hover { color: var(--hero-fg); background: rgba(255, 255, 255, 0.08); }
+.hero-subtabs strong { color: var(--hero-fg); background: rgba(255, 255, 255, 0.16); font-weight: 600; }
+.page-hero .hero-subtabs + .hero-kpis { margin-top: 1rem; }
+
+/* Длинные варианты в <select> (уровни ДК и т.п.) не распирают поле за рамки блока. */
+.requirement-form label { min-width: 0; }
+.requirement-form label > select, .requirement-form label > input:not([type="checkbox"]):not([type="radio"]) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+dialog.edit-modal select { max-width: 100%; min-width: 0; }
+.edit-modal-grid label > select, .edit-modal-grid label > input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
+.edit-modal-section h4 .help-q { margin-left: 0.4em; }
+/* «Подробнее» внизу виджета — аккуратная ссылка-кнопка вместо «→ текст». */
+.widget-more { margin: 0.8em 0 0; }
+.widget-more a { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.3em 0.75em; border: 1px solid var(--border); border-radius: 999px; font-size: 0.85em; text-decoration: none; color: var(--accent); }
+.widget-more a:hover { border-color: var(--accent); }
+.subscribe-renew form.filter-row > label:not(.checkbox) { flex: 0 1 22em; }
+form.filter-bar { flex-wrap: nowrap; }
+form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
+@media (max-width: 52em) { form.filter-bar { flex-wrap: wrap; width: auto; } form.filter-bar select { flex: 1 1 12em; width: auto; } }

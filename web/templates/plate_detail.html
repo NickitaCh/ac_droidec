@@ -134,7 +134,7 @@
                     </select>
                 </label>
                 <label>
-                    Схема мод-билда
+                    Вариант мод-билда
                     <select name="scheme_num">
                         {% for label, value in scheme_options %}
                             <option value="{{ value }}">{{ label }}</option>
@@ -175,7 +175,7 @@
                     </select>
                 </label>
                 <label>
-                    Схема мод-билда
+                    Вариант мод-билда
                     <select name="scheme_num">
                         {% for label, value in scheme_options %}
                             <option value="{{ value }}">{{ label }}</option>
@@ -204,7 +204,7 @@
                         </div>
                     </label>
                     <label>
-                        Схема мод-билда
+                        Вариант мод-билда
                         <select name="scheme_num" data-mod-grid-scheme>
                             {% for label, value in scheme_options %}
                                 <option value="{{ value }}">{{ label }}</option>
@@ -337,7 +337,7 @@
                     </select>
                 </label>
                 <label>
-                    Схема мод-билда
+                    Вариант мод-билда
                     <select name="scheme_num">
                         {% for label, value in scheme_options %}
                             <option value="{{ value }}">{{ label }}</option>
@@ -413,7 +413,7 @@
                                     {% endfor %}
                                 </select>
                                 {% if char.has_schemes %}
-                                    <select name="scheme_num_{{ r.id }}" title="Схема">
+                                    <select name="scheme_num_{{ r.id }}" title="Вариант мод-билда">
                                         {% for label, value in scheme_options %}
                                             <option value="{{ value }}" {% if r.scheme_num_str == value %}selected{% endif %}>{{ label }}</option>
                                         {% endfor %}
@@ -468,7 +468,7 @@
         <p class="empty-state">В этом плейте пока нет требований — добавьте первое выше.</p>
     {% else %}
         {% if not is_modular %}
-            <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу. Строки без схемы видны в обеих колонках сразу.</p>
+            <p class="muted">Перетащите панель персонажа за ⠿, чтобы изменить порядок — сохраняется сразу. Строки без варианта видны в обеих колонках сразу.</p>
         {% endif %}
         <div id="plate-characters-list">
         {% for char in characters %}
@@ -640,7 +640,7 @@
             const html = own.map((id) => setIconHtml(id, "")).concat(other.map((id) => setIconHtml(id, "shared")));
             while (html.length < 6) html.push('<span class="mod-budget-cell"></span>');
             cellsBox.innerHTML = html.join("");
-            budgetLabel.textContent = `${used} / 6 модулей` + (other.length ? ` (${other.length} — из другой схемы)` : "");
+            budgetLabel.textContent = `${used} / 6 модулей` + (other.length ? ` (${other.length} — из другого варианта)` : "");
             budgetLabel.classList.toggle("is-full", used === 6);
             budgetLabel.classList.toggle("is-over", used > 6);
             cards.forEach((c) => {
