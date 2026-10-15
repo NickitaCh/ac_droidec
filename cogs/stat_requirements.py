@@ -1860,7 +1860,8 @@ class StatRequirementsCog(commands.Cog):
         }
         summary = [f"**Персонажи** ({len(summary_rows)}) — дальше по странице на каждого:"]
         for char_name, matched, total, has_failed in summary_rows:
-            icon = "❌" if has_failed else ("✅" if matched == total else "⚠️")
+            # Иконка — только по обязательным: недобор по опциональным не делает персонажа «⚠️».
+            icon = "❌" if has_failed else "✅"
             summary.append(f"{icon} {char_name} — {matched}/{total}")
         summary.append("")
         summary.append(f"## ⚠️ Обязательные статы ({_scenario_titles[сценарий]})")
