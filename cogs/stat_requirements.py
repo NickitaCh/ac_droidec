@@ -1289,15 +1289,17 @@ class StatsRevealView(disnake.ui.View):
 
 
 # Листалка /статы (просьба Егора 2026-10-15: «чтобы на одной странице был один ТП»;
-# 2026-10-16 NicolozZ: «быстро открыть нужного перса»): одно сообщение на Components V2.
-# Итог — строки персонажей, у каждой сбоку кнопка «Открыть» (Section + accessory), страница
-# персонажа — текст + «📋 К списку»; снизу ⏮ ◀ ▶ ⏭ ✖. V2 не живёт во View, поэтому кнопки
-# несут custom_id "stp|<token>|<действие>", обработчик — StatRequirementsCog.on_stats_pager_click,
-# состояние в памяти (STATS_PAGER_TTL, после рестарта — «вызовите заново»). Лимиты Discord на
-# V2-сообщение: 40 компонентов (строка итога = Section+текст+кнопка = 3, остальное ~10; 9 строк = 37, с запасом) и 4000
-# символов текста — отсюда STATS_SUMMARY_ROWS строк на страницу итога. Листать может только автор.
-STATS_SUMMARY_ROWS = 9
+# 2026-10-16 NicolozZ: «быстро открыть нужного перса», «весь список на одной странице»):
+# одно сообщение на Components V2. Итог — сначала невыполненные обязательные статы (кресты),
+# затем список персонажей (сначала с ❌, дальше в порядке плейта) обычным текстом, а открыть
+# персонажа — выпадающим списком (по 25 в списке). Кнопка у каждой строки (Section) съедала
+# 3 компонента из 40 и давала лишь 9 строк на страницу. Страница персонажа — текст + тот же
+# выпадающий список + «📋 К списку»; снизу ⏮ ◀ ▶ ⏭ ✖. V2 не живёт во View, поэтому компоненты
+# несут custom_id "stp|<token>|<действие>", обработчики — on_stats_pager_click/on_stats_pager_pick,
+# состояние в памяти (STATS_PAGER_TTL, после рестарта — «вызовите заново»). Текст страницы
+# держим под лимитом 4000 символов V2-сообщения. Листать может только автор.
 STATS_PAGE_TEXT_BUDGET = 3300
+STATS_PICKS_PER_SELECT = 25
 STATS_PAGER_TTL = 1800
 _stats_pagers: dict[str, dict] = {}
 
@@ -1315,38 +1317,24 @@ def _chunk_lines(lines: list, budget: int) -> list[str]:
     return chunks
 
 
-def _build_stats_pages(title: str, summary_rows: list, char_pages: list, extra_lines: list) -> list[dict]:
-    """summary_rows: [(строка итога, char_name)], char_pages: [(char_name, block)], extra_lines —
-    хвост итога (обязательные статы, «не требуется»). Страницы: итог (по STATS_SUMMARY_ROWS
-    строк), хвост отдельными страницами, если не влез в первую, затем персонажи."""
-    n_summary = max(1, math.ceil(len(summary_rows) / STATS_SUMMARY_ROWS))
-    extra_text = "\n".join(extra_lines).strip()
-    extra_inline = len(extra_text) <= 2400
-    extra_chunks = [] if extra_inline else _chunk_lines(extra_lines, STATS_PAGE_TEXT_BUDGET)
-    row_page = {name: pos // STATS_SUMMARY_ROWS for pos, (_line, name) in enumerate(summary_rows)}
-
-    char_start, char_chunks = {}, []
-    idx = n_summary + len(extra_chunks)
-    for name, block in char_pages:
-        chunks = _chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET)
-        char_start.setdefault(name, idx)
-        char_chunks += [(name, chunk, k) for k, chunk in enumerate(chunks)]
-        idx += len(chunks)
-
+def _build_stats_pages(title: str, summary_lines: list, picks: list, char_pages: list) -> tuple[list[dict], list]:
+    """summary_lines — текст итога (кресты, список персонажей, «не требуется»), picks —
+    [(подпись, эмодзи, char_name)] для выпадающего списка, char_pages — [(char_name, block)].
+    Страницы: итог (обычно одна, при длинном тексте — продолжение), затем персонажи.
+    Возвращает (pages, [(подпись, эмодзи, индекс страницы)]) — без персонажей без страницы."""
+    summary_chunks = _chunk_lines(summary_lines, STATS_PAGE_TEXT_BUDGET) or [""]
     pages = []
-    for s in range(n_summary):
-        part = summary_rows[s * STATS_SUMMARY_ROWS:(s + 1) * STATS_SUMMARY_ROWS]
-        head = f"### {title} — итог" + (f" ({s + 1}/{n_summary})" if n_summary > 1 else "")
-        if s == 0:
-            head += f"\n**Персонажи** ({len(summary_rows)}) — «Открыть» ведёт на страницу персонажа:"
-        pages.append({"head": head, "rows": [(line, char_start.get(name)) for line, name in part],
-                      "text": extra_text if s == 0 and extra_inline else ""})
-    for k, chunk in enumerate(extra_chunks):
-        pages.append({"head": f"### {title} — итог (продолжение {k + 1})", "text": chunk})
-    for name, chunk, k in char_chunks:
-        pages.append({"head": f"### {title} — {name}" + (" (продолжение)" if k else ""), "text": chunk,
-                      "back": row_page.get(name, 0)})
-    return pages
+    for k, chunk in enumerate(summary_chunks):
+        suffix = f" ({k + 1}/{len(summary_chunks)})" if len(summary_chunks) > 1 else ""
+        pages.append({"head": f"### {title} — итог{suffix}", "text": chunk})
+    char_start = {}
+    for name, block in char_pages:
+        for k, chunk in enumerate(_chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET)):
+            char_start.setdefault(name, len(pages))
+            pages.append({"head": f"### {title} — {name}" + (" (продолжение)" if k else ""), "text": chunk,
+                          "back": 0, "char": char_start[name]})
+    targets = [(label, emoji, char_start[name]) for label, emoji, name in picks if name in char_start]
+    return pages, targets
 
 
 def _render_stats_page(state: dict, closed: bool = False) -> list:
@@ -1354,12 +1342,6 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
     pages, i, token = state["pages"], state["index"], state["token"]
     page = pages[i]
     items = [ui.TextDisplay(page["head"])]
-    for k, (line, target) in enumerate(page.get("rows") or []):
-        if target is None:  # «только кресты»: у персонажа в норме нет своей страницы
-            button = ui.Button(label="в норме", custom_id=f"stp|{token}|none{k}", disabled=True)
-        else:
-            button = ui.Button(label="Открыть", custom_id=f"stp|{token}|go{target}", disabled=closed)
-        items.append(ui.Section(line, accessory=button))
     if page.get("text"):
         items.append(ui.TextDisplay(page["text"]))
     footer = f"Страница {i + 1} из {len(pages)}" + (f" · {state['footer']}" if state["footer"] else "")
@@ -1376,6 +1358,18 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
         nav("⏮", "first", i == 0), nav("◀", "prev", i == 0), nav("▶", "next", i == last),
         nav("⏭", "last", i == last), nav("✖", "close", False, disnake.ButtonStyle.danger),
     ))
+    picks = state["picks"]
+    # Строк компонентов максимум 5: навигация + до 3 списков (75 персонажей) + «К списку».
+    n_selects = min(3, math.ceil(len(picks) / STATS_PICKS_PER_SELECT))
+    for n in range(n_selects):
+        part = picks[n * STATS_PICKS_PER_SELECT:(n + 1) * STATS_PICKS_PER_SELECT]
+        placeholder = "🔎 Открыть персонажа…"
+        if n_selects > 1:
+            placeholder = f"🔎 Открыть персонажа ({n * STATS_PICKS_PER_SELECT + 1}–{n * STATS_PICKS_PER_SELECT + len(part)})…"
+        options = [disnake.SelectOption(label=label[:100], value=str(target), emoji=emoji,
+                                        default=target == page.get("char"))
+                   for label, emoji, target in part]
+        components.append(ui.ActionRow(ui.StringSelect(custom_id=f"stp|{token}|pick{n}", placeholder=placeholder, options=options)))
     if "back" in page:
         components.append(ui.ActionRow(ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")))
     return components
@@ -1895,22 +1889,34 @@ class StatRequirementsCog(commands.Cog):
             SCENARIO_UP: "релик поднят только тем, кто ниже цели",
             SCENARIO_FULL: "с полным подгоном релика на цель плейта",
         }
-        row_lines = []
+        # Порядок итога (NicolozZ 2026-10-16): сначала кресты, затем список персонажей —
+        # сперва с ❌, дальше в порядке плейта (сортировка стабильная). Страницы персонажей —
+        # в том же порядке, чтобы ▶ шла по списку.
+        summary_rows.sort(key=lambda row: not row[3])
+        order = {row[0]: pos for pos, row in enumerate(summary_rows)}
+        char_pages.sort(key=lambda page: order.get(page[0], len(order)))
+        failed_required_by_char.sort(key=lambda item: order.get(item[0], len(order)))
+
+        summary = [f"**❌ Обязательные статы** ({_scenario_titles[сценарий]})"]
+        if failed_required_by_char:
+            for char_name, failed_items in failed_required_by_char:
+                parts = "; ".join(f"{item['stat']}: {item['current']} (нужно {item['requirement']})" for item in failed_items)
+                summary.append(f"❌ **{char_name}** — {parts}")
+        else:
+            summary.append("✅ Все обязательные статы в норме.")
+        summary.append("")
+        summary.append(f"**Персонажи** ({len(summary_rows)})")
+        picks = []
         for char_name, matched, total, has_failed in summary_rows:
             # Иконка — только по обязательным: недобор по опциональным не делает персонажа «⚠️».
             icon = "❌" if has_failed else "✅"
-            row_lines.append((f"{icon} {char_name} — {matched}/{total}", char_name))
-        summary = [f"## ⚠️ Обязательные статы ({_scenario_titles[сценарий]})"]
-        if failed_required_by_char:
-            for char_name, failed_items in failed_required_by_char:
-                for item in failed_items:
-                    summary.append(f"❌ **{char_name}** — {item['stat']}: сейчас {item['current']}, нужно {item['requirement']}")
-        else:
-            summary.append("✅ Все обязательные статы в норме.")
+            summary.append(f"{icon} {char_name} — {matched}/{total}")
+            picks.append((f"{char_name} — {matched}/{total}", icon, char_name))
         if skipped_chars:
-            summary.append(f"## ⚪ Не требуется — нет отряда ({len(skipped_chars)})")
+            summary.append("")
+            summary.append(f"**⚪ Не требуется — нет отряда** ({len(skipped_chars)})")
             for char_name, reason in skipped_chars:
-                summary.append(f"**{char_name}** — {reason}")
+                summary.append(f"{char_name} — {reason}")
         if только_кресты:
             summary.append("")
             summary.append("_Режим «только кресты»: на страницах персонажей — только невыполненное._")
@@ -1927,8 +1933,7 @@ class StatRequirementsCog(commands.Cog):
         footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
         if not char_pages:
             # Листать нечего (всё в норме при «только кресты») — обычный embed, как раньше.
-            lines = [f"**Персонажи** ({len(row_lines)}):"] + [line for line, _name in row_lines] + [""] + summary
-            pages = _lines_to_embeds(title + " — итог", color, lines)
+            pages = _lines_to_embeds(title + " — итог", color, summary)
             for e in pages:
                 e.set_footer(text=footer)
             await inter.edit_original_response(embed=pages[0])
@@ -1936,9 +1941,10 @@ class StatRequirementsCog(commands.Cog):
                 await inter.followup.send(embed=e)
             return
         token = inter.id
+        pages, picks = _build_stats_pages(title, summary, picks, char_pages)
         state = {
             "token": token, "author_id": inter.author.id, "index": 0, "color": color, "footer": footer,
-            "pages": _build_stats_pages(title, row_lines, char_pages, summary), "message": None,
+            "pages": pages, "picks": picks, "message": None,
         }
         _stats_pagers[str(token)] = state
         await inter.edit_original_response(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
@@ -1968,13 +1974,31 @@ class StatRequirementsCog(commands.Cog):
                    "back": state["pages"][state["index"]].get("back", 0)}
         if action in targets:
             index = targets[action]
-        elif action.startswith("go") and action[2:].isdigit():
-            index = int(action[2:])
         else:
             await inter.response.defer()
             return
         state["index"] = max(0, min(index, last))
         await inter.response.edit_message(components=_render_stats_page(state), flags=flags)
+
+    @commands.Cog.listener("on_dropdown")
+    async def on_stats_pager_pick(self, inter: disnake.MessageInteraction):
+        """Выпадающий список «Открыть персонажа» листалки /статы."""
+        parts = (inter.component.custom_id or "").split("|")
+        if len(parts) != 3 or parts[0] != "stp" or not parts[2].startswith("pick"):
+            return
+        state = _stats_pagers.get(parts[1])
+        if state is None:
+            await inter.response.send_message("Листалка устарела (прошло 30 минут или бот перезапускался) — вызовите /статы заново.", ephemeral=True)
+            return
+        if inter.author.id != state["author_id"]:
+            await inter.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
+            return
+        value = (inter.values or [""])[0]
+        if not value.isdigit():
+            await inter.response.defer()
+            return
+        state["index"] = max(0, min(int(value), len(state["pages"]) - 1))
+        await inter.response.edit_message(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
 
     # ------------------ /статы_релик (пересчёт нормы плейта на другой релик) ------------------
     @commands.slash_command(name="статы_релик", description="Пересчитать уже заданную в плейте норму персонажа на другой релик")
