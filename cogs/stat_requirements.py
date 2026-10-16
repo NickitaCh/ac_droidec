@@ -1897,7 +1897,7 @@ class StatRequirementsCog(commands.Cog):
         char_pages.sort(key=lambda page: order.get(page[0], len(order)))
         failed_required_by_char.sort(key=lambda item: order.get(item[0], len(order)))
 
-        summary = [f"**❌ Обязательные статы** ({_scenario_titles[сценарий]})"]
+        summary = [f"**Обязательные статы** ({_scenario_titles[сценарий]})"]
         if failed_required_by_char:
             for char_name, failed_items in failed_required_by_char:
                 parts = "; ".join(f"{item['stat']}: {item['current']} (нужно {item['requirement']})" for item in failed_items)
