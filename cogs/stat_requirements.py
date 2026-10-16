@@ -1297,7 +1297,8 @@ class StatsRevealView(disnake.ui.View):
 # выпадающий список + «📋 К списку»; снизу ⏮ ◀ ▶ ⏭ ✖. V2 не живёт во View, поэтому компоненты
 # несут custom_id "stp|<token>|<действие>", обработчики — on_stats_pager_click/on_stats_pager_pick,
 # состояние в памяти (STATS_PAGER_TTL, после рестарта — «вызовите заново»). Текст страницы
-# держим под лимитом 4000 символов V2-сообщения. Листать может только автор.
+# держим под лимитом 4000 символов V2-сообщения. Листать могут вызвавший и проверяемый игрок
+# (его Discord по /регистрация, Ricardo 2026-10-16).
 STATS_PAGE_TEXT_BUDGET = 3300
 STATS_PICKS_PER_SELECT = 25
 STATS_PAGER_TTL = 1800
@@ -1373,6 +1374,27 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
     if "back" in page:
         components.append(ui.ActionRow(ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")))
     return components
+
+
+def _stats_pager_gone_text(token: str) -> str:
+    # Токен — id interaction (snowflake), по нему видно, истёк ли срок или бот перезапускался.
+    try:
+        age = (disnake.utils.utcnow() - disnake.utils.snowflake_time(int(token))).total_seconds()
+    except ValueError:
+        age = STATS_PAGER_TTL
+    reason = "прошло 30 минут" if age >= STATS_PAGER_TTL else "бот перезапускался"
+    return f"Листалка устарела ({reason}) — вызовите /статы заново."
+
+
+async def _check_stats_pager_access(inter: disnake.MessageInteraction, token: str):
+    state = _stats_pagers.get(token)
+    if state is None:
+        await inter.response.send_message(_stats_pager_gone_text(token), ephemeral=True)
+        return None
+    if inter.author.id not in state["allowed_ids"]:
+        await inter.response.send_message("Листать могут только вызвавший команду и проверяемый игрок — вызовите /статы сами.", ephemeral=True)
+        return None
+    return state
 
 
 async def _expire_stats_pager(token: str):
@@ -1941,9 +1963,13 @@ class StatRequirementsCog(commands.Cog):
                 await inter.followup.send(embed=e)
             return
         token = inter.id
+        allowed_ids = {inter.author.id}
+        target_discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
+        if target_discord_id and str(target_discord_id).isdigit():
+            allowed_ids.add(int(target_discord_id))
         pages, picks = _build_stats_pages(title, summary, picks, char_pages)
         state = {
-            "token": token, "author_id": inter.author.id, "index": 0, "color": color, "footer": footer,
+            "token": token, "allowed_ids": allowed_ids, "index": 0, "color": color, "footer": footer,
             "pages": pages, "picks": picks, "message": None,
         }
         _stats_pagers[str(token)] = state
@@ -1957,12 +1983,8 @@ class StatRequirementsCog(commands.Cog):
         parts = (inter.component.custom_id or "").split("|")
         if len(parts) != 3 or parts[0] != "stp":
             return
-        state = _stats_pagers.get(parts[1])
+        state = await _check_stats_pager_access(inter, parts[1])
         if state is None:
-            await inter.response.send_message("Листалка устарела (прошло 30 минут или бот перезапускался) — вызовите /статы заново.", ephemeral=True)
-            return
-        if inter.author.id != state["author_id"]:
-            await inter.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
             return
         action, last = parts[2], len(state["pages"]) - 1
         flags = disnake.MessageFlags(is_components_v2=True)
@@ -1986,12 +2008,8 @@ class StatRequirementsCog(commands.Cog):
         parts = (inter.component.custom_id or "").split("|")
         if len(parts) != 3 or parts[0] != "stp" or not parts[2].startswith("pick"):
             return
-        state = _stats_pagers.get(parts[1])
+        state = await _check_stats_pager_access(inter, parts[1])
         if state is None:
-            await inter.response.send_message("Листалка устарела (прошло 30 минут или бот перезапускался) — вызовите /статы заново.", ephemeral=True)
-            return
-        if inter.author.id != state["author_id"]:
-            await inter.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
             return
         value = (inter.values or [""])[0]
         if not value.isdigit():
