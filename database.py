@@ -5495,6 +5495,20 @@ def upsert_player_units(ally_code: str, units: dict):
     conn.close()
 
 
+def get_player_units_age_seconds(ally_code: str):
+    """Сколько секунд назад ростер игрока последний раз писался в player_unit_cache (None — нет в кэше)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_unit_cache_table(cursor)
+    cursor.execute(
+        "SELECT (julianday('now') - julianday(MAX(updated_at))) * 86400 FROM player_unit_cache WHERE ally_code = ?",
+        (ally_code,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 def get_player_unit(ally_code: str, base_id: str):
     """Возвращает (unit_dict, updated_at) либо None, если юнита нет в кэше."""
     conn = sqlite3.connect(DB_NAME)

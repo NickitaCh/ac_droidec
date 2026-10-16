@@ -121,6 +121,4 @@ async def build_guild_report(comlink, stat_calc, plate_name: str, char_keys: lis
 
 async def refresh_player_units(comlink, ally_code: str) -> None:
     """Свежий ростер игрока в player_unit_cache — нужен до проверки отряда («обновить»)."""
-    units = await activity_diff.fetch_player_units(comlink, ally_code)
-    if units:
-        database.upsert_player_units(ally_code, units)
+    await activity_diff.refresh_player_units(comlink, ally_code)

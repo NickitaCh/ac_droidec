@@ -33,6 +33,27 @@ async def fetch_player_units(comlink, ally_code: str) -> dict:
     return units
 
 
+# «Обновить» по требованию (/статы, карточка игрока, /stats-check, оптимизатор): не чаще раза
+# в REFRESH_COOLDOWN_SECONDS на игрока, иначе рефреши/F5 и проверка плейта (раньше — get_player
+# на КАЖДОГО персонажа) долбят Comlink. Свежесть берём из БД, поэтому лимит общий для бота и веба.
+REFRESH_COOLDOWN_SECONDS = 300
+_refresh_locks: dict[str, asyncio.Lock] = {}
+
+
+async def refresh_player_units(comlink, ally_code: str) -> bool:
+    """Свежий ростер игрока в player_unit_cache. False — пропущено: кэш и так свежее кулдауна."""
+    ally_code = str(ally_code)
+    lock = _refresh_locks.setdefault(ally_code, asyncio.Lock())
+    async with lock:
+        age = database.get_player_units_age_seconds(ally_code)
+        if age is not None and age < REFRESH_COOLDOWN_SECONDS:
+            return False
+        units = await fetch_player_units(comlink, ally_code)
+        if units:
+            database.upsert_player_units(ally_code, units)
+        return True
+
+
 def diff_unit(old: dict, new: dict, skill_tier_map: dict) -> list[tuple[str, str, str]]:
     """(action_type, old_value, new_value) для одного юнита между двумя снимками.
     skill_tier_map: {skill_id: (zeta_tier|None, omicron_tier|None)} из

@@ -418,12 +418,7 @@ async def _get_unit_for_player(comlink, ally_code: str, base_id: str, force_refr
     from services import activity_diff
 
     if force_refresh:
-        units = await activity_diff.fetch_player_units(comlink, ally_code)
-        if units:
-            database.upsert_player_units(ally_code, units)
-        unit = units.get(base_id) if units else None
-        if unit:
-            return unit, "только что"
+        await activity_diff.refresh_player_units(comlink, ally_code)
     cached = database.get_player_unit(ally_code, base_id)
     if cached:
         return cached

@@ -320,12 +320,8 @@ def _build_synthetic_unit(base_id: str, relic_level: int) -> dict:
 async def _get_unit_for_player(bot, ally_code: str, base_id: str, force_refresh: bool):
     """Возвращает (unit_dict, updated_at) либо (None, None)."""
     if force_refresh:
-        units = await activity_diff.fetch_player_units(bot.comlink, ally_code)
-        if units:
-            database.upsert_player_units(ally_code, units)
-        unit = units.get(base_id)
-        if unit:
-            return unit, "только что"
+        # Один запрос на весь плейт: следующие персонажи попадают в кулдаун и читают кэш.
+        await activity_diff.refresh_player_units(bot.comlink, ally_code)
     cached = database.get_player_unit(ally_code, base_id)
     if cached:
         return cached
@@ -1292,64 +1288,107 @@ class StatsRevealView(disnake.ui.View):
             await interaction.channel.send(embed=e)
 
 
-# Листалка /статы (просьба Егора 2026-10-15: «чтобы на одной странице был один ТП», по
-# образцу пагинации других ботов): одно сообщение, страница = итог или один персонаж
-# плейта, кнопки ⏮ ◀ ▶ ⏭ и ✖ (убрать кнопки). Листать может только тот, кто вызвал.
-class StatsPagerView(disnake.ui.View):
-    def __init__(self, pages: list, author_id: int):
-        super().__init__(timeout=1800)
-        self.pages = pages
-        self.author_id = author_id
-        self.index = 0
-        self.message = None
-        for i, e in enumerate(pages):
-            footer = e.footer.text if e.footer and e.footer.text else ""
-            e.set_footer(text=f"Страница {i + 1} из {len(pages)}" + (f" · {footer}" if footer else ""))
-        self._sync()
+# Листалка /статы (просьба Егора 2026-10-15: «чтобы на одной странице был один ТП»;
+# 2026-10-16 NicolozZ: «быстро открыть нужного перса»): одно сообщение на Components V2.
+# Итог — строки персонажей, у каждой сбоку кнопка «Открыть» (Section + accessory), страница
+# персонажа — текст + «📋 К списку»; снизу ⏮ ◀ ▶ ⏭ ✖. V2 не живёт во View, поэтому кнопки
+# несут custom_id "stp|<token>|<действие>", обработчик — StatRequirementsCog.on_stats_pager_click,
+# состояние в памяти (STATS_PAGER_TTL, после рестарта — «вызовите заново»). Лимиты Discord на
+# V2-сообщение: 40 компонентов (строка итога = Section+текст+кнопка = 3, остальное ~10; 9 строк = 37, с запасом) и 4000
+# символов текста — отсюда STATS_SUMMARY_ROWS строк на страницу итога. Листать может только автор.
+STATS_SUMMARY_ROWS = 9
+STATS_PAGE_TEXT_BUDGET = 3300
+STATS_PAGER_TTL = 1800
+_stats_pagers: dict[str, dict] = {}
 
-    def _sync(self):
-        last = len(self.pages) - 1
-        self.first.disabled = self.prev.disabled = self.index == 0
-        self.next.disabled = self.last.disabled = self.index == last
 
-    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        if interaction.author.id != self.author_id:
-            await interaction.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
-            return False
-        return True
+def _chunk_lines(lines: list, budget: int) -> list[str]:
+    chunks, current, size = [], [], 0
+    for line in lines:
+        if current and size + len(line) + 1 > budget:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line[:budget])
+        size += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
-    async def _show(self, interaction: disnake.MessageInteraction, index: int):
-        self.index = max(0, min(index, len(self.pages) - 1))
-        self._sync()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
-    @disnake.ui.button(emoji="⏮", style=disnake.ButtonStyle.secondary)
-    async def first(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        await self._show(interaction, 0)
+def _build_stats_pages(title: str, summary_rows: list, char_pages: list, extra_lines: list) -> list[dict]:
+    """summary_rows: [(строка итога, char_name)], char_pages: [(char_name, block)], extra_lines —
+    хвост итога (обязательные статы, «не требуется»). Страницы: итог (по STATS_SUMMARY_ROWS
+    строк), хвост отдельными страницами, если не влез в первую, затем персонажи."""
+    n_summary = max(1, math.ceil(len(summary_rows) / STATS_SUMMARY_ROWS))
+    extra_text = "\n".join(extra_lines).strip()
+    extra_inline = len(extra_text) <= 2400
+    extra_chunks = [] if extra_inline else _chunk_lines(extra_lines, STATS_PAGE_TEXT_BUDGET)
+    row_page = {name: pos // STATS_SUMMARY_ROWS for pos, (_line, name) in enumerate(summary_rows)}
 
-    @disnake.ui.button(emoji="◀", style=disnake.ButtonStyle.secondary)
-    async def prev(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        await self._show(interaction, self.index - 1)
+    char_start, char_chunks = {}, []
+    idx = n_summary + len(extra_chunks)
+    for name, block in char_pages:
+        chunks = _chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET)
+        char_start.setdefault(name, idx)
+        char_chunks += [(name, chunk, k) for k, chunk in enumerate(chunks)]
+        idx += len(chunks)
 
-    @disnake.ui.button(emoji="▶", style=disnake.ButtonStyle.secondary)
-    async def next(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        await self._show(interaction, self.index + 1)
+    pages = []
+    for s in range(n_summary):
+        part = summary_rows[s * STATS_SUMMARY_ROWS:(s + 1) * STATS_SUMMARY_ROWS]
+        head = f"### {title} — итог" + (f" ({s + 1}/{n_summary})" if n_summary > 1 else "")
+        if s == 0:
+            head += f"\n**Персонажи** ({len(summary_rows)}) — «Открыть» ведёт на страницу персонажа:"
+        pages.append({"head": head, "rows": [(line, char_start.get(name)) for line, name in part],
+                      "text": extra_text if s == 0 and extra_inline else ""})
+    for k, chunk in enumerate(extra_chunks):
+        pages.append({"head": f"### {title} — итог (продолжение {k + 1})", "text": chunk})
+    for name, chunk, k in char_chunks:
+        pages.append({"head": f"### {title} — {name}" + (" (продолжение)" if k else ""), "text": chunk,
+                      "back": row_page.get(name, 0)})
+    return pages
 
-    @disnake.ui.button(emoji="⏭", style=disnake.ButtonStyle.secondary)
-    async def last(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        await self._show(interaction, len(self.pages) - 1)
 
-    @disnake.ui.button(emoji="✖", style=disnake.ButtonStyle.danger)
-    async def close(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        self.stop()
-        await interaction.response.edit_message(view=None)
+def _render_stats_page(state: dict, closed: bool = False) -> list:
+    ui = disnake.ui
+    pages, i, token = state["pages"], state["index"], state["token"]
+    page = pages[i]
+    items = [ui.TextDisplay(page["head"])]
+    for k, (line, target) in enumerate(page.get("rows") or []):
+        if target is None:  # «только кресты»: у персонажа в норме нет своей страницы
+            button = ui.Button(label="в норме", custom_id=f"stp|{token}|none{k}", disabled=True)
+        else:
+            button = ui.Button(label="Открыть", custom_id=f"stp|{token}|go{target}", disabled=closed)
+        items.append(ui.Section(line, accessory=button))
+    if page.get("text"):
+        items.append(ui.TextDisplay(page["text"]))
+    footer = f"Страница {i + 1} из {len(pages)}" + (f" · {state['footer']}" if state["footer"] else "")
+    items.append(ui.TextDisplay(f"-# {footer}"))
+    components = [ui.Container(*items, accent_colour=disnake.Colour(state["color"]))]
+    if closed:
+        return components
+    last = len(pages) - 1
 
-    async def on_timeout(self):
-        if self.message is not None:
-            try:
-                await self.message.edit(view=None)
-            except disnake.HTTPException:
-                pass
+    def nav(emoji, action, disabled, style=disnake.ButtonStyle.secondary):
+        return ui.Button(emoji=emoji, custom_id=f"stp|{token}|{action}", disabled=disabled, style=style)
+
+    components.append(ui.ActionRow(
+        nav("⏮", "first", i == 0), nav("◀", "prev", i == 0), nav("▶", "next", i == last),
+        nav("⏭", "last", i == last), nav("✖", "close", False, disnake.ButtonStyle.danger),
+    ))
+    if "back" in page:
+        components.append(ui.ActionRow(ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")))
+    return components
+
+
+async def _expire_stats_pager(token: str):
+    await asyncio.sleep(STATS_PAGER_TTL)
+    state = _stats_pagers.pop(token, None)
+    if state and state.get("message") is not None:
+        try:
+            await state["message"].edit(components=_render_stats_page(state, closed=True), flags=disnake.MessageFlags(is_components_v2=True))
+        except disnake.HTTPException:
+            pass
 
 
 # =====================================================================
@@ -1809,9 +1848,7 @@ class StatRequirementsCog(commands.Cog):
         missing = {}
         if с_отрядом:
             if обновить:
-                units = await activity_diff.fetch_player_units(self.bot.comlink, ally_code)
-                if units:
-                    database.upsert_player_units(ally_code, units)
+                await activity_diff.refresh_player_units(self.bot.comlink, ally_code)
             missing = _missing_plate_squads(ally_code, guild_id)
             if плейт in missing:
                 await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отряда плейта {плейт} ({missing[плейт]}) — плейт ему не требуется.")
@@ -1858,13 +1895,12 @@ class StatRequirementsCog(commands.Cog):
             SCENARIO_UP: "релик поднят только тем, кто ниже цели",
             SCENARIO_FULL: "с полным подгоном релика на цель плейта",
         }
-        summary = [f"**Персонажи** ({len(summary_rows)}) — дальше по странице на каждого:"]
+        row_lines = []
         for char_name, matched, total, has_failed in summary_rows:
             # Иконка — только по обязательным: недобор по опциональным не делает персонажа «⚠️».
             icon = "❌" if has_failed else "✅"
-            summary.append(f"{icon} {char_name} — {matched}/{total}")
-        summary.append("")
-        summary.append(f"## ⚠️ Обязательные статы ({_scenario_titles[сценарий]})")
+            row_lines.append((f"{icon} {char_name} — {matched}/{total}", char_name))
+        summary = [f"## ⚠️ Обязательные статы ({_scenario_titles[сценарий]})"]
         if failed_required_by_char:
             for char_name, failed_items in failed_required_by_char:
                 for item in failed_items:
@@ -1889,18 +1925,56 @@ class StatRequirementsCog(commands.Cog):
 
         title = f"📋 {плейт} (игрок: {игрок})"
         footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
-        pages = _lines_to_embeds(title + " — итог", color, summary)
-        for char_name, block in char_pages:
-            pages += _lines_to_embeds(f"{title} — {char_name}", color, block.split("\n"))
-        for e in pages:
-            e.set_footer(text=footer)
-
-        if len(pages) == 1:
+        if not char_pages:
+            # Листать нечего (всё в норме при «только кресты») — обычный embed, как раньше.
+            lines = [f"**Персонажи** ({len(row_lines)}):"] + [line for line, _name in row_lines] + [""] + summary
+            pages = _lines_to_embeds(title + " — итог", color, lines)
+            for e in pages:
+                e.set_footer(text=footer)
             await inter.edit_original_response(embed=pages[0])
+            for e in pages[1:]:
+                await inter.followup.send(embed=e)
             return
-        view = StatsPagerView(pages, inter.author.id)
-        await inter.edit_original_response(embed=pages[0], view=view)
-        view.message = await inter.original_response()
+        token = inter.id
+        state = {
+            "token": token, "author_id": inter.author.id, "index": 0, "color": color, "footer": footer,
+            "pages": _build_stats_pages(title, row_lines, char_pages, summary), "message": None,
+        }
+        _stats_pagers[str(token)] = state
+        await inter.edit_original_response(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
+        state["message"] = await inter.original_response()
+        asyncio.create_task(_expire_stats_pager(str(token)))
+
+    @commands.Cog.listener("on_button_click")
+    async def on_stats_pager_click(self, inter: disnake.MessageInteraction):
+        """Кнопки листалки /статы (см. _render_stats_page)."""
+        parts = (inter.component.custom_id or "").split("|")
+        if len(parts) != 3 or parts[0] != "stp":
+            return
+        state = _stats_pagers.get(parts[1])
+        if state is None:
+            await inter.response.send_message("Листалка устарела (прошло 30 минут или бот перезапускался) — вызовите /статы заново.", ephemeral=True)
+            return
+        if inter.author.id != state["author_id"]:
+            await inter.response.send_message("Листать может только тот, кто вызвал команду — вызовите /статы сами.", ephemeral=True)
+            return
+        action, last = parts[2], len(state["pages"]) - 1
+        flags = disnake.MessageFlags(is_components_v2=True)
+        if action == "close":
+            _stats_pagers.pop(parts[1], None)
+            await inter.response.edit_message(components=_render_stats_page(state, closed=True), flags=flags)
+            return
+        targets = {"first": 0, "prev": state["index"] - 1, "next": state["index"] + 1, "last": last,
+                   "back": state["pages"][state["index"]].get("back", 0)}
+        if action in targets:
+            index = targets[action]
+        elif action.startswith("go") and action[2:].isdigit():
+            index = int(action[2:])
+        else:
+            await inter.response.defer()
+            return
+        state["index"] = max(0, min(index, last))
+        await inter.response.edit_message(components=_render_stats_page(state), flags=flags)
 
     # ------------------ /статы_релик (пересчёт нормы плейта на другой релик) ------------------
     @commands.slash_command(name="статы_релик", description="Пересчитать уже заданную в плейте норму персонажа на другой релик")
