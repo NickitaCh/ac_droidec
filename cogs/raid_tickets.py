@@ -18,7 +18,7 @@ from services import feature_flags
 from services import raid_tickets as rt
 
 STATE_RESET = "raid_tickets:reset"
-STATE_DONE = "raid_tickets:done"   # "<reset>:r120,r30,snap,final"
+STATE_DONE = "raid_tickets:done"   # "<reset>:r120,r30,ok,snap,final"
 STATE_SNAP = "raid_tickets:snap"   # {"reset": R, "data": {player_id: [current, lifetime]}}
 
 
@@ -63,7 +63,7 @@ class RaidTicketsCog(commands.Cog):
     def _names(self, gid: int) -> dict:
         return database.get_roster_by_player_id(gid)  # {player_id: (ally_code, name)}
 
-    async def _reminder(self, cfg: dict, reset: int, stage: str, members: list, now: int) -> None:
+    async def _reminder(self, cfg: dict, reset: int, done: set, members: list, now: int) -> None:
         gid = cfg["id"]
         roster = self._names(gid)
         debtors = []
@@ -72,7 +72,12 @@ class RaidTicketsCog(commands.Cog):
             discord_id = database.get_discord_id_for_ally(code, guild_id=gid) if code else None
             debtors.append((name or m["name"], m["current"], discord_id))
         if not debtors:
-            return  # все уже сдали — до среза молчим, похвала будет в итоге дня
+            # Все уже сдали — как HotBot, говорим об этом на проверке (один раз за день);
+            # похвала с серией дней — в итоге после среза.
+            if "ok" not in done:
+                self._mark(gid, reset, done, "ok")
+                await self._send(cfg["raid_tickets_channel_id"], rt.all_done_lines(cfg["name"], reset, now), False)
+            return
         await self._send(cfg["raid_tickets_channel_id"], rt.reminder_lines(cfg["name"], reset, now, debtors), True)
 
     async def _final(self, cfg: dict, reset: int, members_after: list) -> bool:
@@ -118,7 +123,7 @@ class RaidTicketsCog(commands.Cog):
             _, members = await self._fetch(cfg["swgoh_guild_id"])
             self._save_snapshot(gid, reset, members)
             self._mark(gid, reset, done, stage)  # до отправки: сбой Discord не даст дубль через минуту
-            await self._reminder(cfg, reset, stage, members, now)
+            await self._reminder(cfg, reset, done, members, now)
 
         # Тихий снимок за 5 минут до сброса — база для итога.
         if "snap" not in done and reset - rt.SNAPSHOT_BEFORE <= now < reset:

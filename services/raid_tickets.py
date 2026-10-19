@@ -107,7 +107,7 @@ def _days_word(n: int) -> str:
 
 def reminder_lines(guild_name: str, reset: int, now: int, debtors: list) -> list[str]:
     """debtors: [(name, tickets, discord_id | None)] — уже отсортированы, не пусто
-    (если сдали все, напоминание не шлём — похвала только в итоге после среза)."""
+    (если сдали все — all_done_lines)."""
     head = (f"🎟️ **{guild_name}**: не забудьте сдать энку! Срез в {reset_time_text(reset)} МСК "
             f"(через {_left_text(reset - now)})")
     lines = [head]
@@ -115,6 +115,11 @@ def reminder_lines(guild_name: str, reset: int, now: int, debtors: list) -> list
         who = f"<@{discord_id}> {name}" if discord_id else name
         lines.append(f"{who} — **{tickets}**/{REQUIRED}")
     return lines
+
+
+def all_done_lines(guild_name: str, reset: int, now: int) -> list[str]:
+    return [f"✅ **{guild_name}**: проверка энки — все сдали {REQUIRED}/{REQUIRED}, "
+            f"до среза в {reset_time_text(reset)} МСК ещё {_left_text(reset - now)}."]
 
 
 def final_lines(guild_name: str, debtors: list, streak: int) -> list[str]:
