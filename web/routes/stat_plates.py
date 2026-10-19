@@ -27,6 +27,11 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES]
+_STAT_RU = {value: name for name, value in STAT_OPTIONS}
+
+
+def _stat_ru(stat_name: str) -> str:
+    return _STAT_RU.get(stat_name, stat_name)
 OPERATOR_OPTIONS = [(c.name, c.value) for c in OPERATOR_CHOICES]
 COMPARE_OPERATOR_OPTIONS = [(c.name, c.value) for c in COMPARE_OPERATOR_CHOICES]
 PRIORITY_OPTIONS = [(c.name, c.value) for c in PRIORITY_CHOICES]
@@ -46,7 +51,7 @@ COMPARE_STAT_OPTIONS = [(c.name, c.value) for c in STAT_CHOICES if c.value != "R
 # локально по выбранному слоту без похода на бэкенд (справочник маленький и статичный,
 # в отличие от omicron-skills, которые зависят от конкретного персонажа).
 MOD_PRIMARY_OPTIONS_JSON = {
-    slot: [{"unit_stat": opt["unit_stat"], "label": opt["label"]} for opt in opts]
+    slot: [{"unit_stat": opt["unit_stat"], "label": opt["label_ru"]} for opt in opts]
     for slot, opts in stat_engine.MOD_PRIMARY_OPTIONS.items()
 }
 
@@ -89,13 +94,13 @@ def _mod_primary_text(slot_key: str, unit_stat_id, skill_id=None) -> str:
     подтягивать приватные помощники cogs/, см. CLAUDE.md) — сам справочник основ на слот
     общий, stat_engine.MOD_PRIMARY_OPTIONS. Несколько допустимых основ — через «или»."""
     labels = [
-        next((opt["label"] for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if opt["unit_stat"] == stat_id), f"#{stat_id}")
+        next((opt["label_ru"] for opt in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if opt["unit_stat"] == stat_id), f"#{stat_id}")
         for stat_id in mod_primary_allowed(unit_stat_id, skill_id)
     ]
     return f"{MOD_SLOT_LABELS.get(slot_key, slot_key)}: {' или '.join(labels)}"
 
 
-_SET_NAME_BY_ID = {int(k): v for k, v in stat_engine.MOD_SET_IDS.items()}
+_SET_NAME_BY_ID = stat_engine.MOD_SET_NAMES_RU
 
 
 def _mod_set_text(set_id, sets_count=1) -> str:
@@ -147,10 +152,10 @@ def _mod_loadout(reqs: list) -> dict | None:
 
 
 def _mod_primary_label_only(slot_key: str, unit_stat_id, skill_id=None) -> str:
-    """"Speed" из "Speed +32" — короткая подпись основы для сводки сборки ("Health / Protection",
-    если допустимых основ несколько)."""
+    """«Скорость» из «Скорость +32» — короткая подпись основы для сводки сборки («Здоровье /
+    Защита», если допустимых основ несколько)."""
     return " / ".join(
-        next((o["label"] for o in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if o["unit_stat"] == stat_id), f"#{stat_id}").split(" +")[0]
+        next((o["label_ru"] for o in stat_engine.MOD_PRIMARY_OPTIONS.get(slot_key, []) if o["unit_stat"] == stat_id), f"#{stat_id}").split(" +")[0]
         for stat_id in mod_primary_allowed(unit_stat_id, skill_id)
     )
 
@@ -334,9 +339,9 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
             elif is_mod_set_list:
                 value_display = f"Сеты: {_set_list_text(r[3], r[11])}"
             elif is_compare:
-                value_display = f"{r[3]} {r[4]} {_unit_name(r[13])}{_compare_offset_text(r[4], r[5])}"
+                value_display = f"{_stat_ru(r[3])} {r[4]} {_unit_name(r[13])}{_compare_offset_text(r[4], r[5])}"
             else:
-                value_display = f"{r[3]} {r[4]} {_fmt_value(r[5])}"
+                value_display = f"{_stat_ru(r[3])} {r[4]} {_fmt_value(r[5])}"
             reqs.append({
                 "id": r[0], "stat_name": r[3], "operator": r[4], "threshold": r[5],
                 "threshold_fmt": _fmt_value(r[5]), "priority": r[6], "comment": r[8],

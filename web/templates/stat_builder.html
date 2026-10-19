@@ -58,12 +58,12 @@
                             <div class="mod-slot-icon">{{ game.mod_icon(key, none, 6 if primaries.get(key) or key in locked_primary_slots else 5, size="3.2rem") }}</div>
                             <div class="mod-slot-label">{{ label }}</div>
                             {% if key in locked_primary_slots %}
-                                <div class="mod-slot-locked">{{ mod_primary_options.get(key)[0].label }}</div>
+                                <div class="mod-slot-locked">{{ mod_primary_options.get(key)[0].label_ru }}</div>
                             {% else %}
                                 <select name="slot_{{ key }}">
                                     <option value="">—</option>
                                     {% for opt in mod_primary_options.get(key, []) %}
-                                        <option value="{{ opt.unit_stat }}" {% if primaries.get(key) == opt.unit_stat %}selected{% endif %}>{{ opt.label }}</option>
+                                        <option value="{{ opt.unit_stat }}" {% if primaries.get(key) == opt.unit_stat %}selected{% endif %}>{{ opt.label_ru }}</option>
                                     {% endfor %}
                                 </select>
                             {% endif %}

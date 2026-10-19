@@ -156,6 +156,30 @@ MOD_PRIMARY_OPTIONS = {
 
 # Сколько модов сета нужно для бонуса — из реальных данных игры (modSetData/statModSet,
 # добыто 2026-08-19 через comlink.get_game_data(items=StatMod), поле setCount), не угадано.
+# Русские подписи (официальная локализация игры RUS_RU) — для сайта и бота. Английские
+# label в MOD_PRIMARY_OPTIONS остаются: по ним импорт HotBot сопоставляет основы.
+UNIT_STAT_RU = {
+    5: "Скорость", 16: "Критический урон", 17: "Эффективность", 18: "Стойкость", 48: "Атака",
+    49: "Оборона", 52: "Точность", 53: "Шанс на крит. удар", 54: "Избегание крит. удара",
+    55: "Здоровье", 56: "Защита",
+}  # UnitStat_*
+MOD_SET_NAMES_RU = {
+    1: "Здоровье", 2: "Атака", 3: "Оборона", 4: "Скорость", 5: "Шанс на критический удар",
+    6: "Критический урон", 7: "Эффективность", 8: "Стойкость",
+}  # STATMODSETBONUS_*_NAME, id — MOD_SET_IDS
+
+
+def _primary_label_ru(opt: dict) -> str:
+    value = opt["label"].split(" +", 1)[1] if " +" in opt["label"] else ""
+    name = UNIT_STAT_RU.get(opt["unit_stat"], opt["label"].split(" +")[0])
+    return f"{name} +{value.replace('.', ',')}" if value else name
+
+
+for _opts in MOD_PRIMARY_OPTIONS.values():
+    for _opt in _opts:
+        _opt["label_ru"] = _primary_label_ru(_opt)
+
+
 MOD_SET_PIECE_COUNT = {
     1: 2,  # Health
     2: 4,  # Offense

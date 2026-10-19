@@ -36,26 +36,26 @@ from cogs.datacron_requirements import (
 # отдаёт только расщеплённые Physical.../Special... варианты, генерик-ключи всегда None
 # (проверено эмпирически на реальном игроке). Такие пункты сюда не добавлять — требование
 # с ними навсегда останется "нет данных".
-STAT_CHOICES = [
-    disnake.OptionChoice(name="Relic (уровень реликвии)", value="Relic"),
-    disnake.OptionChoice(name="Total Life (Health+Protection)", value="Total Life"),
-    disnake.OptionChoice(name="Health", value="Health"),
-    disnake.OptionChoice(name="Protection", value="Protection"),
-    disnake.OptionChoice(name="Speed", value="Speed"),
-    disnake.OptionChoice(name="Physical Damage", value="Physical Damage"),
-    disnake.OptionChoice(name="Special Damage", value="Special Damage"),
-    disnake.OptionChoice(name="Armor", value="Armor"),
-    disnake.OptionChoice(name="Resistance", value="Resistance"),
-    disnake.OptionChoice(name="Potency", value="Potency"),
-    disnake.OptionChoice(name="Tenacity", value="Tenacity"),
-    disnake.OptionChoice(name="Critical Damage", value="Critical Damage"),
-    disnake.OptionChoice(name="Physical Critical Chance", value="Physical Critical Chance"),
-    disnake.OptionChoice(name="Special Critical Chance", value="Special Critical Chance"),
-    disnake.OptionChoice(name="Physical Critical Avoidance", value="Physical Critical Avoidance"),
-    disnake.OptionChoice(name="Special Critical Avoidance", value="Special Critical Avoidance"),
-    disnake.OptionChoice(name="Physical Accuracy", value="Physical Accuracy"),
-    disnake.OptionChoice(name="Special Accuracy", value="Special Accuracy"),
-    disnake.OptionChoice(name="Health Steal", value="Health Steal"),
+STAT_CHOICES = [  # подписи — официальная русская локализация игры (как STAT_LABEL_SHORT)
+    disnake.OptionChoice(name="Реликвия (уровень)", value="Relic"),
+    disnake.OptionChoice(name="Здоровье + Защита", value="Total Life"),
+    disnake.OptionChoice(name="Здоровье", value="Health"),
+    disnake.OptionChoice(name="Защита", value="Protection"),
+    disnake.OptionChoice(name="Скорость", value="Speed"),
+    disnake.OptionChoice(name="Физический урон", value="Physical Damage"),
+    disnake.OptionChoice(name="Особый урон", value="Special Damage"),
+    disnake.OptionChoice(name="Броня", value="Armor"),
+    disnake.OptionChoice(name="Сопротивление", value="Resistance"),
+    disnake.OptionChoice(name="Эффективность", value="Potency"),
+    disnake.OptionChoice(name="Стойкость", value="Tenacity"),
+    disnake.OptionChoice(name="Критический урон", value="Critical Damage"),
+    disnake.OptionChoice(name="Шанс физ. крит. атаки", value="Physical Critical Chance"),
+    disnake.OptionChoice(name="Шанс особ. крит. атаки", value="Special Critical Chance"),
+    disnake.OptionChoice(name="Избег. физ. крит. удара", value="Physical Critical Avoidance"),
+    disnake.OptionChoice(name="Избег. особ. крит. удара", value="Special Critical Avoidance"),
+    disnake.OptionChoice(name="Физическая точность", value="Physical Accuracy"),
+    disnake.OptionChoice(name="Особая точность", value="Special Accuracy"),
+    disnake.OptionChoice(name="Кража здоровья", value="Health Steal"),
 ]
 
 # Плоская (не растущая с реликвией) часть порога для /статы_релик — значения и сама модель
@@ -122,10 +122,7 @@ def mod_primary_allowed(threshold, skill_id) -> list[int]:
 
 # {int(set_id): название} — официальный русский перевод игры (просьба гильдии 2026-10-19:
 # «чего мы на пендосском»). Импорт HotBot сверяет английские имена по своим словарям.
-_SET_NAME_BY_ID = {
-    1: "Здоровье", 2: "Атака", 3: "Оборона", 4: "Скорость", 5: "Шанс на критический удар",
-    6: "Критический урон", 7: "Эффективность", 8: "Стойкость",
-}  # RUS_RU STATMODSETBONUS_*_NAME, id — stat_engine.MOD_SET_IDS
+_SET_NAME_BY_ID = stat_engine.MOD_SET_NAMES_RU  # RUS_RU STATMODSETBONUS_*_NAME
 SET_CHOICES = [
     disnake.OptionChoice(name=name, value=set_id)
     for set_id, name in sorted(_SET_NAME_BY_ID.items(), key=lambda kv: kv[1])
@@ -407,11 +404,7 @@ def _mod_primary_option(slot_key: str, unit_stat_id) -> dict | None:
     return None
 
 
-_PRIMARY_STAT_RU = {
-    5: "Скорость", 16: "Критический урон", 17: "Эффективность", 18: "Стойкость", 48: "Атака",
-    49: "Оборона", 52: "Точность", 53: "Шанс на крит. удар", 54: "Избегание крит. удара",
-    55: "Здоровье", 56: "Защита",
-}  # официальные RUS_RU UnitStat_*; значения основ (+16% и т.п.) в /статы не пишем
+_PRIMARY_STAT_RU = stat_engine.UNIT_STAT_RU  # официальные RUS_RU UnitStat_*; значения основ (+16% и т.п.) в /статы не пишем
 
 
 def _mod_primary_stat_label(mod_slot: str, unit_stat_id) -> str:

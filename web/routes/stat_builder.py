@@ -26,7 +26,7 @@ from services import feature_flags
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
-MOD_SET_CHOICES = sorted(((int(set_id), name) for set_id, name in stat_engine.MOD_SET_IDS.items()))
+MOD_SET_CHOICES = sorted(stat_engine.MOD_SET_NAMES_RU.items())
 STAT_NAME_CHOICES = [(c.name, c.value) for c in STAT_CHOICES if c.value != "Relic"]
 # Единица измерения (%/число) у поля ввода вторички для этого инструмента — шире, чем
 # родной stat_engine.PERCENT_STATS (тот только про итоговые %-статы StatCalc): Health/
@@ -128,7 +128,7 @@ def _primaries_summary(primaries: dict) -> str:
     for slot_key, slot_label in MOD_SLOT_DEFS:
         opt = _primary_option_by_stat(slot_key, primaries.get(slot_key))
         if opt:
-            parts.append(f"{slot_label}: {opt['label']}")
+            parts.append(f"{slot_label}: {opt['label_ru']}")
     return ", ".join(parts) if parts else "—"
 
 
