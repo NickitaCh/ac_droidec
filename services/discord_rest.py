@@ -45,6 +45,11 @@ async def send_message(channel_id: str, content: str, mention_user_ids: list[str
 async def list_guild_channels(discord_guild_id: str) -> list[dict]:
     """[{id, name, type, category}] — каналы сервера, куда бот может писать, в порядке
     как в Discord (категория, затем позиция)."""
+    from services import demo_mode
+    if demo_mode.active():  # демо: выдуманный сервер — каналы из реестра demo.db, без Discord
+        import database
+        return [{"id": c["channel_id"], "name": c["channel_name"], "type": "text", "category": "Демо"}
+                for c in database.get_guild_channels(demo_mode.DEMO_GUILD_ID)]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{DISCORD_API}/guilds/{discord_guild_id}/channels", headers=_headers())
     if resp.status_code >= 400:

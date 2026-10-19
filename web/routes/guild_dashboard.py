@@ -2335,8 +2335,9 @@ async def _fetch_discord_channel(channel_id: str) -> dict | None:
     имени уже сохранённого, но не зарегистрированного через /канал канала (GET
     /settings), и для авто-регистрации канала, когда его ID вписали вручную
     вместо выбора из списка (POST /settings, см. ниже)."""
+    from services import demo_mode
     token = os.environ.get("DISCORD_TOKEN")
-    if not token:
+    if not token or demo_mode.active():
         return None
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
