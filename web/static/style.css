@@ -2570,3 +2570,4 @@ dialog.edit-modal select { max-width: 100%; min-width: 0; }
 form.filter-bar { flex-wrap: nowrap; }
 form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
 @media (max-width: 52em) { form.filter-bar { flex-wrap: wrap; width: auto; } form.filter-bar select { flex: 1 1 12em; width: auto; } }
+.task-kind-toggle { margin-bottom: 0.6em; }

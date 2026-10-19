@@ -82,8 +82,17 @@
             {% if not card.current_tasks %}
                 <p class="widget-empty">Нет текущих задач.</p>
             {% else %}
+                {% set personal_n = card.current_tasks|selectattr("is_personal")|list|length %}
+                {% if personal_n %}
+                    <div class="segmented-toggle task-kind-toggle">
+                        <div class="segmented-toggle-options">
+                            <a href="#" data-task-kind="all">Все ({{ card.current_tasks|length }})</a><a href="#" data-task-kind="personal">👤 Мои ({{ personal_n }})</a><a href="#" data-task-kind="guild">Гильдии ({{ card.current_tasks|length - personal_n }})</a>
+                        </div>
+                    </div>
+                {% endif %}
+                <p class="widget-empty" id="task-kind-empty" hidden>Задач этого вида нет.</p>
                 <div class="table-scroll">
-                    <table class="data">
+                    <table class="data" id="card-tasks-table">
                         <thead>
                             <tr>
                                 <th>Персонаж</th>
@@ -96,7 +105,7 @@
                         </thead>
                         <tbody>
                             {% for t in card.current_tasks %}
-                                <tr>
+                                <tr data-kind="{{ 'personal' if t.is_personal else 'guild' }}">
                                     <td>{% if t.base_id %}{{ game.unit(t.base_id, t.unit_name) }}{% else %}{{ t.unit_name }}{% endif %}{% if t.is_personal %} <span class="muted" title="Личная задача — поставлена самим игроком">👤</span>{% endif %}</td>
                                     <td class="nowrap">{{ t.target_label }}</td>
                                     <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
@@ -117,6 +126,28 @@
                     </table>
                 </div>
             {% endif %}
+            <script>
+            // «Все / Мои / Гильдии» в задачах карточки — выбор запоминается в браузере.
+            (() => {
+                const links = document.querySelectorAll("[data-task-kind]");
+                if (!links.length) return;
+                const rows = document.querySelectorAll("#card-tasks-table tbody tr[data-kind]");
+                const table = document.getElementById("card-tasks-table");
+                const empty = document.getElementById("task-kind-empty");
+                const show = (kind) => {
+                    let visible = 0;
+                    rows.forEach((tr) => { tr.hidden = kind !== "all" && tr.dataset.kind !== kind; if (!tr.hidden) visible++; });
+                    links.forEach((a) => a.classList.toggle("active", a.dataset.taskKind === kind));
+                    table.hidden = !visible;
+                    empty.hidden = !!visible;
+                    try { localStorage.setItem("cardTaskKind", kind); } catch (e) {}
+                };
+                links.forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); show(a.dataset.taskKind); }));
+                let saved = "all";
+                try { saved = localStorage.getItem("cardTaskKind") || "all"; } catch (e) {}
+                show(["all", "personal", "guild"].includes(saved) ? saved : "all");
+            })();
+            </script>
             {% if can_add_personal_task %}
                 <details class="personal-task-add"{% if task_error %} open{% endif %}>
                     <summary class="link-btn">➕ Поставить себе задачу</summary>
