@@ -21,10 +21,14 @@ from starlette.middleware.sessions import SessionMiddleware
 
 load_dotenv()
 
+from services import demo_mode
 from web import audit, auth
 from web.routes import admin, birthdays, raid_tickets, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks, tw_defense, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Демо-режим: база demo.db для демо-сессий (только в веб-процессе, см. services/demo_mode.py).
+demo_mode.install()
 
 app = FastAPI(title="AC Droidec", dependencies=[Depends(audit.capture_request)])
 
@@ -63,6 +67,7 @@ if not session_secret:
     session_secret = "dev-insecure-secret-change-me"
     print("⚠️ [web] WEB_SESSION_SECRET не задан — использую небезопасный dev-секрет")
 app.add_middleware(audit.AuditMiddleware)
+app.add_middleware(demo_mode.DemoMiddleware)  # внутри SessionMiddleware — ему нужна сессия
 app.add_middleware(SessionMiddleware, secret_key=session_secret)
 
 static_dir = BASE_DIR / "static"

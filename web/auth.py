@@ -107,6 +107,7 @@ async def callback(request: Request):
     username = discord_user.get("username", "?")
     database.log_web_access(discord_id, username, access["guild_id"], access["tier"], access["is_super_admin"])
 
+    request.session.pop("demo", None)
     request.session["user"] = {
         "discord_id": discord_id,
         "username": username,
@@ -116,6 +117,27 @@ async def callback(request: Request):
         "is_super_admin": access["is_super_admin"],
     }
     return RedirectResponse(request.session.pop("post_login_redirect", "/"))
+
+
+@router.get("/demo")
+async def demo_start(request: Request):
+    """Кнопка «Посмотреть демо» для неавторизованных: выдуманная гильдия, только просмотр."""
+    from fastapi.responses import HTMLResponse
+    from services import demo_mode
+    import database
+    if request.session.get("user"):
+        return RedirectResponse("/", status_code=303)
+    if not demo_mode.demo_db_ready(str(database.DB_NAME)):
+        return HTMLResponse("Демо пока не готово — загляните чуть позже.", status_code=503)
+    request.session["demo"] = True
+    return RedirectResponse("/", status_code=303)
+
+
+@router.get("/demo/exit")
+async def demo_exit(request: Request):
+    request.session.pop("demo", None)
+    nxt = request.query_params.get("next") or "/"
+    return RedirectResponse(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/", status_code=303)
 
 
 @router.get("/logout")
@@ -160,6 +182,7 @@ async def login_password_submit(request: Request, login: str = Form(...), passwo
     username = database.get_username_for_discord_id(discord_id) or login.strip()
     database.log_web_access(discord_id, username, access["guild_id"], access["tier"], access["is_super_admin"])
 
+    request.session.pop("demo", None)
     request.session["user"] = {
         "discord_id": discord_id,
         "username": username,

@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261019d">
+    <link rel="stylesheet" href="/static/style.css?v=20261019e">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -204,6 +204,12 @@
             <label for="nav-toggle" class="nav-toggle-btn" aria-label="Меню">☰</label>
             <a class="brand" href="/">AC Droidec</a>
         </header>
+        {% if user and user.is_demo %}
+            <div class="demo-banner" role="status">
+                <span>👀 <strong>Демо-режим</strong> — гильдия, игроки и цифры выдуманы. {% if request.query_params.get("demo_readonly") %}<strong>Изменения в демо не сохраняются.</strong>{% else %}Смотреть можно всё, сохранять — нет.{% endif %}</span>
+                <span class="demo-banner-links"><a href="/demo/exit?next=/subscribe">Подключить свою гильдию</a> · <a href="/demo/exit">Выйти из демо</a></span>
+            </div>
+        {% endif %}
         <main class="{% block main_class %}{% endblock %}">
             {% if user and user.subscription_warning %}
                 {% set sw = user.subscription_warning %}

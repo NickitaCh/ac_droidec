@@ -71,6 +71,10 @@ def _with_subscription_status(user: dict) -> dict:
 
 def get_current_user(request: Request) -> dict:
     user = request.session.get("user")
+    if not user and request.session.get("demo"):
+        # Демо-режим (services/demo_mode.py): офицер выдуманной гильдии, база — demo.db.
+        from services import demo_mode
+        return demo_mode.demo_user()
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
     return _with_subscription_status(_apply_guild_switch(request, _refresh_access(user)))
@@ -80,7 +84,7 @@ def get_current_user_optional(request: Request) -> dict | None:
     """Как get_current_user, но None вместо 401 для незалогиненных — для страниц вроде
     главной, у которых есть гостевой вид. Залогиненным даёт то же самое (включая
     switchable_guilds для супер-админов), просто без обязательной авторизации."""
-    if not request.session.get("user"):
+    if not request.session.get("user") and not request.session.get("demo"):
         return None
     return get_current_user(request)
 

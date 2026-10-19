@@ -2584,3 +2584,14 @@ form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
 
 /* Ссылка «что качал» у проваленной задачи (/tasks, карточка игрока) → /activity за срок задачи. */
 .task-activity-link { font-size: 0.85em; white-space: nowrap; }
+
+/* Демо-режим (services/demo_mode.py): плашка поверх страниц и кнопка на посадочной. */
+.demo-banner {
+    position: sticky; top: 0; z-index: 40;
+    display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; justify-content: space-between; align-items: center;
+    padding: 0.55em 1em; font-size: 0.9em;
+    background: var(--accent, #c8a96a); color: #1a1a1a;
+}
+.demo-banner a { color: #1a1a1a; font-weight: 600; text-decoration: underline; }
+.lp-demo { margin-top: 0.9em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; }
+.lp-button-demo { font-weight: 600; }

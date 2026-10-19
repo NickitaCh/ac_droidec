@@ -17,3 +17,7 @@ web/static/datacron_translations.json
 Thumbs.db
 # Кэш портретов юнитов (web/routes/unit_images.py), качается с CDN по требованию
 cache/
+
+# База демо-режима сайта (services/demo_data.py собирает её на сервере)
+demo.db
+demo.db.tmp
