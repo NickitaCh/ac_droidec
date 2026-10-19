@@ -238,16 +238,16 @@ class _Canvas:
                 line4.append("Ульта")
         self.text((tx, y + 79), self.fit("  ·  ".join(line4), small, tw), small, fill=MUTED)
         if guild:
-            parts = [f"Есть у {row['owners']}"]
+            parts = [f"Есть {row['owners']}"]
             if row.get("ultimates"):
                 parts.append(f"ульта {row['ultimates']}")
             if not row["is_ship"]:
                 parts.append(f"R8+ {row['r8_plus']}")
                 if row.get("avg_relic") is not None:
-                    parts.append(f"ср. R{_dec(row['avg_relic'])}")
+                    parts.append(f"R ср. {_dec(row['avg_relic'])}")
             else:
                 parts.append(f"7★ {row['stars7']}")
-            self.text((tx, y + 102), self.fit("  ·  ".join(parts), bold, tw), bold, fill=GREEN)
+            self.text((tx, y + 102), self.fit(" · ".join(parts), bold, tw), bold, fill=GREEN)
 
     @staticmethod
     def _badge(row: dict, guild: bool):
