@@ -193,6 +193,26 @@ class TasksCog(commands.Cog):
         except Exception as e:
             print(f"⚠️ [Задачи] Не удалось отправить лог в канал: {e}")
 
+    async def _dm_personal_result(self, task_id: int, base_id: str, target_type: str,
+                                  target_value: str, status: str, player_name: str):
+        """Личная задача (игрок поставил себе сам) — результат в ЛС тому, кто её поставил
+        (tasks.created_by), а не в канал задач (решение пользователя 2026-10-19)."""
+        task = database.get_task(task_id)
+        discord_id = task[12] if task else None
+        if not discord_id or not str(discord_id).isdigit():
+            return
+        unit_name = database.get_game_unit_name(base_id) or base_id
+        target_label = self._format_target_label(target_type, target_value)
+        if status == "COMPLETED":
+            text = f"🎉 Личная задача выполнена: **{unit_name}** ({target_label}) — {player_name}."
+        else:
+            text = f"⏰ Личная задача просрочена: **{unit_name}** ({target_label}) — {player_name}, срок истёк."
+        try:
+            user = self.bot.get_user(int(discord_id)) or await self.bot.fetch_user(int(discord_id))
+            await user.send(text)
+        except Exception as e:
+            print(f"⚠️ [Задачи] Не удалось написать в ЛС {discord_id}: {e!r}")
+
     async def _send_reminder(self, guild_cfg: dict, base_id: str, target_type: str,
                               target_value: str, deadline: str, player_name: str):
         """Только в лог-канал гильдии — см. _notify_task_result про отказ от ЛС."""
@@ -263,7 +283,9 @@ class TasksCog(commands.Cog):
                     if deadline_date is not None and today_msk > deadline_date:
                         database.update_task_status(task_id, "FAILED")
                         print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
-                        if not is_personal:
+                        if is_personal:
+                            await self._dm_personal_result(task_id, base_id, target_type, target_value, "FAILED", player_name)
+                        else:
                             await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "FAILED", player_name)
                         continue
 
@@ -274,7 +296,9 @@ class TasksCog(commands.Cog):
                     if self._is_target_completed(unit_data, target_type, target_value, skill_thresholds):
                         database.update_task_status(task_id, "COMPLETED")
                         print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
-                        if not is_personal:
+                        if is_personal:
+                            await self._dm_personal_result(task_id, base_id, target_type, target_value, "COMPLETED", player_name)
+                        else:
                             await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "COMPLETED", player_name)
                         continue
 
