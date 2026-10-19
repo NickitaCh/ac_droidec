@@ -1956,17 +1956,19 @@ def add_task(ally_code, base_id, target_type, target_value, deadline, created_by
     return task_id
 
 
-def get_active_task_for_unit(guild_id: int, ally_code: str, base_id: str):
-    """Есть ли у игрока уже АКТИВНАЯ задача на этот юнит (любой target_type/value) —
-    для запрета дублей при постановке (см. Discord-тред "Гайд по АС Боту", 2026-09-04:
-    "Задача по данному персонажу уже назначена"). Возвращает task_id или None."""
+def get_active_task_for_unit(guild_id: int, ally_code: str, base_id: str, target_type: str = None):
+    """Есть ли у игрока уже АКТИВНАЯ задача на этот юнит — для запрета дублей при постановке
+    (см. Discord-тред "Гайд по АС Боту", 2026-09-04: "Задача по данному персонажу уже
+    назначена"). target_type задан — дублем считается только задача того же типа (личные
+    задачи: 7⭐ и R8 на одного персонажа можно держать одновременно). Возвращает task_id или None."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id FROM tasks
         WHERE guild_id = ? AND ally_code = ? AND base_id = ? AND status = 'ACTIVE'
+          AND (? IS NULL OR target_type = ?)
         LIMIT 1
-    """, (guild_id, ally_code, base_id))
+    """, (guild_id, ally_code, base_id, target_type, target_type))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None

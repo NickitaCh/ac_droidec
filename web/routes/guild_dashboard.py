@@ -1915,8 +1915,9 @@ async def my_task_add(
         err = tasks_routes._validate_deadline(deadline)
     if err:
         return fail(err)
-    if database.get_active_task_for_unit(guild_id, ally_code, base_id):
-        return fail(f"На «{unit_name}» у вас уже есть активная задача.")
+    if database.get_active_task_for_unit(guild_id, ally_code, base_id, target_type):
+        type_label = dict(tasks_routes.TARGET_TYPE_OPTIONS)[target_type]
+        return fail(f"На «{unit_name}» у вас уже есть активная задача этого типа ({type_label}).")
 
     target_value = target_value.strip()
     initial_value = None
