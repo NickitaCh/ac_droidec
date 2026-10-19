@@ -8,8 +8,8 @@ relic.currentTier (релик + 2). Если меняется гир или ст
 табличный бонус тира (как и в stat_engine.project_unit_relic). Моды, уровень и
 навыки — реальные. Вклад модов = итог − тот же юнит без модов.
 
-Корабли (forecast_ship): прогноз только по звёздам корабля — гира/релика и модов у
-кораблей нет, статы зависят от звёзд и прокачки экипажа (StatCalc.calc_ship_stats).
+Корабли (forecast_ship): прогноз только по звёздам корабля — гир/релик, если заданы,
+молча игнорируются (у кораблей их нет, как и модов), статы зависят от звёзд и прокачки экипажа (StatCalc.calc_ship_stats).
 Скорость корабля растёт со звёздами (Палач: 167 на 1★ → 192 на 7★)."""
 
 import copy
@@ -143,12 +143,6 @@ def forecast(stat_calc, unit: dict, stars: int | None = None, gear: int | None =
         "labels": STAT_LABELS,
         "percent": {n for n in STAT_LABELS if n in stat_engine.PERCENT_STATS},
     }
-
-
-def validate_ship(gear: int | None, relic: int | None) -> str | None:
-    if gear is not None or relic is not None:
-        return "У корабля нет гира и реликвии — для прогноза укажите только звёзды."
-    return None
 
 
 def ship_crew(stat_calc, roster: list, base_id: str) -> list:

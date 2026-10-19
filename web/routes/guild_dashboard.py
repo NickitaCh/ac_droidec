@@ -2012,7 +2012,9 @@ async def player_unit_forecast(request: Request, ally_code: str, user: dict = De
     if unit is None:
         return JSONResponse({"error": "У игрока нет этого юнита (или ростер ещё не синхронизирован)."}, status_code=404)
     is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
-    error = unit_forecast.validate_ship(gear, relic) if is_ship else unit_forecast.validate(stars, gear, relic)
+    if is_ship:
+        gear = relic = None  # у корабля гира/релика нет — просто не учитываем
+    error = unit_forecast.validate(stars, gear, relic)
     if error is None and stars is not None and not 1 <= stars <= 7:
         error = "Звёзды — от 1 до 7."
     if error:

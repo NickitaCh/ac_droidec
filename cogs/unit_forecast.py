@@ -58,7 +58,8 @@ class UnitForecastCog(commands.Cog):
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
-        error = unit_forecast.validate(звёзды, гир, релик)
+        is_ship = database.get_unit_types([_parse_bracket_id(юнит)]).get(_parse_bracket_id(юнит)) == "ship"
+        error = unit_forecast.validate(звёзды, None if is_ship else гир, None if is_ship else релик)
         if error:
             await inter.edit_original_response(f"❌ {error}")
             return
@@ -91,12 +92,6 @@ class UnitForecastCog(commands.Cog):
             return
 
         base_id = _parse_bracket_id(юнит)
-        is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
-        if is_ship:
-            error = unit_forecast.validate_ship(гир, релик)
-            if error:
-                await inter.edit_original_response(f"❌ {error}")
-                return
         unit_name = database.get_game_unit_name(base_id)
         if not unit_name:
             await inter.edit_original_response("❌ Юнит не найден — выберите его из списка.")
