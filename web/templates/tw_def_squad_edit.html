@@ -33,7 +33,7 @@
         <div class="panel">
             <div class="panel-title">
                 <span>Слоты</span>
-                <span class="panel-hint">Слот 1 — лидер. Во флоте: 1 — флагман, 2–4 — основа, 5–8 — подкрепление. В слоте можно указать замены: берётся первый подходящий юнит по порядку. «Любые 2 из 5» — два слота с одинаковым списком.</span>
+                <span class="panel-hint">Слот 1 — лидер. Во флоте: 1 — флагман, 2–4 — основа, 5–8 — подкрепление; кораблю без указанных звёзд нужно 7★. В слоте можно указать замены: берётся первый подходящий юнит по порядку. «Любые 2 из 5» — два слота с одинаковым списком.</span>
             </div>
             <div id="twdef-slots" class="twdef-slot-editor-list"></div>
             <button type="button" class="button-secondary" id="twdef-add-slot">+ Слот</button>
@@ -104,5 +104,5 @@
     </template>
 
     <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
-    <script src="/static/tw_def.js?v=20261019a" defer></script>
+    <script src="/static/tw_def.js?v=20261019b" defer></script>
 {% endblock %}

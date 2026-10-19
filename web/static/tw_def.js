@@ -430,6 +430,9 @@
                         : i === 0 ? " — флагман" : i < 4 ? " — основа" : " — подкрепление");
                 slot.querySelectorAll(".twdef-option-row").forEach((row, j) => row.classList.toggle("twdef-option-alt", j > 0));
             });
+            // Кораблю без заданных звёзд движок требует 7★ (SHIP_DEFAULT_MIN_STARS) — показываем это.
+            const ship = combatType() === "ship";
+            slotsBox.querySelectorAll("[data-field=min_stars] option[value='']").forEach((o) => { o.textContent = ship ? "— (7★)" : "—"; });
             addSlotBtn.disabled = slots.length >= MAX[combatType()];
         };
 
