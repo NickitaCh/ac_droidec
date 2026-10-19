@@ -25,9 +25,15 @@
         <p><span class="badge badge-ok">Сохранено</span></p>
     {% endif %}
 
-    <form method="post" action="/settings" class="settings-form">
+    <div class="segmented-toggle settings-tabs">
+        <div class="segmented-toggle-options">
+            {% for tab in tabs %}<a href="#{{ tab }}" data-settings-tab="{{ tab }}">{{ tab }}</a>{% endfor %}
+        </div>
+    </div>
+
+    <form method="post" action="/settings" class="settings-form" id="settings-form">
         {% for group in groups %}
-            <div class="panel settings-group">
+            <div class="panel settings-group" data-tab="{{ group.tab }}">
                 <h3 style="margin-top: 0;">{{ group.name }}</h3>
                 <p class="muted" style="margin-top: -0.5em;">{{ group.hint }}</p>
                 {% for row in group.rows %}
@@ -106,4 +112,25 @@
         {% endfor %}
         <button type="submit">Сохранить</button>
     </form>
+    <script>
+    // Вкладки: форма одна (сохраняются все вкладки разом), видна только группа выбранной.
+    // Вкладка живёт в #хэше — переживает сохранение (редирект сохраняет фрагмент адреса).
+    (() => {
+        const links = document.querySelectorAll("[data-settings-tab]");
+        const groups = document.querySelectorAll(".settings-group[data-tab]");
+        const form = document.getElementById("settings-form");
+        const show = (tab) => {
+            if (![...links].some((a) => a.dataset.settingsTab === tab)) tab = links[0] && links[0].dataset.settingsTab;
+            groups.forEach((g) => { g.hidden = g.dataset.tab !== tab; });
+            links.forEach((a) => a.classList.toggle("active", a.dataset.settingsTab === tab));
+            form.action = "/settings#" + encodeURIComponent(tab);
+        };
+        links.forEach((a) => a.addEventListener("click", (e) => {
+            e.preventDefault();
+            history.replaceState(null, "", "#" + a.dataset.settingsTab);
+            show(a.dataset.settingsTab);
+        }));
+        show(decodeURIComponent(location.hash.slice(1)));
+    })();
+    </script>
 {% endblock %}

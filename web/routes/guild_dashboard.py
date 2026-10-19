@@ -2128,6 +2128,7 @@ async def violation_delete(
 GUILD_SETTINGS_GROUPS = [
     {
         "name": "ТБ — тег на подготовку",
+        "tab": "ТБ",
         "hint": "Раз в две недели, в начале «тегаемой» недели цикла ТБ, бот пишет в этот канал и тегает эту "
                 "роль — напоминание проверить взвод и заказ склада перед стартом Территориальной битвы. "
                 "Чётность самой недели общая для всех гильдий бота (задаёт супер-админ). Ниже — своё для "
@@ -2146,6 +2147,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "ТБ — план и ордер",
+        "tab": "ТБ",
         "hint": "Канал, куда бот публикует план ТБ (планеты по этапам) и автоматические ордера на каждый этап. "
                 "Ордера бот собирает из канала/ветки со стратегией и тегает в них указанную роль. Общий "
                 "переключатель ниже отключает автопубликацию целиком, без удаления самих настроек канала/роли.",
@@ -2158,6 +2160,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "ТБ — итоговый отчёт",
+        "tab": "ТБ",
         "hint": "Канал, куда бот публикует автоотчёт по итогам завершённой ТБ и уведомления офицерам.",
         "fields": [
             ("officer_channel_id", "Канал для автоотчёта и уведомлений", "channel"),
@@ -2165,6 +2168,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "День рождения",
+        "tab": "ДР",
         "hint": "Канал, куда бот пишет поздравление, и роль, которую выдаёт имениннику в день рождения.",
         "fields": [
             ("birthday_channel_id", "Канал для поздравлений с ДР", "channel"),
@@ -2173,6 +2177,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "Омикроны",
+        "tab": "Омикроны",
         "hint": "Канал, куда бот пишет автообъявления о выдаче омикронов.",
         "fields": [
             ("omicron_channel_id", "Канал для автообъявлений об омикронах", "channel"),
@@ -2180,6 +2185,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "Территориальная Война (ВГ)",
+        "tab": "ВГ",
         "hint": "Форум-канал с гайдами по контрам, откуда бот забирает данные для /вг_ордер.",
         "fields": [
             ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ", "channel"),
@@ -2187,6 +2193,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "Задачи — уведомления",
+        "tab": "Задачи",
         "hint": "Канал, куда бот пишет о выполнении/просрочке задачи и напоминания о дедлайне, и время (МСК), "
                 "в которое раз в сутки бот проверяет дедлайны и шлёт напоминания. По умолчанию 10:00. "
                 "Отдельный переключатель — тегать ли игрока прямо в сообщении о постановке новой задачи "
@@ -2199,6 +2206,7 @@ GUILD_SETTINGS_GROUPS = [
     },
     {
         "name": "Энка (рейдовые билеты)",
+        "tab": "Энка",
         "hint": "За 2 часа и за 30 минут до сброса дня гильдии бот тегает в канале тех, кто не сдал 600 билетов, "
                 "после сброса пишет итог без тегов. Время сброса берётся из игры. История — на странице «Энка».",
         "fields": [
@@ -2207,6 +2215,9 @@ GUILD_SETTINGS_GROUPS = [
         ],
     },
 ]
+
+
+SETTINGS_TAB_ORDER = ["ТБ", "ВГ", "Энка", "Задачи", "ДР", "Омикроны"]
 
 
 # Числовые ID типов каналов Discord (те же значения, что в REST-ответе
@@ -2335,10 +2346,12 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
                 "channel_options": await _channel_options(value) if kind == "channel" else None,
                 "schedule_entries": _parse_schedule_rows(value) if kind == "schedule" else None,
             })
-        groups.append({"name": group["name"], "hint": group["hint"], "rows": rows})
+        groups.append({"name": group["name"], "hint": group["hint"], "rows": rows, "tab": group["tab"]})
     return templates.TemplateResponse(request, "guild_settings.html", {
         "user": user,
         "groups": groups,
+        # Вкладки над формой (ТБ / ВГ / Энка / ...) — порядок как в GUILD_SETTINGS_GROUPS.
+        "tabs": sorted(dict.fromkeys(g["tab"] for g in groups), key=lambda t: SETTINGS_TAB_ORDER.index(t) if t in SETTINGS_TAB_ORDER else 99),
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
     })

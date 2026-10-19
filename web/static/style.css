@@ -940,6 +940,9 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .segmented-toggle-options button + strong,
 .segmented-toggle-options button + button { border-left: 1px solid var(--border); }
 .segmented-toggle-options strong { background: var(--accent); color: white; font-weight: 600; }
+.segmented-toggle-options a.active { background: var(--accent); color: white; font-weight: 600; }
+.settings-tabs { margin-bottom: 1em; }
+.settings-tabs .segmented-toggle-options { flex-wrap: wrap; }
 .segmented-toggle-options a + a,
 .segmented-toggle-options strong + a,
 .segmented-toggle-options a + strong { border-left: 1px solid var(--border); }

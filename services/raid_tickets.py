@@ -12,6 +12,7 @@ member[].memberContribution с type == 2 — билеты, currentValue = сда
 Логика без Discord: цикл и отправка — cogs/raid_tickets.py, история — веб /tickets.
 """
 
+import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,21 @@ SNAPSHOT_BEFORE = 5 * 60   # последний тихий снимок пере
 FINAL_AFTER = 2 * 60       # итог — через 2 минуты после сброса
 STAGE_WINDOW = 15 * 60     # опоздали дольше (бот лежал) — напоминание не шлём
 FINAL_WINDOW = 3600
+
+# Похвала в итоге дня, когда сдали все (только после среза — до него молчим).
+PRAISE = (
+    "Все молодцы, так держать! 💪",
+    "Красавчики, ни одного должника! 👏",
+    "Вот это гильдия — спасибо каждому! ❤️",
+    "Идеальный день, рейды скажут спасибо! 🎉",
+    "Ни одного хвоста — уважение всем! 🙌",
+)
+STREAK_PRAISE = (
+    "держим планку!",
+    "так и продолжаем!",
+    "это уже традиция!",
+    "легенды, не иначе!",
+)
 
 
 def parse_guild(resp: dict) -> tuple[int | None, list[dict]]:
@@ -90,9 +106,8 @@ def _days_word(n: int) -> str:
 
 
 def reminder_lines(guild_name: str, reset: int, now: int, debtors: list) -> list[str]:
-    """debtors: [(name, tickets, discord_id | None)] — уже отсортированы. Пусто → «все сдали»."""
-    if not debtors:
-        return [f"✅ **{guild_name}**: энку уже сдали все ({REQUIRED}/{REQUIRED})."]
+    """debtors: [(name, tickets, discord_id | None)] — уже отсортированы, не пусто
+    (если сдали все, напоминание не шлём — похвала только в итоге после среза)."""
     head = (f"🎟️ **{guild_name}**: не забудьте сдать энку! Срез в {reset_time_text(reset)} МСК "
             f"(через {_left_text(reset - now)})")
     lines = [head]
@@ -103,10 +118,12 @@ def reminder_lines(guild_name: str, reset: int, now: int, debtors: list) -> list
 
 
 def final_lines(guild_name: str, debtors: list, streak: int) -> list[str]:
-    """debtors: [(name, tickets)] без тегов. Пусто → серия «N дней подряд»."""
+    """debtors: [(name, tickets)] без тегов. Пусто → похвала (+ серия «N дней подряд»)."""
     if not debtors:
-        tail = f" — {streak} {_days_word(streak)} подряд" if streak > 1 else ""
-        return [f"🔥 **{guild_name}**: энку сдали все{tail}!"]
+        lines = [f"🏆 **{guild_name}**: энку сдали все — по {REQUIRED}/{REQUIRED}! {random.choice(PRAISE)}"]
+        if streak > 1:
+            lines.append(f"🔥 Без единой недосдачи уже {streak} {_days_word(streak)} подряд — {random.choice(STREAK_PRAISE)}")
+        return lines
     lines = [f"📋 **{guild_name}**: итог дня — не сдали энку ({len(debtors)}):"]
     lines += [f"{name} — **{tickets}**/{REQUIRED}" for name, tickets in debtors]
     return lines

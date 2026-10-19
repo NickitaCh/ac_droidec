@@ -71,8 +71,8 @@ class RaidTicketsCog(commands.Cog):
             code, name = roster.get(m["player_id"], (None, None))
             discord_id = database.get_discord_id_for_ally(code, guild_id=gid) if code else None
             debtors.append((name or m["name"], m["current"], discord_id))
-        if not debtors and stage == "r120":
-            return  # за 2 часа «все сдали» не пишем — только за 30 мин
+        if not debtors:
+            return  # все уже сдали — до среза молчим, похвала будет в итоге дня
         await self._send(cfg["raid_tickets_channel_id"], rt.reminder_lines(cfg["name"], reset, now, debtors), True)
 
     async def _final(self, cfg: dict, reset: int, members_after: list) -> bool:
