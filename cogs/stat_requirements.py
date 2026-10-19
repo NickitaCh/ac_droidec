@@ -343,6 +343,14 @@ def _build_table(headers: list, table_rows: list) -> str:
     return "```\n" + "\n".join(lines) + "\n```"
 
 
+def _code_pairs(pairs: list) -> str:
+    """Основы/сеты — «название  состояние» в code-block'е, как таблица статов, но без
+    заголовков; левая колонка выравнивается, если не слишком длинная (мобильный Discord)."""
+    width = max((len(left) for left, _ in pairs if len(left) <= 16), default=0)
+    lines = [f"{left.ljust(width)}  {right}" for left, right in pairs]
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
 def _stat_label(stat_name: str, priority: str) -> str:
     label = STAT_LABEL_SHORT.get(stat_name, stat_name)
     return f"{label}*" if priority in ("optional", "useful") else label
@@ -788,7 +796,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             req_cell = _mod_set_list_req_text(stat_name, skill_id)
             suffix = "*" if priority in ("optional", "useful") else ""
             ok = current_values.get(key, 0.0) >= 1.0
-            mod_set_lines.append(f"{_worn_sets_text(mod_set_counts)} {'✅' if ok else '❌'} — {req_cell}{suffix}")
+            mod_set_lines.append((f"{req_cell}{suffix}", f"{_worn_sets_text(mod_set_counts)} {'✅' if ok else '❌'}"))
             total += 1
             matched += ok
             if priority == PRIORITY_REQUIRED:
@@ -849,9 +857,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             if is_omicron:
                 omicron_lines.append(f"⚠️ {_omicron_ability_label(skill_id)}{suffix}: нет данных")
             elif is_mod_primary:
-                mod_primary_lines.append(f"⚠️ {MOD_SLOT_LABELS.get(mod_slot, mod_slot)}{suffix}: нет данных")
+                mod_primary_lines.append((f"{MOD_SLOT_LABELS.get(mod_slot, mod_slot)}{suffix}", "нет данных ⚠️"))
             elif is_mod_set:
-                mod_set_lines.append(f"⚠️ {_SET_NAME_BY_ID.get(int(skill_id), skill_id)}{suffix}: нет данных")
+                mod_set_lines.append((f"{_SET_NAME_BY_ID.get(int(skill_id), skill_id)}{suffix}", "нет данных ⚠️"))
             elif is_compare:
                 compare_lines.append(f"⚠️ {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}: нет данных")
             else:
@@ -877,12 +885,12 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         elif is_mod_primary:
             slot_label = MOD_SLOT_LABELS.get(mod_slot, mod_slot)
             if cur_ok:
-                mod_primary_lines.append(f"{cur_cell} — {slot_label}{suffix}")
+                mod_primary_lines.append((f"{slot_label}{suffix}", cur_cell))
             else:
                 req_label = primary_req_text.split(": ", 1)[1]
-                mod_primary_lines.append(f"{cur_cell} — {slot_label}{suffix} (нужно: {req_label})")
+                mod_primary_lines.append((f"{slot_label}{suffix}", f"{cur_cell} → {req_label}"))
         elif is_mod_set:
-            mod_set_lines.append(f"{cur_cell} — {_mod_set_req_text(skill_id, threshold)}{suffix}")
+            mod_set_lines.append((f"{_mod_set_req_text(skill_id, threshold)}{suffix}", cur_cell))
         elif is_compare:
             compare_lines.append(f"{cur_cell} — {_stat_label(stat_name, '')} {operator} {compare_char_name}{_compare_offset_text(operator, compare_offset)}{suffix}")
 
@@ -977,8 +985,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if only_failed:
         table_rows = [r for r in table_rows if any("❌" in str(c) for c in r)]
         omicron_lines = [l for l in omicron_lines if "❌" in l]
-        mod_primary_lines = [l for l in mod_primary_lines if "❌" in l]
-        mod_set_lines = [l for l in mod_set_lines if "❌" in l]
+        mod_primary_lines = [l for l in mod_primary_lines if "❌" in l[1]]
+        mod_set_lines = [l for l in mod_set_lines if "❌" in l[1]]
         compare_lines = [l for l in compare_lines if "❌" in l]
         comments = []
         if not (table_rows or omicron_lines or mod_primary_lines or mod_set_lines or compare_lines):
@@ -990,9 +998,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if omicron_lines:
         block += "\n**🧬 Омикроны:**\n" + "\n".join(omicron_lines)
     if mod_primary_lines:
-        block += "\n**⚙️ Основы модов:**\n" + "\n".join(mod_primary_lines)
+        block += "\n**⚙️ Основы модов:**\n" + _code_pairs(mod_primary_lines)
     if mod_set_lines:
-        block += "\n**🔷 Сеты:**\n" + "\n".join(mod_set_lines)
+        block += "\n**🔷 Сеты:**\n" + _code_pairs(mod_set_lines)
     if compare_lines:
         block += "\n**⚔️ Сравнение с персонажами:**\n" + "\n".join(compare_lines)
     if comments:
