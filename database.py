@@ -283,6 +283,7 @@ GUILD_CONFIG_COLUMNS = [
     "antispam_enabled", "antispam_alert_channel_id", "antispam_alert_role_id",
     "antispam_alert_message", "antispam_timeout_minutes",
     "tasks_log_channel_id", "tasks_notify_time",
+    "raid_tickets_channel_id",
     "is_active",
     "subscription_expires_at", "subscription_source", "payment_customer_id",
 ]
@@ -354,6 +355,11 @@ def _ensure_guilds_table(cursor):
         pass  # колонка уже добавлена ранее
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tasks_notify_time TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Канал напоминаний «сдайте энку» (рейдовые билеты) — cogs/raid_tickets.py.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN raid_tickets_channel_id TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
     try:
@@ -7485,3 +7491,73 @@ def get_player_datacrons_bulk(ally_codes: list) -> dict:
         except ValueError:
             continue
     return result
+
+
+# =====================================================================
+# ЭНКА (рейдовые билеты): сколько каждый игрок сдал за игровой день гильдии
+# (сброс — guild.nextChallengesRefresh). Пишет cogs/raid_tickets.py при итоговом
+# отчёте; day — дата сброса по МСК (день, который этим сбросом закончился).
+# =====================================================================
+def _ensure_raid_tickets_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS raid_ticket_daily (
+            guild_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            ally_code TEXT,
+            player_name TEXT,
+            tickets INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, day, player_id)
+        )
+    """)
+
+
+def save_raid_ticket_day(guild_id: int, day: str, rows: list) -> None:
+    """rows: [(player_id, ally_code, player_name, tickets)] — полная замена дня."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_tickets_table(cursor)
+    cursor.execute("DELETE FROM raid_ticket_daily WHERE guild_id = ? AND day = ?", (guild_id, day))
+    cursor.executemany(
+        "INSERT INTO raid_ticket_daily (guild_id, day, player_id, ally_code, player_name, tickets) VALUES (?, ?, ?, ?, ?, ?)",
+        [(guild_id, day, pid, code, name, int(t)) for pid, code, name, t in rows],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_raid_ticket_history(guild_id: int, days: int = 30) -> list:
+    """[(day, player_id, ally_code, player_name, tickets)] за последние `days` сохранённых дней."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_tickets_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT day, player_id, ally_code, player_name, tickets FROM raid_ticket_daily
+        WHERE guild_id = ? AND day IN (
+            SELECT DISTINCT day FROM raid_ticket_daily WHERE guild_id = ? ORDER BY day DESC LIMIT ?
+        )
+        ORDER BY day DESC
+    """, (guild_id, guild_id, days))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_raid_ticket_full_streak(guild_id: int, required: int) -> int:
+    """Сколько последних сохранённых дней подряд ВСЕ сдали >= required (для «N дней подряд»)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_tickets_table(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT day, MIN(tickets) FROM raid_ticket_daily WHERE guild_id = ?
+        GROUP BY day ORDER BY day DESC LIMIT 400
+    """, (guild_id,))
+    streak = 0
+    for _day, min_tickets in cursor.fetchall():
+        if min_tickets < required:
+            break
+        streak += 1
+    conn.close()
+    return streak

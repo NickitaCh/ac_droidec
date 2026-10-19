@@ -29,6 +29,7 @@ FEATURE_FIELDS = {
     "birthday": ["birthday_channel_id", "birthday_role_id"],
     "tw_guide": ["tw_guide_forum_channel_id"],
     "tasks": ["tasks_log_channel_id"],
+    "raid_tickets": ["raid_tickets_channel_id"],  # без FEATURE_LABELS: не нужна всем — только на /tickets
     "omicron": ["omicron_channel_id"],
 }
 

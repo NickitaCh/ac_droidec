@@ -38,6 +38,7 @@ SETTINGS_FIELDS = [
     ("antispam_timeout_minutes", "Длительность автотайм-аута при обнаружении спам-рассылки (мин.)"),
     ("tasks_log_channel_id", "Канал уведомлений о задачах на прокачку (выполнено/просрочено/напоминание)"),
     ("tasks_mention", "Тег игрока при постановке задачи включён"),
+    ("raid_tickets_channel_id", "Канал напоминаний про энку (рейдовые билеты)"),
 ]
 
 
@@ -51,7 +52,7 @@ SETTINGS_FIELDS = [
 SITE_URL = "https://swgoh-sng.ru"
 TEXT_CHANNELS = [disnake.ChannelType.text, disnake.ChannelType.news]
 THREAD_TYPES = [disnake.ChannelType.public_thread, disnake.ChannelType.private_thread, disnake.ChannelType.news_thread]
-FEATURE_FLAG_FIELDS = {"tb_ping", "tb_plan_order", "tasks_mention"}
+FEATURE_FLAG_FIELDS = {"tb_ping", "tb_plan_order", "tasks_mention", "raid_tickets"}
 
 # (ключ, название, поля [(вид, поле, подпись, типы каналов)], только супер-админу)
 SETTINGS_SECTIONS = [
@@ -79,6 +80,10 @@ SETTINGS_SECTIONS = [
     ("tasks", "Задачи на прокачку", [
         ("channel", "tasks_log_channel_id", "Канал уведомлений по задачам", TEXT_CHANNELS),
         ("flag", "tasks_mention", "Тег игрока при постановке задачи", None),
+    ], False),
+    ("raid_tickets", "Энка (рейдовые билеты)", [
+        ("flag", "raid_tickets", "Напоминания и итог дня", None),
+        ("channel", "raid_tickets_channel_id", "Канал напоминаний про энку", TEXT_CHANNELS),
     ], False),
     ("antispam", "Антиспам (супер-админ)", [
         ("flag", "antispam_enabled", "Антиспам-детектор", None),
