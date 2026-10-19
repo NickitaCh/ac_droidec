@@ -343,9 +343,15 @@ def _build_table(headers: list, table_rows: list) -> str:
     return "```\n" + "\n".join(lines) + "\n```"
 
 
+_CODE_PAIR_NUMBERS_RE = re.compile(r" \+\d+(?:[.,]\d+)?%?| \(\d+ мод\.\)")
+
+
 def _code_pairs(pairs: list) -> str:
     """Основы/сеты — «название  состояние» в code-block'е, как таблица статов, но без
-    заголовков; левая колонка выравнивается, если не слишком длинная (мобильный Discord)."""
+    заголовков; левая колонка выравнивается, если не слишком длинная (мобильный Discord).
+    Без цифр основ («Health +16%» → «Health») и «(4 мод.)» (RicardoOneS, 2026-10-19);
+    «×2» у сетов остаётся — это число комплектов."""
+    pairs = [(_CODE_PAIR_NUMBERS_RE.sub("", left), _CODE_PAIR_NUMBERS_RE.sub("", right)) for left, right in pairs]
     width = max((len(left) for left, _ in pairs if len(left) <= 16), default=0)
     lines = [f"{left.ljust(width)}  {right}" for left, right in pairs]
     return "```\n" + "\n".join(lines) + "\n```"
