@@ -120,10 +120,12 @@ def mod_primary_allowed(threshold, skill_id) -> list[int]:
     иначе единственная — threshold_value."""
     return parse_id_list(skill_id) or [int(threshold)]
 
-# {int(set_id): "Health"/...} — те же английские имена, что уже использует /моды_поиск
-# (cogs/mod_search.py::SET_CHOICES), не переизобретаем русский перевод, которого в проекте
-# нигде больше нет для сетов.
-_SET_NAME_BY_ID = {int(k): v for k, v in stat_engine.MOD_SET_IDS.items()}
+# {int(set_id): название} — официальный русский перевод игры (просьба гильдии 2026-10-19:
+# «чего мы на пендосском»). Импорт HotBot сверяет английские имена по своим словарям.
+_SET_NAME_BY_ID = {
+    1: "Здоровье", 2: "Атака", 3: "Оборона", 4: "Скорость", 5: "Шанс на критический удар",
+    6: "Критический урон", 7: "Эффективность", 8: "Стойкость",
+}  # RUS_RU STATMODSETBONUS_*_NAME, id — stat_engine.MOD_SET_IDS
 SET_CHOICES = [
     disnake.OptionChoice(name=name, value=set_id)
     for set_id, name in sorted(_SET_NAME_BY_ID.items(), key=lambda kv: kv[1])
@@ -203,22 +205,27 @@ SCENARIO_CHOICES = [
 # Health/Speed/Armor/Potency и т.п. уже достаточно короткие — оставлены как есть (fallback).
 STAT_LABEL_SHORT = {
     "Relic": "Реликвия",
-    "Total Life": "Общ.HP",
+    "Total Life": "Здоровье+Защита",
+    "Speed": "Скорость",
+    "Health": "Здоровье",
     "Protection": "Защита",
-    "Physical Damage": "Атк.Ф",
-    "Special Damage": "Атк.О",
-    "Critical Chance": "КШ",
-    "Physical Critical Chance": "КШ.Ф",
-    "Special Critical Chance": "КШ.О",
-    "Critical Damage": "КУ",
-    "Critical Avoidance": "АКШ",
-    "Physical Critical Avoidance": "АКШ.Ф",
-    "Special Critical Avoidance": "АКШ.О",
-    "Accuracy": "Точность",
-    "Physical Accuracy": "Точн.Ф",
-    "Special Accuracy": "Точн.О",
-    "Health Steal": "Вампиризм",
+    "Armor": "Броня",
+    "Resistance": "Сопротивление",
+    "Potency": "Эффективность",
     "Tenacity": "Стойкость",
+    "Physical Damage": "Физический урон",
+    "Special Damage": "Особый урон",
+    "Critical Damage": "Критический урон",
+    "Critical Chance": "Шанс на крит. удар",
+    "Physical Critical Chance": "Шанс физ. крит. атаки",
+    "Special Critical Chance": "Шанс особ. крит. атаки",
+    "Critical Avoidance": "Избегание крит. удара",
+    "Physical Critical Avoidance": "Избег. физ. крит. удара",
+    "Special Critical Avoidance": "Избег. особ. крит. удара",
+    "Accuracy": "Точность",
+    "Physical Accuracy": "Физическая точность",
+    "Special Accuracy": "Особая точность",
+    "Health Steal": "Кража здоровья",
     "Offense": "Атака",
     "Defense": "Оборона",
 }
@@ -400,9 +407,18 @@ def _mod_primary_option(slot_key: str, unit_stat_id) -> dict | None:
     return None
 
 
+_PRIMARY_STAT_RU = {
+    5: "Скорость", 16: "Критический урон", 17: "Эффективность", 18: "Стойкость", 48: "Атака",
+    49: "Оборона", 52: "Точность", 53: "Шанс на крит. удар", 54: "Избегание крит. удара",
+    55: "Здоровье", 56: "Защита",
+}  # официальные RUS_RU UnitStat_*; значения основ (+16% и т.п.) в /статы не пишем
+
+
 def _mod_primary_stat_label(mod_slot: str, unit_stat_id) -> str:
     opt = _mod_primary_option(mod_slot, unit_stat_id)
-    return opt["label"] if opt else f"#{unit_stat_id}"
+    if not opt:
+        return f"#{unit_stat_id}"
+    return _PRIMARY_STAT_RU.get(opt["unit_stat"], opt["label"])
 
 
 def _mod_primary_req_text(mod_slot: str, unit_stat_id, skill_id=None) -> str:
@@ -874,7 +890,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         cur_ok = _compare(cur_val, operator, threshold)
         if is_mod_primary:
             actual_opt = _mod_primary_option(mod_slot, cur_val)
-            cur_cell = f"{actual_opt['label'] if actual_opt else f'#{int(cur_val)}'} {'✅' if cur_ok else '❌'}"
+            cur_cell = f"{_mod_primary_stat_label(mod_slot, cur_val) if actual_opt else f'#{int(cur_val)}'} {'✅' if cur_ok else '❌'}"
         elif is_omicron:
             cur_cell = "Есть ✅" if cur_ok else "Нет ❌"
         elif is_mod_set and (threshold or 1) > 1:
@@ -979,7 +995,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             current_text = (
                 "не разблокирован" if is_omicron
                 else (f"надето {int(cur_val or 0)} из {int(threshold)}" if (threshold or 1) > 1 else "не надет") if is_mod_set
-                else (actual_opt["label"] if actual_opt else "другая основа") if is_mod_primary
+                else (_mod_primary_stat_label(mod_slot, cur_val) if actual_opt else "другая основа") if is_mod_primary
                 else _fmt_compact(cur_val)
             )
             failed_required.append({
@@ -1164,7 +1180,7 @@ async def _project_character_relic(bot, plate_name: str, base_id: str, target_re
         scheme_label = database.get_character_scheme_labels(scheme_leaf_plate, base_id, guild_id).get(active_scheme, f"Вариант {active_scheme}")
 
     if required_relic is None:
-        block = "⚠️ В требованиях плейта нет строки Relic — не от чего считать прибавку."
+        block = "⚠️ В требованиях плейта нет строки «Реликвия» — не от чего считать прибавку."
         return char_name, block
 
     ref_unit = _build_synthetic_unit(base_id, required_relic)
