@@ -38,6 +38,8 @@ def _value(name: str, stat: dict, percent: set) -> str:
 
 
 def _level_text(level: dict) -> tuple[str, tuple]:
+    if level["gear"] is None:  # корабль
+        return "", GEAR_BG
     if level["relic"] is not None:
         return f"R{level['relic']}", RELIC_BG
     return f"G{level['gear']}", GEAR_BG
@@ -45,9 +47,10 @@ def _level_text(level: dict) -> tuple[str, tuple]:
 
 def render(unit_name: str, base_id: str, player_name: str, updated_at: str | None, result: dict) -> bytes:
     cur, proj = result["current"], result["projected"]
+    is_ship = result.get("is_ship", False)
     cols = [cur] + ([proj] if proj else [])
     col_w = (W - 2 * PAD - LABEL_W) // len(cols)
-    n_rows = 3 + sum(len(g) for g in result["groups"])
+    n_rows = (2 if is_ship else 3) + sum(len(g) for g in result["groups"])
     height = PAD + PIC + 20 + ROW_H + n_rows * (ROW_H + 2) + len(result["groups"]) * 6 + 60
     img = Image.new("RGB", (W, height), BG)
     draw = ImageDraw.Draw(img)
@@ -74,9 +77,11 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
     draw.text((tx, y + 72), player_name, font=_font(22), fill=MUTED, anchor="lm")
     if proj:
         a, b = _level_text(cur["level"])[0], _level_text(proj["level"])[0]
-        stars = f"{cur['level']['stars']}★ {a}  →  {proj['level']['stars']}★ {b}"
+        stars = f"{cur['level']['stars']}★ {a}  →  {proj['level']['stars']}★ {b}".strip()
+        if is_ship:
+            stars = f"{cur['level']['stars']}★  →  {proj['level']['stars']}★"
         draw.text((tx, y + 110), stars, font=_font(24, True), fill=GOLD, anchor="lm")
-        draw.text((tx, y + 140), "в текущих модах", font=_font(18), fill=MUTED, anchor="lm")
+        draw.text((tx, y + 140), "при текущем экипаже" if is_ship else "в текущих модах", font=_font(18), fill=MUTED, anchor="lm")
     y += PIC + 20
 
     def row(label: str, cells: list, fill, bold_label=False):
@@ -111,7 +116,8 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
         font = _font(22, True)
         for k in range(7):
             draw.text((x + k * 24, y - 2 - ROW_H // 2), "★", font=font, fill=GOLD if k < c["level"]["stars"] else (90, 94, 104), anchor="lm")
-    row("Гир / Реликвия", [(*_level_text(c["level"])[:1], TEXT, _level_text(c["level"])[1]) for c in cols], PANEL_ALT, True)
+    if not is_ship:
+        row("Гир / Реликвия", [(*_level_text(c["level"])[:1], TEXT, _level_text(c["level"])[1]) for c in cols], PANEL_ALT, True)
     gp_cells = [(_int(cur["gp"]) if cur["gp"] else "—", TEXT, None)]
     if proj:
         gp_cells.append((_int(proj["gp"]) if proj["gp"] else "—", _delta_color(cur["gp"], proj["gp"]), None))
@@ -129,7 +135,7 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
             row(result["labels"][name], cells, fill)
 
     y += 10
-    foot = "В скобках — вклад модов"
+    foot = "Статы зависят от звёзд корабля и прокачки экипажа" if is_ship else "В скобках — вклад модов"
     if updated_at:
         foot += f"  ·  данные игрока: {updated_at}"
     draw.text((W // 2, y + 12), foot, font=_font(16), fill=MUTED, anchor="mm")

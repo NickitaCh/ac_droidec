@@ -6,7 +6,11 @@ services/unit_forecast_image.py.
 relic.currentTier (релик + 2). Если меняется гир или ставится релик, надетые детали
 шмота (equipment) снимаются: их набор на другом тире неизвестен, считается только
 табличный бонус тира (как и в stat_engine.project_unit_relic). Моды, уровень и
-навыки — реальные. Вклад модов = итог − тот же юнит без модов."""
+навыки — реальные. Вклад модов = итог − тот же юнит без модов.
+
+Корабли (forecast_ship): прогноз только по звёздам корабля — гира/релика и модов у
+кораблей нет, статы зависят от звёзд и прокачки экипажа (StatCalc.calc_ship_stats).
+Скорость корабля растёт со звёздами (Палач: 167 на 1★ → 192 на 7★)."""
 
 import copy
 
@@ -31,11 +35,11 @@ STAT_LABELS = {
     "Health Steal": "Кража здоровья",
     "Physical Damage": "Физ. урон",
     "Physical Critical Chance": "Шанс физ. крита",
-    "Armor Penetration": "Пробой брони",
+    "Armor Penetration": "Пробитие брони",
     "Armor": "Броня",
     "Special Damage": "Особый урон",
     "Special Critical Chance": "Шанс особ. крита",
-    "Resistance Penetration": "Пробой сопр.",
+    "Resistance Penetration": "Особое пробитие",
     "Resistance": "Сопротивление",
     "Physical Accuracy": "Точность",
 }
@@ -45,6 +49,21 @@ MOD_STATS = {
     "Health", "Protection", "Speed", "Physical Damage", "Special Damage",
     "Physical Critical Chance", "Special Critical Chance", "Armor", "Resistance",
     "Potency", "Tenacity", "Critical Damage", "Physical Accuracy",
+}
+
+
+# Финальные статы корабля StatCalc отдаёт по номерам UnitStat, проценты — долями (0–1).
+SHIP_STAT_GROUPS = [
+    ["Health", "Protection", "Speed", "Critical Damage"],
+    ["Potency", "Tenacity", "Health Steal"],
+    ["Physical Damage", "Physical Critical Chance", "Armor Penetration", "Armor"],
+    ["Special Damage", "Special Critical Chance", "Resistance Penetration", "Resistance"],
+]
+SHIP_STAT_IDS = {
+    "Health": "1", "Protection": "28", "Speed": "5", "Critical Damage": "16",
+    "Potency": "17", "Tenacity": "18", "Health Steal": "27",
+    "Physical Damage": "6", "Physical Critical Chance": "14", "Armor Penetration": "10", "Armor": "8",
+    "Special Damage": "7", "Special Critical Chance": "15", "Resistance Penetration": "11", "Resistance": "9",
 }
 
 
@@ -121,4 +140,51 @@ def forecast(stat_calc, unit: dict, stars: int | None = None, gear: int | None =
         "groups": STAT_GROUPS,
         "labels": STAT_LABELS,
         "percent": {n for n in STAT_LABELS if n in stat_engine.PERCENT_STATS},
+    }
+
+
+def validate_ship(gear: int | None, relic: int | None) -> str | None:
+    if gear is not None or relic is not None:
+        return "У корабля нет гира и реликвии — для прогноза укажите только звёзды."
+    return None
+
+
+def ship_crew(stat_calc, roster: list, base_id: str) -> list:
+    """Экипаж корабля из ростера игрока (сырые rosterUnit) — в порядке из игровых данных."""
+    meta = (stat_calc._unit_data or {}).get(base_id) or {}
+    by_id = {(u.get("definitionId") or "").split(":")[0]: u for u in roster}
+    return [by_id[c] for c in meta.get("crew") or [] if c in by_id]
+
+
+def _ship_snapshot(stat_calc, ship: dict, crew: list) -> dict:
+    crew = [copy.deepcopy(c) for c in crew]
+    for c in crew:  # calc_ship_stats суммирует ГМ экипажа, сам его не считает
+        c["gp"] = stat_calc.calc_char_gp(copy.deepcopy(c))
+    result = stat_calc.calc_ship_stats(copy.deepcopy(ship), crew)
+    final = (result.get("stats") or {}).get("final") or {}
+    stats = {}
+    for name, stat_id in SHIP_STAT_IDS.items():
+        value = float(final.get(stat_id) or 0)
+        if name in stat_engine.PERCENT_STATS:
+            value *= 100
+        stats[name] = {"value": value, "mods": 0}
+    level = {"stars": ship.get("currentRarity") or 1, "gear": None, "relic": None}
+    return {"level": level, "gp": result.get("gp"), "stats": stats}
+
+
+def forecast_ship(stat_calc, ship: dict, crew: list, stars: int | None = None) -> dict:
+    """Как forecast, но для корабля: прогноз только по звёздам."""
+    current = _ship_snapshot(stat_calc, ship, crew)
+    projected = None
+    if stars is not None and stars != current["level"]["stars"]:
+        target = copy.deepcopy(ship)
+        target["currentRarity"] = stars
+        projected = _ship_snapshot(stat_calc, target, crew)
+    return {
+        "current": current,
+        "projected": projected,
+        "groups": SHIP_STAT_GROUPS,
+        "labels": STAT_LABELS,
+        "percent": {n for n in SHIP_STAT_IDS if n in stat_engine.PERCENT_STATS},
+        "is_ship": True,
     }

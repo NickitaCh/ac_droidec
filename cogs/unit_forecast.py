@@ -20,6 +20,7 @@ MSK = ZoneInfo("Europe/Moscow")
 
 
 def _parse_bracket_id(text: str) -> str:
+    # «Имя [BASE_ID] 🚀» у кораблей — хвост после скобок не мешает.
     m = re.search(r"\[(.*?)\]", text or "")
     return m.group(1) if m else (text or "").strip()
 
@@ -29,9 +30,7 @@ async def autocomplete_character_unit(inter: disnake.ApplicationCommandInteracti
     types = database.get_unit_types([base_id for base_id, _ in matches])
     options = []
     for base_id, name in matches:
-        if types.get(base_id) == "ship":
-            continue
-        label = f"{name} [{base_id}]"
+        label = f"{name} [{base_id}]" + (" 🚀" if types.get(base_id) == "ship" else "")
         options.append(disnake.OptionChoice(name=label[:100], value=label[:100]))
         if len(options) >= 25:
             break
@@ -50,8 +49,8 @@ class UnitForecastCog(commands.Cog):
     async def unit_forecast_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        юнит: str = commands.Param(description="Персонаж", autocomplete=autocomplete_character_unit),
-        звёзды: int = commands.Param(default=None, ge=1, le=7, description="Звёзды для прогноза (1–7)"),
+        юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
+        звёзды: int = commands.Param(default=None, ge=1, le=7, description="Звёзды для прогноза (1–7), у корабля — единственный параметр"),
         гир: int = commands.Param(default=None, ge=1, le=13, description="Гир для прогноза (1–13)"),
         релик: int = commands.Param(default=None, ge=0, le=10, description="Реликвия для прогноза (0–10), ставит G13"),
         аликод: str = commands.Param(default=None, description="Код союзника любого игрока (пусто → вы)"),
@@ -91,12 +90,15 @@ class UnitForecastCog(commands.Cog):
             return
 
         base_id = _parse_bracket_id(юнит)
-        if database.get_unit_types([base_id]).get(base_id) == "ship":
-            await inter.edit_original_response("❌ Корабли пока не поддерживаются — выберите персонажа.")
-            return
+        is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
+        if is_ship:
+            error = unit_forecast.validate_ship(гир, релик)
+            if error:
+                await inter.edit_original_response(f"❌ {error}")
+                return
         unit_name = database.get_game_unit_name(base_id)
         if not unit_name:
-            await inter.edit_original_response("❌ Персонаж не найден — выберите его из списка.")
+            await inter.edit_original_response("❌ Юнит не найден — выберите его из списка.")
             return
 
         try:
@@ -110,16 +112,25 @@ class UnitForecastCog(commands.Cog):
         unit = next((u for u in player["rosterUnit"] if u.get("definitionId", "").split(":")[0] == base_id), None)
         player_name = player.get("name") or ally_code
         if unit is None:
-            await inter.edit_original_response(f"❌ У **{player_name}** нет персонажа **{unit_name}**.")
+            await inter.edit_original_response(f"❌ У **{player_name}** нет {'корабля' if is_ship else 'персонажа'} **{unit_name}**.")
             return
 
         updated_at = datetime.now(MSK).strftime("%d.%m.%Y %H:%M МСК")
 
         def work():
-            result = unit_forecast.forecast(self.bot.stat_calc, unit, звёзды, гир, релик)
+            if is_ship:
+                crew = unit_forecast.ship_crew(self.bot.stat_calc, player["rosterUnit"], base_id)
+                result = unit_forecast.forecast_ship(self.bot.stat_calc, unit, crew, звёзды)
+            else:
+                result = unit_forecast.forecast(self.bot.stat_calc, unit, звёзды, гир, релик)
             return unit_forecast_image.render(unit_name, base_id, player_name, updated_at, result)
 
-        png = await asyncio.to_thread(work)
+        try:
+            png = await asyncio.to_thread(work)
+        except Exception as e:
+            print(f"⚠️ [Юнит] расчёт {base_id} для {ally_code}: {e!r}")
+            await inter.edit_original_response("❌ Не удалось посчитать статы этого юнита.")
+            return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename=f"unit_{base_id}.png"))
 
 

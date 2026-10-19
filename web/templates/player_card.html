@@ -108,7 +108,7 @@
                                 <tr data-kind="{{ 'personal' if t.is_personal else 'guild' }}">
                                     <td>{% if t.base_id %}{{ game.unit(t.base_id, t.unit_name) }}{% else %}{{ t.unit_name }}{% endif %}{% if t.is_personal %} <span class="muted" title="Личная задача — поставлена самим игроком">👤</span>{% endif %}</td>
                                     <td class="nowrap">{{ t.target_label }}</td>
-                                    <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
+                                    <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span>{% if is_officer and t.activity_url %} <a class="task-activity-link" href="{{ t.activity_url }}" title="Что игрок качал с постановки задачи до провала">что качал</a>{% endif %}</td>
                                     <td>{{ t.progress }}</td>
                                     <td class="nowrap" title="{{ t.deadline }}">{% if t.deadline and t.deadline|length >= 10 %}{{ t.deadline[8:10] }}.{{ t.deadline[5:7] }}{% elif t.deadline %}{{ t.deadline }}{% else %}—{% endif %}</td>
                                     {% if can_add_personal_task %}
@@ -365,6 +365,58 @@
                 </ul>
             {% endif %}
             {% if is_officer %}<p class="widget-more"><a href="{{ card.omicron_report_url }}">Полный отчёт</a></p>{% endif %}
+        </div>
+        {% endif %}
+
+        {% if forecast_units %}
+        <div class="widget" id="unit-forecast">
+            <div class="widget-header">
+                <h2>🔭 Прогноз юнита</h2>
+                {{ ui.help("Статы юнита в текущих модах сейчас и на других звёздах, гире или релике — как /юнит прогноз в Discord. Для корабля — только звёзды: его статы зависят от звёзд и прокачки экипажа. Ростер — из часового синка.") }}
+            </div>
+            <form class="filter-row" id="unit-forecast-form">
+                <label>Юнит
+                    <input list="unit-forecast-units" name="unit_name" required placeholder="Начните вводить имя…" autocomplete="off">
+                    <datalist id="unit-forecast-units">
+                        {% for base_id, name, is_ship in forecast_units %}<option value="{{ name }}{% if is_ship %} 🚀{% endif %}" data-id="{{ base_id }}"></option>{% endfor %}
+                    </datalist>
+                </label>
+                <label>Звёзды <input type="number" name="stars" min="1" max="7" style="width:4.5em"></label>
+                <label>Гир <input type="number" name="gear" min="1" max="13" style="width:4.5em"></label>
+                <label>Релик <input type="number" name="relic" min="0" max="10" style="width:4.5em"></label>
+                <button type="submit">Показать</button>
+            </form>
+            <p class="widget-empty" id="unit-forecast-msg" hidden></p>
+            <img id="unit-forecast-img" alt="Прогноз юнита" hidden style="max-width:100%;height:auto;border-radius:10px;margin-top:0.5em">
+            <script>
+            (function () {
+                const form = document.getElementById("unit-forecast-form");
+                const img = document.getElementById("unit-forecast-img");
+                const msg = document.getElementById("unit-forecast-msg");
+                const ids = {};
+                document.querySelectorAll("#unit-forecast-units option").forEach(o => { ids[o.value] = o.dataset.id; });
+                function show(text) { msg.textContent = text; msg.hidden = false; img.hidden = true; }
+                form.addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    const fd = new FormData(form);
+                    const id = ids[fd.get("unit_name")];
+                    if (!id) { show("Выберите юнит из списка."); return; }
+                    const params = new URLSearchParams({unit: id});
+                    for (const k of ["stars", "gear", "relic"]) { if (fd.get(k)) params.set(k, fd.get(k)); }
+                    show("Считаю…");
+                    const resp = await fetch("/player/{{ card.ally_code }}/forecast.png?" + params);
+                    if (!resp.ok) {
+                        let text = "Не удалось посчитать.";
+                        try { text = (await resp.json()).error || text; } catch (_) {}
+                        show(text);
+                        return;
+                    }
+                    if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+                    img.src = URL.createObjectURL(await resp.blob());
+                    img.hidden = false; msg.hidden = true;
+                });
+            })();
+            </script>
         </div>
         {% endif %}
 
