@@ -16,6 +16,7 @@ import asyncio
 
 import database
 import stat_engine
+from services import player_profile
 
 
 async def fetch_player_units(comlink, ally_code: str) -> dict:
@@ -24,6 +25,9 @@ async def fetch_player_units(comlink, ally_code: str) -> dict:
     # Датакроны приходят в том же ответе — сохраняем попутно (деф ВГ: «у кого нужный ДК»).
     if "datacron" in player_data:
         database.upsert_player_datacrons(str(ally_code), player_data.get("datacron") or [])
+    # Статы ВА/ранги арены — для гильдийского /профиль (services/player_profile.py).
+    if player_data.get("profileStat") is not None:
+        database.upsert_player_profile(str(ally_code), player_profile.player_meta(player_data))
     roster = player_data.get("rosterUnit") or player_data.get("roster") or []
     units = {}
     for u in roster:

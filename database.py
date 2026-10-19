@@ -7471,6 +7471,53 @@ def upsert_player_datacrons(ally_code: str, datacrons: list) -> None:
     conn.close()
 
 
+# Профиль игрока помимо ростера (статы ВА, ранги арены, лига) — services/player_profile.py::
+# player_meta, пишется попутно в ежечасном синке (activity_diff.fetch_player_units). Нужен
+# гильдийскому /профиль, чтобы не дёргать get_player по каждому участнику.
+def _ensure_player_profile_cache_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS player_profile_cache (
+            ally_code TEXT PRIMARY KEY,
+            profile_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def upsert_player_profile(ally_code: str, profile: dict) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_profile_cache_table(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO player_profile_cache (ally_code, profile_json, updated_at) VALUES (?, ?, datetime('now'))",
+        (str(ally_code), json.dumps(profile, ensure_ascii=False)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_player_profiles_bulk(ally_codes: list) -> dict:
+    """{ally_code: profile} — только по тем, у кого кэш уже есть."""
+    if not ally_codes:
+        return {}
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_player_profile_cache_table(cursor)
+    conn.commit()
+    placeholders = ",".join("?" for _ in ally_codes)
+    cursor.execute(f"SELECT ally_code, profile_json FROM player_profile_cache WHERE ally_code IN ({placeholders})",
+                   [str(c) for c in ally_codes])
+    rows = cursor.fetchall()
+    conn.close()
+    result = {}
+    for ally_code, raw in rows:
+        try:
+            result[ally_code] = json.loads(raw)
+        except ValueError:
+            continue
+    return result
+
+
 def get_player_datacrons_bulk(ally_codes: list) -> dict:
     """{ally_code: [datacron, ...]} — только по тем, у кого кэш уже есть."""
     if not ally_codes:

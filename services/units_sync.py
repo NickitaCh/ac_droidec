@@ -243,6 +243,7 @@ async def sync_units(comlink) -> int:
     units_to_db = {}
     thumbnails = {}
     selftags = {}
+    galactic_legends = []
     gear_recipes = {}
     for unit in units_list:
         if not _is_canonical_playable_unit(unit):
@@ -260,6 +261,8 @@ async def sync_units(comlink) -> int:
         for cat in unit.get("categoryId") or []:
             if cat.startswith("selftag_"):
                 selftags[cat] = bid
+            elif cat == "galactic_legend":
+                galactic_legends.append(bid)
 
         # Рецепт деталей по тиру снаряжения (unitTier[].equipmentSet) — для
         # resource_spend.py (счётчик потраченных деталей в /ресурсы). Тир 13 у comlink —
@@ -285,6 +288,10 @@ async def sync_units(comlink) -> int:
     # Читает services/journey_guide.py.
     if selftags:
         database.set_bot_state("unit_selftags", json.dumps(selftags), guild_id=0)
+    # ГЛ для /профиль (services/player_profile.py::galactic_legends) — из игровых данных,
+    # чтобы новые легенды появлялись без правки кода.
+    if galactic_legends:
+        database.set_bot_state("galactic_legends", json.dumps(sorted(galactic_legends)), guild_id=0)
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление
