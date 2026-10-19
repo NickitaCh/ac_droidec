@@ -51,7 +51,7 @@ class UnitForecastCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
-        звёзды: int = commands.Param(default=None, ge=1, le=7, description="Звёзды для прогноза (1–7), у корабля — единственный параметр"),
+        звёзды: int = commands.Param(default=None, ge=1, le=7, description="Звёзды для прогноза (1–7); не заданы при гире/релике — 7★"),
         гир: int = commands.Param(default=None, ge=1, le=13, description="Гир для прогноза (1–13)"),
         релик: int = commands.Param(default=None, ge=0, le=10, description="Реликвия для прогноза (0–10), ставит G13"),
         аликод: str = commands.Param(default=None, description="Код союзника любого игрока (пусто → вы)"),

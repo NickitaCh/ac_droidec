@@ -130,6 +130,8 @@ def forecast(stat_calc, unit: dict, stars: int | None = None, gear: int | None =
     или задано то же, что сейчас."""
     current = _snapshot(stat_calc, unit)
     projected = None
+    if stars is None and (gear is not None or relic is not None):
+        stars = 7  # звёзды не заданы — тянем до 7★ (реликвии в игре и так только на 7★)
     if any(v is not None for v in (stars, gear, relic)):
         target = project(unit, stars, gear, relic)
         if current_level(target) != current["level"]:
