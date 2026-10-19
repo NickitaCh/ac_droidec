@@ -1354,6 +1354,10 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 }
 .requirement-form label { flex: 1 1 12em; min-width: 10em; }
 .requirement-form button { flex: 0 0 auto; height: 2.6em; }
+.requirement-form button.level-alt-add { height: auto; align-self: flex-start; }
+.personal-task-add { margin-top: 0.8em; }
+.personal-task-add > .requirement-form { margin-top: 0.6em; }
+.personal-task-unit { flex: 1 1 14em; min-width: 10em; display: flex; flex-direction: column; gap: 0.25em; }
 /* ---- Пары "нарушение + комментарий" внутри requirement-form (/нарушения) — без
    этого правила .violation-pair оставался обычным <div> и как flex-item родителя
    получал flex-basis:auto по контенту, а его два <label> внутри стекались по

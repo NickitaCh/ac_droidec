@@ -232,7 +232,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
 
     all_ctx = []
     for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-         initial_value, current_value, in_progress, created_by, resolved_at, archived_at) in rows:
+         initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal) in rows:
         archived = database.is_task_archived(resolved_at, status, archived_at)
         all_ctx.append({
             "task_id": task_id, "ally_code": ally_code, "base_id": base_id,
@@ -250,6 +250,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             "archived": archived,
             "can_archive": status in ("COMPLETED", "FAILED") and not archived,
             "departed": ally_code in departed_codes,
+            "personal": bool(is_personal),
             "resolved_at_text": _format_resolved_at(resolved_at),
         })
 
@@ -258,10 +259,15 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     # игрокам" — только текущие задачи, как и в отчётах бота.
     # Задачи выбывших из гильдии — своя вкладка "Выбывшие" (только они, любой статус),
     # ни в текущих, ни в "Архиве" их нет.
-    current = [t for t in all_ctx if not t["archived"] and not t["departed"]]
-    archived = [t for t in all_ctx if t["archived"] and not t["departed"]]
+    # Личные задачи (игрок поставил себе сам) — только на вкладке "Личные", без архива:
+    # в счётчики, списки и отчёты гильдии не попадают.
+    personal = [t for t in all_ctx if t["personal"] and not t["departed"]]
+    current = [t for t in all_ctx if not t["archived"] and not t["departed"] and not t["personal"]]
+    archived = [t for t in all_ctx if t["archived"] and not t["departed"] and not t["personal"]]
     if view == "departed":
         scope = [t for t in all_ctx if t["departed"]]
+    elif view == "personal":
+        scope = personal
     elif view == "archive":
         scope = archived
     else:
@@ -348,6 +354,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "synced": request.query_params.get("synced"),
         "archive_after_days": database.TASK_ARCHIVE_AFTER_DAYS,
         "departed_count": len({t["ally_code"] for t in all_ctx if t["departed"]}),
+        "personal_count": len(personal),
         "config_warning": config_warning_html(database.get_guild_config(guild_id), "tasks"),
     })
 
@@ -664,7 +671,7 @@ async def task_add_guide(
 async def task_edit(
     task_id: int,
     target_value: str = Form(...),
-    deadline: str = Form(...),
+    deadline: str = Form(""),
     user: dict = Depends(feature_flags.require_feature("tasks")),
 ):
     guild_id = user["guild_id"]
@@ -677,10 +684,13 @@ async def task_edit(
     if err:
         return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
 
-    try:
-        datetime.strptime(deadline, "%Y-%m-%d")
-    except ValueError:
-        return RedirectResponse(f"/tasks?{urlencode({'error': 'Некорректная дата дедлайна (ГГГГ-ММ-ДД).'})}", status_code=303)
+    deadline = deadline.strip()
+    is_personal = bool(task[15])
+    if deadline or not is_personal:  # у личной задачи срок необязателен
+        try:
+            datetime.strptime(deadline, "%Y-%m-%d")
+        except ValueError:
+            return RedirectResponse(f"/tasks?{urlencode({'error': 'Некорректная дата дедлайна (ГГГГ-ММ-ДД).'})}", status_code=303)
 
     database.update_task(task_id, target_value=target_value.strip(), deadline=deadline)
     return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача обновлена'})}", status_code=303)

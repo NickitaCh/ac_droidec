@@ -50,7 +50,7 @@
     <nav class="hero-links" style="margin: 0 0 1em;"><a class="hero-link" href="/datacrons/check?season={{ set_id }}"><span class="hero-link-icon">🔍</span>Проверить игрока/гильдию по сезону</a>{% if user.is_super_admin %}<a class="hero-link" href="/admin/datacron-shorts?season={{ set_id }}"><span class="hero-link-icon">✏️</span>Сокращения бонусов</a>{% endif %}</nav>
 
     <div class="panel">
-        <div class="panel-title"><span>Добавить обычное требование</span>{% call ui.help(side="right") %}<p>Для каждого уровня выберите бонус из списка (или оставьте «не проверять»). Несколько допустимых альтернатив на один уровень и состав пака — в «править» у уже созданного требования.</p><p>«Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования.</p><p>Мин. % статов: датакрон засчитывается по уровням независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>{% endcall %}</div>
+        <div class="panel-title"><span>Добавить обычное требование</span>{% call ui.help(side="right") %}<p>Для каждого уровня выберите бонус из списка (или оставьте «не проверять»). «+ вариант «ИЛИ»» добавляет ещё один допустимый бонус на тот же уровень — подходит любой из выбранных. Состав пака — в «править» у уже созданного требования.</p><p>«Сколько таких ДК нужно» — число разных датакронов игрока под это требование; один ДК никогда не засчитывается в два требования.</p><p>Мин. % статов: датакрон засчитывается по уровням независимо от статов, несоответствие только помечается ⚠️ при проверке игрока.</p>{% endcall %}</div>
         <form method="post" action="/datacrons/{{ set_id }}/add" class="requirement-form">
             <label>
                 Название
@@ -69,15 +69,16 @@
                 <input type="number" name="quantity" value="1" min="1" max="{{ max_quantity }}" required>
             </label>
             {% for lvl in (3, 6, 9) %}
-                <label>
+                <label data-level-box>
                     Уровень {{ lvl }}
-                    <select name="level{{ lvl }}">
+                    <select name="level{{ lvl }}" data-level-select>
                         <option value="{{ datacron_none }}" selected>{{ datacron_none_label }}</option>
                         <option value="{{ datacron_any }}">{{ datacron_any_label }}</option>
                         {% for ability_id, label in level_options[lvl] %}
                             <option value="{{ ability_id }}" title="{{ label }}">{{ label|truncate(80, True, '…') }}</option>
                         {% endfor %}
                     </select>
+                    <button type="button" class="link-btn level-alt-add" data-level-add>+ вариант «ИЛИ»</button>
                 </label>
             {% endfor %}
             <label>

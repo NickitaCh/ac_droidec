@@ -30,6 +30,7 @@ from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
 from web.deps import own_accounts, require_guild_access, require_member_access
+from web.routes import tasks as tasks_routes
 # Переиспользуем построитель отчёта по датакронам одного игрока и кэш каталога сезонов
 # из web/routes/datacrons.py вместо дублирования — та же логика сопоставления,
 # что уже используется на /datacrons/check (см. модульный docstring того файла
@@ -1871,6 +1872,80 @@ async def my_profile_add_alt(ally_code: str = Form(...), user: dict = Depends(re
     return RedirectResponse(f"/player/{result.ally_code}?{urlencode({'alt_added': result.ingame_name})}", status_code=303)
 
 
+# ---- Личные задачи: игрок ставит задачу сам себе в «Моём профиле» (Юсин, тред «Гайд по
+# АС Боту» 2026-10-16). Видны ему и офицерам (/tasks?view=personal), срок необязателен,
+# в канал задач не пишутся. Проверка выполнения — тот же ежечасный аудит бота. ----
+
+@router.get("/me/api/units", response_class=JSONResponse)
+async def my_units_search(q: str = "", user: dict = Depends(require_member_access)):
+    if len(q.strip()) < 2:
+        return []
+    return [{"base_id": base_id, "name": name} for base_id, name in database.search_game_units(q.strip(), limit=20)]
+
+
+@router.get("/me/api/omicron-skills", response_class=JSONResponse)
+async def my_omicron_skills(base_id: str = "", user: dict = Depends(require_member_access)):
+    return tasks_routes._omicron_options(base_id) if base_id else []
+
+
+@router.post("/me/tasks/add", response_class=HTMLResponse)
+async def my_task_add(
+    ally_code: str = Form(...),
+    base_id: str = Form(""),
+    target_type: str = Form(...),
+    target_value: str = Form(""),
+    deadline: str = Form(""),
+    user: dict = Depends(require_member_access),
+):
+    guild_id = user["guild_id"]
+    back = f"/player/{ally_code}"
+
+    def fail(text: str):
+        return RedirectResponse(f"{back}?{urlencode({'task_error': text})}#my-tasks", status_code=303)
+
+    if ally_code not in {a[0] for a in own_accounts(user)}:
+        return RedirectResponse("/me", status_code=303)
+    if not feature_flags.is_enabled(guild_id, "tasks"):
+        return fail("Задачи в этой гильдии выключены.")
+    unit_name = database.get_game_unit_name(base_id) if base_id else None
+    if not unit_name:
+        return fail("Выберите юнита из подсказок.")
+    err = tasks_routes._validate_target(base_id, target_type, target_value)
+    if not err and deadline.strip():
+        err = tasks_routes._validate_deadline(deadline)
+    if err:
+        return fail(err)
+    if database.get_active_task_for_unit(guild_id, ally_code, base_id):
+        return fail(f"На «{unit_name}» у вас уже есть активная задача.")
+
+    target_value = target_value.strip()
+    initial_value = None
+    try:
+        unit_data = await asyncio.to_thread(tasks_routes._fetch_unit_data, tasks_routes._get_comlink(), ally_code, base_id)
+    except Exception:
+        unit_data = None
+    if unit_data is not None:
+        thresholds = database.get_all_skill_tier_thresholds() if target_type == "omicron" else {}
+        if tasks_routes._is_target_completed(unit_data, target_type, target_value, thresholds):
+            return fail(f"«{unit_name}» уже соответствует этой цели.")
+        initial_value = tasks_routes._current_progress_value(unit_data, target_type, target_value)
+
+    database.add_task(ally_code, base_id, target_type, target_value, deadline.strip(), str(user["discord_id"]),
+                      guild_id=guild_id, initial_value=initial_value, is_personal=True)
+    return RedirectResponse(f"{back}?{urlencode({'task_notice': f'Задача «{unit_name}» поставлена.'})}#my-tasks", status_code=303)
+
+
+@router.post("/me/tasks/{task_id}/delete", response_class=HTMLResponse)
+async def my_task_delete(task_id: int, user: dict = Depends(require_member_access)):
+    """Удалить можно только свою личную задачу (офицерские — нельзя)."""
+    task = database.get_task(task_id)
+    own_codes = {a[0] for a in own_accounts(user)}
+    if not task or task[7] != user["guild_id"] or task[1] not in own_codes or not task[15]:
+        return RedirectResponse("/me", status_code=303)
+    database.delete_task(task_id)
+    return RedirectResponse(f"/player/{task[1]}?{urlencode({'task_notice': 'Задача удалена.'})}#my-tasks", status_code=303)
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
 async def player_card(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
     guild_id = user["guild_id"]
@@ -1962,6 +2037,10 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "resources": _player_resources(guild_id, ally_code, request.query_params.get("res_period") or "month") if not card.departed_at else None,
         "alt_error": request.query_params.get("alt_error"),
         "alt_added": request.query_params.get("alt_added"),
+        "can_add_personal_task": ally_code in own_codes and not card.departed_at and feature_flags.is_enabled(guild_id, "tasks"),
+        "target_type_options": tasks_routes.TARGET_TYPE_OPTIONS,
+        "task_error": request.query_params.get("task_error"),
+        "task_notice": request.query_params.get("task_notice"),
     })
 
 

@@ -253,7 +253,7 @@ class TasksCog(commands.Cog):
                 print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
 
                 for task in active_tasks:
-                    task_id, ally_code, base_id, target_type, target_value, deadline_str, initial_value, _current_value, _in_progress = task
+                    task_id, ally_code, base_id, target_type, target_value, deadline_str, initial_value, _current_value, _in_progress, is_personal = task
                     player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
 
                     try:
@@ -263,7 +263,8 @@ class TasksCog(commands.Cog):
                     if deadline_date is not None and today_msk > deadline_date:
                         database.update_task_status(task_id, "FAILED")
                         print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
-                        await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "FAILED", player_name)
+                        if not is_personal:
+                            await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "FAILED", player_name)
                         continue
 
                     unit_data = await self._fetch_unit_data(ally_code, base_id)
@@ -273,7 +274,8 @@ class TasksCog(commands.Cog):
                     if self._is_target_completed(unit_data, target_type, target_value, skill_thresholds):
                         database.update_task_status(task_id, "COMPLETED")
                         print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
-                        await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "COMPLETED", player_name)
+                        if not is_personal:
+                            await self._notify_task_result(guild_cfg, base_id, target_type, target_value, "COMPLETED", player_name)
                         continue
 
                     current_value = self._current_progress_value(unit_data, target_type, target_value)
@@ -373,7 +375,7 @@ class TasksCog(commands.Cog):
             rows = [
                 r for r in database.get_all_tasks(guild_id)
                 if r[6] in ("ACTIVE", "FAILED") and not database.is_task_archived(r[12], r[6], r[13])
-                and r[1] not in departed_codes
+                and r[1] not in departed_codes and not r[14]
             ]
             if not rows:
                 await inter.edit_original_response("🎉 Активных или просроченных задач нет — все чисто.")
@@ -431,16 +433,17 @@ class TasksCog(commands.Cog):
 
         lines = []
         for (_task_id, _ally_code, base_id, target_type, target_value, deadline, status,
-             initial_value, current_value, in_progress, created_by, _resolved_at) in rows:
+             initial_value, current_value, in_progress, created_by, _resolved_at, _archived_at, is_personal) in rows:
             unit_name = database.get_game_unit_name(base_id) or base_id
             target_label = self._format_target_label(target_type, target_value)
             emoji, status_text = self._status_label(status, in_progress)
             progress = self._progress_label(initial_value, current_value)
             author_name = database.get_username_for_discord_id(created_by) if created_by else None
-            lines.append(
-                f"{emoji} **{unit_name}** — {target_label} ({status_text}) · прогресс: {progress} · "
-                f"до {deadline}" + (f" · назначил: {author_name}" if author_name else "")
-            )
+            if is_personal:
+                tail = (f"до {deadline}" if deadline else "без срока") + " · 👤 личная"
+            else:
+                tail = f"до {deadline}" + (f" · назначил: {author_name}" if author_name else "")
+            lines.append(f"{emoji} **{unit_name}** — {target_label} ({status_text}) · прогресс: {progress} · {tail}")
 
         embeds = _lines_to_embeds(f"📋 Задачи — {игрок}", DATACRON_LIST_COLOR, lines)
         await inter.edit_original_response(embed=embeds[0])

@@ -68,7 +68,7 @@
     {% endif %}
 
     <div class="dashboard-grid">
-        <div class="widget">
+        <div class="widget" id="my-tasks">
             <div class="widget-header">
                 <h2>📋 Задачи</h2>
                 {% if card.departed_at %}
@@ -77,6 +77,8 @@
                     <span class="muted">{{ card.current_tasks|length }} текущих · {{ card.archived_tasks_count }} в архиве</span>
                 {% endif %}
             </div>
+            {% if task_notice %}<p class="badge badge-ok">✅ {{ task_notice }}</p>{% endif %}
+            {% if task_error %}<p class="error">{{ task_error }}</p>{% endif %}
             {% if not card.current_tasks %}
                 <p class="widget-empty">Нет текущих задач.</p>
             {% else %}
@@ -89,21 +91,100 @@
                                 <th>Статус</th>
                                 <th>Прогресс</th>
                                 <th>Дедлайн</th>
+                                {% if can_add_personal_task %}<th></th>{% endif %}
                             </tr>
                         </thead>
                         <tbody>
                             {% for t in card.current_tasks %}
                                 <tr>
-                                    <td>{% if t.base_id %}{{ game.unit(t.base_id, t.unit_name) }}{% else %}{{ t.unit_name }}{% endif %}</td>
+                                    <td>{% if t.base_id %}{{ game.unit(t.base_id, t.unit_name) }}{% else %}{{ t.unit_name }}{% endif %}{% if t.is_personal %} <span class="muted" title="Личная задача — поставлена самим игроком">👤</span>{% endif %}</td>
                                     <td class="nowrap">{{ t.target_label }}</td>
                                     <td><span class="badge {{ t.status_badge }}">{{ t.status_label }}</span></td>
                                     <td>{{ t.progress }}</td>
-                                    <td class="nowrap" title="{{ t.deadline }}">{% if t.deadline and t.deadline|length >= 10 %}{{ t.deadline[8:10] }}.{{ t.deadline[5:7] }}{% else %}{{ t.deadline }}{% endif %}</td>
+                                    <td class="nowrap" title="{{ t.deadline }}">{% if t.deadline and t.deadline|length >= 10 %}{{ t.deadline[8:10] }}.{{ t.deadline[5:7] }}{% elif t.deadline %}{{ t.deadline }}{% else %}—{% endif %}</td>
+                                    {% if can_add_personal_task %}
+                                    <td class="row-actions">
+                                        {% if t.is_personal %}
+                                        <form method="post" action="/me/tasks/{{ t.task_id }}/delete" onsubmit="return confirm('Удалить задачу «{{ t.unit_name }}»?');">
+                                            <button type="submit" class="link-btn" title="Удалить личную задачу">удалить</button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
                                 </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
+            {% endif %}
+            {% if can_add_personal_task %}
+                <details class="personal-task-add"{% if task_error %} open{% endif %}>
+                    <summary class="link-btn">➕ Поставить себе задачу</summary>
+                    <form method="post" action="/me/tasks/add" class="requirement-form" id="personal-task-form">
+                        <input type="hidden" name="ally_code" value="{{ card.ally_code }}">
+                        <div class="personal-task-unit">
+                            Персонаж / корабль
+                            <div class="unit-search" data-live-search data-required="true" data-url="/me/api/units" data-value-field="base_id" data-label-field="name" data-min-length="2">
+                                <input type="text" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off">
+                                <input type="hidden" name="base_id" class="unit-search-value">
+                                <div class="unit-search-results"></div>
+                            </div>
+                        </div>
+                        <label>
+                            Цель
+                            <select name="target_type">
+                                {% for value, label in target_type_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            Значение
+                            <input type="text" name="target_value" class="target-value-text" placeholder="Число" required>
+                            <select name="target_value" class="target-value-select" style="display:none" disabled></select>
+                        </label>
+                        <label>
+                            Срок (необязательно)
+                            <input type="date" name="deadline">
+                        </label>
+                        <button type="submit">Поставить</button>
+                    </form>
+                    <p class="muted">Задачу видите вы и офицеры. Выполнение бот проверяет сам раз в час; без срока задача не просрочится.</p>
+                </details>
+                <script>
+                document.addEventListener("DOMContentLoaded", () => {
+                    const form = document.getElementById("personal-task-form");
+                    const unitHidden = form.querySelector(".unit-search-value");
+                    const typeSelect = form.querySelector('select[name="target_type"]');
+                    const textInput = form.querySelector(".target-value-text");
+                    const valueSelect = form.querySelector(".target-value-select");
+                    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+                    const refresh = async () => {
+                        const omicron = typeSelect.value === "omicron";
+                        textInput.style.display = omicron ? "none" : "";
+                        textInput.disabled = omicron;
+                        textInput.required = !omicron;
+                        valueSelect.style.display = omicron ? "" : "none";
+                        valueSelect.disabled = !omicron;
+                        valueSelect.required = omicron;
+                        if (!omicron) return;
+                        if (!unitHidden.value) {
+                            valueSelect.innerHTML = '<option value="">— сначала выберите юнита —</option>';
+                            return;
+                        }
+                        try {
+                            const resp = await fetch(`/me/api/omicron-skills?base_id=${encodeURIComponent(unitHidden.value)}`);
+                            const options = resp.ok ? await resp.json() : [];
+                            valueSelect.innerHTML = options.length
+                                ? options.map((o) => `<option value="${esc(o.skill_id)}">${esc(o.label)}</option>`).join("")
+                                : '<option value="">— у юнита нет омикрона —</option>';
+                        } catch {
+                            valueSelect.innerHTML = '<option value="">— ошибка загрузки —</option>';
+                        }
+                    };
+                    typeSelect.addEventListener("change", refresh);
+                    unitHidden.addEventListener("change", refresh);
+                    refresh();
+                });
+                </script>
             {% endif %}
         </div>
 

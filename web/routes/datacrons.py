@@ -349,13 +349,11 @@ async def season_detail(request: Request, set_id: int, user: dict = Depends(feat
 # =====================================================================
 @router.post("/{set_id}/add", response_class=HTMLResponse)
 async def add_base_requirement(
+    request: Request,
     set_id: int,
     pack: str = Form(""),
     priority: str = Form(PRIORITY_REQUIRED),
     quantity: int = Form(1),
-    level3: str = Form(DATACRON_NONE),
-    level6: str = Form(DATACRON_NONE),
-    level9: str = Form(DATACRON_NONE),
     stats: str = Form(""),
     stat1: str = Form(""), value1: float = Form(None),
     stat2: str = Form(""), value2: float = Form(None),
@@ -369,8 +367,11 @@ async def add_base_requirement(
     catalog = await _safe_catalog()
     if not _is_valid_season(catalog, set_id):
         return _redirect_season(set_id, error="Сезон не найден в справочнике.")
+    # Уровень может прийти несколькими <select> (варианты «ИЛИ»), как в попапе «править».
+    form = await request.form()
+    level3, level6, level9 = (_level_from_form(form.getlist(f"level{n}")) for n in (3, 6, 9))
     for level_num, value in ((3, level3), (6, level6), (9, level9)):
-        if not _is_valid_level_value(catalog, set_id, level_num, value):
+        if not all(_is_valid_level_value(catalog, set_id, level_num, part) for part in value.split(",")):
             return _redirect_season(set_id, error=f"Некорректное значение уровня {level_num} — выберите вариант из подсказок.")
     if level3 == DATACRON_NONE and level6 == DATACRON_NONE and level9 == DATACRON_NONE:
         return _redirect_season(set_id, error="Укажите хотя бы один уровень (3/6/9).")

@@ -135,6 +135,12 @@ def init_db():
         cursor.execute("ALTER TABLE tasks ADD COLUMN archived_at TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        # Личная задача — игрок поставил себе сам («Мой профиль»). Дедлайн необязателен
+        # (deadline = ''), в канал задач о ней не пишем, на /tasks — отдельная вкладка.
+        cursor.execute("ALTER TABLE tasks ADD COLUMN is_personal INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
 
     # 4. Справочник игровых юнитов (Персонажи и Корабли) — глобальный, общий
     #    для всех гильдий (игровой каталог SWGOH, не привязан к guild_id).
@@ -1932,7 +1938,7 @@ def set_journey_guide_overrides(guild_id: int, guide_base_id: str, overrides: di
 
 
 def add_task(ally_code, base_id, target_type, target_value, deadline, created_by, guild_id: int = 1,
-             batch_id: str = None, initial_value: str = None) -> int:
+             batch_id: str = None, initial_value: str = None, is_personal: bool = False) -> int:
     """initial_value — снимок текущего состояния юнита на момент постановки (см.
     cogs/tasks.py::_current_progress_value), сохраняется и как current_value, пока
     tasks_audit_loop не обновит его первый раз."""
@@ -1940,10 +1946,10 @@ def add_task(ally_code, base_id, target_type, target_value, deadline, created_by
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO tasks (ally_code, base_id, target_type, target_value, deadline, status, created_by,
-                            date_created, guild_id, batch_id, initial_value, current_value)
-        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?, ?, ?, ?)
+                            date_created, guild_id, batch_id, initial_value, current_value, is_personal)
+        VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'), ?, ?, ?, ?, ?)
     """, (ally_code, base_id, target_type, target_value, deadline, created_by, guild_id, batch_id,
-          initial_value, initial_value))
+          initial_value, initial_value, 1 if is_personal else 0))
     conn.commit()
     task_id = cursor.lastrowid
     conn.close()
@@ -1973,7 +1979,7 @@ def get_active_tasks(guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline,
-               initial_value, current_value, in_progress
+               initial_value, current_value, in_progress, is_personal
         FROM tasks WHERE status = 'ACTIVE' AND guild_id = ?
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -1990,7 +1996,7 @@ def get_all_tasks(guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal
         FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -2006,7 +2012,7 @@ def get_tasks_for_ally(ally_code, guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status,
-               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal
         FROM tasks WHERE guild_id = ? AND ally_code = ? ORDER BY task_id DESC
     """, (guild_id, ally_code))
     rows = cursor.fetchall()
@@ -2023,7 +2029,7 @@ def get_task(task_id: int):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, guild_id, batch_id,
-               initial_value, current_value, in_progress, created_by, resolved_at, archived_at
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal
         FROM tasks WHERE task_id = ?
     """, (task_id,))
     row = cursor.fetchone()
@@ -2142,7 +2148,7 @@ def get_tasks_needing_reminder(guild_id: int, days_before: int):
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline
         FROM tasks
-        WHERE guild_id = ? AND status = 'ACTIVE' AND reminder_sent_at IS NULL
+        WHERE guild_id = ? AND status = 'ACTIVE' AND reminder_sent_at IS NULL AND is_personal = 0
           AND julianday(deadline) - julianday('now') <= ?
     """, (guild_id, days_before))
     rows = cursor.fetchall()

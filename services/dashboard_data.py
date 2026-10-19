@@ -154,6 +154,7 @@ class PlayerCardTask:
     progress: str
     deadline: str
     base_id: str = ""
+    is_personal: bool = False
 
 
 @dataclass
@@ -215,7 +216,7 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
     current_tasks = []
     archived_tasks_count = 0
     for (task_id, _ally_code, base_id, target_type, target_value, deadline, status,
-         initial_value, current_value, in_progress, _created_by, resolved_at, archived_at) in task_rows:
+         initial_value, current_value, in_progress, _created_by, resolved_at, archived_at, is_personal) in task_rows:
         # У выбывшего все задачи архивные (LEFT) — показываем их как есть, иначе
         # архивная карточка всегда была бы с пустым блоком задач.
         if database.is_task_archived(resolved_at, status, archived_at) and departed_at is None:
@@ -230,6 +231,7 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
             progress=_task_progress_label(initial_value, current_value),
             deadline=deadline,
             base_id=base_id,
+            is_personal=bool(is_personal),
         ))
 
     violations_overview = get_violations_overview(guild_id, include_zero=True, include_departed=True)

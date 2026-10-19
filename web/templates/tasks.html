@@ -145,6 +145,9 @@
                 {% if view == "flat" or not view %}<strong>Список</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?{% if status_filter %}status={{ status_filter }}{% endif %}">Список</a>{% endif %}
                 {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=players{% if status_filter %}&status={{ status_filter }}{% endif %}">По игрокам</a>{% endif %}
                 {% if view == "archive" %}<strong>Архив</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=archive{% if status_filter %}&status={{ status_filter }}{% endif %}">Архив</a>{% endif %}
+                {% if personal_count or view == "personal" %}
+                    {% if view == "personal" %}<strong>👤 Личные ({{ personal_count }})</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=personal">👤 Личные ({{ personal_count }})</a>{% endif %}
+                {% endif %}
                 {% if departed_count or view == "departed" %}
                     {% if view == "departed" %}<strong>Выбывшие ({{ departed_count }})</strong>{% else %}<a data-ajax-swap="tasks-module" href="/tasks?view=departed">Выбывшие ({{ departed_count }})</a>{% endif %}
                 {% endif %}
@@ -154,6 +157,8 @@
             <p class="muted">Выполненные задачи попадают сюда сами через {{ archive_after_days }} дней или кнопкой «В архив», просроченные — только кнопкой. В отчётах бота архив не учитывается.</p>
         {% elif view == "departed" %}
             <p class="muted">Задачи игроков, выбывших из гильдии. При возвращении игрока активные задачи восстановятся.</p>
+        {% elif view == "personal" %}
+            <p class="muted">Задачи, которые игроки поставили себе сами в «Мой профиль». В счётчики, отчёты и канал задач не попадают.</p>
         {% endif %}
 
         {% if view == "players" %}
@@ -181,7 +186,7 @@
             {% endif %}
         {% else %}
             {% if not tasks %}
-                <p class="empty-state">{% if view in ("archive", "departed") %}Архив пуст.{% else %}Задач пока нет.{% endif %}</p>
+                <p class="empty-state">{% if view in ("archive", "departed") %}Архив пуст.{% elif view == "personal" %}Личных задач пока нет.{% else %}Задач пока нет.{% endif %}</p>
             {% else %}
                 <div class="table-scroll">
                     <table class="data" id="tasks-table">
@@ -204,9 +209,9 @@
                                     <td><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ t.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ t.unit_name }}</span></td>
                                     <td class="nowrap">{{ t.target_label }}</td>
                                     <td>{{ t.progress }}</td>
-                                    <td class="nowrap">{{ t.deadline }}</td>
+                                    <td class="nowrap">{{ t.deadline or "без срока" }}</td>
                                     <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span></td>
-                                    <td>{{ t.created_by_name }}</td>
+                                    <td>{% if t.personal %}👤 сам{% else %}{{ t.created_by_name }}{% endif %}</td>
                                     <td class="row-actions row-actions-icons">
                                         <details>
                                             <summary class="icon-btn" title="Править" aria-label="Править">
@@ -222,7 +227,7 @@
                                                 {% else %}
                                                     <input type="text" name="target_value" value="{{ t.target_value }}" style="width: 4em;">
                                                 {% endif %}
-                                                <input type="date" name="deadline" value="{{ t.deadline }}">
+                                                <input type="date" name="deadline" value="{{ t.deadline }}"{% if not t.personal %} required{% endif %}>
                                                 <button type="submit">Сохранить</button>
                                             </form>
                                         </details>
