@@ -31,7 +31,7 @@
             <div class="hero-kpis">
                 <div class="hero-kpi">
                     <span class="hero-kpi-value">{{ ui.num(total_count) }}</span>
-                    <span class="hero-kpi-label">{{ "событий по фильтру" if (player_filter or action_type_filter or period) else "событий всего" }}</span>
+                    <span class="hero-kpi-label">{{ "событий по фильтру" if (player_filter or action_type_filter or period or custom_period_label) else "событий всего" }}</span>
                 </div>
                 <div class="hero-kpi">
                     <span class="hero-kpi-value">{{ players|length }}</span>
@@ -100,7 +100,8 @@
                 {% endfor %}
             </select>
             <select name="period">
-                <option value="" {% if not period %}selected{% endif %}>Всё время</option>
+                {% if custom_period_label %}<option value="" selected>{{ custom_period_label }}</option>{% endif %}
+                <option value="" {% if not period and not custom_period_label %}selected{% endif %}>Всё время</option>
                 <option value="7" {% if period == '7' %}selected{% endif %}>7 дней</option>
                 <option value="30" {% if period == '30' %}selected{% endif %}>30 дней</option>
                 <option value="90" {% if period == '90' %}selected{% endif %}>90 дней</option>
@@ -108,11 +109,16 @@
             {% if player_filter %}
                 <input type="hidden" name="page_size" value="{{ page_size }}">
             {% endif %}
+            {% if flat_view %}
+                <input type="hidden" name="view" value="list">
+            {% endif %}
+            {% if custom_from %}<input type="hidden" name="from" value="{{ custom_from }}">{% endif %}
+            {% if custom_to %}<input type="hidden" name="to" value="{{ custom_to }}">{% endif %}
             {% if show_departed %}
                 <input type="hidden" name="departed" value="1">
             {% endif %}
             <button type="submit">Применить</button>
-            {% if player_filter or action_type_filter or period %}
+            {% if player_filter or action_type_filter or period or custom_period_label %}
                 <a class="filter-bar-reset" href="{{ reset_url }}">Сбросить</a>
             {% endif %}
         </form>
@@ -137,8 +143,40 @@
         {% else %}
             <div class="table-toolbar" style="margin-bottom: 0.75em;">
                 <input type="search" placeholder="Поиск по игроку или персонажу…" data-feed-search="activity-feed">
+                <span class="segmented-toggle-options">
+                    {% if flat_view %}<a href="{{ grouped_url }}">По игрокам</a><strong>Общим списком</strong>{% else %}<strong>По игрокам</strong><a href="{{ flat_url }}">Общим списком</a>{% endif %}
+                </span>
             </div>
             <div id="activity-feed">
+                {% if flat_view %}
+                {% for group in grouped %}
+                    <div class="activity-date-group">
+                        <div class="activity-date-header">{{ group.date_label }}</div>
+                        <div class="activity-player-card activity-flat-card">
+                            {% for player in group.players %}{% for row in player.rows %}
+                                <div class="activity-event-row activity-event-row-card" data-search="{{ (player.player_name ~ ' ' ~ row.unit_name)|lower }}">
+                                    <span class="unit-portrait unit-portrait-sm unit-portrait-{{ row.action_class }}"><img src="/unit-img/{{ row.base_id }}" alt="" loading="lazy" width="128" height="128"></span>
+                                    <span class="activity-event-main">
+                                        <span class="activity-unit-name">{{ row.unit_name }} <span class="activity-player-inline">· {{ player.player_name }}</span></span>
+                                        <span class="activity-event-meta">
+                                            <span class="badge badge-{{ row.action_class }}">{{ row.action_label }}</span>
+                                            <span class="activity-change">
+                                                {% if row.old_value %}
+                                                    <strong>{{ row.old_value }}</strong> → <strong>{{ row.new_value }}</strong>
+                                                {% elif row.skill_url %}
+                                                    <strong><a href="{{ row.skill_url }}" target="_blank" rel="noopener">{{ row.new_value }}</a></strong>
+                                                {% else %}
+                                                    <strong>{{ row.new_value }}</strong>
+                                                {% endif %}
+                                            </span>
+                                        </span>
+                                    </span>
+                                </div>
+                            {% endfor %}{% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+                {% else %}
                 {% for group in grouped %}
                     <div class="activity-date-group">
                         <div class="activity-date-header">{{ group.date_label }}</div>
@@ -169,6 +207,7 @@
                         {% endfor %}
                     </div>
                 {% endfor %}
+                {% endif %}
             </div>
 
             {% if total_pages > 1 %}

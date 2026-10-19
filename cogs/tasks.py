@@ -457,7 +457,7 @@ class TasksCog(commands.Cog):
 
         lines = []
         for (_task_id, _ally_code, base_id, target_type, target_value, deadline, status,
-             initial_value, current_value, in_progress, created_by, _resolved_at, _archived_at, is_personal) in rows:
+             initial_value, current_value, in_progress, created_by, _resolved_at, _archived_at, is_personal, *_rest) in rows:
             unit_name = database.get_game_unit_name(base_id) or base_id
             target_label = self._format_target_label(target_type, target_value)
             emoji, status_text = self._status_label(status, in_progress)

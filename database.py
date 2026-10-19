@@ -2004,7 +2004,8 @@ def get_all_tasks(guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal,
+               date_created
         FROM tasks WHERE guild_id = ? ORDER BY task_id DESC
     """, (guild_id,))
     rows = cursor.fetchall()
@@ -2020,7 +2021,8 @@ def get_tasks_for_ally(ally_code, guild_id: int = 1):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT task_id, ally_code, base_id, target_type, target_value, deadline, status,
-               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal
+               initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal,
+               date_created
         FROM tasks WHERE guild_id = ? AND ally_code = ? ORDER BY task_id DESC
     """, (guild_id, ally_code))
     rows = cursor.fetchall()

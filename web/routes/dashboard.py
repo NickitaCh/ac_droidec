@@ -85,7 +85,7 @@ def _tasks_summary(guild_id: int, limit: int = 8):
     counts = {"ACTIVE": 0, "COMPLETED": 0, "FAILED": 0}
     open_rows = []
     for (task_id, ally_code, base_id, target_type, target_value, deadline, status, _batch_id,
-         _initial_value, _current_value, in_progress, _created_by, resolved_at, archived_at, is_personal) in rows:
+         _initial_value, _current_value, in_progress, _created_by, resolved_at, archived_at, is_personal, _date_created) in rows:
         if database.is_task_archived(resolved_at, status, archived_at) or ally_code in departed_codes or is_personal:
             continue
         counts[status] = counts.get(status, 0) + 1

@@ -22,7 +22,7 @@ import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
 from services import discord_rest, feature_flags, journey_guide
-from services.dashboard_data import task_status_badge
+from services.dashboard_data import failed_task_activity_url, task_status_badge
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -232,7 +232,8 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
 
     all_ctx = []
     for (task_id, ally_code, base_id, target_type, target_value, deadline, status, batch_id,
-         initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal) in rows:
+         initial_value, current_value, in_progress, created_by, resolved_at, archived_at, is_personal,
+         date_created) in rows:
         archived = database.is_task_archived(resolved_at, status, archived_at)
         all_ctx.append({
             "task_id": task_id, "ally_code": ally_code, "base_id": base_id,
@@ -252,6 +253,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             "departed": ally_code in departed_codes,
             "personal": bool(is_personal),
             "resolved_at_text": _format_resolved_at(resolved_at),
+            "activity_url": failed_task_activity_url(status, ally_code, date_created, resolved_at, deadline),
         })
 
     # "Архив" — отдельная вкладка: выполненные через TASK_ARCHIVE_AFTER_DAYS дней или

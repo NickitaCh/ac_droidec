@@ -210,7 +210,7 @@
                                     <td class="nowrap">{{ t.target_label }}</td>
                                     <td>{{ t.progress }}</td>
                                     <td class="nowrap">{{ t.deadline or "без срока" }}</td>
-                                    <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span></td>
+                                    <td><span class="badge {{ t.status_badge }}"{% if t.resolved_at_text %} title="{{ t.resolved_at_text }}"{% endif %}>{{ t.status_label }}</span>{% if t.activity_url %} <a class="task-activity-link" href="{{ t.activity_url }}" title="Что игрок качал с постановки задачи до провала">что качал</a>{% endif %}</td>
                                     <td>{% if t.personal %}👤 сам{% else %}{{ t.created_by_name }}{% endif %}</td>
                                     <td class="row-actions row-actions-icons">
                                         <details>

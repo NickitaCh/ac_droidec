@@ -1472,6 +1472,22 @@ def _period_to_date_from(period: str | None) -> str | None:
     return (datetime.now(MSK).date() - timedelta(days=days)).isoformat()
 
 
+def _iso_date_or_none(value: str | None) -> str | None:
+    try:
+        return datetime.strptime((value or "").strip()[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _custom_period_label(date_from: str | None, date_to: str | None) -> str | None:
+    if not (date_from or date_to):
+        return None
+    fmt = lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%d.%m.%Y")
+    if date_from and date_to:
+        return f"{fmt(date_from)} — {fmt(date_to)}"
+    return f"с {fmt(date_from)}" if date_from else f"по {fmt(date_to)}"
+
+
 @router.get("/activity", response_class=HTMLResponse)
 async def activity(request: Request, user: dict = Depends(require_guild_access)):
     guild_id = user["guild_id"]
@@ -1481,6 +1497,16 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     if period not in ACTIVITY_PERIOD_DAYS:
         period = ""
     date_from = _period_to_date_from(period)
+    date_to = None
+    # Произвольный период ?from=YYYY-MM-DD&to=YYYY-MM-DD (ссылка «что качал» из проваленной
+    # задачи на /tasks) — перекрывает пресет period.
+    custom_from = _iso_date_or_none(request.query_params.get("from"))
+    custom_to = _iso_date_or_none(request.query_params.get("to"))
+    if custom_from or custom_to:
+        period = ""
+        date_from, date_to = custom_from, custom_to
+    # «Общим списком» (?view=list) — без группировки по игрокам, у каждой строки своё имя.
+    flat_view = request.query_params.get("view") == "list"
     # Выбывшие из гильдии игроки архивируются автоматически (sync_guild_roster) и живут
     # на отдельной вкладке «Выбывшие» (?departed=1) — там ТОЛЬКО они, в основной ленте их нет.
     show_departed = request.query_params.get("departed") == "1"
@@ -1490,7 +1516,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     # дню, иначе цифра скакала бы при перелистывании страниц.
     total_count = dashboard_data.get_guild_activity_count(
         guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
-        include_archived=archived_scope,
+        date_to=date_to, include_archived=archived_scope,
     )
 
     page_date_label = None
@@ -1514,7 +1540,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         rows = dashboard_data.get_guild_activity(
             guild_id, ally_code=player_filter, action_type=action_type_filter,
             limit=page_size, offset=(page - 1) * page_size, date_from=date_from,
-            include_archived=archived_scope,
+            date_to=date_to, include_archived=archived_scope,
         )
     else:
         # Список дат, за которые вообще есть события по фильтру (без учёта страницы) — сама
@@ -1522,7 +1548,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         # показывает все события за N-й по свежести день, а не N-ю полусотню строк.
         activity_dates = dashboard_data.get_guild_activity_dates(
             guild_id, ally_code=player_filter, action_type=action_type_filter, date_from=date_from,
-            include_archived=archived_scope,
+            date_to=date_to, include_archived=archived_scope,
         )
         total_pages = max(1, len(activity_dates))
         try:
@@ -1547,23 +1573,25 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
     # Панель "по типу изменения" — по всему фильтру (игрок/период), не по одной странице,
     # иначе бары скакали бы при перелистывании и не отражали реальную картину.
     breakdown_rows = dashboard_data.get_guild_activity_breakdown(
-        guild_id, ally_code=player_filter, date_from=date_from, include_archived=archived_scope,
+        guild_id, ally_code=player_filter, date_from=date_from, date_to=date_to,
+        include_archived=archived_scope,
     )
     max_breakdown = breakdown_rows[0][1] if breakdown_rows else 0
 
-    base_params = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period}.items() if v}
+    filter_params = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period,
+                                       "from": custom_from, "to": custom_to}.items() if v}
+    if show_departed:
+        filter_params["departed"] = "1"
+    base_params = dict(filter_params)
+    if flat_view:
+        base_params["view"] = "list"
     if player_filter and page_size != ACTIVITY_DEFAULT_PAGE_SIZE:
         base_params["page_size"] = page_size
-    if show_departed:
-        base_params["departed"] = "1"
 
     page_size_urls = None
     if player_filter:
-        filter_params_only = {k: v for k, v in {"player": player_filter, "action_type": action_type_filter, "period": period}.items() if v}
-        if show_departed:
-            filter_params_only["departed"] = "1"
         page_size_urls = [
-            (size, f"/activity?{urlencode({**filter_params_only, 'page_size': size})}")
+            (size, f"/activity?{urlencode({**filter_params, **({'view': 'list'} if flat_view else {}), 'page_size': size})}")
             for size in ACTIVITY_PAGE_SIZES
         ]
 
@@ -1576,6 +1604,12 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "action_type_filter": action_type_filter,
         "action_types": dashboard_data.ACTIVITY_ACTION_LABELS.items(),
         "period": period,
+        "custom_from": custom_from,
+        "custom_to": custom_to,
+        "custom_period_label": _custom_period_label(custom_from, custom_to),
+        "flat_view": flat_view,
+        "grouped_url": f"/activity?{urlencode({k: v for k, v in base_params.items() if k != 'view'})}",
+        "flat_url": f"/activity?{urlencode({**base_params, 'view': 'list'})}",
         "show_departed": show_departed,
         "departed_count": len(database.get_guild_activity_player_codes(guild_id, include_archived="only")),
         "breakdown_rows": breakdown_rows,
@@ -1590,7 +1624,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
         "page_size_urls": page_size_urls,
         "prev_page_url": f"/activity?{urlencode({**base_params, 'page': page - 1})}" if page > 1 else None,
         "next_page_url": f"/activity?{urlencode({**base_params, 'page': page + 1})}" if page < total_pages else None,
-        "reset_url": "/activity?departed=1" if show_departed else "/activity",
+        "reset_url": f"/activity?{urlencode({**({'departed': '1'} if show_departed else {}), **({'view': 'list'} if flat_view else {})})}",
     })
 
 
@@ -1947,6 +1981,67 @@ async def my_task_delete(task_id: int, user: dict = Depends(require_member_acces
     return RedirectResponse(f"/player/{task[1]}?{urlencode({'task_notice': 'Задача удалена.'})}#my-tasks", status_code=303)
 
 
+def _forecast_units(ally_code: str) -> list:
+    """[(base_id, name, is_ship), ...] из кэша ростера — для выбора юнита в виджете прогноза."""
+    units = database.get_player_units(ally_code)
+    names = database.get_game_unit_names(list(units))
+    types = database.get_unit_types(list(units))
+    rows = [(b, names.get(b) or b, types.get(b) == "ship") for b in units]
+    return sorted(rows, key=lambda r: r[1].lower())
+
+
+def _int_or_none(value: str | None) -> int | None:
+    try:
+        return int(value) if (value or "").strip() else None
+    except ValueError:
+        return None
+
+
+@router.get("/player/{ally_code}/forecast.png")
+async def player_unit_forecast(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    """Картинка /юнит прогноз для виджета карточки игрока: юнит из кэша ростера (часовой синк),
+    без живого Comlink. Доступ — как у самой карточки."""
+    from services import unit_forecast, unit_forecast_image
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    q = request.query_params
+    base_id = (q.get("unit") or "").strip()
+    stars, gear, relic = _int_or_none(q.get("stars")), _int_or_none(q.get("gear")), _int_or_none(q.get("relic"))
+    units = database.get_player_units(ally_code)
+    unit = units.get(base_id)
+    if unit is None:
+        return JSONResponse({"error": "У игрока нет этого юнита (или ростер ещё не синхронизирован)."}, status_code=404)
+    is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
+    error = unit_forecast.validate_ship(gear, relic) if is_ship else unit_forecast.validate(stars, gear, relic)
+    if error is None and stars is not None and not 1 <= stars <= 7:
+        error = "Звёзды — от 1 до 7."
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
+    stat_calc = stat_forecast.cached_stat_calc()
+    if stat_calc is None:
+        stat_forecast.start_background_build(_get_comlink())
+        return JSONResponse({"error": "Калькулятор статов ещё загружается — повторите через минуту."}, status_code=503)
+    player_name = database.get_player_names(user["guild_id"]).get(ally_code, ally_code)
+    unit_name = database.get_game_unit_name(base_id) or base_id
+    age = database.get_player_units_age_seconds(ally_code)
+    updated_at = (datetime.now(MSK) - timedelta(seconds=age)).strftime("%d.%m.%Y %H:%M МСК") if age is not None else None
+
+    def work():
+        if is_ship:
+            crew = unit_forecast.ship_crew(stat_calc, list(units.values()), base_id)
+            result = unit_forecast.forecast_ship(stat_calc, unit, crew, stars)
+        else:
+            result = unit_forecast.forecast(stat_calc, unit, stars, gear, relic)
+        return unit_forecast_image.render(unit_name, base_id, player_name, updated_at, result)
+
+    try:
+        png = await asyncio.to_thread(work)
+    except Exception as e:
+        print(f"⚠️ [web/forecast] {ally_code} {base_id}: {e!r}")
+        return JSONResponse({"error": "Не удалось посчитать статы этого юнита."}, status_code=500)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
 async def player_card(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
     guild_id = user["guild_id"]
@@ -2042,6 +2137,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "target_type_options": tasks_routes.TARGET_TYPE_OPTIONS,
         "task_error": request.query_params.get("task_error"),
         "task_notice": request.query_params.get("task_notice"),
+        "forecast_units": _forecast_units(ally_code) if not card.departed_at else [],
     })
 
 

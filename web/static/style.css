@@ -1649,6 +1649,16 @@ dialog.stat-problem-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
     margin-bottom: 0;
 }
 .activity-player-name { font-weight: 700; font-size: 0.9em; margin-bottom: 0.5em; }
+/* «Общим списком» (/activity?view=list): одна карточка на день во всю ширину, события
+   без группировки по игрокам — имя игрока в самой строке. */
+.activity-flat-card {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(22em, 1fr));
+    column-gap: 1.5em;
+}
+.activity-flat-card .activity-event-row { border-top: 1px dashed var(--border); }
+.activity-player-inline { font-weight: 400; color: var(--fg-secondary); }
 .activity-event-row {
     display: flex;
     align-items: baseline;
@@ -2571,3 +2581,6 @@ form.filter-bar { flex-wrap: nowrap; }
 form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
 @media (max-width: 52em) { form.filter-bar { flex-wrap: wrap; width: auto; } form.filter-bar select { flex: 1 1 12em; width: auto; } }
 .task-kind-toggle { margin-bottom: 0.6em; }
+
+/* Ссылка «что качал» у проваленной задачи (/tasks, карточка игрока) → /activity за срок задачи. */
+.task-activity-link { font-size: 0.85em; white-space: nowrap; }

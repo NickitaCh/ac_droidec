@@ -11,7 +11,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
 import database
@@ -144,6 +144,29 @@ def _task_progress_label(initial_value, current_value) -> str:
     return f"{initial_value} → {current_value}"
 
 
+def _msk_date(utc_text: str | None) -> str | None:
+    try:
+        dt = datetime.strptime(utc_text or "", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return dt.astimezone(MSK).date().isoformat()
+
+
+def failed_task_activity_url(status, ally_code, date_created, resolved_at, deadline) -> str | None:
+    """Проваленная задача → /activity по этому игроку с даты постановки до провала: что он
+    качал вместо задачи. Для задач без date_created (старые) ссылки нет."""
+    if status != "FAILED":
+        return None
+    date_from = _msk_date(date_created)
+    if not date_from:
+        return None
+    date_to = _msk_date(resolved_at) or (deadline or None)
+    params = {"player": ally_code, "from": date_from, "view": "list"}
+    if date_to:
+        params["to"] = date_to
+    return f"/activity?{urlencode(params)}"
+
+
 @dataclass
 class PlayerCardTask:
     task_id: int
@@ -155,6 +178,7 @@ class PlayerCardTask:
     deadline: str
     base_id: str = ""
     is_personal: bool = False
+    activity_url: str | None = None  # проваленная задача → что игрок качал за её срок
 
 
 @dataclass
@@ -216,7 +240,8 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
     current_tasks = []
     archived_tasks_count = 0
     for (task_id, _ally_code, base_id, target_type, target_value, deadline, status,
-         initial_value, current_value, in_progress, _created_by, resolved_at, archived_at, is_personal) in task_rows:
+         initial_value, current_value, in_progress, _created_by, resolved_at, archived_at, is_personal,
+         date_created) in task_rows:
         # У выбывшего все задачи архивные (LEFT) — показываем их как есть, иначе
         # архивная карточка всегда была бы с пустым блоком задач.
         if database.is_task_archived(resolved_at, status, archived_at) and departed_at is None:
@@ -232,6 +257,7 @@ def get_player_card(guild_id: int, ally_code: str) -> "PlayerCard | None":
             deadline=deadline,
             base_id=base_id,
             is_personal=bool(is_personal),
+            activity_url=failed_task_activity_url(status, ally_code, date_created, resolved_at, deadline),
         ))
 
     violations_overview = get_violations_overview(guild_id, include_zero=True, include_departed=True)
