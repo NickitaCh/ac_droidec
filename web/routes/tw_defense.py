@@ -429,7 +429,8 @@ async def plan_page(plan_id: int, request: Request, user: dict = Depends(_requir
             "gone": ally_code not in roster_set,
             "count": counts.get(ally_code, 0),
             "entries": [{"id": a["id"], "zone": engine.ZONES_BY_KEY.get(a["zone"], {}).get("label", a["zone"]),
-                         "squad_name": a["squad_name"], "units": unit_cells(a)} for a in by_player.get(ally_code, [])],
+                         "squad_name": a["squad_name"], "units": unit_cells(a),
+                         "kind": engine.ZONES_BY_KEY.get(a["zone"], {}).get("kind")} for a in by_player.get(ally_code, [])],
         })
 
     capacity_total = sum(z["capacity"] for z in zones)

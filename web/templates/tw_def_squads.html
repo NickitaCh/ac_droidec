@@ -46,6 +46,9 @@
                         </header>
                         <ol class="twdef-slots">
                             {% for slot in s.slot_views %}
+                                {% if kind == "ship" and loop.index in (1, 2, 5) %}
+                                    <li class="twdef-slot-group">{{ {1: "Флагман", 2: "Основа", 5: "Подкрепление"}[loop.index] }}</li>
+                                {% endif %}
                                 <li class="twdef-slot{% if loop.first and kind == 'character' %} twdef-slot-lead{% endif %}">
                                     {% for opt in slot %}
                                         <span class="twdef-opt{% if not loop.first %} twdef-opt-alt{% endif %}" title="{{ opt.name }}{% if opt.req %} — {{ opt.req }}{% endif %}">
@@ -81,5 +84,5 @@
     {% endfor %}
 
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261012a" defer></script>
+    <script src="/static/tw_def.js?v=20261019a" defer></script>
 {% endblock %}

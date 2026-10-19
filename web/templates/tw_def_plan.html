@@ -4,10 +4,10 @@
 {% block title %}{{ plan.name }} — Расстановка дефа ВГ{% endblock %}
 {% block main_class %}wide{% endblock %}
 
-{% macro unit_strip(units) -%}
+{% macro unit_strip(units, kind=None) -%}
 <span class="twdef-units">
     {%- for u in units -%}
-        <span class="twdef-unit" title="{{ u.name }}{% if u.badge %} · {{ u.badge }}{% endif %}">{{ game.portrait(u.base_id, "xs") }}{% if u.badge %}<span class="twdef-unit-badge">{{ u.badge }}</span>{% endif %}</span>
+        <span class="twdef-unit{% if kind == 'ship' and loop.index in (2, 5) %} twdef-unit-gap{% endif %}" title="{{ u.name }}{% if u.badge %} · {{ u.badge }}{% endif %}">{{ game.portrait(u.base_id, "xs") }}{% if u.badge %}<span class="twdef-unit-badge">{{ u.badge }}</span>{% endif %}</span>
     {%- endfor -%}
 </span>
 {%- endmacro %}
@@ -101,7 +101,7 @@
                                         {% for r in g.rows %}
                                             <li class="twdef-row{% if r.gone %} twdef-row-gone{% elif r.excluded %} twdef-row-excluded{% endif %}">
                                                 <span class="twdef-row-name">{{ r.name }}{% if r.dc %} <span class="badge badge-ok" title="Игроку назначен датакрон под этот пак">ДК</span>{% endif %}{% if r.gone %} <span class="badge badge-danger">не в гильдии</span>{% elif r.excluded %} <span class="badge badge-warn">не участвует</span>{% endif %}</span>
-                                                {{ unit_strip(r.units) }}
+                                                {{ unit_strip(r.units, z.kind) }}
                                                 <button type="button" class="twdef-x" data-twdef-move="{{ r.id }}" data-kind="{{ z.kind }}" data-zone="{{ z.key }}" title="Перенести в другую зону">⇄</button>
                                                 <button type="button" class="twdef-x" data-twdef-del="{{ r.id }}" data-back="#zone-{{ z.key }}" title="Убрать">✕</button>
                                             </li>
@@ -166,7 +166,7 @@
                                         {% for e in p.entries %}
                                             <li>
                                                 <span class="twdef-entry-zone">{{ e.zone }}</span> — {{ e.squad_name }}
-                                                {{ unit_strip(e.units) }}
+                                                {{ unit_strip(e.units, e.kind) }}
                                                 <button type="button" class="twdef-x" data-twdef-del="{{ e.id }}" data-back="?view=players" title="Убрать">✕</button>
                                             </li>
                                         {% endfor %}
@@ -188,5 +188,5 @@
     </form>
     <script type="application/json" id="twdef-zones">{{ zone_options | tojson }}</script>
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261012a" defer></script>
+    <script src="/static/tw_def.js?v=20261019a" defer></script>
 {% endblock %}

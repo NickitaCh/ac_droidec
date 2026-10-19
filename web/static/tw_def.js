@@ -426,7 +426,8 @@
             const slots = slotsBox.querySelectorAll(".twdef-slot-edit");
             slots.forEach((slot, i) => {
                 slot.querySelector(".twdef-slot-title").textContent =
-                    `Слот ${i + 1}` + (i === 0 && combatType() === "character" ? " — лидер" : i === 0 ? " — флагман" : "");
+                    `Слот ${i + 1}` + (combatType() === "character" ? (i === 0 ? " — лидер" : "")
+                        : i === 0 ? " — флагман" : i < 4 ? " — основа" : " — подкрепление");
                 slot.querySelectorAll(".twdef-option-row").forEach((row, j) => row.classList.toggle("twdef-option-alt", j > 0));
             });
             addSlotBtn.disabled = slots.length >= MAX[combatType()];
