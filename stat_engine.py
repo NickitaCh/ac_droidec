@@ -47,6 +47,24 @@ PERCENT_STATS = frozenset({
 })
 
 
+
+async def wait_stat_calc(bot, inter=None, timeout: float = 240):
+    """bot.stat_calc, дождавшись первой сборки после рестарта (она идёт пару минут — вся игровая
+    база из Comlink). Команда уже отложена (defer), токен живёт 15 минут, так что вместо отказа
+    «ещё загружается» ждём, показав это игроку. None — если так и не собрался за timeout."""
+    if getattr(bot, "stat_calc", None):
+        return bot.stat_calc
+    if inter is not None:
+        try:
+            await inter.edit_original_response("⏳ Бот только что перезапустился — калькулятор статов загружается, ответ будет через минуту-две…")
+        except Exception:
+            pass
+    waited = 0.0
+    while waited < timeout and not getattr(bot, "stat_calc", None):
+        await asyncio.sleep(2)
+        waited += 2
+    return getattr(bot, "stat_calc", None)
+
 def calc_final_stats(stat_calc: StatCalc, unit: dict) -> dict:
     """{"Health": ..., "Speed": ..., "Physical Damage": ..., ...} — не мутирует переданный unit.
     Статы из PERCENT_STATS домножены на 100, чтобы совпадать с игровым % (см. PERCENT_STATS)."""

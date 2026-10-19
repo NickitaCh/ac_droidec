@@ -1793,8 +1793,8 @@ class StatRequirementsCog(commands.Cog):
             if guild_id is None:
                 return
 
-        if not self.bot.stat_calc:
-            await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
+        if not await stat_engine.wait_stat_calc(self.bot, inter):
+            await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
         forced_scheme = _parse_scheme_param(вариант)
@@ -2057,8 +2057,8 @@ class StatRequirementsCog(commands.Cog):
         if guild_id is None:
             return
 
-        if not self.bot.stat_calc:
-            await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
+        if not await stat_engine.wait_stat_calc(self.bot, inter):
+            await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
         base_id = _parse_bracket_id(персонаж)

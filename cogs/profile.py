@@ -11,6 +11,7 @@ import disnake
 from disnake.ext import commands
 
 import database
+import stat_engine
 import guild_resolver
 from cogs.violations import autocomplete_players
 from services import player_profile as pp
@@ -47,8 +48,8 @@ class ProfileCog(commands.Cog):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        if not getattr(self.bot, "stat_calc", None):
-            await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
+        if not await stat_engine.wait_stat_calc(self.bot, inter):
+            await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
         ctx = await asyncio.to_thread(pp.load_context)
         if гильдия:

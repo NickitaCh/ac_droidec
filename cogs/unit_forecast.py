@@ -13,6 +13,7 @@ import disnake
 from disnake.ext import commands
 
 import database
+import stat_engine
 import guild_resolver
 from services import unit_forecast, unit_forecast_image
 
@@ -85,8 +86,8 @@ class UnitForecastCog(commands.Cog):
                     return
                 ally_code = registration[0]
 
-        if not getattr(self.bot, "stat_calc", None):
-            await inter.edit_original_response("⏳ Калькулятор статов ещё загружается, попробуйте через минуту.")
+        if not await stat_engine.wait_stat_calc(self.bot, inter):
+            await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
         base_id = _parse_bracket_id(юнит)
