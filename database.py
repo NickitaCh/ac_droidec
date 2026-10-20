@@ -7719,3 +7719,30 @@ def get_raid_known_names(guild_id: int) -> dict:
     names = {pid: (name, code) for pid, name, code in cursor.fetchall()}
     conn.close()
     return names
+
+
+def get_raid_unnamed_players(guild_id: int) -> list[str]:
+    """player_id, у которых в рейдах нет ни имени, ни кода союзника (ушли из гильдии до сохранения рейда)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    conn.commit()
+    cursor.execute(
+        "SELECT DISTINCT player_id FROM raid_member_scores WHERE guild_id = ? AND ally_code IS NULL AND player_name = player_id",
+        (guild_id,),
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def set_raid_player_identity(guild_id: int, player_id: str, name: str, ally_code: str | None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    cursor.execute(
+        "UPDATE raid_member_scores SET player_name = ?, ally_code = COALESCE(ally_code, ?) WHERE guild_id = ? AND player_id = ?",
+        (name, ally_code, guild_id, player_id),
+    )
+    conn.commit()
+    conn.close()

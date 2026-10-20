@@ -66,9 +66,24 @@ class RaidsCog(commands.Cog):
                 saved = store_recent(cfg["id"], resp)
                 if saved:
                     print(f"⚔️ [Рейды] [{cfg.get('name')}] сохранено новых рейдов: {saved}")
+                await self._resolve_unnamed(cfg["id"])
             except Exception as e:
                 # Один сбой Comlink не должен останавливать цикл навсегда.
                 print(f"⚠️ [Рейды] [{cfg.get('name')}] {e!r}")
+
+    async def _resolve_unnamed(self, gid: int) -> None:
+        """Ушедшие из гильдии до сохранения рейда остаются с сырым playerId — имя и код
+        союзника берём из игры по playerId (по одному запросу на игрока, один раз)."""
+        for pid in database.get_raid_unnamed_players(gid)[:20]:
+            try:
+                player = await asyncio.to_thread(self.bot.comlink.get_player, player_id=pid)
+            except Exception as e:
+                print(f"⚠️ [Рейды] get_player {pid}: {e!r}")
+                continue
+            name = (player or {}).get("name")
+            if name:
+                code = str(player.get("allyCode") or "") or None
+                database.set_raid_player_identity(gid, pid, name, code)
 
     @raids_loop.before_loop
     async def before_raids(self):

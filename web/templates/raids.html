@@ -41,7 +41,7 @@
         {% endif %}
 
         <div class="panel">
-            <div class="panel-title"><span>{{ "Выбывшие" if departed else "По игрокам" }}</span><span class="panel-hint">последние {{ raids|length }} рейдов, в ячейке — очки и место</span></div>
+            <div class="panel-title"><span>{{ "Выбывшие" if departed else "По игрокам" }}</span><span class="panel-hint">{{ raids|length }} последн{{ "ий рейд" if raids|length == 1 else ("их рейда" if raids|length < 5 else "их рейдов") }}, в ячейке — очки и место</span></div>
             <div class="table-scroll">
                 <table class="data" id="raids-table">
                     <thead>
