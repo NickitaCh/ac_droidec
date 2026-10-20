@@ -98,24 +98,13 @@ class ProfileCog(commands.Cog):
 
     async def _guild_profile(self, inter, guild_id: int, ctx: dict):
         cfg = database.get_guild_config(guild_id) or {}
-        codes = [code for code, _name in database.get_roster_by_player_id(guild_id).values() if code]
-        units = await asyncio.to_thread(database.get_player_units_bulk, codes)
-        datacrons = await asyncio.to_thread(database.get_player_datacrons_bulk, codes)
-        profiles = await asyncio.to_thread(database.get_player_profiles_bulk, codes)
-        names = database.get_player_names(guild_id)
-        if not any(units.get(c) for c in codes):
+        players = await asyncio.to_thread(pp.guild_players_from_cache, guild_id, self.bot.stat_calc, ctx)
+        if not players:
             await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
             return
         guild_gp = await self._guild_gp(cfg.get("swgoh_guild_id"))
 
         def work():
-            players = []
-            for code in codes:
-                roster = units.get(code)
-                if not roster:
-                    continue
-                meta = profiles.get(code) or {"name": names.get(code, code), "ally_code": code, "stats": {}}
-                players.append(pp.summarize(list(roster.values()), datacrons.get(code) or [], meta, self.bot.stat_calc, ctx))
             summary = pp.summarize_guild(cfg.get("name") or "Гильдия", guild_gp, players, ctx)
             return profile_image.render_guild(summary)
 

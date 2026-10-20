@@ -248,6 +248,24 @@ def load_context() -> dict:
 
 # ---------------------------------------------------------------- гильдия
 
+def guild_players_from_cache(guild_id: int, stat_calc, ctx: dict) -> list[dict]:
+    """summarize() по каждому участнику текущего состава — из кэшей ежечасного синка
+    (player_unit_cache и др.), без запросов в игру. Блокирующая — звать через to_thread."""
+    codes = [code for code, _name in database.get_roster_by_player_id(guild_id).values() if code]
+    units = database.get_player_units_bulk(codes)
+    datacrons = database.get_player_datacrons_bulk(codes)
+    profiles = database.get_player_profiles_bulk(codes)
+    names = database.get_player_names(guild_id)
+    players = []
+    for code in codes:
+        roster = units.get(code)
+        if not roster:
+            continue
+        meta = profiles.get(code) or {"name": names.get(code, code), "ally_code": code, "stats": {}}
+        players.append(summarize(list(roster.values()), datacrons.get(code) or [], meta, stat_calc, ctx))
+    return players
+
+
 def _sum(players: list[dict], *path):
     total = 0
     for p in players:

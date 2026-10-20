@@ -11,7 +11,7 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 from cogs.violations import autocomplete_players
-from services import feature_flags
+from services import feature_flags, guild_compare
 from services import raids as rs
 
 PLAYER_HISTORY = 12  # рейдов в истории игрока
@@ -57,13 +57,15 @@ class RaidsCog(commands.Cog):
     @tasks.loop(hours=3)
     async def raids_loop(self):
         for cfg in database.get_all_guild_configs():
-            if not cfg.get("swgoh_guild_id") or not feature_flags.is_enabled(cfg["id"], "raids"):
+            if not cfg.get("swgoh_guild_id"):
                 continue
             try:
                 resp = await asyncio.to_thread(
                     self.bot.comlink.get_guild, cfg["swgoh_guild_id"], include_recent_guild_activity_info=True
                 )
-                saved = store_recent(cfg["id"], resp)
+                # Тот же ответ несёт прошлых соперников по ВГ — для подсказки в /вг_соперник.
+                guild_compare.save_recent_opponents(cfg["id"], resp)
+                saved = store_recent(cfg["id"], resp) if feature_flags.is_enabled(cfg["id"], "raids") else 0
                 if saved:
                     print(f"⚔️ [Рейды] [{cfg.get('name')}] сохранено новых рейдов: {saved}")
                 await self._resolve_unnamed(cfg["id"])
