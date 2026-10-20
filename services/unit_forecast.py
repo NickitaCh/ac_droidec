@@ -107,7 +107,7 @@ def project(unit: dict, stars: int | None = None, gear: int | None = None, relic
     return projected
 
 
-def _snapshot(stat_calc, unit: dict) -> dict:
+def snapshot(stat_calc, unit: dict) -> dict:
     final = stat_engine.calc_final_stats(stat_calc, unit)
     modless_unit = copy.deepcopy(unit)
     modless_unit["equippedStatMod"] = []
@@ -128,14 +128,14 @@ def forecast(stat_calc, unit: dict, stars: int | None = None, gear: int | None =
     """{"current": снимок, "projected": снимок или None, "groups": STAT_GROUPS,
     "labels": STAT_LABELS, "percent": {...}}. projected = None, если ничего не задано
     или задано то же, что сейчас."""
-    current = _snapshot(stat_calc, unit)
+    current = snapshot(stat_calc, unit)
     projected = None
     if stars is None and (gear is not None or relic is not None):
         stars = 7  # звёзды не заданы — тянем до 7★ (реликвии в игре и так только на 7★)
     if any(v is not None for v in (stars, gear, relic)):
         target = project(unit, stars, gear, relic)
         if current_level(target) != current["level"]:
-            projected = _snapshot(stat_calc, target)
+            projected = snapshot(stat_calc, target)
     return {
         "current": current,
         "projected": projected,
