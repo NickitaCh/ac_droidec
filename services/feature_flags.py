@@ -40,6 +40,7 @@ FEATURES: dict[str, dict] = {
     "tasks": {"label": "Задачи на прокачку", "category": "Прочее"},
     "tasks_mention": {"label": "Задачи — тег игрока при постановке", "category": "Прочее"},
     "raid_tickets": {"label": "Энка — напоминания и итог дня", "category": "Прочее"},
+    "raids": {"label": "Рейды — история очков", "category": "Прочее"},
     "datacrons": {"label": "Датакроны", "category": "Прочее"},
     "omicron": {"label": "Омикрон-объявления", "category": "Прочее"},
     "stat_requirements": {"label": "Статы и плейты", "category": "Мод-инструменты"},

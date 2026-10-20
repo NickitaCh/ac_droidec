@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Рейды — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Состав гильдии</p>
+                <h1>Рейды{% call ui.help(side="left") %}<p>Очки каждого участника за завершённые рейды. Бот сохраняет рейд после его окончания, поэтому история копится с момента подключения. Идущий рейд игра без входа в аккаунт не показывает.</p><p>Красным — меньше половины среднего по гильдии в этом рейде. В Discord то же самое — <code>/рейд итоги</code> и <code>/рейд игрок</code>.</p>{% endcall %}</h1>
+            </div>
+            <div class="hero-links">
+                {% if departed %}<a class="hero-link" href="/raids">Текущий состав</a>{% elif departed_count %}<a class="hero-link" href="/raids?departed=1">Выбывшие ({{ departed_count }})</a>{% endif %}
+            </div>
+        </div>
+        {% if latest %}
+        <div class="hero-kpis">
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ millions(latest.guild_score) }}</span><span class="hero-kpi-label">{{ raid_name(latest.raid_id) }}, {{ end_date(latest.end_time) }}</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ latest_count }}</span><span class="hero-kpi-label">участников</span></div>
+            {% if latest_avg %}<div class="hero-kpi"><span class="hero-kpi-value">{{ millions(latest_avg) }}</span><span class="hero-kpi-label">в среднем на игрока</span></div>{% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    {% if not raids %}
+        <div class="panel"><p class="muted">Сохранённых рейдов пока нет — бот записывает каждый рейд после его окончания.</p></div>
+    {% else %}
+        {% if chart|length > 1 and not departed %}
+        <div class="panel">
+            <div class="panel-title"><span>Очки гильдии по рейдам</span></div>
+            <div class="bar-chart">
+                {% for c in chart %}
+                    <div class="bar-chart-row">
+                        <span class="bar-chart-name">{{ c.label }}</span>
+                        <span class="bar-chart-track"><span class="bar-chart-fill" style="width: {{ c.pct }}%"></span></span>
+                        <span class="bar-chart-value">{{ millions(c.value) }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="panel">
+            <div class="panel-title"><span>{{ "Выбывшие" if departed else "По игрокам" }}</span><span class="panel-hint">последние {{ raids|length }} рейдов, в ячейке — очки и место</span></div>
+            <div class="table-scroll">
+                <table class="data" id="raids-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th data-sort="number" class="num">Среднее</th>
+                            {% for r in raids %}<th data-sort="number" class="num nowrap" title="{{ raid_name(r.raid_id) }}">{{ end_date(r.end_time)[:5] }}</th>{% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in players %}
+                            <tr>
+                                <td>{% if p.ally_code %}<a href="/player/{{ p.ally_code }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</td>
+                                <td class="num nowrap" data-value="{{ p.avg or 0 }}">{{ millions(p.avg) if p.avg is not none else "—" }}</td>
+                                {% for r in raids %}
+                                    {% set x = p.raids.get(r.key) %}
+                                    <td class="num nowrap" data-value="{{ x.score if x else -1 }}">
+                                        {% if x %}{% if x.low %}<span class="badge badge-danger">{{ millions(x.score) }}</span>{% else %}{{ millions(x.score) }}{% endif %} <span class="muted">#{{ x.place }}</span>{% else %}<span class="muted">·</span>{% endif %}
+                                    </td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

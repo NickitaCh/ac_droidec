@@ -118,6 +118,7 @@ MEMBER_ACCESSIBLE_COMMANDS = {
     # внутри самих команд: guild_resolver.self_only_error / GUILD_WIDE_OFFICER_ONLY.
     "дк_требования проверить",
     "омикроны отчёт",
+    "рейд игрок",
 }
 
 # Команды, закрытые супер-админом (@commands.check(is_super_admin) в коге) — для

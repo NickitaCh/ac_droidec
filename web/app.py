@@ -23,7 +23,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, birthdays, raid_tickets, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks, tw_defense, unit_images
+from web.routes import admin, birthdays, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks, tw_defense, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -99,3 +99,4 @@ app.include_router(subscribe.router, tags=["subscribe"])
 app.include_router(qa_checklist.router, prefix="/qa-checklist", tags=["qa-checklist"])
 app.include_router(gear_farm.router, prefix="/farm", tags=["gear-farm"])
 app.include_router(raid_tickets.router, prefix="/tickets", tags=["raid-tickets"])
+app.include_router(raids.router, prefix="/raids", tags=["raids"])

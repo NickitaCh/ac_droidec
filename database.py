@@ -7610,3 +7610,112 @@ def get_raid_ticket_full_streak(guild_id: int, required: int) -> int:
         streak += 1
     conn.close()
     return streak
+
+
+# =====================================================================
+# РЕЙДЫ: очки участников за завершённые рейды (services/raids.py). Comlink отдаёт только
+# последние несколько рейдов, поэтому cogs/raids.py сохраняет каждый новый — история копится
+# здесь. raid_key = "<raidId>:<endTime>". Имя игрока — на момент сохранения рейда.
+# =====================================================================
+def _ensure_raid_results_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS raid_results (
+            guild_id INTEGER NOT NULL,
+            raid_key TEXT NOT NULL,
+            raid_id TEXT NOT NULL,
+            difficulty INTEGER,
+            end_time INTEGER NOT NULL,
+            guild_score INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, raid_key)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS raid_member_scores (
+            guild_id INTEGER NOT NULL,
+            raid_key TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            ally_code TEXT,
+            player_name TEXT,
+            score INTEGER NOT NULL,
+            rank INTEGER,
+            PRIMARY KEY (guild_id, raid_key, player_id)
+        )
+    """)
+
+
+def save_raid_result(guild_id: int, raid: dict, rows: list) -> bool:
+    """raid — services/raids.parse_recent; rows: [(player_id, ally_code, player_name, score, rank)].
+    Уже сохранённый рейд не трогает. True — рейд новый и записан."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    cursor.execute("SELECT 1 FROM raid_results WHERE guild_id = ? AND raid_key = ?", (guild_id, raid["key"]))
+    if cursor.fetchone():
+        conn.commit()
+        conn.close()
+        return False
+    cursor.execute(
+        "INSERT INTO raid_results (guild_id, raid_key, raid_id, difficulty, end_time, guild_score) VALUES (?, ?, ?, ?, ?, ?)",
+        (guild_id, raid["key"], raid["raid_id"], raid.get("difficulty"), raid["end_time"], raid["guild_score"]),
+    )
+    cursor.executemany(
+        "INSERT OR REPLACE INTO raid_member_scores (guild_id, raid_key, player_id, ally_code, player_name, score, rank) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(guild_id, raid["key"], pid, code, name, int(score), rank) for pid, code, name, score, rank in rows],
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_raid_results(guild_id: int, limit: int = 50) -> list[dict]:
+    """Сохранённые рейды гильдии, новые первыми."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    conn.commit()
+    cursor.execute(
+        "SELECT raid_key, raid_id, difficulty, end_time, guild_score FROM raid_results "
+        "WHERE guild_id = ? ORDER BY end_time DESC LIMIT ?",
+        (guild_id, limit),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"key": k, "raid_id": rid, "difficulty": d, "end_time": e, "guild_score": s} for k, rid, d, e, s in rows]
+
+
+def get_raid_scores(guild_id: int, raid_keys: list[str]) -> list[dict]:
+    """Очки участников по указанным рейдам."""
+    if not raid_keys:
+        return []
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    conn.commit()
+    placeholders = ",".join("?" * len(raid_keys))
+    cursor.execute(
+        f"SELECT raid_key, player_id, ally_code, player_name, score, rank FROM raid_member_scores "
+        f"WHERE guild_id = ? AND raid_key IN ({placeholders})",
+        (guild_id, *raid_keys),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"raid_key": k, "player_id": pid, "ally_code": code, "name": name, "score": score, "rank": rank}
+            for k, pid, code, name, score, rank in rows]
+
+
+def get_raid_known_names(guild_id: int) -> dict:
+    """{player_id: последнее сохранённое имя} — для выбывших до сохранения рейда."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_raid_results_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT s.player_id, s.player_name, s.ally_code FROM raid_member_scores s
+        JOIN raid_results r ON r.guild_id = s.guild_id AND r.raid_key = s.raid_key
+        WHERE s.guild_id = ? AND s.player_name IS NOT NULL AND s.player_name != ''
+        ORDER BY r.end_time
+    """, (guild_id,))
+    names = {pid: (name, code) for pid, name, code in cursor.fetchall()}
+    conn.close()
+    return names
