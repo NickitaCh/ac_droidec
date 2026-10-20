@@ -18,8 +18,8 @@
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
-                <h1>Калькулятор{% call ui.help(side="left") %}Прикидка статов персонажа, которого ещё никто не прокачал — под гипотетический набор модов. Primary-статы на 6 слотах — точные игровые константы для 6★ уровня 15 (добыты эмпирически из реальных модов гильдии, не угаданы), бонус сетов — тоже точный (реальные игровые данные). Вручную оценить нужно только вклад ВТОРИЧНЫХ статов — единственное, что действительно нельзя посчитать точно, потому что вторички рандомны и у них нет фиксированной таблицы значений.{% endcall %}</h1>
+                <p class="page-hero-eyebrow">Модули и статы</p>
+                <h1>Калькулятор{% call ui.help(side="left") %}Прикидка статов персонажа, которого ещё никто не прокачал — под гипотетический набор модов. Primary-статы на 6 слотах — точные игровые константы для 6★ уровня 15 (добыты эмпирически из реальных модулей гильдии, не угаданы), бонус сетов — тоже точный (реальные игровые данные). Вручную оценить нужно только вклад ДОПОЛНИТЕЛЬНЫХ характеристик — единственное, что действительно нельзя посчитать точно, потому что вторички рандомны и у них нет фиксированной таблицы значений.{% endcall %}</h1>
             </div>
         </div>
     </section>
@@ -51,7 +51,7 @@
             </label>
 
             <div class="form-block">
-                <span>Моды — основной (primary) стат на каждом из 6 слотов, 6★ ур.15</span>
+                <span>Модули — основной (primary) стат на каждом из 6 слотов, 6★ ур.15</span>
                 <div class="mod-slot-grid">
                     {% for key, label in mod_slots %}
                         <div class="mod-slot-card{% if primaries.get(key) %} filled{% endif %}">
@@ -73,7 +73,7 @@
             </div>
 
             <div class="form-block">
-                <span>Сеты — сколько модов какого сета надето (максимум 6 модов всего)</span>
+                <span>Сеты — сколько модулей какого сета надето (максимум 6 модулей всего)</span>
                 <div class="mod-set-picker" data-set-picker>
                     <div class="mod-set-rows">
                         {% for set_id, set_name in mod_sets %}
@@ -84,12 +84,12 @@
                             </div>
                         {% endfor %}
                     </div>
-                    <div class="mod-set-total">Выбрано модов: <span data-set-total>0</span>/6</div>
+                    <div class="mod-set-total">Выбрано модулей: <span data-set-total>0</span>/6</div>
                 </div>
             </div>
 
             <div class="form-block" data-row-group>
-                <span>Вклад в статы от вторичных статов модов — сумма по всем 6 модам, все статы в % (кроме Speed — числом)</span>
+                <span>Вклад в статы от дополнительных характеристик модулей — сумма по всем 6 модулям, все статы в % (кроме Speed — числом)</span>
                 <table class="stat-rows-table">
                     <thead>
                         <tr><th>Стат</th><th>Значение</th><th></th></tr>
@@ -199,14 +199,14 @@
     {% endif %}
 
     <div class="panel">
-        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">моды + статы, применимые к любому персонажу</span></div>
+        <div class="panel-title"><span>Пресеты</span><span class="panel-hint">модули + статы, применимые к любому персонажу</span></div>
         {% if not presets %}
             <p class="empty-state">Пока нет сохранённых пресетов — посчитайте сборку выше и сохраните.</p>
         {% else %}
             <div class="table-scroll">
                 <table class="data">
                     <thead>
-                        <tr><th>Название</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th></th></tr>
+                        <tr><th>Название</th><th>Сеты</th><th>Модули</th><th>Дополнительные</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for p in presets %}
@@ -238,7 +238,7 @@
             <div class="table-scroll">
                 <table class="data">
                     <thead>
-                        <tr><th>Персонаж</th><th>Релик</th><th>Звёзды</th><th>Сеты</th><th>Моды</th><th>Вторички</th><th>Когда</th><th></th></tr>
+                        <tr><th>Персонаж</th><th>Релик</th><th>Звёзды</th><th>Сеты</th><th>Модули</th><th>Дополнительные</th><th>Когда</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for h in history %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% import "_ui.html" as ui %}
+{% block title %}Рассылка — {{ plan.name }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ twui.tw_hero(plan.name, "plans", "Каждому отмеченному игроку в личку Discord уйдёт его часть плана: зона, отряд, персонажи и датакрон.") }}
+    <p><a href="/tw/def/plans/{{ plan.id }}">← К карте</a></p>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    {% if report %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Результат рассылки</span>
+                <span class="panel-hint">отправлено: {{ report|selectattr("status", "equalto", "sent")|list|length }} из {{ report|length }}</span>
+            </div>
+            <ul class="platoon-slot-list">
+                {% for r in report %}
+                    <li class="platoon-slot">
+                        {% if r.status == "sent" %}<span class="badge badge-ok">✅ отправлено</span>
+                        {% elif r.status == "skipped_no_discord" %}<span class="badge badge-neutral">⏭ пропущен</span>
+                        {% else %}<span class="badge badge-danger">❌ ошибка</span>{% endif %}
+                        {{ r.name }}
+                        {% if r.status != "sent" %}<span class="muted">— {{ r.detail }}</span>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+        <p><a class="button" href="/tw/def/plans/{{ plan.id }}/notify">↻ Отправить ещё раз</a></p>
+    {% elif not error %}
+        {% if not rows %}
+            <p class="empty-state">В плане пока нет назначений.</p>
+        {% else %}
+            <form method="post" action="/tw/def/plans/{{ plan.id }}/notify">
+                <p class="platoon-export-actions">
+                    <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = !c.disabled)">Отметить всех</button>
+                    <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = false)">Снять все отметки</button>
+                </p>
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>Кому отправить{% call ui.help() %}Сообщение уходит только тем, кто привязал Discord через /регистрация. Основной аккаунт и альт одного человека получают одно сообщение.{% endcall %}</span>
+                        <span class="panel-hint">игроков с назначениями: {{ rows|length }}</span>
+                    </div>
+                    <div class="notify-recipients-grid">
+                        {% for row in rows %}
+                            <label class="notify-recipient-card{% if not row.discord_id %} notify-recipient-card-disabled{% endif %}">
+                                <input type="checkbox" class="checkbox notify-check" name="ally_codes" value="{{ row.ally_code }}"
+                                       {% if row.discord_id %}checked{% else %}disabled{% endif %}>
+                                <span class="notify-recipient-name">{{ row.name }}</span>
+                                <span class="badge badge-neutral">отрядов: {{ row.entries|length }}</span>
+                                {% if not row.discord_id %}<span class="badge badge-danger">нет привязки Discord</span>{% endif %}
+                            </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% if preview %}
+                    <div class="panel">
+                        <div class="panel-title"><span>Пример сообщения</span><span class="panel-hint">{{ rows[0].name }}</span></div>
+                        <textarea class="twdef-text" readonly rows="10">{{ preview }}</textarea>
+                    </div>
+                {% endif %}
+                <p><button type="submit" class="button">📨 Отправить в личку отмеченным</button></p>
+            </form>
+        {% endif %}
+    {% endif %}
+{% endblock %}

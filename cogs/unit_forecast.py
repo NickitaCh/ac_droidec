@@ -65,7 +65,7 @@ class UnitForecastCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="юнит_прогноз", description="Статы юнита в текущих модах сейчас и на других звёздах, гире или релике")
+    @commands.slash_command(name="юнит_прогноз", description="Статы юнита в текущих модулях сейчас и на других звёздах, гире или релике")
     async def unit_forecast_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -148,7 +148,7 @@ class UnitForecastCog(commands.Cog):
             return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename=f"unit_{base_id}.png"))
 
-    @commands.slash_command(name="юнит", description="Персонажи игроков бок о бок: статы, моды, зеты и омикроны (как HotBot /toon)")
+    @commands.slash_command(name="юнит", description="Персонажи игроков бок о бок: статы, модули, зеты и омикроны (как HotBot /toon)")
     async def unit_card_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -167,7 +167,7 @@ class UnitForecastCog(commands.Cog):
         аликод4: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
         с_собой: bool = commands.Param(default=False, description="Добавить и вас (без других игроков вы и так в карточке)"),
         альт: bool = commands.Param(default=False, description="Вместо вашего основного аккаунта — второй (альт)"),
-        обновить: bool = commands.Param(default=False, description="Свежие данные из игры вместо ежечасного синка"),
+        обновить: bool = commands.Param(default=False, description="Свежие данные из игры вместо ежечасного обновления"),
         includerokamora: bool = commands.Param(default=False, description="Добавить Rokamora"),
     ):
         await inter.response.defer()
@@ -235,7 +235,7 @@ class UnitForecastCog(commands.Cog):
         if oldest is None:
             updated_at = datetime.now(MSK).strftime("%d.%m.%Y %H:%M МСК")
         else:
-            updated_at = f"ежечасный синк, до {max(1, int(oldest) // 60)} мин назад («обновить» — свежие)"
+            updated_at = f"ежечасное обновление, {max(1, int(oldest) // 60)} мин назад («обновить» — свежие)"
 
         def work():
             rows = toon.build(self.bot.stat_calc, players, base_ids)

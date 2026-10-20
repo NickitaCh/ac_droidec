@@ -182,4 +182,4 @@ def describe_mod(base_id: str, decoded: dict, char_label) -> str:
     secondaries_txt = ", ".join(
         f"{s['name']} {fmt_value(s['value'])}{'%' if s['is_percent'] else ''}" for s in decoded["secondaries"]
     ) or "—"
-    return f"**{name}** — {decoded['slot_label']} · {set_name} · primary: {primary_txt} · вторички: {secondaries_txt}"
+    return f"**{name}** — {decoded['slot_label']} · {set_name} · primary: {primary_txt} · дополнительные: {secondaries_txt}"

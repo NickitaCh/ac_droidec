@@ -163,9 +163,10 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
         draw.text((bx + 6, badge_y), str(card["zetas"]), font=font_b, fill=ZETA_FG, anchor="lm")
     omicron = _badge("omicron", 26)
     if card["omicrons"] and omicron is not None:
-        oy = badge_y + 30
-        img.paste(omicron, (bx - 24, oy - 13), omicron)
-        draw.text((bx + 6, oy), str(card["omicrons"]), font=font_b, fill=OMICRON_FG, anchor="lm")
+        # В том же ряду, справа от реликвии: ниже — уже полоса ГМ.
+        ox = lx + LEFT_W // 2 + 62 + 26
+        img.paste(omicron, (ox, badge_y - 13), omicron)
+        draw.text((ox + 30, badge_y), str(card["omicrons"]), font=font_b, fill=OMICRON_FG, anchor="lm")
 
     y_stats = py + PIC + 30
     draw.rectangle((lx, y_stats, lx + LEFT_W - 1, y_stats + 30), fill=(120, 30, 30))
@@ -257,7 +258,7 @@ def render(rows: list[dict], updated_at: str | None = None) -> bytes:
             x = PAD + col * (CARD_W + GAP)
             _draw_card(img, draw, x, y, h, row["name"], row["base_id"], card, row["best"], col)
         y += h + GAP
-    notes = ["В скобках — вклад модов, [ ] — скорость со вторичек", "Цифра у вторички — сколько раз прокачивалась"]
+    notes = ["В скобках — вклад модулей, [ ] — скорость от дополнительных характеристик", "Цифра у характеристики — сколько раз она улучшалась"]
     if n_cols > 1:
         notes.append("Зелёным — лучшее значение среди игроков")
     if updated_at:

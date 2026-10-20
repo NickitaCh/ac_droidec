@@ -114,7 +114,7 @@ def format_dm_text(guild_name: str, plan_name: str, round_num: int, player_rows:
     return "\n".join(lines)
 
 
-async def _send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str) -> tuple[bool, str]:
+async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str) -> tuple[bool, str]:
     headers = {"Authorization": f"Bot {token}"}
     resp = await client.post(
         f"{DISCORD_API_BASE}/users/@me/channels", headers=headers, json={"recipient_id": discord_id},
@@ -159,7 +159,7 @@ async def send_broadcast(
     async with httpx.AsyncClient(timeout=15.0) as client:
         for discord_id, player_rows in by_discord.items():
             text = format_dm_text(guild_name, plan["name"], round_num, player_rows)
-            ok, detail = await _send_dm(client, token, discord_id, text)
+            ok, detail = await send_dm(client, token, discord_id, text)
             for row in player_rows:
                 report.append({
                     "ally_code": row["ally_code"], "name": row["name"],

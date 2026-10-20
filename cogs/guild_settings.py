@@ -32,9 +32,9 @@ SETTINGS_FIELDS = [
     ("tb_order_role_id", "Роль, тегаемая в автоордере ТБ"),
     ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ (для /вг_ордер)"),
     ("antispam_enabled", "Антиспам-детектор включён"),
-    ("antispam_alert_channel_id", "Канал алертов антиспам-детектора (кросс-постинг/компрометация)"),
-    ("antispam_alert_role_id", "Роль, тегаемая в алерте антиспама"),
-    ("antispam_alert_message", "Кастомный текст алерта антиспама"),
+    ("antispam_alert_channel_id", "Канал оповещений антиспама (рассылка по каналам, взлом аккаунта)"),
+    ("antispam_alert_role_id", "Роль, которую упоминать в оповещении антиспама"),
+    ("antispam_alert_message", "Свой текст оповещения антиспама"),
     ("antispam_timeout_minutes", "Длительность автотайм-аута при обнаружении спам-рассылки (мин.)"),
     ("tasks_log_channel_id", "Канал уведомлений о задачах на прокачку (выполнено/просрочено/напоминание)"),
     ("tasks_mention", "Тег игрока при постановке задачи включён"),
@@ -87,8 +87,8 @@ SETTINGS_SECTIONS = [
     ], False),
     ("antispam", "Антиспам (супер-админ)", [
         ("flag", "antispam_enabled", "Антиспам-детектор", None),
-        ("channel", "antispam_alert_channel_id", "Канал алертов", TEXT_CHANNELS),
-        ("role", "antispam_alert_role_id", "Роль, которую тегать в алерте", None),
+        ("channel", "antispam_alert_channel_id", "Канал оповещений", TEXT_CHANNELS),
+        ("role", "antispam_alert_role_id", "Роль для упоминания в оповещении", None),
     ], True),
 ]
 
@@ -180,7 +180,7 @@ class SettingsPanel(disnake.ui.View):
                 lines.append(f"• {label}: {shown}")
         if self.section_key == "antispam":
             lines.append(f"• Тайм-аут: {cfg.get('antispam_timeout_minutes') or 60} мин.")
-            lines.append(f"• Текст алерта: {cfg.get('antispam_alert_message') or '*по умолчанию*'}")
+            lines.append(f"• Текст оповещения: {cfg.get('antispam_alert_message') or '*по умолчанию*'}")
         lines += ["", "-# Пустой выбор в списке — сбросить значение. Время рассылок и расписание тегов — на сайте."]
         return "\n".join(lines)
 
@@ -272,10 +272,10 @@ class AntispamModal(disnake.ui.Modal):
     def __init__(self, panel: SettingsPanel):
         self.panel = panel
         cfg = database.get_guild_config(panel.guild_id) or {}
-        super().__init__(title="Антиспам: тайм-аут и текст алерта", components=[
+        super().__init__(title="Антиспам: тайм-аут и текст оповещения", components=[
             disnake.ui.TextInput(label="Тайм-аут, минут (1–40320)", custom_id="timeout", max_length=5,
                                  value=str(cfg.get("antispam_timeout_minutes") or 60)),
-            disnake.ui.TextInput(label="Текст алерта (пусто — по умолчанию)", custom_id="text", required=False,
+            disnake.ui.TextInput(label="Текст оповещения (пусто — по умолчанию)", custom_id="text", required=False,
                                  style=disnake.TextInputStyle.paragraph, max_length=1500,
                                  value=cfg.get("antispam_alert_message") or "",
                                  placeholder="Плейсхолдеры: {role} {member} {timeout} {reason} {channels} {count}"),

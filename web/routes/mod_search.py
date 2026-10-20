@@ -112,7 +112,7 @@ def _filter_summary(filt: dict) -> str:
         for stat_id, op, value in conditions:
             name = mod_search.STAT_ID_TO_INFO.get(stat_id, (f"#{stat_id}", False))[0]
             cond_txt.append(f"{name}{op}{mod_search.fmt_value(value)}")
-        parts.append("Вторички: " + ", ".join(cond_txt))
+        parts.append("Дополнительные: " + ", ".join(cond_txt))
     return "; ".join(parts) if parts else "— без условий —"
 
 

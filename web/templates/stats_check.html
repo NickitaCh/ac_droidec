@@ -6,7 +6,7 @@
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
+                <p class="page-hero-eyebrow">Модули и статы</p>
                 <h1>Прогноз статов{% call ui.help(side="left") %}Сравнивает реальные статы игрока (на релике плейта) с сохранёнными в плейте нормами — то же самое, что делает Discord-команда /статы. Игрок не выбран — проверка идёт сразу по всей гильдии. Пересчёт нормы плейта на другой релик — на <a href="/stats-check/relic">отдельной странице</a>.{% endcall %}</h1>
             </div>
         </div>
@@ -199,7 +199,7 @@
             </div>
 
             {% if guild_report.no_data %}
-                <p class="muted">⚠️ Нет кэшированных данных ни по одному юниту: {{ guild_report.no_data|map(attribute="name")|join(", ") }}</p>
+                <p class="muted">⚠️ Нет сохранённых данных ни по одному юниту: {{ guild_report.no_data|map(attribute="name")|join(", ") }}</p>
             {% endif %}
 
             {% if guild_report.skipped %}

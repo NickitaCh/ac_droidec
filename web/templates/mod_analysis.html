@@ -8,8 +8,8 @@
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
-                <h1>Анализ модинга{% call ui.help(side="left") %}Как гильдия в среднем модит выбранного персонажа: какие сеты и основы популярны, в какие характеристики вкладываются больше всего (вклад именно от модов — статы каждого релевантного игрока нормируются на один и тот же уровень реликвии, чтобы разница в реликах между игроками не искажала картину), и сколько в гильдии разных "направлений" сборки этого персонажа.{% endcall %}</h1>
+                <p class="page-hero-eyebrow">Модули и статы</p>
+                <h1>Анализ модинга{% call ui.help(side="left") %}Как гильдия в среднем модит выбранного персонажа: какие сеты и основы популярны, в какие характеристики вкладываются больше всего (вклад именно от модулей — статы каждого релевантного игрока нормируются на один и тот же уровень реликвии, чтобы разница в реликах между игроками не искажала картину), и сколько в гильдии разных "направлений" сборки этого персонажа.{% endcall %}</h1>
             </div>
         </div>
     </section>
@@ -42,7 +42,7 @@
 
             <button type="submit">Посчитать</button>
             <p class="muted" style="margin-top: .5em;">
-                Без кода/ID — анализ по своей гильдии (быстро, из кэша). С кодом союзника
+                Без кода/ID — анализ по своей гильдии (быстро, по сохранённым данным). С кодом союзника
                 любого игрока чужой гильдии (или её ID напрямую, если уже известен) — бот
                 опрашивает участников живьём, на крупной гильдии может занять до минуты.
             </p>
@@ -67,12 +67,12 @@
             {% if result.relevant_count == 0 %}
                 <p class="empty-state">
                     Ни один игрок не прошёл фильтр релевантности (релик &gt; 5, все 6 слотов
-                    заняты, средний уровень модов = 15) — данных для анализа нет.
+                    заняты, средний уровень модулей = 15) — данных для анализа нет.
                 </p>
             {% else %}
                 <p class="muted">Средний реальный релик релевантных игроков: {{ "%.1f"|format(result.avg_relic) }}</p>
 
-                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 сетовых комбинации</span></div>
+                <div class="panel-title" style="margin-top: 1em;"><span>Три самых частых сочетания сетов</span></div>
                 <div class="table-scroll">
                     <table class="data">
                         <thead><tr><th>Комбинация</th><th>Игроков</th><th>Доля</th></tr></thead>
@@ -84,7 +84,7 @@
                     </table>
                 </div>
 
-                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 основы по слоту</span></div>
+                <div class="panel-title" style="margin-top: 1em;"><span>Три самые частые основные характеристики по слоту</span></div>
                 <div class="table-scroll">
                     <table class="data">
                         <thead><tr><th>Слот</th><th>Основа</th><th>Игроков</th><th>Доля</th></tr></thead>
@@ -103,7 +103,7 @@
 
                 <div class="panel-title" style="margin-top: 1em;">
                     <span>Характеристики</span>
-                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модов на релике {{ result.target_relic }}</span>
+                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модулей на релике {{ result.target_relic }}</span>
                 </div>
                 <div class="segmented-toggle" style="margin-bottom: .5em;">
                     <span class="muted">Показывать:</span>
@@ -155,7 +155,7 @@
                     </table>
                 </div>
 
-                <div class="panel-title" style="margin-top: 1em;"><span>Топ-3 характеристики по фокусу гильдии</span></div>
+                <div class="panel-title" style="margin-top: 1em;"><span>Три главные характеристики по вкладу гильдии</span></div>
                 <ul>
                     {% for row in result.top3_stats %}
                         <li><strong>{{ row.label }}</strong> — GF {{ row.gf_fmt }} ({{ row.gf_level }})</li>

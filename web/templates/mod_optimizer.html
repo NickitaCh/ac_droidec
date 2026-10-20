@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Оптимизатор модов — AC Droidec{% endblock %}
+{% block title %}Оптимизатор модулей — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
-                <h1>Оптимизатор модов</h1>
-                <p class="page-hero-lead">Загружаешь CSV со всеми своими модами — и для каждого персонажа выбранных плейтов инструмент подбирает лучший набор из 6 модов из общего пула (включая уже надетые на других персонажах), стараясь не ломать сеты и закрыть нормы плейта. Статы считаются на РЕАЛЬНОЙ реликвии/шестерне персонажа прямо сейчас, без проекции на релик плейта — если не хватает реликвии, это будет явно видно в отчёте.</p>
+                <p class="page-hero-eyebrow">Модули и статы</p>
+                <h1>Оптимизатор модулей</h1>
+                <p class="page-hero-lead">Загружаешь CSV со всеми своими модулями — и для каждого персонажа выбранных плейтов инструмент подбирает лучший набор из 6 модулей из общего пула (включая уже надетые на других персонажах), стараясь не ломать сеты и закрыть нормы плейта. Статы считаются на РЕАЛЬНОЙ реликвии/шестерне персонажа прямо сейчас, без проекции на релик плейта — если не хватает реликвии, это будет явно видно в отчёте.</p>
             </div>
         </div>
     </section>
     <details style="margin-bottom: 1em;">
-        <summary style="cursor: pointer;">Как получить CSV с модами?</summary>
+        <summary style="cursor: pointer;">Как получить CSV с модулями?</summary>
         <ol class="muted">
             <li>Открой <code>hotutils.com/mods/management</code> в браузере (авторизованным).</li>
             <li>Дай странице полностью загрузиться (заголовок должен показывать «Data fetched … ago»).</li>
@@ -28,7 +28,7 @@
         <div class="panel-title"><span>Параметры</span></div>
         <form method="post" action="/mod-optimizer" enctype="multipart/form-data">
             <label>
-                Файл с модами (CSV)
+                Файл с модулями (CSV)
                 <input type="file" name="mods_file" accept=".csv" required>
             </label>
 
@@ -62,10 +62,10 @@
     {% if loading %}
         <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
     {% elif results is not none %}
-        <h2>Результат ({{ mods_total }} модов в файле, игрок: {{ player_name }})</h2>
+        <h2>Результат ({{ mods_total }} модулей в файле, игрок: {{ player_name }})</h2>
         <p class="muted">
             Плейтов пройдено целиком: <strong>{{ plates_passed|length }}/{{ plates_total }}</strong>{% if plates_passed %} — {{ plates_passed|join(", ") }}{% endif %}.
-            Это глобально оптимальный (не жадный) подбор — солвер сам решает, кому какие моды отдать, чтобы пройти максимум плейтов целиком, а не по порядку персонажей.
+            Это глобально оптимальный (не жадный) подбор — солвер сам решает, кому какие модули отдать, чтобы пройти максимум плейтов целиком, а не по порядку персонажей.
             {% if solver_timed_out %}⚠️ Солвер упёрся в лимит времени — показан лучший найденный вариант, не факт что доказанно оптимальный.{% endif %}
         </p>
         {% if not results %}
@@ -106,7 +106,7 @@
                     {% endif %}
 
                     {% if r.mods_summary %}
-                        <p class="panel-hint" style="margin-bottom: 0.2em;">Предложенные моды:</p>
+                        <p class="panel-hint" style="margin-bottom: 0.2em;">Предложенные модули:</p>
                         <ul class="muted" style="margin-top: 0;">
                             {% for s in r.mods_summary %}<li>{{ s }}</li>{% endfor %}
                         </ul>

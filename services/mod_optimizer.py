@@ -156,7 +156,7 @@ def parse_mods_csv(raw_bytes: bytes) -> list[dict]:
     required_cols = {"id", "level", "set", "slot", "locked", "equipped_to", "primary_stat", "primary_value"}
     missing = required_cols - set(reader.fieldnames or [])
     if missing:
-        raise ModCsvError(f"В файле нет колонок: {', '.join(sorted(missing))} — это точно экспорт модов с /mod-optimizer?")
+        raise ModCsvError(f"В файле нет колонок: {', '.join(sorted(missing))} — это точно экспорт модулей с /mod-optimizer?")
 
     mods = []
     for i, row in enumerate(reader, start=2):  # 2 = с учётом строки заголовка
@@ -171,7 +171,7 @@ def parse_mods_csv(raw_bytes: bytes) -> list[dict]:
         except ModCsvError as e:
             raise ModCsvError(f"Строка {i} (primary): {e}")
         if primary is None:
-            raise ModCsvError(f"Строка {i}: у мода нет primary-стата.")
+            raise ModCsvError(f"Строка {i}: у модуля нет primary-стата.")
         secondaries = []
         for n in (1, 2, 3, 4):
             try:
@@ -198,7 +198,7 @@ def parse_mods_csv(raw_bytes: bytes) -> list[dict]:
             "secondaries": secondaries,
         })
     if not mods:
-        raise ModCsvError("Файл пуст — ни одного мода не распознано.")
+        raise ModCsvError("Файл пуст — ни одного модуля не распознано.")
     return mods
 
 
@@ -542,8 +542,8 @@ async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code:
 
         if chosen is None:
             passed, failed, mods_used, reason = [], stat_thresholds, [], (
-                "В общем пуле не нашлось модов нужных сетов/форм для этого персонажа." if not cands
-                else "Солвер не выделил этому персонажу ни одного билда — все подходящие моды нужнее другим персонажам плейтов (не хватает свободных модов на всех)."
+                "В общем пуле не нашлось модулей нужных сетов/форм для этого персонажа." if not cands
+                else "Солвер не выделил этому персонажу ни одного билда — все подходящие модули нужнее другим персонажам плейтов (не хватает свободных модулей на всех)."
             )
         else:
             final_stats = chosen["final_stats"]

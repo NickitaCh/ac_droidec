@@ -170,7 +170,7 @@ SCHEME_CHOICES = [
 # Для /статы/статы_релик — форсирует, под какую схему проверять/пересчитывать, вместо
 # авто-определения (значение "" = авто).
 FORCE_SCHEME_CHOICES = [
-    disnake.OptionChoice(name="Авто (по фактическим модам игрока)", value=""),
+    disnake.OptionChoice(name="Авто (по фактическим модулям игрока)", value=""),
     disnake.OptionChoice(name="Вариант 1", value="1"),
     disnake.OptionChoice(name="Вариант 2", value="2"),
 ]
@@ -347,7 +347,7 @@ def _build_table(headers: list, table_rows: list) -> str:
     return "```\n" + "\n".join(lines) + "\n```"
 
 
-_CODE_PAIR_NUMBERS_RE = re.compile(r" \+\d+(?:[.,]\d+)?%?| \(\d+ мод\.\)")
+_CODE_PAIR_NUMBERS_RE = re.compile(r" \+\d+(?:[.,]\d+)?%?| \(\d+ модуль\.\)")
 
 
 def _code_pairs(pairs: list) -> str:
@@ -1013,7 +1013,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if omicron_lines:
         block += "\n**🧬 Омикроны:**\n" + "\n".join(omicron_lines)
     if mod_primary_lines:
-        block += "\n**⚙️ Основы модов:**\n" + _code_pairs(mod_primary_lines)
+        block += "\n**⚙️ Основы модулей:**\n" + _code_pairs(mod_primary_lines)
     if mod_set_lines:
         block += "\n**🔷 Сеты:**\n" + _code_pairs(mod_set_lines)
     if compare_lines:
@@ -1775,7 +1775,7 @@ class StatRequirementsCog(commands.Cog):
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
         обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
-        сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/моды с нормой плейта по релику", choices=SCENARIO_CHOICES),
+        сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/модули с нормой плейта по релику", choices=SCENARIO_CHOICES),
         вариант: str = commands.Param(default=None, description="Форсировать вариант мод-билда вместо авто-детекта (не действует на персонажей без вариантов)", choices=FORCE_SCHEME_CHOICES),
         с_отрядом: bool = commands.Param(default=False, description="Только у кого есть отряд плейта (состав задаётся на сайте). По умолчанию — все"),
         только_кресты: bool = commands.Param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
@@ -1975,7 +1975,7 @@ class StatRequirementsCog(commands.Cog):
             color = DATACRON_CHECK_COLOR_PARTIAL
 
         title = f"📋 {плейт} (игрок: {игрок})"
-        footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет кэшированных данных ни по одному из этих юнитов у игрока"
+        footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет сохранённых данных ни по одному из этих юнитов у игрока"
         if not char_pages:
             # Листать нечего (всё в норме при «только кресты») — обычный embed, как раньше.
             pages = _lines_to_embeds(title + " — итог", color, summary)
@@ -2074,7 +2074,7 @@ class StatRequirementsCog(commands.Cog):
             await inter.edit_original_response("❌ Нечего показать.")
             return
 
-        embeds[-1].set_footer(text="Модель: плоская часть порога (роллы модов) не растёт, остальное масштабируется вместе с базой персонажа")
+        embeds[-1].set_footer(text="Модель: плоская часть порога (роллы модулей) не растёт, остальное масштабируется вместе с базой персонажа")
 
         await inter.edit_original_response(embed=embeds[0])
         for e in embeds[1:]:

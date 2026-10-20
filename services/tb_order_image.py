@@ -41,7 +41,7 @@ PLANET_RU = {
     "malachor": "Малахор",
 }
 
-PROMPT = """На картинке — скриншот вкладки "Strategy Summary" планировщика ТБ (Star Wars:
+PROMPT = """На картинке — снимок экрана вкладки "Strategy Summary" планировщика ТБ (Star Wars:
 Galaxy of Heroes, "Восход Империи"). Таблица: строки Dark/Mixed/Light/Bonus,
 колонки Round 1..Round 6.
 

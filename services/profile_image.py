@@ -192,6 +192,17 @@ class _Canvas:
 
     def _unit_card(self, row: dict, x: int, y: int, w: int, h: int, pic: int, guild: bool):
         px, py = x + 8, y + (h - pic) // 2
+        if row.get("missing"):  # юнита нет — серый портрет, как у HotBot
+            portrait = _portrait(row["base_id"], pic)
+            if portrait is not None:
+                gray = portrait.convert("LA").convert("RGBA")
+                gray.putalpha(portrait.getchannel("A").point(lambda v: v * 6 // 10))
+                self.img.paste(gray, (px, py), gray)
+            name_font = _font(19, True, condensed=True)
+            tx = px + pic + 14
+            self.text((tx, y + 8), self.fit(row["name"], name_font, x + w - 10 - tx), name_font, fill=MUTED)
+            self.text((tx, y + 40), "Нет", _font(17, condensed=True), fill=MUTED)
+            return
         portrait = _portrait(row["base_id"], pic)
         border = GOLD if row["base_id"] in self.gls else (110, 116, 128)
         if portrait is not None:
@@ -235,12 +246,12 @@ class _Canvas:
             if row.get("omicrons"):
                 line4.append(f"Омик. {row['omicrons']}")
             if row.get("ultimate"):
-                line4.append("Ульта")
+                line4.append("Абсолютная")
         self.text((tx, y + 79), self.fit("  ·  ".join(line4), small, tw), small, fill=MUTED)
         if guild:
             parts = [f"Есть {row['owners']}"]
             if row.get("ultimates"):
-                parts.append(f"ульта {row['ultimates']}")
+                parts.append(f"абс. {row['ultimates']}")
             if not row["is_ship"]:
                 parts.append(f"R8+ {row['r8_plus']}")
                 if row.get("avg_relic") is not None:
@@ -311,15 +322,15 @@ def render_player(s: dict, guild_gp: int | None = None) -> bytes:
     cv.section("Сводка")
     cv.grid([
         ("ГМ", compact(s["gp"])), ("ГМ персонажей", compact(s["char_gp"])), ("ГМ кораблей", compact(s["ship_gp"])),
-        ("Топ-80", compact(s["top80"])), ("Арена", _int(m.get("arena_rank"))), ("Флот", _int(m.get("fleet_rank"))),
+        ("Лучшие 80", compact(s["top80"])), ("Арена", _int(m.get("arena_rank"))), ("Флот", _int(m.get("fleet_rank"))),
         ("Зеты", _int(s["zetas"])), ("Омикроны", _int(s["omicrons"])),
         ("Омик. ВГ / ТБ / ВА", f"{s['omicrons_tw']} / {s['omicrons_tb']} / {s['omicrons_gac']}"),
         ("G13", _int(s["g13"])), ("G12", _int(s["g12"])), ("G11", _int(s["g11"])),
-        ("Скор. модов G11+", f"+{_int(s['speed_g11'])}" if s["speed_g11"] is not None else "—"),
-        ("Скор. модов топ-80", f"+{_int(s['speed_top80'])}" if s["speed_top80"] is not None else "—"),
+        ("Скор. модулей G11+", f"+{_int(s['speed_g11'])}" if s["speed_g11"] is not None else "—"),
+        ("Скор. модулей (лучшие 80)", f"+{_int(s['speed_top80'])}" if s["speed_top80"] is not None else "—"),
     ])
 
-    cv.section("Моды")
+    cv.section("Модули")
     cv.grid(_mod_cells(s["mods"]))
     cv.section("Реликвии")
     cv.grid(_relic_cells(s["relics"]), cols=4)
@@ -344,7 +355,7 @@ def render_guild(g: dict) -> bytes:
         ("G13", _int(g["g13"])), ("G12", _int(g["g12"])),
     ])
     if g["mods"]:
-        cv.section("Моды")
+        cv.section("Модули")
         cv.grid(_mod_cells(g["mods"]))
     cv.section("Реликвии")
     cv.grid(_relic_cells(g["relics"]), cols=4)
@@ -353,10 +364,10 @@ def render_guild(g: dict) -> bytes:
     a = g["avg"]
     cv.section("Средний игрок")
     cv.grid([
-        ("ГМ", compact(a["gp"])), ("Топ-80", compact(a["top80"])), ("Уровней релик", _int(a["relics"])),
+        ("ГМ", compact(a["gp"])), ("Лучшие 80", compact(a["top80"])), ("Уровней релик", _int(a["relics"])),
         ("6 точек", _int(a["six_dot"])), ("Зеты", _int(a["zetas"])), ("G13", _int(a["g13"])),
         ("G12", _int(a["g12"])), ("Арена", _int(a["arena_rank"])), ("Флот", _int(a["fleet_rank"])),
-        ("Скор. модов G11+", f"+{_int(a['speed_g11'])}" if a["speed_g11"] is not None else "—"),
+        ("Скор. модулей G11+", f"+{_int(a['speed_g11'])}" if a["speed_g11"] is not None else "—"),
     ])
     for title, key in (("Галактические легенды", "gls"), ("Мета", "meta_units"), ("Мета флота", "fleet")):
         if g[key]:

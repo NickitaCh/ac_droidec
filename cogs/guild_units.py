@@ -15,7 +15,7 @@ import stat_engine
 from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from services import guild_units, guild_units_image, journey_guide
 
-LINES_PER_BLOCK = 30  # строк в одном блоке кода — чтобы влезть в лимиты эмбеда
+FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
 
 
 async def autocomplete_guides(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -36,7 +36,7 @@ def _gp(n) -> str:
 
 def _owner_line(o: dict, is_ship: bool) -> str:
     level = guild_units.level_text(o, is_ship)
-    extra = "" if is_ship else f"{o['zetas']}/{o['omicrons']}" + ("·U" if o["ultimate"] else "")
+    extra = "" if is_ship else f"{o['zetas']}/{o['omicrons']}" + ("·А" if o["ultimate"] else "")
     return f"{_gp(o['gp']):>6} : {level:<6} : {extra:<6} : {o['name'][:18]}"
 
 
@@ -74,10 +74,15 @@ class GuildUnitsCog(commands.Cog):
         blocks = []
         for stars in sorted(groups, reverse=True):
             rows = groups[stars]
-            for k in range(0, len(rows), LINES_PER_BLOCK):
-                chunk = rows[k:k + LINES_PER_BLOCK]
-                body = "\n".join([head] + [_owner_line(o, r["is_ship"]) for o in chunk])
-                blocks.append((f"{stars}★ ({len(rows)})" if k == 0 else f"{stars}★ (продолжение)", f"```\n{body}\n```"))
+            # Поле эмбеда — не длиннее 1024 символов вместе с ```: режем по длине, не по строкам.
+            chunk, first = [head], True
+            for o in rows:
+                line = _owner_line(o, r["is_ship"])
+                if len("\n".join(chunk + [line])) + 8 > FIELD_LIMIT:
+                    blocks.append((f"{stars}★ ({len(rows)})" if first else f"{stars}★ (продолжение)", "```\n" + "\n".join(chunk) + "\n```"))
+                    chunk, first = [head], False
+                chunk.append(line)
+            blocks.append((f"{stars}★ ({len(rows)})" if first else f"{stars}★ (продолжение)", "```\n" + "\n".join(chunk) + "\n```"))
         if r["missing"]:
             blocks.append((f"Нет у ({len(r['missing'])})", ", ".join(r["missing"])[:1024]))
 
@@ -87,14 +92,14 @@ class GuildUnitsCog(commands.Cog):
                 embed = disnake.Embed(
                     title=f"{cfg.get('name') or 'Гильдия'} ({r['members']})",
                     description=f"**{r['name']}** — есть у {len(r['owners'])} из {r['members']}"
-                    + ("" if r["is_ship"] else " · з/о — зеты/омикроны, U — ульта"),
+                    + ("" if r["is_ship"] else " · з/о — зеты/омикроны, А — абсолютная способность"),
                     color=disnake.Color.gold(),
                 )
                 embeds.append(embed)
             embed.add_field(name=name, value=value, inline=False)
         if not embeds:
             embeds = [disnake.Embed(title=cfg.get("name") or "Гильдия", description=f"**{r['name']}** — ни у кого нет.")]
-        embeds[-1].set_footer(text="Данные ежечасного синка ростеров")
+        embeds[-1].set_footer(text="Данные ежечасного обновления составов")
         if sum(len(e) for e in embeds) > 5900 or len(embeds) > 10:  # общий лимит эмбедов сообщения
             text = "\n\n".join(f"{name}\n{value.strip('`')}" for name, value in blocks)
             await inter.edit_original_response(
@@ -122,7 +127,7 @@ class GuildUnitsCog(commands.Cog):
             await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
             return
         cfg = database.get_guild_config(guild_id) or {}
-        png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного синка")
+        png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления")
         ready = sum(1 for p in r["players"] if p["ready"])
         await inter.edit_original_response(
             content=f"**{r['guide']['name']}** — готовы {ready} из {len(r['players'])}",

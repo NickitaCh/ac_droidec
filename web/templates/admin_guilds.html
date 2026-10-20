@@ -76,7 +76,7 @@
                                     </form>
                                     {% if g.is_active %}
                                         <form method="post" action="/admin/guilds/{{ g.id }}/deactivate"
-                                              onsubmit="return confirm('Деактивировать гильдию «{{ g.name }}»? Её участники потеряют доступ к дашборду и командам бота.');">
+                                              onsubmit="return confirm('Деактивировать гильдию «{{ g.name }}»? Её участники потеряют доступ к сайту и командам бота.');">
                                             <button type="submit" class="button-danger">Деактивировать</button>
                                         </form>
                                     {% endif %}

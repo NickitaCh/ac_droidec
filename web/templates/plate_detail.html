@@ -7,7 +7,7 @@
         <a class="page-hero-back" href="/plates">← Все плейты</a>
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
+                <p class="page-hero-eyebrow">Модули и статы</p>
                 <h1>{{ plate_name }}{% if is_modular %} <span class="badge" title="Модульный плейт">🧩 модульный</span>{% endif %}</h1>
             </div>
         </div>
@@ -191,7 +191,7 @@
         </div>
 
         <div class="panel">
-            <div class="panel-title"><span>Моды: основы и сеты</span><span class="panel-hint">сборка персонажа — 6 модулей</span></div>
+            <div class="panel-title"><span>Модули: основы и сеты</span><span class="panel-hint">сборка персонажа — 6 модулей</span></div>
             <form method="post" action="/plates/{{ plate_name }}/requirements/save_mods" class="mod-grid-form" data-mod-grid-form
                   data-config-url="/plates/{{ plate_name | urlencode }}/api/mod-config">
                 <div class="mod-grid-head">

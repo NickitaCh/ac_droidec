@@ -34,6 +34,7 @@
             {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tw/def/plans/{{ plan.id }}?view=players">По игрокам</a>{% endif %}
         </div>
         <a class="button" href="/tw/def/plans/{{ plan.id }}/text">Текст для Discord</a>
+        <a class="button" href="/tw/def/plans/{{ plan.id }}/notify">Разослать в личку</a>
         <form method="post" action="/tw/def/plans/{{ plan.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия плана</button></form>
         {% if assigned_total %}
             <form method="post" action="/tw/def/plans/{{ plan.id }}/clear" class="twdef-inline" onsubmit="return confirm('Убрать все {{ assigned_total }} назначений из плана?');">

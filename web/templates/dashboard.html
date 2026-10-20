@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
-{% block title %}Дашборд — AC Droidec{% endblock %}
+{% block title %}Главная — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
     {% if error %}
@@ -22,7 +22,7 @@
                 <div class="lp-hero-text">
                     <p class="lp-eyebrow">Star Wars: Galaxy of Heroes</p>
                     <h1>AC Droidec</h1>
-                    <p class="lp-lead">Бот для Discord и веб-дашборд для офицеров гильдии: ТБ и ВГ, прокачка, моды, датакроны и дисциплина — в одном месте.</p>
+                    <p class="lp-lead">Бот для Discord и сайт для офицеров гильдии: ТБ и ВГ, прокачка, модули, датакроны и дисциплина — в одном месте.</p>
                     <div class="lp-cta">
                         <a class="button lp-button-primary" href="/login">Войти через Discord</a>
                         <a class="button lp-button-ghost" href="/subscribe">Подключить гильдию</a>
@@ -67,8 +67,8 @@
                         <span class="mod-icon mod-shape-circle" style="--set: url(/static/img/game/sets/set-6.webp)"></span>
                         <span class="mod-icon mod-icon-gold mod-shape-cross" style="--set: url(/static/img/game/sets/set-1.webp)"></span>
                     </div>
-                    <h3>Моды и статы</h3>
-                    <p>Плейты гильдии, калькулятор, поиск модов по всему составу и анализ модинга с рекомендациями.</p>
+                    <h3>Модули и статы</h3>
+                    <p>Плейты гильдии, калькулятор, поиск модулей по всему составу и анализ модинга с рекомендациями.</p>
                 </article>
                 <article class="lp-feature">
                     <div class="lp-feature-art lp-art-datacron">
@@ -142,7 +142,7 @@
         {% endif %}
     {% elif not guild_cfg %}
         <h1>Привет, {{ user.username }}</h1>
-        <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть дашборд.</p>
+        <p class="muted">Гильдия не выбрана — переключите её через меню в шапке сайта, чтобы увидеть главную страницу.</p>
     {% else %}
         {% set tb_last = widgets.tb_report.chart_bars[-1] if widgets.tb_report and widgets.tb_report.chart_bars else none %}
         {% set tw_period = widgets.tw_stats.periods[0] if widgets.tw_stats and widgets.tw_stats.periods else none %}
@@ -157,11 +157,11 @@
                         {% if widgets.sync_status.last_sync_text %}
                             Обновлено {{ widgets.sync_status.last_sync_text }}
                         {% else %}
-                            Кэш активности ещё не наполнялся
+                            Данные активности ещё не загружены
                         {% endif %}
                         {% if widgets.sync_status.next_auto_text %}<br><span class="page-hero-sync-next">автообновление {{ widgets.sync_status.next_auto_text }}</span>{% endif %}
                     </span>
-                    <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Синкаю…';">
+                    <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Обновляю…';">
                         <button type="submit">Обновить сейчас</button>
                     </form>
                 </div>
@@ -223,7 +223,7 @@
                     <p class="empty-state" style="padding: 0;">Готово — {{ linked_name }} привязан(а) к Discord.</p>
                 {% endif %}
                 {% if not widgets.roster_rows %}
-                    <p class="widget-empty">Состав пуст — кэш ростера ещё не синхронизировался с Comlink.</p>
+                    <p class="widget-empty">Состав пуст — данные ещё не загружены из игры.</p>
                 {% else %}
                     <div class="table-toolbar" style="margin-bottom: 0.6em;">
                         <input type="search" placeholder="Имя или код союзника…" data-table-search="dashboard-roster-table">

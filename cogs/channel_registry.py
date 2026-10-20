@@ -41,7 +41,7 @@ class ChannelRegistry(commands.Cog):
 
         await inter.response.send_message(
             f"✅ Канал «{name}» запомнен для гильдии — теперь его можно выбрать в настройках оповещений "
-            f"(`/настройки` или веб-дашборд `/settings`).",
+            f"(`/настройки` или на сайте, раздел «Настройки»).",
             ephemeral=True,
         )
 

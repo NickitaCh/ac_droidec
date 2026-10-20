@@ -81,7 +81,7 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
         if is_ship:
             stars = f"{cur['level']['stars']}★  →  {proj['level']['stars']}★"
         draw.text((tx, y + 110), stars, font=_font(24, True), fill=GOLD, anchor="lm")
-        draw.text((tx, y + 140), "при текущем экипаже" if is_ship else "в текущих модах", font=_font(18), fill=MUTED, anchor="lm")
+        draw.text((tx, y + 140), "при текущем экипаже" if is_ship else "в текущих модулях", font=_font(18), fill=MUTED, anchor="lm")
     y += PIC + 20
 
     def row(label: str, cells: list, fill, bold_label=False):
@@ -135,7 +135,7 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
             row(result["labels"][name], cells, fill)
 
     y += 10
-    foot = "Статы — от звёзд и экипажа" if is_ship else "В скобках — вклад модов"
+    foot = "Статы — от звёзд и экипажа" if is_ship else "В скобках — вклад модулей"
     if updated_at:
         foot += f"  ·  данные игрока: {updated_at}"
     draw.text((W // 2, y + 12), foot, font=_font(16), fill=MUTED, anchor="mm")

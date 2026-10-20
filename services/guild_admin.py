@@ -137,10 +137,36 @@ async def add_grant(comlink, discord_id: str, ally_code: str, guild_id: int, tie
         return GrantResult(ok=False, error=f"Игрок с кодом союзника {clean_code} не найден на серверах EA/CG.")
 
     database.add_manual_grant(str(discord_id), clean_code, guild_id, tier, granted_by=granted_by, ingame_name=player_data["name"])
+    link_grant_registration(str(discord_id), clean_code, guild_id, player_data["name"])
     return GrantResult(ok=True, ingame_name=player_data["name"])
 
 
+def link_grant_registration(discord_id: str, ally_code: str, guild_id: int, ingame_name: str) -> bool:
+    """Привязывает аккаунт гранта к Discord в гильдии гранта, как /регистрация: иначе
+    игрок вне обслуживаемых гильдий (его /регистрация отклоняет) не может пользоваться
+    командами «про себя», и его нельзя указать тегом (участник:@…). Чужую привязку того
+    же кода не трогает. True — привязан."""
+    owner = database.find_ally_code_owner(ally_code, guild_id=guild_id)
+    if owner and owner != discord_id:
+        return False
+    existing = database.get_user_registrations(discord_id, guild_id=guild_id)
+    is_main = not any(main for code, _name, main in existing if code != ally_code)
+    database.set_user_registration(discord_id, ally_code, ingame_name or "", is_main=is_main, guild_id=guild_id)
+    return True
+
+
+def _unlink_grant_registration(grant: dict | None) -> None:
+    """Снимает привязку, сделанную грантом, — только если игрок не в составе гильдии
+    гранта (иначе это обычная регистрация участника, её не трогаем)."""
+    if not grant or not grant.get("ally_code") or grant.get("guild_id") is None:
+        return
+    roster_codes = {code for code, _name in database.get_roster_by_player_id(grant["guild_id"]).values()}
+    if grant["ally_code"] not in roster_codes:
+        database.delete_user_registration(grant["discord_id"], grant["ally_code"], guild_id=grant["guild_id"])
+
+
 def remove_grant(discord_id: str) -> bool:
+    _unlink_grant_registration(database.get_manual_grant(str(discord_id)))
     return database.remove_manual_grant(str(discord_id))
 
 
@@ -166,6 +192,7 @@ def remove_guild_scoped_grant(discord_id: str, guild_id: int) -> GrantResult:
         return GrantResult(ok=False, error="У этого участника нет ручного гранта.")
     if existing["guild_id"] != guild_id:
         return GrantResult(ok=False, error="Этот грант принадлежит другой гильдии — снять его может только супер-админ.")
+    _unlink_grant_registration(existing)
     database.remove_manual_grant(discord_id)
     return GrantResult(ok=True, ingame_name=existing.get("ingame_name"))
 

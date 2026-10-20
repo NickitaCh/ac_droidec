@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% import "_game.html" as game %}
-{% block title %}Поиск модов — AC Droidec{% endblock %}
+{% block title %}Поиск модулей — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 
 {% block content %}
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
-                <h1>Поиск модов{% call ui.help(side="left") %}Гибкий фильтр по НАДЕТЫМ модам гильдии — сет, слот, primary-стат (можно отметить несколько в каждой категории — тогда внутри категории через ИЛИ) и любое число условий по вторичкам (условия между собой и с категориями — все через И). Данные — из последней синхронизации ростера, без обращения к игре напрямую.{% endcall %}</h1>
+                <p class="page-hero-eyebrow">Модули и статы</p>
+                <h1>Поиск модулей{% call ui.help(side="left") %}Гибкий фильтр по НАДЕТЫМ модулям гильдии — сет, слот, primary-стат (можно отметить несколько в каждой категории — тогда внутри категории через ИЛИ) и любое число условий по дополнительным характеристикам (условия между собой и с категориями — все через И). Данные — из последней синхронизации ростера, без обращения к игре напрямую.{% endcall %}</h1>
             </div>
         </div>
     </section>
@@ -49,7 +49,7 @@
             </div>
 
             <div class="form-block" data-row-group>
-                <span>Условия по вторичкам — можно добавить сколько угодно, все через И</span>
+                <span>Условия по дополнительным характеристикам — можно добавить сколько угодно, все через И</span>
                 <table class="stat-rows-table">
                     <thead>
                         <tr><th>Стат</th><th>Оператор</th><th>Значение</th><th></th></tr>
@@ -121,7 +121,7 @@
                 <div class="table-scroll">
                     <table class="data">
                         <thead>
-                            <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
+                            <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Основная</th><th>Дополнительные</th></tr>
                         </thead>
                         <tbody>
                             {% for row in list_result.rows %}
@@ -142,7 +142,7 @@
         <div class="panel">
             <div class="panel-title">
                 <span>Результаты по гильдии</span>
-                <span class="panel-hint">{{ table_result.matched_players }}/{{ table_result.total_players }} игроков с совпадениями · {{ table_result.total_mods }} модов</span>
+                <span class="panel-hint">{{ table_result.matched_players }}/{{ table_result.total_players }} игроков с совпадениями · {{ table_result.total_mods }} модулей</span>
             </div>
             <div class="table-scroll">
                 <table class="data">
@@ -163,7 +163,7 @@
                     <div class="table-scroll">
                         <table class="data">
                             <thead>
-                                <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Primary</th><th>Вторички</th></tr>
+                                <tr><th>Персонаж</th><th>Слот</th><th>Сет</th><th>Основная</th><th>Дополнительные</th></tr>
                             </thead>
                             <tbody>
                                 {% for row in p.rows %}

@@ -193,7 +193,7 @@ def option_requirement_label(opt: dict, combat_type: str) -> str:
     if opt.get("omicron"):
         parts.append("омикрон")
     if opt.get("ultimate"):
-        parts.append("ульта")
+        parts.append("абс.")
     for st in option_stats(opt):
         parts.append(_stat_text(st))
     return ", ".join(parts)
@@ -340,7 +340,7 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
     if reason:
         return reason
     if opt.get("ultimate") and not unit.get("purchasedAbilityId"):
-        return "нет ульты"
+        return "нет абсолютной способности"
     for st in option_stats(opt):
         value = roster.stat(ally_code, opt["base_id"], st["stat"])
         if value is None:
@@ -410,7 +410,7 @@ def used_datacrons_by_player(assignments: list[dict]) -> dict[str, set[str]]:
     return used
 
 
-DC_REASONS = {"no": "нет нужного ДК", "unknown": "датакроны игрока ещё не синкались", "gone": "требование ДК удалено",
+DC_REASONS = {"no": "нет нужного ДК", "unknown": "датакроны игрока ещё не загружены", "gone": "требование ДК удалено",
               "used": "нужный ДК уже стоит в другом паке плана"}
 
 

@@ -119,7 +119,7 @@ def _diff_unit_mods(old_mods: list, new_mods: list) -> list[tuple[str, str]]:
         if old_d is None or new_d is None:
             present = new_d or old_d
             action = "надет" if new_d else "снят"
-            events.append(("minor", f"{present['slot_label']}: мод {action}"))
+            events.append(("minor", f"{present['slot_label']}: модуль {action}"))
             continue
         old_primary_id = (old_d["primary"] or {}).get("stat_id")
         new_primary_id = (new_d["primary"] or {}).get("stat_id")

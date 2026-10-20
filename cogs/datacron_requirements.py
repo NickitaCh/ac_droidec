@@ -28,7 +28,7 @@ DATACRON_LEVELS = (3, 6, 9)
 
 DATACRON_ANY = "ANY"
 DATACRON_NONE = "NONE"
-DATACRON_ANY_LABEL = "Любой (тир разблокирован, бонус неважен)"
+DATACRON_ANY_LABEL = "Любой (уровень разблокирован, бонус неважен)"
 DATACRON_NONE_LABEL = "— не проверять"
 
 PRIORITY_REQUIRED = "required"
@@ -1558,7 +1558,7 @@ class DatacronRequirementsCog(commands.Cog):
             await inter.edit_original_message(f"⏳ Собираю данные по всей гильдии ({season_label})...")
             report = await self._build_guild_datacron_report(set_id, season_label, requirements, focused_requirements, guild_id=guild_id)
             if report is None:
-                await inter.edit_original_message("❌ Кэш состава гильдии пуст — подождите обновления или попробуйте позже.")
+                await inter.edit_original_message("❌ Состав гильдии ещё не загружен — попробуйте позже.")
                 return
             embeds, debtors = report
             if debtors:
@@ -1591,7 +1591,7 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             cache = self.bot.guild_roster_caches.get(guild_id, {})
             if not cache or игрок not in cache:
-                await inter.edit_original_message("❌ Игрок не найден в кэше состава.")
+                await inter.edit_original_message("❌ Игрок не найден в составе гильдии.")
                 return
             allycode = cache[игрок]
 

@@ -37,7 +37,7 @@ async def _active_datacron_seasons(guild_id: int):
     try:
         catalog = await datacron_catalog.get_catalog(_get_comlink())
     except Exception as e:
-        print(f"⚠️ [/] Каталог датакронов недоступен для виджета дашборда: {e}")
+        print(f"⚠️ [/] Каталог датакронов недоступен для виджета сайта: {e}")
         return []
     if not catalog or not catalog.get("seasons"):
         return []

@@ -77,7 +77,7 @@
             <label class="twdef-req twdef-req-char" title="Минимальная реликвия">R ≥
                 <select data-field="min_relic"><option value="">—</option>{% for r in range(0, 11) %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
             </label>
-            <label class="twdef-req twdef-req-char" title="Минимальный тир (если релик не важен)">G ≥
+            <label class="twdef-req twdef-req-char" title="Минимальный уровень (если релик не важен)">G ≥
                 <select data-field="min_gear"><option value="">—</option>{% for g in range(8, 14) %}<option value="{{ g }}">{{ g }}</option>{% endfor %}</select>
             </label>
             <label class="twdef-req" title="Минимум звёзд">★ ≥
@@ -85,8 +85,8 @@
             </label>
             <label class="twdef-req twdef-req-char twdef-check" title="Все зеты юнита"><input type="checkbox" data-field="zeta"> зеты</label>
             <label class="twdef-req twdef-req-char twdef-check" title="Омикрон для ВГ (если у юнита нет ВГ-омикрона — любой)"><input type="checkbox" data-field="omicron"> омикрон</label>
-            <label class="twdef-req twdef-req-char twdef-check" title="Ульта (легенды)"><input type="checkbox" data-field="ultimate"> ульта</label>
-            <button type="button" class="button-secondary twdef-small twdef-req-char twdef-add-stat" title="Минимальный стат с модами: скорость, здоровье, защита…">+ стат</button>
+            <label class="twdef-req twdef-req-char twdef-check" title="Абсолютная способность (легенды)"><input type="checkbox" data-field="ultimate"> абс.</label>
+            <button type="button" class="button-secondary twdef-small twdef-req-char twdef-add-stat" title="Минимальный стат с модулями: скорость, здоровье, защита…">+ стат</button>
             <button type="button" class="button-danger twdef-remove-option" title="Убрать вариант">✕</button>
             <div class="twdef-stat-rows twdef-req-char"></div>
         </div>

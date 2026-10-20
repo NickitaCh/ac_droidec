@@ -4,6 +4,7 @@
 (её же потом использует бот), здесь только HTTP и шаблоны."""
 import asyncio
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -13,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 import tw_def_engine as engine
-from services import datacron_catalog, feature_flags, stat_forecast
+from services import datacron_catalog, feature_flags, stat_forecast, tw_def_notify
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -677,4 +678,41 @@ async def plan_text(plan_id: int, request: Request, user: dict = Depends(_requir
         "by_zone": engine.format_plan_by_zone(plan, assignments, names),
         "by_player": engine.format_plan_by_player(plan, assignments, names),
         "assigned_total": len(assignments),
+    })
+
+
+# ---- Рассылка плана в личку (services/tw_def_notify.py): кто где ставит и какой ДК.
+
+async def _notify_catalog():
+    try:
+        return await datacron_catalog.get_catalog(_get_comlink())
+    except Exception as e:
+        print(f"⚠️ [web] tw_def notify: каталог ДК недоступен: {e}")
+        return datacron_catalog._cache
+
+
+@router.get("/plans/{plan_id}/notify", response_class=HTMLResponse)
+async def plan_notify_page(plan_id: int, request: Request, user: dict = Depends(_require)):
+    plan = _get_plan_or_404(user["guild_id"], plan_id)
+    rows = tw_def_notify.build_player_rows(user["guild_id"], plan, await _notify_catalog())
+    guild_name = (database.get_guild_config(user["guild_id"]) or {}).get("name") or "гильдия"
+    preview = tw_def_notify.format_dm(guild_name, plan["name"], rows[:1]) if rows else []
+    return templates.TemplateResponse(request, "tw_def_notify.html", {
+        "user": user, "plan": plan, "rows": rows, "preview": "\n".join(preview), "report": None, "error": None,
+    })
+
+
+@router.post("/plans/{plan_id}/notify", response_class=HTMLResponse)
+async def plan_notify_send(plan_id: int, request: Request, ally_codes: list[str] = Form([]),
+                           user: dict = Depends(_require)):
+    plan = _get_plan_or_404(user["guild_id"], plan_id)
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return templates.TemplateResponse(request, "tw_def_notify.html", {
+            "user": user, "plan": plan, "rows": [], "preview": "", "report": None,
+            "error": "На сервере не задан токен бота — рассылка недоступна.",
+        })
+    report = await tw_def_notify.send_broadcast(token, user["guild_id"], plan, await _notify_catalog(), set(ally_codes))
+    return templates.TemplateResponse(request, "tw_def_notify.html", {
+        "user": user, "plan": plan, "rows": [], "preview": "", "report": report, "error": None,
     })

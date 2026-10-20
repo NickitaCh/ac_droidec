@@ -430,7 +430,7 @@ class TWCounters(commands.Cog):
                 stats = await self._sync_guild(guild_cfg)
                 if "threads" not in stats:  # канал не задан / не форум — тоже показать на сайте
                     database.set_bot_state("tw_sync_result", json.dumps({
-                        "error": stats.get("error") or stats.get("skipped") or "синк пропущен",
+                        "error": stats.get("error") or stats.get("skipped") or "обновление пропущено",
                         "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     }, ensure_ascii=False), guild_id=gid)
             except Exception as e:
@@ -484,7 +484,7 @@ class TWCounters(commands.Cog):
             await inter.edit_original_response(f"Ошибка синхронизации: {e}")
             return
         warning = (
-            "\n\n⚠️ Похоже, синк обработал не все треды (сеть/рейт-лимит Discord) — "
+            "\n\n⚠️ Похоже, обновление обработало не все ветки (сбой сети или ограничение Discord) — "
             "результат заметно ниже прошлого успешного прогона даже после автоповтора. "
             "Запустите команду ещё раз."
             if stats.get("suspect_partial") else ""

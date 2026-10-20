@@ -14,15 +14,17 @@ import statistics
 
 import database
 
-# Мета под ГЛ — фиксированный список (решение пользователя 2026-10-19); правится здесь.
+# Мета и флот — ровно как в /profile у HotBot (решение пользователя 2026-10-20; список
+# снят с картинки HotBot, порядок — по английскому имени, как там); правится здесь.
 META_CHARACTERS = (
-    "JEDIKNIGHTREVAN", "DARTHREVAN", "DARTHMALAK", "GENERALSKYWALKER", "PADMEAMIDALA",
-    "QUEENAMIDALA", "MANDALORBOKATAN", "STARKILLER", "BAYLANSKOLL", "MAULS7",
-    "DARTHMALGUS", "GRANDINQUISITOR",
+    "BAYLANSKOLL", "MANDALORBOKATAN", "COMMANDERAHSOKA", "DARTHBANE", "DARTHMALGUS",
+    "EZRAEXILE", "JARJARBINKS", "MORGANELSBETH", "STARKILLER", "TARONMALICOS", "THIRDSISTER",
 )
-FLEET_META = (
-    "CAPITALLEVIATHAN", "CAPITALPROFUNDITY", "CAPITALEXECUTOR", "CAPITALFINALIZER",
-    "CAPITALMALEVOLENCE", "CAPITALNEGOTIATOR", "CAPITALRADDUS",
+FLEET_META = ("CAPITALLEVIATHAN", "CAPITALPROFUNDITY", "CAPITALEXECUTOR")
+# ГЛ — в порядке выхода в игре, как у HotBot; новые (из игровых данных) — в конец.
+GL_ORDER = (
+    "GLREY", "SUPREMELEADERKYLOREN", "GRANDMASTERLUKE", "SITHPALPATINE", "JEDIMASTERKENOBI",
+    "LORDVADER", "JABBATHEHUTT", "GLLEIA", "GLAHSOKATANO", "GLHONDO",
 )
 # Список ГЛ берётся из игровых данных (категория galactic_legend, пишет units_sync в
 # bot_state "galactic_legends"); это — запасной вариант до первого синка.
@@ -56,6 +58,11 @@ def galactic_legends() -> list[str]:
         except ValueError:
             pass
     return list(FALLBACK_GALACTIC_LEGENDS)
+
+
+def ordered_gls(gls: list[str]) -> list[str]:
+    known = [g for g in GL_ORDER if g in gls]
+    return known + sorted(g for g in gls if g not in GL_ORDER)
 
 
 def _base_id(unit: dict) -> str:
@@ -203,8 +210,10 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
     relic_levels = [r["relic"] for r in chars if r["relic"] is not None]
     stats = meta.get("stats") or {}
 
-    def owned(ids):
-        return [rows[b] for b in ids if b in rows]
+    def with_missing(ids):
+        """Все юниты списка: чего нет — заглушка {missing: True} (HotBot показывает их серыми)."""
+        return [rows.get(b) or {"base_id": b, "name": names.get(b, b), "missing": True,
+                                "is_ship": b.startswith("CAPITAL")} for b in ids]
 
     return {
         "meta": meta,
@@ -229,9 +238,9 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
         },
         "mods": _mod_summary(roster),
         "datacrons": _datacron_summary(datacrons),
-        "gls": sorted(owned(gls), key=lambda r: r["gp"], reverse=True),
-        "meta_units": owned(META_CHARACTERS),
-        "fleet": owned(FLEET_META),
+        "gls": with_missing(ordered_gls(gls)),
+        "meta_units": with_missing(META_CHARACTERS),
+        "fleet": with_missing(FLEET_META),
     }
 
 
@@ -280,7 +289,7 @@ def _aggregate_units(players: list[dict], key: str, ids: list[str], names: dict)
     """Средние статы по владельцам юнита + сколько их в гильдии (как у HotBot guild=true)."""
     result = []
     for base_id in ids:
-        owners = [r for p in players for r in p[key] if r["base_id"] == base_id]
+        owners = [r for p in players for r in p[key] if r["base_id"] == base_id and not r.get("missing")]
         if not owners:
             continue
         row = {"base_id": base_id, "name": names.get(base_id, base_id), "is_ship": owners[0]["is_ship"],
@@ -299,8 +308,7 @@ def summarize_guild(guild_name: str, guild_gp: int | None, players: list[dict], 
     n = len(players) or 1
     metas = [p["meta"] for p in players]
     relic_keys = ["total"] + [f"r{i}" for i in range(5, 11)] + ["r1_4"]
-    gls = [g for g in ctx["gls"] if any(r["base_id"] == g for p in players for r in p["gls"])]
-    gls.sort(key=lambda g: -sum(r["base_id"] == g for p in players for r in p["gls"]))
+    gls = ordered_gls(ctx["gls"])
     return {
         "name": guild_name,
         "members": len(players),

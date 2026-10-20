@@ -40,7 +40,7 @@ class GuildCompareCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="вг_соперник", description="Своя гильдия против соперника: ГМ, реликвии, омикроны, моды, ГЛ и мета")
+    @commands.slash_command(name="вг_соперник", description="Своя гильдия против соперника: ГМ, реликвии, омикроны, модули, ГЛ и мета")
     async def compare_guild(
         self,
         inter: disnake.ApplicationCommandInteraction,

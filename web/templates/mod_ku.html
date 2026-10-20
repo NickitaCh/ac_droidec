@@ -6,9 +6,9 @@
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
-                <p class="page-hero-eyebrow">Моды и статы</p>
+                <p class="page-hero-eyebrow">Модули и статы</p>
                 <h1>МодКу</h1>
-                <p class="page-hero-lead">Сколько скорости в среднем даёт один мод на G13-персонажах игрока. Атака в допах пересчитана в скорость.</p>
+                <p class="page-hero-lead">Сколько скорости в среднем даёт один модуль на G13-персонажах игрока. Атака в допах пересчитана в скорость.</p>
             </div>
         </div>
     </section>
@@ -46,7 +46,7 @@
                 <div class="stat-tile"><div class="stat-value">{{ r.modku }}</div><div class="stat-label">МодКу</div></div>
                 <div class="stat-tile"><div class="stat-value">+{{ r.speed_part }}</div><div class="stat-label">от скорости</div></div>
                 <div class="stat-tile"><div class="stat-value">+{{ r.attack_part }}</div><div class="stat-label">от атаки</div></div>
-                <div class="stat-tile"><div class="stat-value">{{ r.coverage }}%</div><div class="stat-label">G13 со всеми модами ≥15 скорости</div></div>
+                <div class="stat-tile"><div class="stat-value">{{ r.coverage }}%</div><div class="stat-label">G13 со всеми модулями ≥15 скорости</div></div>
                 <div class="stat-tile"><div class="stat-value">{{ r.chars }}</div><div class="stat-label">G13-персонажей</div></div>
             </div>
             <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(16em, 1fr)); align-items: start;">
@@ -54,7 +54,7 @@
                     <h3>Скорость в допах</h3>
                     <div class="table-scroll">
                         <table class="data">
-                            <thead><tr><th class="num">Скорость</th><th class="num">Модов</th><th class="num">Очков</th></tr></thead>
+                            <thead><tr><th class="num">Скорость</th><th class="num">Модулей</th><th class="num">Очков</th></tr></thead>
                             <tbody>
                                 {% for row in r.speed_hist %}
                                     <tr><td class="num">{{ row.speed }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.points }}</td></tr>
@@ -67,7 +67,7 @@
                     <h3>Атака в допах</h3>
                     <div class="table-scroll">
                         <table class="data">
-                            <thead><tr><th class="num">Атака, %</th><th class="num">Модов</th></tr></thead>
+                            <thead><tr><th class="num">Атака, %</th><th class="num">Модулей</th></tr></thead>
                             <tbody>
                                 {% for row in r.attack_hist %}
                                     <tr><td class="num">{{ row.pct }}–{{ row.pct + 1 }}</td><td class="num">{{ row.count }}</td></tr>
@@ -91,7 +91,7 @@
                                         <td class="muted">
                                             {% if c.empty %}пустых слотов: {{ c.empty }}{% endif %}
                                             {% if c.empty and c.slow %} · {% endif %}
-                                            {% if c.slow %}модов &lt;15 скорости: {{ c.slow }}{% endif %}
+                                            {% if c.slow %}модулей &lt;15 скорости: {{ c.slow }}{% endif %}
                                         </td>
                                     </tr>
                                 {% endfor %}

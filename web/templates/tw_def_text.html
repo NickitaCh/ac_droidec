@@ -3,7 +3,7 @@
 {% block title %}Текст — {{ plan.name }}{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {{ twui.tw_hero(plan.name, "plans", "Готовый текст расстановки — скопируйте в канал. Публикация ботом в канал и рассылка в личку — следующим этапом.") }}
+    {{ twui.tw_hero(plan.name, "plans", "Готовый текст расстановки — скопируйте в канал. Разослать каждому его часть в личку — кнопкой «Разослать в личку» на карте.") }}
     <p><a href="/tw/def/plans/{{ plan.id }}">← К карте</a></p>
 
     {% if not assigned_total %}

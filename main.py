@@ -503,6 +503,15 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
             await inter.response.send_message(_access_denied_message(inter, tier), ephemeral=True)
     else:
         print(f"❌ Непредвиденная ошибка при выполнении команды: {error}")
+        # Без ответа Discord так и показывает «бот думает…» — сообщаем об ошибке явно.
+        text = "❌ Не удалось выполнить команду из-за внутренней ошибки. Попробуйте ещё раз; если повторится — сообщите офицерам."
+        try:
+            if inter.response.is_done():
+                await inter.edit_original_response(content=text, embeds=[], attachments=[])
+            else:
+                await inter.response.send_message(text, ephemeral=True)
+        except Exception as reply_err:
+            print(f"⚠️ Не удалось ответить об ошибке: {reply_err!r}")
 
 if __name__ == "__main__":
     if not os.path.exists("cogs"):

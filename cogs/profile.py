@@ -36,7 +36,7 @@ class ProfileCog(commands.Cog):
             print(f"⚠️ [Профиль] ГМ гильдии {swgoh_guild_id}: {e!r}")
             return None
 
-    @commands.slash_command(name="профиль", description="Профиль игрока или гильдии картинкой: ВА, моды, реликвии, ДК, ГЛ и мета")
+    @commands.slash_command(name="профиль", description="Профиль игрока или гильдии картинкой: ВА, модули, реликвии, ДК, ГЛ и мета")
     async def profile(
         self,
         inter: disnake.ApplicationCommandInteraction,
