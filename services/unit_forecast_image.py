@@ -1,4 +1,4 @@
-"""Картинка для /юнит прогноз (PNG через Pillow) — по результату services/unit_forecast.forecast.
+"""Картинка для /юнит_прогноз (PNG через Pillow) — по результату services/unit_forecast.forecast.
 Шрифты, портреты и палитра — общие с /профиль (services/profile_image.py)."""
 
 import io

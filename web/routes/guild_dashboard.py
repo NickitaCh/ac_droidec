@@ -1999,7 +1999,7 @@ def _int_or_none(value: str | None) -> int | None:
 
 @router.get("/player/{ally_code}/forecast.png")
 async def player_unit_forecast(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
-    """Картинка /юнит прогноз для виджета карточки игрока: юнит из кэша ростера (часовой синк),
+    """Картинка /юнит_прогноз для виджета карточки игрока: юнит из кэша ростера (часовой синк),
     без живого Comlink. Доступ — как у самой карточки."""
     from services import unit_forecast, unit_forecast_image
     if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:

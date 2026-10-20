@@ -1,7 +1,12 @@
-"""/юнит прогноз — юнит игрока в его текущих модах сейчас и на заданных звёздах/гире/
+"""/юнит_прогноз — юнит игрока в его текущих модах сейчас и на заданных звёздах/гире/
 релике, картинкой (как C3PO `p unit`). Расчёт — services/unit_forecast.py, картинка —
 services/unit_forecast_image.py. Игрок — свежий get_player: свой (или альт) по
-умолчанию, любой код союзника — через «аликод»; открыто всем участникам, как /профиль."""
+умолчанию, любой код союзника — через «аликод»; открыто всем участникам, как /профиль.
+
+/юнит — персонажи игроков бок о бок (как HotBot `/toon`): services/toon.py + toon_image.py.
+Набор параметров — как у HotBot (5 юнитов, 4 участника Discord, 4 кода союзника, с_собой,
+обновить, альт) плюс includerokamora (просьба пользователя 2026-10-20). Ростер — из кэша
+ежечасного синка, если игрок в нём есть; «обновить» или игрок не из гильдии — из игры."""
 
 import asyncio
 import io
@@ -15,16 +20,33 @@ from disnake.ext import commands
 import database
 import stat_engine
 import guild_resolver
-from cogs.violations import autocomplete_players
-from services import toon, toon_image, unit_forecast, unit_forecast_image
+from services import activity_diff, toon, toon_image, unit_forecast, unit_forecast_image
 
 MSK = ZoneInfo("Europe/Moscow")
+ROKAMORA_ALLY_CODE = "365732527"  # includerokamora — просьба пользователя 2026-10-20
+MAX_CARD_PLAYERS = 10  # 1 + 4 участника + 4 кода + Rokamora — как у HotBot
 
 
 def _parse_bracket_id(text: str) -> str:
     # «Имя [BASE_ID] 🚀» у кораблей — хвост после скобок не мешает.
     m = re.search(r"\[(.*?)\]", text or "")
     return m.group(1) if m else (text or "").strip()
+
+
+async def autocomplete_ally_codes(inter: disnake.ApplicationCommandInteraction, string: str):
+    """Игроки гильдии «Ник · код» со значением = код союзника; можно вписать любой код."""
+    guild_id = guild_resolver.resolve_guild_id(inter.author)
+    cache = (inter.bot.guild_roster_caches.get(guild_id) or {}) if guild_id is not None else {}
+    needle = string.strip().lower()
+    options = []
+    if guild_resolver.normalize_ally_code(string):
+        options.append(disnake.OptionChoice(name=string.strip()[:100], value=string.strip()[:100]))
+    for name, code in cache.items():
+        if needle in name.lower() or needle in str(code):
+            options.append(disnake.OptionChoice(name=f"{name} · {code}"[:100], value=str(code)))
+        if len(options) >= 25:
+            break
+    return options
 
 
 async def autocomplete_character_unit(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -43,11 +65,7 @@ class UnitForecastCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="юнит", description="Юнит игрока картинкой")
-    async def unit_group(self, inter: disnake.ApplicationCommandInteraction):
-        pass
-
-    @unit_group.sub_command(name="прогноз", description="Статы юнита в текущих модах сейчас и на других звёздах, гире или релике")
+    @commands.slash_command(name="юнит_прогноз", description="Статы юнита в текущих модах сейчас и на других звёздах, гире или релике")
     async def unit_forecast_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -130,85 +148,94 @@ class UnitForecastCog(commands.Cog):
             return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename=f"unit_{base_id}.png"))
 
-    @unit_group.sub_command(name="карточка", description="Персонажи игроков бок о бок: статы, моды, зеты и омикроны (как HotBot /toon)")
+    @commands.slash_command(name="юнит", description="Персонажи игроков бок о бок: статы, моды, зеты и омикроны (как HotBot /toon)")
     async def unit_card_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
         юнит: str = commands.Param(description="Персонаж", autocomplete=autocomplete_character_unit),
-        юнит2: str = commands.Param(default=None, description="Второй персонаж", autocomplete=autocomplete_character_unit),
-        юнит3: str = commands.Param(default=None, description="Третий персонаж", autocomplete=autocomplete_character_unit),
-        игрок2: str = commands.Param(default=None, description="С кем сравнить: игрок гильдии или код союзника", autocomplete=autocomplete_players),
-        игрок3: str = commands.Param(default=None, description="Ещё один игрок: игрок гильдии или код союзника", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника первого игрока (пусто → вы)"),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        юнит2: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        юнит3: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        юнит4: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        юнит5: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        участник: disnake.User = commands.Param(default=None, description="Участник Discord (по его /регистрация)"),
+        участник2: disnake.User = commands.Param(default=None, description="Ещё участник Discord"),
+        участник3: disnake.User = commands.Param(default=None, description="Ещё участник Discord"),
+        участник4: disnake.User = commands.Param(default=None, description="Ещё участник Discord"),
+        аликод: str = commands.Param(default=None, description="Код союзника или игрок гильдии из списка", autocomplete=autocomplete_ally_codes),
+        аликод2: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
+        аликод3: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
+        аликод4: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
+        с_собой: bool = commands.Param(default=False, description="Добавить и вас (без других игроков вы и так в карточке)"),
+        альт: bool = commands.Param(default=False, description="Вместо вашего основного аккаунта — второй (альт)"),
+        обновить: bool = commands.Param(default=False, description="Свежие данные из игры вместо ежечасного синка"),
+        includerokamora: bool = commands.Param(default=False, description="Добавить Rokamora"),
     ):
         await inter.response.defer()
-        base_ids = list(dict.fromkeys(_parse_bracket_id(u) for u in (юнит, юнит2, юнит3) if u))
+        base_ids = list(dict.fromkeys(_parse_bracket_id(u) for u in (юнит, юнит2, юнит3, юнит4, юнит5) if u))
         types = database.get_unit_types(base_ids)
         for base_id in base_ids:
             if not database.get_game_unit_name(base_id):
                 await inter.edit_original_response(f"❌ Персонаж «{base_id}» не найден — выберите его из списка.")
                 return
             if types.get(base_id) == "ship":
-                await inter.edit_original_response("❌ Карточка — только для персонажей: у кораблей нет модов. Корабль — в `/юнит прогноз`.")
+                await inter.edit_original_response("❌ Здесь только персонажи: у кораблей нет модов. Корабль — в `/юнит_прогноз`.")
                 return
 
-        if альт:
-            alt = await guild_resolver.require_alt(inter, "unit_forecast", other_target=аликод is not None)
-            if alt is None:
-                return
-            guild_id = guild_resolver.resolve_guild_id(inter.author) or alt["guild_id"]
-            first = alt["ally_code"]
-        else:
-            guild_id = await guild_resolver.require_guild_id(inter)
-            if guild_id is None:
-                return
-            if аликод is not None:
-                first = guild_resolver.normalize_ally_code(аликод)
-                if first is None:
-                    await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        users = [u for u in (участник, участник2, участник3, участник4) if u]
+        raw_codes = [c for c in (аликод, аликод2, аликод3, аликод4) if c]
+
+        ally_codes = []
+        if с_собой or альт or not (users or raw_codes or includerokamora):
+            if альт:
+                alt = await guild_resolver.require_alt(inter, "unit_forecast")
+                if alt is None:
                     return
+                ally_codes.append(alt["ally_code"])
             else:
                 registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
                 if not registration:
                     await inter.edit_original_response(
-                        "❌ Вы не зарегистрированы — используйте `/регистрация` или укажите код союзника."
+                        "❌ Вы не зарегистрированы — используйте `/регистрация` или укажите участника либо код союзника."
                     )
                     return
-                first = registration[0]
-
-        ally_codes = [first]
-        for raw in (игрок2, игрок3):
-            if not raw:
-                continue
+                ally_codes.append(registration[0])
+        for user in users:
+            registration = database.get_user_registration(str(user.id), guild_id=guild_id)
+            if not registration:
+                await inter.edit_original_response(f"❌ {user.mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника.")
+                return
+            ally_codes.append(registration[0])
+        for raw in raw_codes:
             code = guild_resolver.normalize_ally_code(raw)
             if code is None:
-                cache = self.bot.guild_roster_caches.get(guild_id) or {}
-                code = cache.get(raw.strip()) if raw.strip() in cache else None
-            if code is None:
-                await inter.edit_original_response(f"❌ Игрок «{raw}» не найден — выберите из списка или укажите код союзника.")
+                await inter.edit_original_response(f"❌ «{raw}» — не код союзника: нужно 9 цифр или игрок из списка.")
                 return
-            ally_codes.append(str(code))
-        ally_codes = list(dict.fromkeys(ally_codes))
+            ally_codes.append(code)
+        if includerokamora:
+            ally_codes.append(ROKAMORA_ALLY_CODE)
+        ally_codes = list(dict.fromkeys(str(c) for c in ally_codes))
+        if len(ally_codes) > MAX_CARD_PLAYERS:
+            await inter.edit_original_response(f"❌ Не больше {MAX_CARD_PLAYERS} игроков в одной карточке.")
+            return
 
         if not await stat_engine.wait_stat_calc(self.bot, inter):
             await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
-        async def fetch(code):
-            try:
-                return await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(code))
-            except Exception as e:
-                print(f"⚠️ [Юнит карточка] get_player {code}: {e!r}")
-                return None
-
-        players = await asyncio.gather(*(fetch(c) for c in ally_codes))
+        players, ages = await self._card_players(ally_codes, guild_id, обновить)
         for code, player in zip(ally_codes, players):
             if not player or not player.get("rosterUnit"):
                 await inter.edit_original_response(f"❌ Не удалось получить игрока с кодом {code} из игры.")
                 return
 
-        updated_at = datetime.now(MSK).strftime("%d.%m.%Y %H:%M МСК")
+        oldest = max((age for age in ages if age is not None), default=None)
+        if oldest is None:
+            updated_at = datetime.now(MSK).strftime("%d.%m.%Y %H:%M МСК")
+        else:
+            updated_at = f"ежечасный синк, до {max(1, int(oldest) // 60)} мин назад («обновить» — свежие)"
 
         def work():
             rows = toon.build(self.bot.stat_calc, players, base_ids)
@@ -217,11 +244,38 @@ class UnitForecastCog(commands.Cog):
         try:
             png = await asyncio.to_thread(work)
         except Exception as e:
-            print(f"⚠️ [Юнит карточка] {base_ids} для {ally_codes}: {e!r}")
+            print(f"⚠️ [Юнит] {base_ids} для {ally_codes}: {e!r}")
             await inter.edit_original_response("❌ Не удалось собрать карточку.")
             return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename="toon.png"))
 
+    async def _card_players(self, ally_codes: list[str], guild_id: int, refresh: bool) -> tuple[list, list]:
+        """([сырой игрок {name, rosterUnit} | None], [возраст кэша в секундах | None = из игры]).
+        Игрок из кэша синка — без запроса в игру; «обновить» освежает кэш (кулдаун 5 мин,
+        общий с /статы), игрок не из кэша — всегда свежий get_player."""
+        names = database.get_player_names(guild_id)
+        profiles = database.get_player_profiles_bulk(ally_codes)
+
+        async def one(code):
+            if database.get_player_units_age_seconds(code) is not None:
+                if refresh:
+                    try:
+                        await activity_diff.refresh_player_units(self.bot.comlink, code)
+                    except Exception as e:
+                        print(f"⚠️ [Юнит] обновление {code}: {e!r}")
+                units = await asyncio.to_thread(database.get_player_units, code)
+                if units:
+                    name = (profiles.get(code) or {}).get("name") or names.get(code) or code
+                    age = database.get_player_units_age_seconds(code)
+                    return {"name": name, "rosterUnit": list(units.values())}, (None if refresh else age)
+            try:
+                return await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(code)), None
+            except Exception as e:
+                print(f"⚠️ [Юнит] get_player {code}: {e!r}")
+                return None, None
+
+        results = await asyncio.gather(*(one(c) for c in ally_codes))
+        return [r[0] for r in results], [r[1] for r in results]
 
 def setup(bot):
     bot.add_cog(UnitForecastCog(bot))

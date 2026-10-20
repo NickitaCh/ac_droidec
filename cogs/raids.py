@@ -4,6 +4,7 @@
 история копится там. Логика — services/raids.py, страница — веб /raids."""
 
 import asyncio
+import io
 
 import disnake
 from disnake.ext import commands, tasks
@@ -13,6 +14,7 @@ import guild_resolver
 from cogs.violations import autocomplete_players
 from services import feature_flags, guild_compare
 from services import raids as rs
+from services import raids_image
 
 PLAYER_HISTORY = 12  # рейдов в истории игрока
 
@@ -113,24 +115,23 @@ class RaidsCog(commands.Cog):
                 "❌ Рейд не найден." if рейд else "Сохранённых рейдов пока нет — бот записывает их после завершения рейда."
             )
             return
-        scores = database.get_raid_scores(guild_id, [raid["key"]])
-        s = rs.summarize(raid, scores)
-        lines = [f"{i}. **{p['name']}** — {rs.millions(p['score'])}" for i, p in enumerate(s["ranked"], 1)]
-        head = (f"Всего {rs.millions(s['total'])} · участников {s['count']} · "
-                f"в среднем {rs.millions(s['avg'])} · медиана {rs.millions(s['median'])}")
-        embed = disnake.Embed(
-            title=f"⚔️ {rs.raid_name(raid['raid_id'])} — {rs.end_date(raid['end_time'])}",
-            description=head + "\n\n" + "\n".join(lines),
-            color=disnake.Color.dark_red(),
-        )
-        if порог is not None:
-            limit = порог * 1_000_000
+        idx = results.index(raid)
+        older = results[idx + 1:]
+        prev = next((r for r in older if r["raid_id"] == raid["raid_id"]), older[0] if older else None)
+        scores = database.get_raid_scores(guild_id, [raid["key"]] + ([prev["key"]] if prev else []))
+        s = rs.summarize(raid, [x for x in scores if x["raid_key"] == raid["key"]])
+        prev_scores = {x["player_id"]: x["score"] for x in scores if prev and x["raid_key"] == prev["key"]}
+        limit = int(порог * 1_000_000) if порог is not None else None
+
+        lines = [f"⚔️ **{rs.raid_name(raid['raid_id'])} — {rs.end_date(raid['end_time'])}**: всего {rs.millions(s['total'])}"
+                 f" · участников {s['count']} · в среднем {rs.millions(s['avg'])} · медиана {rs.millions(s['median'])}"]
+        if limit is not None:
             below = [p for p in s["ranked"] if p["score"] < limit]
-            text = "\n".join(f"**{p['name']}** — {rs.millions(p['score'])}" for p in reversed(below)) or "Таких нет 👍"
-            embed.add_field(name=f"Ниже {rs.millions(limit)} ({len(below)})", value=text[:1024], inline=False)
-        if len(embed.description) > 4096:
-            embed.description = embed.description[:4090] + "\n…"
-        await inter.edit_original_response(embed=embed)
+            lines.append(f"Ниже {rs.millions(limit)} ({len(below)}): "
+                         + (", ".join(f"{p['name']} — {rs.millions(p['score'])}" for p in reversed(below)) or "таких нет 👍"))
+        png = await asyncio.to_thread(raids_image.render, raid, s["ranked"], prev, prev_scores, limit)
+        await inter.edit_original_response(content="\n".join(lines)[:2000],
+                                           file=disnake.File(io.BytesIO(png), filename=f"raid_{raid['raid_id']}.png"))
 
     @raid_group.sub_command(name="игрок", description="История очков игрока в рейдах")
     async def raid_player(

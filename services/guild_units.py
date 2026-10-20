@@ -1,0 +1,127 @@
+"""Юнит по всей гильдии и готовность гильдии к цели «Руководства» — по кэшу ежечасного
+синка ростеров (player_unit_cache), без запросов в игру.
+
+- unit_report — у кого есть юнит и на какой прокачке (как C3PO `g unit`): звёзды, гир/
+  реликвия, ГМ, зеты и омикроны, ульта; у кого нет.
+- readiness — готовность к цели «Руководства» (как WookieeBot `guild ready journey`):
+  по каждому игроку уровень каждого требуемого юнита и общий процент.
+
+Логика без Discord: команды — cogs/guild_units.py, картинка готовности —
+services/guild_units_image.py."""
+
+import copy
+
+import database
+from services import journey_guide, unit_forecast
+from services.player_profile import _skill_counts
+
+
+def _members(guild_id: int) -> list[tuple[str, str]]:
+    """[(ally_code, имя)] текущего состава."""
+    return [(code, name) for code, name in database.get_roster_by_player_id(guild_id).values() if code]
+
+
+def level_of(unit: dict) -> dict:
+    lv = unit_forecast.current_level(unit)
+    return {"stars": lv["stars"], "gear": lv["gear"], "relic": lv["relic"]}
+
+
+def level_text(level: dict, is_ship: bool = False, with_stars: bool = False) -> str:
+    if is_ship:
+        return f"{level['stars']}★"
+    core = f"R{level['relic']}" if level["relic"] is not None else f"G{level['gear']}"
+    if with_stars or level["stars"] < 7:
+        return f"{level['stars']}★ {core}"
+    return core
+
+
+def unit_report(guild_id: int, base_id: str, stat_calc) -> dict:
+    """{name, is_ship, members, owners: [{name, ally_code, stars, gear, relic, gp, zetas,
+    omicrons, ultimate}], missing: [имя]} — владельцы по убыванию прокачки и ГМ."""
+    members = _members(guild_id)
+    units = database.get_player_units_bulk([c for c, _ in members])
+    is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
+    skills = database.get_all_skill_tier_info()
+    owners, missing = [], []
+    for code, name in members:
+        roster = units.get(code) or {}
+        unit = roster.get(base_id)
+        if unit is None:
+            missing.append(name or code)
+            continue
+        try:
+            if is_ship:
+                crew = unit_forecast.ship_crew(stat_calc, list(roster.values()), base_id)
+                gp = unit_forecast._ship_snapshot(stat_calc, unit, crew)["gp"]
+            else:
+                gp = stat_calc.calc_char_gp(copy.deepcopy(unit))
+        except Exception:
+            gp = None
+        zetas, omicrons = _skill_counts(unit, skills)
+        owners.append({"name": name or code, "ally_code": code, **level_of(unit), "gp": gp,
+                       "zetas": zetas, "omicrons": len(omicrons), "ultimate": bool(unit.get("purchasedAbilityId"))})
+    owners.sort(key=lambda o: (-o["stars"], -(o["relic"] if o["relic"] is not None else -1), -o["gear"], -(o["gp"] or 0)))
+    missing.sort(key=str.lower)
+    return {"name": database.get_game_unit_name(base_id) or base_id, "is_ship": is_ship,
+            "members": len(members), "owners": owners, "missing": missing}
+
+
+# ---------------------------------------------------------------- готовность к «Руководству»
+
+def _fraction(unit: dict | None, target_type: str, target_value: str) -> float:
+    """Насколько юнит дошёл до цели, 0..1. Реликвия: гир + реликвия против 13 + N, звёзды
+    ниже 7 — пропорционально (реликвия открывается только на 7★)."""
+    if unit is None:
+        return 0.0
+    if journey_guide.unit_meets(unit, target_type, target_value):
+        return 1.0
+    target = int(target_value)
+    stars = unit.get("currentRarity", 0)
+    gear = unit.get("currentTier", 0)
+    relic = int(journey_guide.unit_progress(unit, "relic") or 0) if gear >= 13 else 0
+    if target_type == "stars":
+        return min(1.0, stars / target) if target else 1.0
+    if target_type == "gear":
+        return min(1.0, gear / target) if target else 1.0
+    if target_type == "relic":
+        return min(1.0, (gear + relic) / (13 + target)) * min(1.0, stars / 7)
+    return 0.0
+
+
+def readiness(guild_id: int, guide_base_id: str) -> dict:
+    """{guide: {base_id, name}, units: [{base_id, name, label}], players: [{name, pct,
+    ready, guide_level, cells: [{text, met}]}]} — игроки по убыванию готовности."""
+    requirements = database.get_journey_guide_requirements(guide_base_id, guild_id)
+    grouped = journey_guide.group_by_unit(requirements)
+    unit_ids = list(grouped)
+    names = database.get_game_unit_names(unit_ids + [guide_base_id])
+    types = database.get_unit_types(unit_ids + [guide_base_id])
+    members = _members(guild_id)
+    rosters = database.get_player_units_bulk([c for c, _ in members])
+
+    units = []
+    for unit_id, targets in grouped.items():
+        label = " ".join(journey_guide.short_label(t, v) for t, v in targets)
+        units.append({"base_id": unit_id, "name": names.get(unit_id, unit_id), "label": label})
+
+    players = []
+    for code, name in members:
+        roster = rosters.get(code)
+        if not roster:
+            continue
+        cells, fractions = [], []
+        for unit_id, targets in grouped.items():
+            unit = roster.get(unit_id)
+            met = unit is not None and all(journey_guide.unit_meets(unit, t, v) for t, v in targets)
+            fractions.append(min(_fraction(unit, t, v) for t, v in targets))
+            text = "—" if unit is None else level_text(level_of(unit), types.get(unit_id) == "ship")
+            cells.append({"text": text, "met": met})
+        guide_unit = roster.get(guide_base_id)
+        guide_level = level_text(level_of(guide_unit), types.get(guide_base_id) == "ship") if guide_unit else None
+        pct = sum(fractions) / len(fractions) * 100 if fractions else 0
+        players.append({"name": name or code, "ally_code": code, "pct": pct,
+                        "ready": all(c["met"] for c in cells), "guide_level": guide_level, "cells": cells})
+    players.sort(key=lambda p: (-int(p["pct"] + 1e-9), p["guide_level"] is None, p["name"].lower()))
+    return {"guide": {"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id),
+                      "is_ship": types.get(guide_base_id) == "ship"},
+            "units": units, "players": players}
