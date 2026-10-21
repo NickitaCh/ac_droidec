@@ -215,12 +215,16 @@ RAID_TEAMS = {
 
 def raid_teams(raid_id: str, allowed: list[str], names: dict) -> list[tuple[str, list[str]]]:
     """[(отряд, [base_id])] только из допущенных игрой персонажей; без известных отрядов —
-    один «Все персонажи» по алфавиту."""
+    один «Все персонажи»: сначала в порядке из PREVIEW_RAIDS (как у WookieeBot — по выходу
+    персонажей), остальные по алфавиту."""
+    raid_id = (raid_id or "").lower()
     allowed_set = set(allowed)
-    teams = [(name, [b for b in ids if b in allowed_set]) for name, ids in RAID_TEAMS.get((raid_id or "").lower(), [])]
+    teams = [(name, [b for b in ids if b in allowed_set]) for name, ids in RAID_TEAMS.get(raid_id, [])]
     teams = [(name, ids) for name, ids in teams if ids]
     placed = {b for _n, ids in teams for b in ids}
-    rest = sorted((b for b in allowed if b not in placed), key=lambda b: (names.get(b) or b).lower())
+    order = {b: i for i, b in enumerate(PREVIEW_RAIDS.get(raid_id, {}).get("units") or [])}
+    rest = sorted((b for b in allowed if b not in placed),
+                  key=lambda b: (order.get(b, len(order)), (names.get(b) or b).lower()))
     if rest:
         teams.append(("Прочие" if teams else "Все персонажи", rest))
     return teams
