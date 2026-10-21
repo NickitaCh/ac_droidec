@@ -143,14 +143,15 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
 # Анонсированные, но ещё не вышедшие рейды — состав со swgoh.gg (по Community Update CG,
 # 2026-09-28; «может измениться»). Как только рейд появится в данных игры (узел GUILD/RAIDS
 # с почти тем же составом), запись отсюда скрывается сама — тогда её можно удалить.
-# Ещё не вышедших в игре юнитов (Мандалорец и Грогу, новый B1, рейнджер Адельфи) тут нет.
+# Ещё не вышедших в игре юнитов (Мандалорец и Грогу, новый B1) тут нет; у WookieeBot они
+# пустые колонки GLMANDO и B1BATTLEDROID перед рейнджером Адельфи.
 PREVIEW_RAIDS = {
     "droiddestruction": {
         "units": ["4LOM", "ZUCKUSS", "STORMTROOPERLUKE", "IG90", "ASAJJDARKDISCIPLE", "INQUISITORBARRISS",
                   "YODACHEWBACCA", "VADERDUELSEND", "MAULHATEFUELED", "KLEYA", "VEL", "CINTA", "DEDRAMEERO",
                   "MAJORPARTAGAZ", "KXSECURITYDROID", "CASSIANUNDERCOVER", "CARSONTEVA", "R5D4", "BISHOP",
                   "RANGERZEB", "GOPHERANTS", "REMNANTSNOWCOMMANDER", "RACCOON", "MARAJADESKYWALKER", "YODADSV",
-                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR"],
+                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR", "ADELPHIRANGER"],
         "min_stars": 4,
         "preview": "до выхода рейда (ноябрь 2026), состав по анонсу — может измениться",
         # Уровень сложности: (порог входа для КАЖДОГО юнита отряда, очки за бой); 5 попыток.

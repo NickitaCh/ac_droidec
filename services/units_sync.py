@@ -51,20 +51,30 @@ _NOT_FACTION_PREFIXES = ("role_", "raid_", "shipclass_", "eventonly", "character
 # свой (например по PVE_-префиксу — он ловит не все случаи, "_DUEL"/"_GLEVENT" NPC-варианты
 # без этого префикса тоже встречаются) — так game_units всегда содержит ровно те baseId,
 # для которых StatCalc реально умеет считать статы (см. stat_engine.build_stat_calc), не
-# больше и не меньше.
+# больше и не меньше. Исключение — юниты без записи 1★ (см. _canonical_units).
 _RARITY_ENUM = {
     "ONE_STAR": 1, "TWO_STAR": 2, "THREE_STAR": 3, "FOUR_STAR": 4,
     "FIVE_STAR": 5, "SIX_STAR": 6, "SEVEN_STAR": 7,
 }
 
 
-def _is_canonical_playable_unit(unit: dict) -> bool:
-    if not unit.get("obtainable", False) or unit.get("obtainableTime") != "0":
-        return False
+def _rarity(unit: dict) -> int:
     rarity = unit.get("rarity", 0)
-    if isinstance(rarity, str):
-        rarity = _RARITY_ENUM.get(rarity, 0)
-    return rarity == 1
+    return _RARITY_ENUM.get(rarity, 0) if isinstance(rarity, str) else rarity
+
+
+def _canonical_units(units_list: list) -> list:
+    """По одной записи на baseId: rarity 1, а если её нет — младшая. 2026-10-21: у части
+    новых юнитов (ADELPHIRANGER) записи с 1★ нет вовсе — строгий rarity == 1 молча
+    выкидывал их из game_units (не было имени/портрета, например в /рейд готовность)."""
+    best: dict[str, dict] = {}
+    for unit in units_list:
+        bid = unit.get("baseId")
+        if not bid or not unit.get("obtainable", False) or unit.get("obtainableTime") != "0":
+            continue
+        if bid not in best or _rarity(unit) < _rarity(best[bid]):
+            best[bid] = unit
+    return list(best.values())
 
 
 def _factions(categories: list, units_list: list, units_to_db: dict, loc_kv: dict) -> dict:
@@ -73,9 +83,9 @@ def _factions(categories: list, units_list: list, units_to_db: dict, loc_kv: dic
     wanted = {c["id"]: c.get("descKey") for c in categories
               if c.get("visible") and not c["id"].startswith(_NOT_FACTION_PREFIXES)}
     members: dict[str, list] = {}
-    for unit in units_list:
+    for unit in _canonical_units(units_list):
         bid = unit.get("baseId")
-        if not _is_canonical_playable_unit(unit) or bid not in units_to_db or units_to_db[bid][1] != "character":
+        if bid not in units_to_db or units_to_db[bid][1] != "character":
             continue
         for cat in unit.get("categoryId") or []:
             if cat in wanted:
@@ -113,14 +123,14 @@ def _ability_names(abilities_list: list, loc_kv: dict) -> dict:
 
 def _omicron_skills_by_base_id(skills_list: list, units_list: list) -> dict:
     """{base_id: [skill_id, ...]} для каждого КАНОНИЧЕСКОГО игрового юнита (тот же фильтр
-    _is_canonical_playable_unit, что и основной цикл sync_units при заполнении game_units),
+    _canonical_units, что и основной цикл sync_units при заполнении game_units),
     у которого хотя бы одна реферснутая (unit.skillReference) способность имеет тир с
     isOmicronTier=True.
 
     2026-08-31: раньше (и в старой _omicron_capable_base_ids, которую эта функция заменила)
     фильтра не было — перебирались ВСЕ записи units_list, включая NPC/PVE-only боевые копии
     персонажей (свой отдельный baseId, "PVE_"-префиксы, "_DUEL"/"_GLEVENT"-суффиксы и т.п.,
-    см. комментарий у _is_canonical_playable_unit) и лишние rarity-варианты. Раньше это было
+    см. комментарий у _canonical_units) и лишние rarity-варианты. Раньше это было
     безобидно: результат только флипал game_units.has_omicron, а game_units и так содержит
     только канонические baseId — NPC-копии там просто не находили строку и no-op'ались.
     Но /omicron/phrases читает unit_omicron_skills НАПРЯМУЮ (без такого неявного join),
@@ -134,9 +144,7 @@ def _omicron_skills_by_base_id(skills_list: list, units_list: list) -> dict:
         if any(t.get("isOmicronTier") for t in (sk.get("tier") or []))
     }
     result = {}
-    for unit in units_list:
-        if not _is_canonical_playable_unit(unit):
-            continue
+    for unit in _canonical_units(units_list):
         bid = unit.get("baseId")
         if not bid:
             continue
@@ -268,9 +276,7 @@ async def sync_units(comlink) -> int:
     selftags = {}
     galactic_legends = []
     gear_recipes = {}
-    for unit in units_list:
-        if not _is_canonical_playable_unit(unit):
-            continue
+    for unit in _canonical_units(units_list):
         bid = unit.get('baseId')
         if not bid:
             continue
@@ -329,7 +335,7 @@ async def sync_units(comlink) -> int:
                                            include_pve_units=False)).get("territoryBattleDefinition") or []
         campaigns = (await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.CAMPAIGN_FLAG),
                                              include_pve_units=False)).get("campaign") or []
-        canonical = [u for u in units_list if _is_canonical_playable_unit(u) and u.get("baseId") in units_to_db]
+        canonical = [u for u in _canonical_units(units_list) if u.get("baseId") in units_to_db]
         covert = tb_covert.parse(tb_defs, campaigns, canonical)
         if covert:
             database.set_bot_state(tb_covert.STATE_KEY, json.dumps(covert, ensure_ascii=False), guild_id=0)
