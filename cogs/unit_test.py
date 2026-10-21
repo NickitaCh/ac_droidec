@@ -21,7 +21,9 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import stat_engine
-from cogs.unit_forecast import LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit
+from cogs.unit_forecast import (
+    LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_ally_codes, autocomplete_character_unit,
+)
 from services import toon, toon_image, unit_forecast
 
 COMPARE_SLOTS = 4
@@ -98,7 +100,7 @@ class CompareSetupView(disnake.ui.View):
 
     def status_text(self) -> str:
         chosen = self.chosen()
-        lines = [f"**Сравнение** — выберите до {COMPARE_SLOTS} игроков любым способом и нажмите «Сравнить»."]
+        lines = [f"**Сравнение** — выберите до {COMPARE_SLOTS} игроков любым способом (можно одного, без себя) и нажмите «Сравнить»."]
         lines.append("Выбрано: " + (", ".join(name for name, _ in chosen) if chosen else "никого")
                      + f" ({len(chosen)}/{COMPARE_SLOTS})")
         extras = [x for x, on in (("вы", self.with_self), ("Rokamora", self.rokamora)) if on]
@@ -199,9 +201,12 @@ class UnitTestCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
+        игрок: str = commands.Param(default=None, description="Чужой игрок: игрок гильдии из списка или любой код союзника (пусто → вы)",
+                                    autocomplete=autocomplete_ally_codes),
+        участник: disnake.User = commands.Param(default=None, description="Чужой игрок: участник Discord (по его /регистрация)"),
         юнит2: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         юнит3: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
-        сравнение: bool = commands.Param(default=False, description="Выбрать игроков для сравнения в панели (до 4)"),
+        сравнение: bool = commands.Param(default=False, description="Панель выбора игроков для сравнения (до 4, вы — по кнопке «С собой»)"),
         звёзды: int = commands.Param(default=None, ge=1, le=7, description="Пересчитать на звёзды (1–7)"),
         гир: int = commands.Param(default=None, ge=1, le=13, description="Пересчитать на гир (1–13)"),
         релик: int = commands.Param(default=None, ge=0, le=10, description="Пересчитать на реликвию (0–10), ставит G13"),
@@ -216,8 +221,8 @@ class UnitTestCog(commands.Cog):
                 await inter.edit_original_response(f"❌ Персонаж «{base_id}» не найден — выберите его из списка.")
                 return
         ship = any(types.get(b) == "ship" for b in base_ids)
-        if ship and (len(base_ids) > 1 or сравнение):
-            await inter.edit_original_response("❌ Корабль — только один и без сравнения: у кораблей нет модулей.")
+        if ship and (len(base_ids) > 1 or сравнение or (игрок and участник)):
+            await inter.edit_original_response("❌ Корабль — только один и для одного игрока: у кораблей нет модулей.")
             return
         error = unit_forecast.validate(звёзды, None if ship else гир, None if ship else релик)
         if error:
@@ -226,24 +231,44 @@ class UnitTestCog(commands.Cog):
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
             return
-        if ship:
+        params = {"base_ids": base_ids, "звёзды": звёзды, "гир": гир, "релик": релик, "альт": альт, "обновить": обновить}
+
+        # «игрок»/«участник» — посмотреть чужого игрока без панели (вопрос в треде 2026-10-21:
+        # «я только чужого мЛюка пробить хотел»); со «сравнением» — уже выбраны в панели.
+        others = []
+        if игрок:
+            code = guild_resolver.normalize_ally_code(игрок)
+            if code is None:
+                await inter.edit_original_response(f"❌ «{игрок}» — не код союзника: нужно 9 цифр или игрок из списка.")
+                return
+            others.append(str(code))
+        if участник:
+            reg = (database.get_user_registration(str(участник.id), guild_id=guild_id)
+                   or database.get_any_main_registration(str(участник.id)))
+            if not reg:
+                await inter.edit_original_response(
+                    f"❌ {участник.mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника в «игрок».")
+                return
+            others.append(str(reg[0]))
+        others = list(dict.fromkeys(others))
+
+        if сравнение:
+            view = CompareSetupView(self, inter, guild_id, params)
+            view.codes = others
+            await inter.edit_original_response(content=view.status_text(), view=view)
+            return
+        if others:
+            codes = others
+        else:
             code, error = self.own_code(inter, guild_id, альт)
             if error:
                 await inter.edit_original_response(error)
                 return
-            await self.bot.get_cog("UnitForecastCog").send_forecast(inter, code, base_ids[0], звёзды, None, None)
+            codes = [code]
+        if ship:
+            await self.bot.get_cog("UnitForecastCog").send_forecast(inter, codes[0], base_ids[0], звёзды, None, None)
             return
-        params = {"base_ids": base_ids, "звёзды": звёзды, "гир": гир, "релик": релик, "альт": альт, "обновить": обновить}
-
-        if сравнение:
-            view = CompareSetupView(self, inter, guild_id, params)
-            await inter.edit_original_response(content=view.status_text(), view=view)
-            return
-        code, error = self.own_code(inter, guild_id, альт)
-        if error:
-            await inter.edit_original_response(error)
-            return
-        await self.render_card(inter, None, [code], params)
+        await self.render_card(inter, None, codes, params)
 
     async def render_card(self, inter, component_inter, ally_codes: list[str], params: dict):
         """Карточка в канал: из панели — отдельным сообщением (панель эфемерная), иначе — ответом."""
