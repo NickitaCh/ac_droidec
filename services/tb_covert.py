@@ -152,6 +152,19 @@ def reward_text(m: dict, short: bool = False) -> str:
     return ", ".join(parts)
 
 
+def reward_compact(m: dict) -> str:
+    """«15 Mk3», «1 оск. «Третья сестра»» — для строки сводки /тб оз_готовность."""
+    parts = []
+    for item_id, qty in m.get("reward") or []:
+        if item_id.startswith("unitshard_"):
+            bid = item_id[len("unitshard_"):]
+            parts.append(f"{qty} оск. «{database.get_game_unit_names([bid]).get(bid, bid)}»")
+        else:
+            mk = {"Mk I": "Mk1", "Mk II": "Mk2", "Mk III": "Mk3"}.get(CURRENCY_NAMES.get(item_id), item_id)
+            parts.append(f"{qty} {mk}")
+    return ", ".join(parts)
+
+
 COMPLETE_PREFIX = "covert_complete_mission_"
 
 

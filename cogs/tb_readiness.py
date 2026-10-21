@@ -73,17 +73,18 @@ class TBReadinessCog(commands.Cog):
             return
         cfg = database.get_guild_config(guild_id) or {}
         title = "Спецмиссии ВИ" + (f", {tb_covert.planet_ru(planet)}" if planet else "") + (f", этап {этап}" if этап else "")
-        lines, total, phase = [], len(r["players"]), None
+        # «1 · Кореллия — 46 из 50 (15 Mk3)»; персонаж — только если на планете этапа
+        # две миссии (Татуин), иначе строки не различить.
+        lines, total = [], len(r["players"])
+        same = {}
+        for m in r["missions"]:
+            same[(m["phase"], m["planet"])] = same.get((m["phase"], m["planet"]), 0) + 1
         for m, u, n in zip(r["missions"], r["units"], r["ready_counts"]):
-            if m["phase"] != phase:
-                phase = m["phase"]
-                lines.append(f"### Этап {phase}")
-            dot = "🟢" if n >= total * 0.9 else "🟡" if n >= total * 0.5 else "🔴"
-            extra = [x for x in (tb_covert.reward_text(m, short=True),
-                                 f"🔓 {tb_covert.planet_ru(m['unlocks'])}" if m["unlocks"] else "") if x]
-            lines.append(f"{dot} **{tb_covert.planet_ru(m['planet'])}** · {u['name']} — **{n}/{total}**"
-                         + "".join(f" · {x}" for x in extra))
-        lines.append("-# проходят / всего · 🪙 жетоны событий гильдии за одну победу · 🔓 открывает планету")
+            who = f" ({u['name']})" if same[(m["phase"], m["planet"])] > 1 else ""
+            unlock = f" · открывает {tb_covert.planet_ru(m['unlocks'])}" if m["unlocks"] else ""
+            reward = tb_covert.reward_compact(m)
+            lines.append(f"{m['phase']} · {tb_covert.planet_ru(m['planet'])}{who} — {n} из {total}{unlock}"
+                         + (f" ({reward})" if reward else ""))
         png = await asyncio.to_thread(
             guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления", title,
             ["✓ — проходит · R5 — уровень обязательного персонажа ниже порога · — — его нет",
