@@ -25,7 +25,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import tb_order_image
+from services import tb_order_image, tb_projection
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -483,6 +483,19 @@ _fetch_plan_planets = tb_plan_reader.fetch_plan_planets
 # чего переключение этапа/раскрытие слота ощутимо тормозило (жалоба пользователя
 # 2026-08-28). Топ-N по релику — снизу всё равно никто не выбирает донора №25.
 PLATOON_CANDIDATES_LIMIT = 20
+
+
+@router.get("/tb/projection", response_class=HTMLResponse)
+async def tb_projection_page(request: Request, bonus: int = 1,
+                             user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    # ~50 игроков × ~300 юнитов из player_unit_cache — секунды, поэтому в потоке.
+    r = await asyncio.to_thread(tb_projection.build, user["guild_id"], bool(bonus))
+    return templates.TemplateResponse(request, "tb_projection.html", {
+        "user": user,
+        "r": r,
+        "bonus": bool(bonus),
+        "planet_ru": lambda p: (_PLANET_NAME_TO_RU.get(p) or p).capitalize(),
+    })
 
 
 @router.get("/tb/platoons", response_class=HTMLResponse)

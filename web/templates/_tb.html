@@ -8,7 +8,7 @@
         </div>
     </div>
     <nav class="hero-tabs">
-        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы")] %}
+        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/projection", "projection", "Проекция")] %}
             {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
         {% endfor %}
     </nav>
