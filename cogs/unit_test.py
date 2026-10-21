@@ -64,9 +64,10 @@ class CompareSetupView(disnake.ui.View):
         roster = sorted((cog.bot.guild_roster_caches.get(guild_id) or {}).items(), key=lambda kv: kv[0].lower())
         self.roster_names = {str(code): name for name, code in roster}
 
-        user_select = disnake.ui.UserSelect(placeholder="Участники Discord", min_values=0, max_values=COMPARE_SLOTS, row=0)
-        user_select.callback = self._on_users
-        self.add_item(user_select)
+        self.user_select = disnake.ui.UserSelect(placeholder="Участники Discord", min_values=0, max_values=COMPARE_SLOTS, row=0)
+        self.user_select.callback = self._on_users
+        self.add_item(self.user_select)
+        self.roster_selects: dict[int, disnake.ui.StringSelect] = {}
         for i, part in enumerate((roster[:25], roster[25:50])):
             if not part:
                 continue
@@ -76,20 +77,33 @@ class CompareSetupView(disnake.ui.View):
                 options=[disnake.SelectOption(label=name[:100], value=str(code)) for name, code in part],
             )
             select.callback = self._make_pick(i)
+            self.roster_selects[i] = select
             self.add_item(select)
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
         return interaction.author.id == self.author_id
 
+    def _keep_selection(self):
+        """Discord перерисовывает списки при каждом edit_message без отметок — выбранное
+        «исчезало», хотя было запомнено (тред 2026-10-21). Отмечаем выбранное заново."""
+        for idx, select in self.roster_selects.items():
+            for option in select.options:
+                option.default = option.value in self.picked[idx]
+        self.user_select.default_values = self.users or None
+
+    async def _refresh(self, interaction: disnake.MessageInteraction, extra: str = ""):
+        self._keep_selection()
+        await interaction.response.edit_message(content=self.status_text() + extra, view=self)
+
     def _make_pick(self, idx):
         async def cb(interaction: disnake.MessageInteraction):
             self.picked[idx] = list(interaction.values)
-            await interaction.response.edit_message(content=self.status_text(), view=self)
+            await self._refresh(interaction)
         return cb
 
     async def _on_users(self, interaction: disnake.MessageInteraction):
         self.users = list(interaction.resolved_values)
-        await interaction.response.edit_message(content=self.status_text(), view=self)
+        await self._refresh(interaction)
 
     def chosen(self) -> list[tuple[str, str]]:
         """[(подпись, источник)] — что выбрано сейчас, для строки статуса."""
@@ -117,14 +131,14 @@ class CompareSetupView(disnake.ui.View):
         self.with_self = not self.with_self
         button.label = f"С собой: {'да' if self.with_self else 'нет'}"
         button.style = disnake.ButtonStyle.primary if self.with_self else disnake.ButtonStyle.secondary
-        await interaction.response.edit_message(content=self.status_text(), view=self)
+        await self._refresh(interaction)
 
     @disnake.ui.button(label="Rokamora: нет", style=disnake.ButtonStyle.secondary, row=3)
     async def rokamora_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         self.rokamora = not self.rokamora
         button.label = f"Rokamora: {'да' if self.rokamora else 'нет'}"
         button.style = disnake.ButtonStyle.primary if self.rokamora else disnake.ButtonStyle.secondary
-        await interaction.response.edit_message(content=self.status_text(), view=self)
+        await self._refresh(interaction)
 
     @disnake.ui.button(label="Сравнить", style=disnake.ButtonStyle.success, row=4)
     async def go_button(self, button, interaction: disnake.MessageInteraction):
@@ -176,8 +190,7 @@ class CodesModal(disnake.ui.Modal):
             code = guild_resolver.normalize_ally_code(raw)
             (codes if code else bad).append(code or raw)
         self.view.codes = codes
-        await interaction.response.edit_message(content=self.view.status_text()
-                                                + (f"\n❌ Не коды союзника: {', '.join(bad)}" if bad else ""), view=self.view)
+        await self.view._refresh(interaction, f"\n❌ Не коды союзника: {', '.join(bad)}" if bad else "")
 
 
 class UnitTestCog(commands.Cog):
