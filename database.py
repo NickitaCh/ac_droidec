@@ -3025,6 +3025,23 @@ def get_tb_player_summary_for_events(event_ids):
     conn.close()
     return rows
 
+def get_tb_zone_data_for_events(event_ids) -> list:
+    """[(event_id, member_id, player_name, zone_data_json)] — расшифровка по планетам для
+    services/tb_missions.py (бои и спецмиссии по игрокам)."""
+    if not event_ids:
+        return []
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    placeholders = ",".join("?" * len(event_ids))
+    cursor.execute(f"""
+        SELECT event_id, member_id, player_name, zone_data_json
+        FROM tb_player_detail WHERE event_id IN ({placeholders})
+    """, list(event_ids))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
 def get_tb_player_detail(event_id, member_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -7767,3 +7784,61 @@ def get_any_main_registration(discord_id: str):
     row = cursor.fetchone()
     conn.close()
     return row
+
+
+# =====================================================================
+# КАЛЬКУЛЯТОР ЗАВОЕВАНИЯ (веб /conquest, services/conquest.py): ручные отметки подвигов
+# игрока — по Discord-аккаунту, отдельно на каждое Завоевание и сложность.
+# =====================================================================
+def _ensure_conquest_marks_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conquest_marks (
+            discord_id TEXT NOT NULL,
+            conquest_id TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            feats_json TEXT NOT NULL,
+            battle_keycards INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (discord_id, conquest_id, difficulty)
+        )
+    """)
+
+
+def get_conquest_marks(discord_id: str, conquest_id: str, difficulty: str) -> tuple[set, int]:
+    """(отмеченные id подвигов, ключ-карты за бои)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_conquest_marks_table(cursor)
+    cursor.execute(
+        "SELECT feats_json, battle_keycards FROM conquest_marks WHERE discord_id = ? AND conquest_id = ? AND difficulty = ?",
+        (str(discord_id), conquest_id, difficulty),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return (set(json.loads(row[0])), row[1]) if row else (set(), 0)
+
+
+def get_conquest_last_difficulty(discord_id: str, conquest_id: str) -> str | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_conquest_marks_table(cursor)
+    cursor.execute(
+        "SELECT difficulty FROM conquest_marks WHERE discord_id = ? AND conquest_id = ? ORDER BY updated_at DESC LIMIT 1",
+        (str(discord_id), conquest_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_conquest_marks(discord_id: str, conquest_id: str, difficulty: str, feats: list, battle_keycards: int) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_conquest_marks_table(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO conquest_marks (discord_id, conquest_id, difficulty, feats_json, battle_keycards, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        (str(discord_id), conquest_id, difficulty, json.dumps(sorted(feats)), battle_keycards),
+    )
+    conn.commit()
+    conn.close()

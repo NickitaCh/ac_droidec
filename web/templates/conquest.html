@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Завоевание — AC Droidec{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-dark">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Калькулятор{% if period %} · {{ period }}{% endif %}</p>
+                <h1>Завоевание{% call ui.help() %}<p>Отмечайте подвиги, которые выполнили или точно выполните, — страница сложит ключ-карты и покажет, какой сундук вы получите и что в нём.</p><p>Ключ-карты игра даёт и за бои, а не только за подвиги: сколько — видно в игре, впишите их в поле «за бои». Подвиги и сундуки берутся из игры автоматически, отметки — ваши, ручные (без входа в аккаунт игры их не прочитать). Сохраняются за вашим Discord-аккаунтом, отдельно для каждой сложности.</p>{% endcall %}</h1>
+            </div>
+        </div>
+        {% if state %}
+            <nav class="hero-tabs">
+                {% for d in state.difficulties %}
+                    {% if d.key == diff.key %}<strong>{{ d.name }}</strong>{% else %}<a href="/conquest?diff={{ d.key }}">{{ d.name }}</a>{% endif %}
+                {% endfor %}
+            </nav>
+            <div class="hero-kpis">
+                <div class="hero-kpi"><span class="hero-kpi-value" id="cq-total">{{ result.total }}</span><span class="hero-kpi-label">ключ-карт</span></div>
+                <div class="hero-kpi hero-kpi-good"><span class="hero-kpi-value" id="cq-crate">{{ result.crate.n if result.crate else "—" }}</span><span class="hero-kpi-label">сундук из {{ diff.crates|length }}</span></div>
+                <div class="hero-kpi"><span class="hero-kpi-value" id="cq-need">{{ result.need if result.next else "—" }}</span><span class="hero-kpi-label" id="cq-need-label">{% if result.next %}до сундука {{ result.next.n }}{% else %}все сундуки{% endif %}</span></div>
+            </div>
+        {% endif %}
+    </section>
+
+    {% if not state %}
+        <div class="panel"><p class="muted">Данных о Завоевании пока нет — они появятся после ежедневного обновления справочника, когда в игре объявят следующее Завоевание.</p></div>
+    {% else %}
+    {% if not started %}<p class="muted">Это Завоевание ещё не началось — подвиги уже известны, можно планировать заранее.</p>{% endif %}
+    <form method="post" action="/conquest/save" id="cq-form">
+        <input type="hidden" name="diff" value="{{ diff.key }}">
+        <div class="panel">
+            <div class="panel-title">
+                <span>Сундуки{% if diff.min_gp %} <span class="muted">· от {{ ui.num(diff.min_gp) }} ГМ</span>{% endif %}</span>
+                <span class="panel-hint">подвиги дают до {{ result.max_feats }} ключ-карт</span>
+            </div>
+            <p>
+                <label>Ключ-карты за бои: <input type="number" name="battles" id="cq-battles" min="0" max="10000" value="{{ battles }}" style="width: 7em"></label>
+                <span class="muted">· за подвиги: <strong id="cq-feats">{{ result.feat_keycards }}</strong></span>
+                <button type="submit" class="btn">Сохранить</button>
+            </p>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th class="num">Сундук</th><th class="num">Ключ-карт</th><th>Осколки</th><th>Остальное</th></tr></thead>
+                    <tbody>
+                        {% for c in crates %}
+                            <tr class="cq-crate" data-min="{{ c.min }}" data-n="{{ c.n }}"{% if result.crate and result.crate.n == c.n %} style="outline: 2px solid var(--accent, #4ade80);"{% endif %}>
+                                <td class="num"><strong>{{ c.n }}</strong></td>
+                                <td class="num">{{ c.min }}</td>
+                                <td>{% for name, qty in c.shards %}<span class="nowrap">{{ name }} ×{{ qty }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
+                                <td>{% if c.other %}<details><summary class="muted">{{ c.other|length }} предм.</summary><span class="muted">{% for name, qty in c.other %}{{ name }} ×{{ ui.num(qty) }}{% if not loop.last %}; {% endif %}{% endfor %}</span></details>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% for title, feats in groups %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>{{ title }}</span>
+                    <span class="panel-hint"><span class="cq-group-sum">{{ feats|selectattr("id", "in", done)|sum(attribute="keycards") }}</span> из {{ feats|sum(attribute="keycards") }}</span>
+                </div>
+                <div class="table-scroll">
+                    <table class="data">
+                        <tbody>
+                            {% for f in feats %}
+                                <tr>
+                                    <td style="width: 2em"><input type="checkbox" class="cq-feat" name="feat" value="{{ f.id }}" data-k="{{ f.keycards }}" {% if f.id in done %}checked{% endif %} id="f-{{ f.id }}"></td>
+                                    <td><label for="f-{{ f.id }}"><strong>{{ f.name }}</strong>{% if f.kind != "event" and f.kind != "sector" %} <span class="badge badge-neutral">{{ kind_labels[f.kind] }}</span>{% endif %}<br><span class="muted">{{ f.desc }}</span></label></td>
+                                    <td class="num nowrap">{{ f.keycards }} 🔑</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endfor %}
+        <p><button type="submit" class="btn">Сохранить отметки</button></p>
+    </form>
+    <script>
+    (function () {
+        const form = document.getElementById("cq-form");
+        const crates = Array.from(document.querySelectorAll(".cq-crate"));
+        function recalc() {
+            let feats = 0;
+            form.querySelectorAll(".cq-feat:checked").forEach(cb => { feats += parseInt(cb.dataset.k, 10) || 0; });
+            const battles = Math.max(0, parseInt(document.getElementById("cq-battles").value, 10) || 0);
+            const total = feats + battles;
+            let reached = null, next = null;
+            crates.forEach(tr => {
+                const min = parseInt(tr.dataset.min, 10);
+                if (total >= min) reached = tr; else if (!next) next = tr;
+                tr.style.outline = "";
+            });
+            if (reached) reached.style.outline = "2px solid var(--accent, #4ade80)";
+            document.getElementById("cq-feats").textContent = feats;
+            document.getElementById("cq-total").textContent = total;
+            document.getElementById("cq-crate").textContent = reached ? reached.dataset.n : "—";
+            document.getElementById("cq-need").textContent = next ? (parseInt(next.dataset.min, 10) - total) : "—";
+            document.getElementById("cq-need-label").textContent = next ? ("до сундука " + next.dataset.n) : "все сундуки";
+            form.querySelectorAll(".panel").forEach(panel => {
+                const sum = panel.querySelector(".cq-group-sum");
+                if (!sum) return;
+                let s = 0;
+                panel.querySelectorAll(".cq-feat:checked").forEach(cb => { s += parseInt(cb.dataset.k, 10) || 0; });
+                sum.textContent = s;
+            });
+        }
+        form.addEventListener("change", recalc);
+        form.addEventListener("input", recalc);
+    })();
+    </script>
+    {% endif %}
+{% endblock %}

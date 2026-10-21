@@ -25,7 +25,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import tb_order_image, tb_projection
+from services import tb_missions, tb_order_image, tb_projection
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -483,6 +483,27 @@ _fetch_plan_planets = tb_plan_reader.fetch_plan_planets
 # чего переключение этапа/раскрытие слота ощутимо тормозило (жалоба пользователя
 # 2026-08-28). Топ-N по релику — снизу всё равно никто не выбирает донора №25.
 PLATOON_CANDIDATES_LIMIT = 20
+
+
+@router.get("/tb/missions", response_class=HTMLResponse)
+async def tb_missions_page(request: Request, tab: str = "covert",
+                           user: dict = Depends(feature_flags.require_feature("tb_reports"))):
+    events = database.get_recent_tb_events(guild_id=user["guild_id"])  # старые -> новые
+    if tab not in ("covert", "rates", "strikes"):
+        tab = "covert"
+    ctx = {"user": user, "tab": tab, "events": events, "r": None, "selected_event_id": None}
+    if events:
+        event_ids = [e[0] for e in events]
+        selected = _parse_event_id(request)
+        selected = selected if selected in event_ids else event_ids[-1]
+        ctx["selected_event_id"] = selected
+        if tab == "covert":
+            ctx["r"] = await asyncio.to_thread(tb_missions.covert_event, user["guild_id"], selected, selected == event_ids[-1])
+        elif tab == "rates":
+            ctx["r"] = await asyncio.to_thread(tb_missions.covert_rates, user["guild_id"], events)
+        else:
+            ctx["r"] = await asyncio.to_thread(tb_missions.strikes_event, user["guild_id"], selected)
+    return templates.TemplateResponse(request, "tb_missions.html", ctx)
 
 
 @router.get("/tb/projection", response_class=HTMLResponse)

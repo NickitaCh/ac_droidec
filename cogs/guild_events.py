@@ -1003,6 +1003,23 @@ class GuildEvents(commands.Cog):
             title = f"📊 Итоги: {self._event_label(event[1], event[2])}"
             return title, self._format_stats_table(title, stats)
 
+        if kind in ("covert", "covert_rate", "strikes"):
+            from services import tb_missions  # лениво — цикл импортов через tb_covert, см. CLAUDE.md
+            if kind == "covert":
+                is_latest = bool(events) and event[0] == events[-1][0]  # events — от старых к новым
+                r = tb_missions.covert_event(guild_id, event[0], with_skipped=is_latest)
+                title = f"🎯 Спецмиссии: {self._event_label(event[1], event[2])}"
+                return title, tb_missions.covert_event_text(r, title)
+            if kind == "strikes":
+                r = tb_missions.strikes_event(guild_id, event[0])
+                title = f"⚔️ Бои: {self._event_label(event[1], event[2])}"
+                return title, tb_missions.strikes_event_text(r, title)
+            r = tb_missions.covert_rates(guild_id, events)
+            if not r["players"]:
+                return None, "Нет сохранённых заходов в спецмиссии."
+            title = f"🎯 Спецмиссии: % побед за последние {len(events)} ТБ"
+            return title, tb_missions.covert_rates_text(r, title)
+
         if kind == "player":
             row = database.get_tb_player_detail(event[0], member_id)
             if not row:
@@ -1053,6 +1070,9 @@ TB_REPORT_KINDS = [
     ("player", "Игрок за ТБ", "По фазам и планетам"),
     ("compare", "Гильдия: сравнение по последним ТБ", "С пометкой просевших"),
     ("player_compare", "Игрок: сравнение по последним ТБ", "По фазам"),
+    ("covert", "Спецмиссии за ТБ", "Кто прошёл, проиграл, мог, но не пошёл"),
+    ("covert_rate", "Спецмиссии: % побед", "По всем сохранённым ТБ, худшие сверху"),
+    ("strikes", "Бои за ТБ", "Боёв и волн по планетам, недобитые волны"),
 ]
 
 
@@ -1092,7 +1112,7 @@ class TBReportPanel(disnake.ui.View):
         return interaction.author.id == self.author_id
 
     def _needs_event(self):
-        return self.kind in ("event", "player")
+        return self.kind in ("event", "player", "covert", "strikes")
 
     def _needs_player(self):
         return self.kind in ("player", "player_compare")

@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% import "_tb.html" as tbui %}
+{% import "_ui.html" as ui %}
+{% block title %}Бои и спецмиссии ТБ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {% call tbui.tb_hero("Бои и спецмиссии", "missions") %}{% endcall %}
+
+    {% set ev_q = "&event_id=" ~ selected_event_id if selected_event_id and events and selected_event_id != events[-1][0] else "" %}
+    <nav class="hero-links" style="margin: 0 0 1em;">
+        {% for key, label in [("covert", "Спецмиссии за ТБ"), ("rates", "Спецмиссии: % побед"), ("strikes", "Бои за ТБ")] %}
+            {% if key == tab %}<strong class="hero-link">{{ label }}</strong>{% else %}<a class="hero-link" href="/tb/missions?tab={{ key }}{{ ev_q if key != 'rates' else '' }}">{{ label }}</a>{% endif %}
+        {% endfor %}
+    </nav>
+
+    {% if not events %}
+        <div class="panel"><p class="muted">Пока нет сохранённых ТБ — данные появятся после первой завершённой битвы.</p></div>
+    {% else %}
+
+    {% macro event_picker() %}
+        {% if events|length > 1 %}
+            <form method="get" class="tb-event-picker">
+                <input type="hidden" name="tab" value="{{ tab }}">
+                <select name="event_id" onchange="this.form.submit()">
+                    {% for event_id, completed_at in events|reverse %}
+                        <option value="{{ event_id }}" {% if event_id == selected_event_id %}selected{% endif %}>{{ completed_at[:10] }}{% if event_id == events[-1][0] %} · последняя{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <noscript><button type="submit">Показать</button></noscript>
+            </form>
+        {% else %}{{ events[-1][1][:10] }}{% endif %}
+    {% endmacro %}
+
+    {% if tab == "covert" %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Спецмиссии{% call ui.help() %}<p>Кто прошёл каждую спецмиссию (✓), кто зашёл и проиграл (✗) и — только для последней ТБ — кто мог пройти по своему нынешнему составу, но не пошёл (💤). Порог «мог» — тот же, что в <code>/тб оз_готовность</code>.</p><p>Показаны только миссии, в которые кто-то заходил. Данные — итог ТБ из игры, сохраняется после окончания битвы. В Discord — <code>/тб_отчет</code> → «Спецмиссии за ТБ».</p>{% endcall %}</span>
+                <span class="panel-hint">{{ event_picker() }}</span>
+            </div>
+            {% if not r.cols %}
+                <p class="muted">В эту ТБ в спецмиссии никто не заходил.</p>
+            {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Игрок</th>
+                            {% for c in r.cols %}<th class="num" title="{{ c.lead }} · {{ c.threshold }}">{{ c.label }}<br><span class="muted">{{ c.threshold }}</span></th>{% endfor %}
+                            <th class="num">✓</th><th class="num">✗</th>{% if r.with_skipped %}<th class="num">💤</th>{% endif %}
+                        </tr>
+                        <tr>
+                            <td class="muted">прошли / проиграли{% if r.with_skipped %} / не пошли{% endif %}</td>
+                            {% for t in r.totals %}<td class="num nowrap">{{ t.won }} / {{ t.failed }}{% if r.with_skipped %} / {{ t.skipped }}{% endif %}</td>{% endfor %}
+                            <td></td><td></td>{% if r.with_skipped %}<td></td>{% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in r.players %}
+                            <tr>
+                                <td class="nowrap">{{ p.name }}</td>
+                                {% for c in p.cells %}
+                                    <td class="num">{% if c == "won" %}<span class="badge badge-ok">✓</span>{% elif c == "failed" %}<span class="badge badge-danger">✗</span>{% elif c == "skipped" %}<span class="badge badge-warn">💤</span>{% else %}<span class="muted">·</span>{% endif %}</td>
+                                {% endfor %}
+                                <td class="num">{{ p.won }}</td>
+                                <td class="num">{% if p.failed %}<strong>{{ p.failed }}</strong>{% else %}0{% endif %}</td>
+                                {% if r.with_skipped %}<td class="num">{% if p.skipped %}<strong>{{ p.skipped }}</strong>{% else %}0{% endif %}</td>{% endif %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+
+    {% elif tab == "rates" %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>% побед в спецмиссиях{% call ui.help() %}<p>Сколько спецмиссий игрок прошёл из тех, в которые заходил, по всем сохранённым ТБ (до {{ events|length }}). Сверху — с худшим процентом. По ТБ — «побед/заходов», от старых к новым.</p><p>Выбывшие из гильдии не показаны. В Discord — <code>/тб_отчет</code> → «Спецмиссии: % побед».</p>{% endcall %}</span>
+                <span class="panel-hint">ТБ: {% for _id, at in events %}{{ at[5:10] }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+            </div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Игрок</th><th class="num">% побед</th><th class="num">Побед / заходов</th>{% for _id, at in events %}<th class="num">{{ at[5:10] }}</th>{% endfor %}<th>Проигрыши</th></tr></thead>
+                    <tbody>
+                        {% for p in r.players %}
+                            <tr>
+                                <td class="nowrap">{{ p.name }}</td>
+                                <td class="num">{% if p.pct >= 100 %}<span class="badge badge-ok">100%</span>{% elif p.pct >= 85 %}<span class="badge badge-warn">{{ p.pct|round|int }}%</span>{% else %}<span class="badge badge-danger">{{ p.pct|round|int }}%</span>{% endif %}</td>
+                                <td class="num">{{ p.won }} / {{ p.attempts }}</td>
+                                {% for x in p.per_event %}<td class="num nowrap">{% if x %}{% if x[0] < x[1] %}<strong>{{ x[0] }}/{{ x[1] }}</strong>{% else %}{{ x[0] }}/{{ x[1] }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endfor %}
+                                <td>{% if p.fails %}<span class="muted">{{ p.fails|join("; ") }}</span>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title"><span>По миссиям</span><span class="panel-hint">за все сохранённые ТБ</span></div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Спецмиссия</th><th class="num">Порог</th><th class="num">Побед / заходов</th><th class="num">%</th></tr></thead>
+                    <tbody>
+                        {% for m in r.missions if m.attempts %}
+                            <tr><td>{{ m.label }}</td><td class="num">{{ m.threshold }}</td><td class="num">{{ m.won }} / {{ m.attempts }}</td><td class="num">{{ m.pct|round|int }}%</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    {% else %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Бои{% call ui.help() %}<p>В клетке — «боёв / волн отбито» на планете. Игра хранит бои только по планете целиком, без разбивки по отдельному бою, поэтому «отбил полностью» (✓) или «недобито N волн» видно только у тех, кто сходил во все бои планеты. У остальных — просто сколько боёв и волн.</p><p>Число боёв и волн на планете — из игровых данных. Сверху — у кого больше недобитых волн. В Discord — <code>/тб_отчет</code> → «Бои за ТБ».</p>{% endcall %}</span>
+                <span class="panel-hint">{{ event_picker() }}</span>
+            </div>
+            {% if not r.zones %}
+                <p class="muted">В эту ТБ в бои никто не заходил.</p>
+            {% else %}
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr>
+                        <th>Игрок</th>
+                        {% for z in r.zones %}<th class="num">{{ z.label }}{% if z.battles %}<br><span class="muted">{{ z.battles }} б. · {{ z.waves }} в.</span>{% endif %}</th>{% endfor %}
+                        <th class="num">Боёв</th><th class="num">Волн</th><th class="num">Недобито</th>
+                    </tr></thead>
+                    <tbody>
+                        {% for p in r.players %}
+                            <tr>
+                                <td class="nowrap">{{ p.name }}</td>
+                                {% for c in p.cells %}
+                                    <td class="num nowrap">{% if c is none %}<span class="muted">·</span>{% else %}{{ c.attempts }} / {{ c.waves }}{% if c.full %} <span class="badge badge-ok">✓</span>{% elif c.lost %} <span class="badge badge-danger">−{{ c.lost }}</span>{% endif %}{% endif %}</td>
+                                {% endfor %}
+                                <td class="num">{{ p.attempts }}</td>
+                                <td class="num">{{ p.waves }}</td>
+                                <td class="num">{% if p.lost %}<strong>{{ p.lost }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    {% endif %}
+    {% endif %}
+{% endblock %}

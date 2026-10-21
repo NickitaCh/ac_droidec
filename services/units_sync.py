@@ -339,8 +339,17 @@ async def sync_units(comlink) -> int:
         covert = tb_covert.parse(tb_defs, campaigns, canonical)
         if covert:
             database.set_bot_state(tb_covert.STATE_KEY, json.dumps(covert, ensure_ascii=False), guild_id=0)
+        from services import tb_missions
+        strikes = tb_missions.parse_strikes(tb_defs, campaigns)
+        if strikes:
+            database.set_bot_state(tb_missions.STRIKE_STATE_KEY, json.dumps(strikes), guild_id=0)
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить спецмиссии ТБ: {e}")
+    try:
+        from services import conquest
+        await conquest.sync(comlink, loc_ru_kv)
+    except Exception as e:
+        print(f"⚠️ [Справочник] Не удалось обновить подвиги Завоевания: {e}")
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление
