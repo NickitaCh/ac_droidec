@@ -145,3 +145,32 @@ def raid_entry_units(raid_id: str) -> dict | None:
     raw = database.get_bot_state(RAID_UNITS_STATE, guild_id=0)
     data = json.loads(raw) if raw else {}
     return data.get((raid_id or "").lower())
+
+
+# Отряды рейда — как у WookieeBot raid ready (в данных игры деления на отряды нет: только
+# общая категория raid_<рейд>_allowed). Порядок — как в их таблице. Персонаж, допущенный
+# игрой, но не попавший ни в один отряд (новый в рейде), уходит в «Прочие».
+RAID_TEAMS = {
+    "order66": [
+        ("Империя (Таркин и клоны)", ["GRANDMOFFTARKIN", "APPO", "OPERATIVE", "DISGUISEDCLONETROOPER", "SCORCH"]),
+        ("Бракованная партия 2.0", ["OMEGAS3", "HUNTERS3", "WRECKERS3", "CROSSHAIRS3", "BATCHERS3"]),
+        ("Авангард джедаев", ["JEDIMASTERMACEWINDU", "JOCASTANU", "VANGUARDTEMPLEGUARD", "DEPABILLABA", "AAYLASECURA",
+                              "BARRISSOFFEE", "EETHKOTH", "IMAGUNDI", "JEDIKNIGHTCONSULAR", "JEDIKNIGHTGUARDIAN",
+                              "KELLERANBEQ", "KITFISTO", "LUMINARAUNDULI", "PLOKOON", "QUIGONJINN", "SHAAKTI"]),
+        ("Пираты", ["GLHONDO", "SM33", "ENFYSNEST", "HONDO", "SANASTARROS", "ITHANO", "QUIGGOLD", "KIX", "BRUTUS",
+                    "VANE", "CAPTAINSILVO", "MAZKANATA"]),
+    ],
+}
+
+
+def raid_teams(raid_id: str, allowed: list[str], names: dict) -> list[tuple[str, list[str]]]:
+    """[(отряд, [base_id])] только из допущенных игрой персонажей; без известных отрядов —
+    один «Все персонажи» по алфавиту."""
+    allowed_set = set(allowed)
+    teams = [(name, [b for b in ids if b in allowed_set]) for name, ids in RAID_TEAMS.get((raid_id or "").lower(), [])]
+    teams = [(name, ids) for name, ids in teams if ids]
+    placed = {b for _n, ids in teams for b in ids}
+    rest = sorted((b for b in allowed if b not in placed), key=lambda b: (names.get(b) or b).lower())
+    if rest:
+        teams.append(("Прочие" if teams else "Все персонажи", rest))
+    return teams

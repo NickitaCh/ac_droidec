@@ -56,6 +56,18 @@ async def autocomplete_raid_kinds(inter: disnake.ApplicationCommandInteraction, 
     return [disnake.OptionChoice(name=rs.raid_name(k), value=k) for k in kinds if string.lower() in rs.raid_name(k).lower()][:25]
 
 
+async def autocomplete_raid_teams(inter: disnake.ApplicationCommandInteraction, string: str):
+    raid = inter.filled_options.get("рейд")
+    if not raid:
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
+        raid = last[0]["raid_id"] if last else "order66"
+    entry = rs.raid_entry_units(raid) or {"units": []}
+    teams = rs.raid_teams(raid, entry["units"], database.get_game_unit_names(entry["units"]))
+    return [disnake.OptionChoice(name=f"{name} ({len(ids)})"[:100], value=name) for name, ids in teams
+            if string.lower() in name.lower()][:25]
+
+
 class RaidsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -172,6 +184,7 @@ class RaidsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
         рейд: str = commands.Param(default=None, description="Рейд (пусто → текущий)", autocomplete=autocomplete_raid_kinds),
+        отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
     ):
         await inter.response.defer()
         guild_id = await guild_resolver.require_feature(inter, "raids")
@@ -186,19 +199,26 @@ class RaidsCog(commands.Cog):
             return
         target = ("relic", str(реликвия)) if реликвия > 0 else ("gear", "13")
         names = database.get_game_unit_names(entry["units"])
-        grouped = {u: [target] for u in sorted(entry["units"], key=lambda b: (names.get(b) or b).lower())}
+        teams = rs.raid_teams(рейд, entry["units"], names)
+        if отряд:
+            teams = [t for t in teams if t[0] == отряд]
+            if not teams:
+                await inter.edit_original_response("❌ Такого отряда в этом рейде нет — выберите из списка.")
+                return
+        grouped = {u: [target] for _name, ids in teams for u in ids}
         r = await asyncio.to_thread(guild_units.readiness_grid, guild_id, grouped)
+        r["groups"] = [(name, len(ids)) for name, ids in teams]
         if not r["players"]:
             await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
             return
         cfg = database.get_guild_config(guild_id) or {}
         level = f"R{реликвия}" if реликвия > 0 else "G13"
-        title = f"Готовность к рейду «{rs.raid_name(рейд)}» ({level})"
+        title = f"Готовность к рейду «{rs.raid_name(рейд)}»" + (f", {отряд}" if отряд else "") + f" ({level})"
         png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия",
                                       f"в рейд пускают с {entry['min_stars']}★ · данные ежечасного обновления", title)
         ready = sum(1 for p in r["players"] if p["ready"])
         await inter.edit_original_response(
-            content=(f"**{rs.raid_name(рейд)}** — {len(entry['units'])} допущенных персонажей, порог {level}: "
+            content=(f"**{rs.raid_name(рейд)}**" + (f", {отряд}" if отряд else "") + f" — {len(grouped)} персонажей, порог {level}: "
                      f"готовы {ready} из {len(r['players'])}"),
             file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{рейд}.png"),
         )

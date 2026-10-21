@@ -39,7 +39,9 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
     gw = GUIDE_W if guide else 0
     width = PAD * 2 + PCT_W + NAME_W + gw + CELL_W * len(units)
     title_h = 64
-    height = PAD + title_h + HEAD_H + ROW_H * len(players) + 100
+    groups = r.get("groups") if len(r.get("groups") or []) > 1 else None
+    band_h = 30 if groups else 0
+    height = PAD + title_h + band_h + HEAD_H + ROW_H * len(players) + 100
     img = Image.new("RGB", (width, height), BG)
     draw = ImageDraw.Draw(img)
 
@@ -51,6 +53,17 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
 
     # Шапка: цель, затем требуемые юниты с порогом.
     gx = PAD + PCT_W + NAME_W
+    if groups:  # подписи отрядов над их колонками (рейд)
+        x = gx + gw
+        for k, (name, count) in enumerate(groups):
+            w = count * CELL_W
+            draw.rectangle((x + 2, y, x + w - 2, y + band_h - 6), fill=(70, 58, 30) if k % 2 == 0 else (40, 52, 80))
+            label = name
+            while label and draw.textlength(label, font=_font(15, True)) > w - 10:
+                label = label[:-1]
+            draw.text((x + w // 2, y + (band_h - 6) // 2), label, font=_font(15, True), fill=TEXT, anchor="mm")
+            x += w
+        y += band_h
     if guide:
         portrait = _portrait(guide["base_id"], PIC)
         if portrait is not None:
