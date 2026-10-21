@@ -51,8 +51,7 @@ async def autocomplete_raids(inter: disnake.ApplicationCommandInteraction, strin
 
 
 async def autocomplete_raid_kinds(inter: disnake.ApplicationCommandInteraction, string: str):
-    raw = database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0)
-    kinds = sorted(json.loads(raw)) if raw else []
+    kinds = rs.raid_kinds()
     return [disnake.OptionChoice(name=rs.raid_name(k), value=k) for k in kinds if string.lower() in rs.raid_name(k).lower()][:25]
 
 
@@ -222,11 +221,18 @@ class RaidsCog(commands.Cog):
         level = f"R{реликвия}" if реликвия > 0 else "G13"
         title = f"Готовность к рейду «{rs.raid_name(рейд)}»" + (f", {отряд}" if отряд else "") + f" ({level})"
         png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия",
-                                      f"в рейд пускают с {entry['min_stars']}★ · данные ежечасного обновления", title)
+                                      f"в рейд пускают с {entry['min_stars']}★ · "
+                                      + (f"предварительно: {entry['preview']}" if entry.get("preview") else "данные ежечасного обновления"),
+                                      title)
         ready = sum(1 for p in r["players"] if p["ready"])
+        content = (f"**{rs.raid_name(рейд)}**" + (f", {отряд}" if отряд else "") + f" — {len(grouped)} персонажей, порог {level}: "
+                   f"готовы {ready} из {len(r['players'])}")
+        if entry.get("tiers"):
+            content += f"\n-# Уровни (порог для всех юнитов отряда, очки за бой): {rs.tiers_text(entry)}"
+        if entry.get("preview"):
+            content += f"\n-# 🔮 Предварительно — {entry['preview']}."
         await inter.edit_original_response(
-            content=(f"**{rs.raid_name(рейд)}**" + (f", {отряд}" if отряд else "") + f" — {len(grouped)} персонажей, порог {level}: "
-                     f"готовы {ready} из {len(r['players'])}"),
+            content=content,
             file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{рейд}.png"),
         )
 

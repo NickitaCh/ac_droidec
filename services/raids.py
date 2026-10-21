@@ -27,6 +27,7 @@ RAID_NAMES = {
     "rancor_challenge": "Логово ранкора (испытание)",
     "aat": "Танковый рейд",
     "sith_raid": "Тройной рейд ситхов",
+    "droiddestruction": "Уничтожение дроидов",
 }
 
 
@@ -139,11 +140,46 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
     return result
 
 
+# Анонсированные, но ещё не вышедшие рейды — состав со swgoh.gg (по Community Update CG,
+# 2026-09-28; «может измениться»). Как только рейд появится в данных игры (узел GUILD/RAIDS
+# с почти тем же составом), запись отсюда скрывается сама — тогда её можно удалить.
+# Ещё не вышедших в игре юнитов (Мандалорец и Грогу, новый B1, рейнджер Адельфи) тут нет.
+PREVIEW_RAIDS = {
+    "droiddestruction": {
+        "units": ["4LOM", "ZUCKUSS", "STORMTROOPERLUKE", "IG90", "ASAJJDARKDISCIPLE", "INQUISITORBARRISS",
+                  "YODACHEWBACCA", "VADERDUELSEND", "MAULHATEFUELED", "KLEYA", "VEL", "CINTA", "DEDRAMEERO",
+                  "MAJORPARTAGAZ", "KXSECURITYDROID", "CASSIANUNDERCOVER", "CARSONTEVA", "R5D4", "BISHOP",
+                  "RANGERZEB", "GOPHERANTS", "REMNANTSNOWCOMMANDER", "RACCOON", "MARAJADESKYWALKER", "YODADSV",
+                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR"],
+        "min_stars": 4,
+        "preview": "до выхода рейда (ноябрь 2026), состав по анонсу — может измениться",
+        # Уровень сложности: (порог входа для КАЖДОГО юнита отряда, очки за бой); 5 попыток.
+        "tiers": [("4★", 300_000), ("G12", 450_000), ("R2", 600_000), ("R4", 900_000),
+                  ("R6", 1_200_000), ("R8", 1_800_000), ("R9", 2_700_000), ("R10", 3_600_000)],
+    },
+}
+
+
 def _raid_units_data() -> dict:
     import json
     import database
     raw = database.get_bot_state(RAID_UNITS_STATE, guild_id=0)
-    return json.loads(raw) if raw else {}
+    data = json.loads(raw) if raw else {}
+    for raid_id, entry in PREVIEW_RAIDS.items():
+        units = set(entry["units"])
+        released = raid_id in data or any(len(units & set(v["units"])) >= 0.8 * len(units) for v in data.values())
+        if not released:
+            data[raid_id] = entry
+    return data
+
+
+def raid_kinds() -> list[str]:
+    return sorted(_raid_units_data())
+
+
+def tiers_text(entry: dict) -> str:
+    """«T0 4★ 0,3 млн · … · T7 R10 3,6 млн» — уровни сложности рейда, если известны."""
+    return " · ".join(f"T{i} {gate} {millions(points)}" for i, (gate, points) in enumerate(entry.get("tiers") or []))
 
 
 def raid_entry_units(raid_id: str) -> dict | None:
