@@ -167,7 +167,8 @@ def covert_event(guild_id: int, event_id: int, with_skipped: bool) -> dict:
 def covert_rates(guild_id: int, events: list) -> dict:
     """% побед в спецмиссиях по всем сохранённым ТБ. events — [(event_id, completed_at)]
     от старых к новым. {events, players: [{name, attempts, won, pct, per_event: [(won,
-    attempts)|None], fails: [(подпись миссии, сколько раз)]}], missions: [{label, attempts, won, pct}]}."""
+    attempts)|None], battles: [{won: [подпись], failed: [подпись]}|None] — то же по битвам с
+    названиями миссий, fails: [(подпись миссии, сколько раз)]}], missions: [{label, attempts, won, pct}]}."""
     event_ids = [e[0] for e in events]
     data = _load(guild_id, event_ids)
     cols = _covert_mission_cols(tb_covert.missions())
@@ -175,9 +176,11 @@ def covert_rates(guild_id: int, events: list) -> dict:
     for idx, event_id in enumerate(event_ids):
         for member_id, (name, zone_data) in data.get(event_id, {}).items():
             p = by_member.setdefault(member_id, {"name": name, "attempts": 0, "won": 0,
-                                                 "per_event": [None] * len(event_ids), "fails": {}})
+                                                 "per_event": [None] * len(event_ids),
+                                                 "battles": [None] * len(event_ids), "fails": {}})
             p["name"] = name  # последнее известное имя
             won = attempts = 0
+            won_labels, failed_labels = [], []
             for i, col in enumerate(cols):
                 res = _covert_result(zone_data, col["parts"])
                 if res is None:
@@ -187,10 +190,13 @@ def covert_rates(guild_id: int, events: list) -> dict:
                 if res == "won":
                     won += 1
                     mission_stats[i]["won"] += 1
+                    won_labels.append(col["label"])
                 else:
                     p["fails"][col["label"]] = p["fails"].get(col["label"], 0) + 1
+                    failed_labels.append(col["label"])
             if attempts:
                 p["per_event"][idx] = (won, attempts)
+                p["battles"][idx] = {"won": won_labels, "failed": failed_labels}
                 p["attempts"] += attempts
                 p["won"] += won
     roster = database.get_roster_by_player_id(guild_id)

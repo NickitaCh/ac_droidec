@@ -2628,3 +2628,8 @@ form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
 .tbm-history summary { cursor: pointer; font-size: 0.95em; }
 .tbm-label-good { color: var(--status-good); font-weight: 600; }
 .tbm-table td:first-child { min-width: 0; overflow-wrap: anywhere; }
+.tbm-battles { list-style: none; margin: 0.4em 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.45em; }
+.tbm-battle { padding: 0.3em 0 0.3em 0.7em; border-left: 3px solid var(--border-strong); }
+.tbm-battle-ok { border-left-color: var(--status-good); }
+.tbm-battle-bad { border-left-color: var(--status-critical); }
+.tbm-battle-head { margin-bottom: 0.1em; }

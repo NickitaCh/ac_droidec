@@ -120,7 +120,19 @@
                                 <div class="tbm-name">{{ p.name }}</div>
                                 {% if p.fails %}<div class="tbm-small"><span class="tbm-label-bad">Проиграл:</span> {% for label, n in p.fails %}{{ label }}{% if n > 1 %} — {{ times(n) }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
                                 <details class="tbm-history tbm-small"><summary class="muted">по битвам</summary>
-                                    {% for x in p.per_event %}{% set at = events[loop.index0][1] %}<div>{{ at[8:10] }}.{{ at[5:7] }} — {% if x %}прошёл {{ x[0] }} из {{ x[1] }}{% if x[0] < x[1] %} <span class="tbm-label-bad">(проиграл {{ x[1] - x[0] }})</span>{% endif %}{% else %}<span class="muted">не заходил</span>{% endif %}</div>{% endfor %}
+                                    <ol class="tbm-battles">
+                                    {% for i in range(events|length - 1, -1, -1) %}
+                                        {% set at = events[i][1] %}{% set x = p.per_event[i] %}{% set b = p.battles[i] %}
+                                        <li class="tbm-battle{% if x and x[0] < x[1] %} tbm-battle-bad{% elif x %} tbm-battle-ok{% endif %}">
+                                            <div class="tbm-battle-head"><strong>ТБ {{ at[8:10] }}.{{ at[5:7] }}.{{ at[:4] }}</strong>
+                                                {% if x %} — прошёл {{ x[0] }} из {{ x[1] }}{% if x[0] < x[1] %}, <span class="tbm-label-bad">проиграл {{ x[1] - x[0] }}</span>{% else %}, <span class="tbm-label-good">без проигрышей</span>{% endif %}
+                                                {% else %} — <span class="muted">в спецмиссии не заходил</span>{% endif %}
+                                            </div>
+                                            {% if b and b.failed %}<div><span class="tbm-label-bad">✗ Проиграл:</span> {{ b.failed|join(", ") }}</div>{% endif %}
+                                            {% if b and b.won %}<div class="muted"><span class="tbm-label-good">✓ Прошёл:</span> {{ b.won|join(", ") }}</div>{% endif %}
+                                        </li>
+                                    {% endfor %}
+                                    </ol>
                                 </details>
                             </td>
                             <td class="num nowrap">{{ p.won }} из {{ p.attempts }}</td>
