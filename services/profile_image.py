@@ -54,7 +54,13 @@ def _int(n) -> str:
 
 
 def _dec(n, digits: int = 1) -> str:
-    return f"{n:.{digits}f}".replace(".", ",") if n is not None else "—"
+    """Десятичная запятая без хвостовых нулей: 16,00 → 16, 8,50 → 8,5."""
+    if n is None:
+        return "—"
+    text = f"{n:.{digits}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",")
 
 
 def compact(n) -> str:

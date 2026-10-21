@@ -1,4 +1,5 @@
-"""/юнит_тест — пробный вариант /юнит по предложениям из треда «Гайд по АС Боту» (NicolozZ,
+"""/юнит (до 2026-10-21 — /юнит_тест; заменила старые /юнит и /юнит_прогноз, их код оставлен
+для отката — LEGACY_UNIT_COMMANDS в cogs/unit_forecast.py). Пробный вариант /юнит по предложениям из треда «Гайд по АС Боту» (NicolozZ,
 Ricardo, 2026-10-20), чтобы сравнить с /юнит на практике:
 
 - /юнит и /юнит_прогноз в одной команде: «звёзды», «гир», «релик» пересчитывают выбранных
@@ -8,7 +9,8 @@ Ricardo, 2026-10-20), чтобы сравнить с /юнит на практи
   выбором до 4 игроков (люди из Discord, игроки гильдии из списка, коды союзника через окно
   ввода) и кнопками «С собой» / «Rokamora».
 
-Картинка — та же, что у /юнит (services/toon.py + toon_image.py)."""
+Картинка — services/toon.py + toon_image.py; корабль (один, без сравнения) — прогноз
+по звёздам, как старая /юнит_прогноз (UnitForecastCog.send_forecast)."""
 
 import asyncio
 import io
@@ -19,7 +21,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import stat_engine
-from cogs.unit_forecast import ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit
+from cogs.unit_forecast import LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit
 from services import toon, toon_image, unit_forecast
 
 COMPARE_SLOTS = 4
@@ -191,12 +193,12 @@ class UnitTestCog(commands.Cog):
             return None, "❌ Вы не зарегистрированы — используйте `/регистрация`."
         return reg[0], None
 
-    @commands.slash_command(name="юнит_тест",
-                            description="Проба: /юнит и /юнит_прогноз в одной команде, сравнение — через панель выбора игроков")
+    @commands.slash_command(name="юнит_тест" if LEGACY_UNIT_COMMANDS else "юнит",
+                            description="Персонаж: статы, модули, зеты; прогноз на другую прокачку; сравнение игроков")
     async def unit_test_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        юнит: str = commands.Param(description="Персонаж", autocomplete=autocomplete_character_unit),
+        юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
         юнит2: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         юнит3: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         сравнение: bool = commands.Param(default=False, description="Выбрать игроков для сравнения в панели (до 4)"),
@@ -213,15 +215,23 @@ class UnitTestCog(commands.Cog):
             if not database.get_game_unit_name(base_id):
                 await inter.edit_original_response(f"❌ Персонаж «{base_id}» не найден — выберите его из списка.")
                 return
-            if types.get(base_id) == "ship":
-                await inter.edit_original_response("❌ Здесь только персонажи: у кораблей нет модулей. Корабль — в `/юнит_прогноз`.")
-                return
-        error = unit_forecast.validate(звёзды, гир, релик)
+        ship = any(types.get(b) == "ship" for b in base_ids)
+        if ship and (len(base_ids) > 1 or сравнение):
+            await inter.edit_original_response("❌ Корабль — только один и без сравнения: у кораблей нет модулей.")
+            return
+        error = unit_forecast.validate(звёзды, None if ship else гир, None if ship else релик)
         if error:
             await inter.edit_original_response(f"❌ {error}")
             return
         guild_id = await guild_resolver.require_guild_id(inter)
         if guild_id is None:
+            return
+        if ship:
+            code, error = self.own_code(inter, guild_id, альт)
+            if error:
+                await inter.edit_original_response(error)
+                return
+            await self.bot.get_cog("UnitForecastCog").send_forecast(inter, code, base_ids[0], звёзды, None, None)
             return
         params = {"base_ids": base_ids, "звёзды": звёзды, "гир": гир, "релик": релик, "альт": альт, "обновить": обновить}
 
@@ -271,19 +281,18 @@ class UnitTestCog(commands.Cog):
                 players = [projected_player(p, base_ids, stars, gear, relic, suffix) for p in players]
 
         oldest = max((a for a in ages if a is not None), default=None)
-        note = (f"ежечасное обновление, {max(1, int(oldest) // 60)} мин назад («обновить» — свежие)"
-                if oldest is not None else "свежие данные из игры")
+        note = toon_image.freshness_note(oldest)
 
         def work():
-            return toon_image.render(toon.build(self.bot.stat_calc, players, base_ids), note)
+            return toon_image.render(toon.build(self.bot.stat_calc, players, base_ids))
 
         try:
             png = await asyncio.to_thread(work)
         except Exception as e:
-            print(f"⚠️ [Юнит тест] {base_ids} для {ally_codes}: {e!r}")
+            print(f"⚠️ [Юнит] {base_ids} для {ally_codes}: {e!r}")
             await reply("❌ Не удалось собрать карточку.")
             return
-        await reply(file=disnake.File(io.BytesIO(png), filename="toon.png"))
+        await reply(note, file=disnake.File(io.BytesIO(png), filename="toon.png"))
 
 
 def setup(bot):

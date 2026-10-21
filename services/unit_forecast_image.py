@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 from services.profile_image import (
     BG, GEAR_BG, GOLD, GREEN, LABEL_BG, LABEL_FG, MUTED, PANEL, PANEL_ALT, RED, RELIC_BG, TEXT,
-    _font, _int, _portrait,
+    _dec, _font, _int, _portrait,
 )
 
 W, PAD = 760, 16
@@ -18,9 +18,6 @@ PIC = 150
 # Шанс крита — с сотыми (как в игре), прочие проценты — с десятыми.
 _TWO_DECIMALS = {"Physical Critical Chance", "Special Critical Chance"}
 
-
-def _dec(n: float, digits: int) -> str:
-    return f"{n:.{digits}f}".replace(".", ",")
 
 
 def _value(name: str, stat: dict, percent: set) -> str:

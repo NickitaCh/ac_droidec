@@ -6,7 +6,12 @@ services/unit_forecast_image.py. Игрок — свежий get_player: сво�
 /юнит — персонажи игроков бок о бок (как HotBot `/toon`): services/toon.py + toon_image.py.
 Набор параметров — как у HotBot (5 юнитов, 4 участника Discord, 4 кода союзника, с_собой,
 обновить, альт) плюс includerokamora (просьба пользователя 2026-10-20). Ростер — из кэша
-ежечасного синка, если игрок в нём есть; «обновить» или игрок не из гильдии — из игры."""
+ежечасного синка, если игрок в нём есть; «обновить» или игрок не из гильдии — из игры.
+
+С 2026-10-21 в Discord обе команды заменены объединённой /юнит (cogs/unit_test.py, бывшая
+/юнит_тест — решение по треду). Код оставлен для отката: LEGACY_UNIT_COMMANDS = True вернёт
+/юнит и /юнит_прогноз, а новая команда снова станет /юнит_тест. После переключения — ручная
+синхронизация команд с Discord."""
 
 import asyncio
 import io
@@ -25,6 +30,9 @@ from services import activity_diff, toon, toon_image, unit_forecast, unit_foreca
 MSK = ZoneInfo("Europe/Moscow")
 ROKAMORA_ALLY_CODE = "365732527"  # includerokamora — просьба пользователя 2026-10-20
 MAX_CARD_PLAYERS = 10  # 1 + 4 участника + 4 кода + Rokamora — как у HotBot
+LEGACY_UNIT_COMMANDS = False
+# Имена старых команд, пока они выключены, — чтобы не занимать «юнит» у новой.
+RETIRED_UNIT_COMMANDS = () if LEGACY_UNIT_COMMANDS else ("юнит_старый", "юнит_прогноз")
 
 
 def _parse_bracket_id(text: str) -> str:
@@ -106,11 +114,16 @@ class UnitForecastCog(commands.Cog):
                     return
                 ally_code = registration[0]
 
+        await self.send_forecast(inter, ally_code, _parse_bracket_id(юнит), звёзды, гир, релик)
+
+    async def send_forecast(self, inter, ally_code: str, base_id: str, звёзды, гир, релик):
+        """Картинка прогноза одного юнита (персонажа или корабля) игрока — ответом на inter.
+        Общая для /юнит_прогноз и корабля в /юнит."""
+        is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
         if not await stat_engine.wait_stat_calc(self.bot, inter):
             await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
-        base_id = _parse_bracket_id(юнит)
         unit_name = database.get_game_unit_name(base_id)
         if not unit_name:
             await inter.edit_original_response("❌ Юнит не найден — выберите его из списка.")
@@ -148,7 +161,7 @@ class UnitForecastCog(commands.Cog):
             return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename=f"unit_{base_id}.png"))
 
-    @commands.slash_command(name="юнит", description="Персонажи игроков бок о бок: статы, модули, зеты и омикроны (как HotBot /toon)")
+    @commands.slash_command(name="юнит" if LEGACY_UNIT_COMMANDS else "юнит_старый", description="Персонажи игроков бок о бок: статы, модули, зеты и омикроны (как HotBot /toon)")
     async def unit_card_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -232,15 +245,11 @@ class UnitForecastCog(commands.Cog):
                 await inter.edit_original_response(f"❌ Не удалось получить игрока с кодом {code} из игры.")
                 return
 
-        oldest = max((age for age in ages if age is not None), default=None)
-        if oldest is None:
-            updated_at = datetime.now(MSK).strftime("%d.%m.%Y %H:%M МСК")
-        else:
-            updated_at = f"ежечасное обновление, {max(1, int(oldest) // 60)} мин назад («обновить» — свежие)"
+        note = toon_image.freshness_note(max((age for age in ages if age is not None), default=None))
 
         def work():
             rows = toon.build(self.bot.stat_calc, players, base_ids)
-            return toon_image.render(rows, updated_at)
+            return toon_image.render(rows)
 
         try:
             png = await asyncio.to_thread(work)
@@ -248,7 +257,7 @@ class UnitForecastCog(commands.Cog):
             print(f"⚠️ [Юнит] {base_ids} для {ally_codes}: {e!r}")
             await inter.edit_original_response("❌ Не удалось собрать карточку.")
             return
-        await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename="toon.png"))
+        await inter.edit_original_response(content=note, file=disnake.File(io.BytesIO(png), filename="toon.png"))
 
     async def _card_players(self, ally_codes: list[str], guild_id: int, refresh: bool) -> tuple[list, list]:
         """([сырой игрок {name, rosterUnit} | None], [возраст кэша в секундах | None = из игры]).
@@ -280,3 +289,5 @@ class UnitForecastCog(commands.Cog):
 
 def setup(bot):
     bot.add_cog(UnitForecastCog(bot))
+    for name in RETIRED_UNIT_COMMANDS:
+        bot.remove_slash_command(name)

@@ -12,13 +12,13 @@ from PIL import Image, ImageDraw
 
 from services import toon
 from services.profile_image import (
-    BG, GEAR_BG, GOLD, LABEL_FG, MUTED, PANEL, PANEL_ALT, RELIC_BG, TEXT, _font, _int, _portrait,
+    BG, GEAR_BG, GOLD, LABEL_FG, MUTED, PANEL, PANEL_ALT, RELIC_BG, TEXT, _dec, _font, _int, _portrait,
 )
 from services.unit_forecast import STAT_LABELS
 
 GAME_IMG = Path(__file__).resolve().parent.parent / "web" / "static" / "img" / "game"
 
-CARD_W, LEFT_W = 590, 300
+CARD_W, LEFT_W = 578, 300
 PAD, GAP = 12, 8
 TITLE_H = 34
 STAT_H = 25
@@ -34,7 +34,9 @@ LEVEL_BG = (36, 58, 82)
 
 # Цвет эмблемы сета по тиру мода E..A (как .mod-tier-N в style.css).
 TIER_COLORS = {1: (216, 221, 227), 2: (152, 253, 51), 3: (0, 189, 254), 4: (178, 123, 255), 5: (255, 204, 51)}
-# Позиция эмблемы сета на форме слота: (top, left, width) в долях — как .mod-shape-* в style.css.
+# Центр эмблемы сета на форме слота: (top, left, width) в долях — как .mod-shape-* в style.css;
+# размер у всех слотов один (SET_SIDE), иначе эмблемы разного размера (замечание из треда 2026-10-21).
+SET_SIDE = 0.30
 SET_POS = {
     "square": (0.25, 0.40, 0.36), "arrow": (0.23, 0.49, 0.27), "diamond": (0.35, 0.35, 0.32),
     "triangle": (0.46, 0.38, 0.25), "circle": (0.35, 0.35, 0.32), "cross": (0.37, 0.35, 0.29),
@@ -46,9 +48,6 @@ _TWO_DECIMALS = {"Physical Critical Chance", "Special Critical Chance"}
 _PERCENT = {"Physical Critical Chance", "Special Critical Chance", "Critical Damage", "Potency", "Tenacity", "Armor", "Resistance"}
 _NO_MODS = {"Armor Penetration", "Resistance Penetration"}
 
-
-def _dec(n: float, digits: int) -> str:
-    return f"{n:.{digits}f}".replace(".", ",")
 
 
 def _stat_text(name: str, stat: dict, speed_secondary: int) -> str:
@@ -88,10 +87,11 @@ def _mod_icon(slot_key: str, set_id: int, gold: bool, tier: int, size: int):
     emblem = _image(f"sets/set-{set_id}.webp")
     if emblem is not None:
         top, left, width = SET_POS.get(slot_key, SET_POS["diamond"])
-        side = max(1, int(size * width))
+        side = max(1, int(size * SET_SIDE))
+        cx, cy = size * (left + width / 2), size * (top + width / 2)
         alpha = emblem.getchannel("A").resize((side, side), Image.LANCZOS)
         colored = Image.new("RGBA", (side, side), TIER_COLORS.get(tier, TIER_COLORS[5]) + (255,))
-        icon.paste(colored, (int(size * left), int(size * top)), alpha)
+        icon.paste(colored, (int(cx - side / 2), int(cy - side / 2)), alpha)
     return icon
 
 
@@ -171,15 +171,15 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
     draw.text((lx + LEFT_W // 2, y_stats + 15), f"ГМ {_int(card['gp'])}" if card["gp"] else "ГМ —",
               font=_font(19, True), fill=TEXT, anchor="mm")
     y_stats += 32
-    label_w = 128
+    label_w = 140
     for i, name in enumerate(toon.STATS):
         ry = y_stats + i * STAT_H
         fill = PANEL_ALT if i % 2 else PANEL
         draw.rectangle((lx, ry, lx + LEFT_W - 1, ry + STAT_H - 1), fill=fill)
         if best.get(name) == col:
             draw.rectangle((lx + label_w, ry, lx + LEFT_W - 1, ry + STAT_H - 1), fill=BEST_BG)
-        draw.text((lx + label_w - 6, ry + STAT_H // 2), STAT_LABELS[name], font=_font(15, condensed=True),
-                  fill=MUTED, anchor="rm")
+        draw.text((lx + label_w - 6, ry + STAT_H // 2), _fit(draw, STAT_LABELS[name], _font(15, condensed=True), label_w - 16),
+                  font=_font(15, condensed=True), fill=MUTED, anchor="rm")
         text = _fit(draw, _stat_text(name, card["stats"][name], card["speed_secondary"]),
                     _font(15, True, condensed=True), LEFT_W - label_w - 10)
         draw.text((lx + label_w + 6, ry + STAT_H // 2), text, font=_font(15, True, condensed=True), fill=TEXT, anchor="lm")
@@ -202,7 +202,7 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
         draw.text((rx + 37, my + 9), dots, font=_font(14, True), fill=GOLD if (mod["rarity"] or 0) >= 6 else TEXT, anchor="mm")
         if mod.get("level") and mod["level"] < 15:
             draw.text((rx + 37, my + MOD_H - 8), f"ур. {mod['level']}", font=_font(12), fill=MISSING_FG, anchor="mm")
-        tx = rx + 76
+        tx = rx + 68
         line_h = 16
         primary = mod["primary"]
         if primary:
@@ -214,7 +214,7 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
             color = ROLL_COLORS.get(rolls, TEXT)
             draw.text((tx + 8, sy), str(rolls), font=_font(14, True, condensed=True), fill=color, anchor="ma")
             label = f"{_mod_value(sec)} {toon.MOD_STAT_RU.get(sec['stat_id'], sec['name'])}"
-            draw.text((tx + 22, sy), _fit(draw, label, _font(14, True, condensed=True), rw - 100), font=_font(14, True, condensed=True),
+            draw.text((tx + 22, sy), _fit(draw, label, _font(14, True, condensed=True), rw - (tx + 22 - rx) - 2), font=_font(14, True, condensed=True),
                       fill=color if rolls >= 4 else TEXT, anchor="la")
 
     ay = y + 6 * MOD_H
@@ -236,18 +236,25 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
         name = a["name"] + (f" ({a['mode']})" if a["omicron_tier"] is not None and a["mode"] else "")
         font = _font(14, True, condensed=True)
         missing = (a["zeta_tier"] is not None and not a["zeta"]) or (a["omicron_tier"] is not None and not a["omicron"])
-        text_w = rw - (ix - rx) - (30 if missing else 10)  # место под ✗ — только когда он есть
+        text_w = rw - (ix - rx) - (30 if missing else 6)  # место под ✗ — только когда он есть
         draw.text((ix + 4, ry + ABIL_H // 2 - 1), _fit(draw, name, font, text_w), font=font,
                   fill=TEXT if applied else MISSING_FG, anchor="lm")
         if missing:
             draw.text((rx + rw - 14, ry + ABIL_H // 2 - 1), "✗", font=_font(18, True), fill=CROSS, anchor="mm")
 
 
-def render(rows: list[dict], updated_at: str | None = None) -> bytes:
+def freshness_note(age_seconds) -> str:
+    """Подпись к картинке в сообщении: насколько свежи данные (возраст кэша, None — из игры)."""
+    if age_seconds is None:
+        return "-# Данные из игры — свежие"
+    return f"-# Данные из ежечасного обновления, {max(1, int(age_seconds) // 60)} мин назад («обновить» — свежие)"
+
+
+def render(rows: list[dict]) -> bytes:
     n_cols = max(len(r["cards"]) for r in rows)
     width = PAD * 2 + n_cols * CARD_W + (n_cols - 1) * GAP
     heights = [max(_card_height(c) for c in r["cards"]) for r in rows]
-    height = PAD + sum(heights) + GAP * (len(rows) - 1) + 110
+    height = PAD * 2 + sum(heights) + GAP * (len(rows) - 1)
     img = Image.new("RGB", (width, height), BG)
     draw = ImageDraw.Draw(img)
     y = PAD
@@ -256,18 +263,6 @@ def render(rows: list[dict], updated_at: str | None = None) -> bytes:
             x = PAD + col * (CARD_W + GAP)
             _draw_card(img, draw, x, y, h, row["name"], row["base_id"], card, row["best"], col)
         y += h + GAP
-    notes = ["В скобках — вклад модулей, [ ] — скорость от дополнительных характеристик", "Цифра у характеристики — сколько раз она улучшалась"]
-    if n_cols > 1:
-        notes.append("Зелёным — лучшее значение среди игроков")
-    if updated_at:
-        notes.append(f"Данные из игры: {updated_at}")
-    # Подписи — в одну строку, если влезают, иначе по одной на строку.
-    lines = [" · ".join(notes)]
-    if draw.textlength(lines[0], font=_font(14)) > width - 20:
-        lines = notes
-    for line in lines:
-        draw.text((width // 2, y + 10), _fit(draw, line, _font(14), width - 20), font=_font(14), fill=MUTED, anchor="mm")
-        y += 20
     out = io.BytesIO()
-    img.crop((0, 0, width, y + 12)).save(out, format="PNG", optimize=True)
+    img.save(out, format="PNG", optimize=True)
     return out.getvalue()
