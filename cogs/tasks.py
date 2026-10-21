@@ -270,11 +270,14 @@ class TasksCog(commands.Cog):
                 if not active_tasks:
                     continue
                 cache = self.bot.guild_roster_caches.get(gid, {})
+                # Кэш состава в памяти пуст сразу после рестарта (аудит стартует раньше, чем
+                # ViolationsCog его заполнит) и не знает выбывших — имя берём ещё и из БД.
+                db_names = database.get_player_names(gid)
                 print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
 
                 for task in active_tasks:
                     task_id, ally_code, base_id, target_type, target_value, deadline_str, initial_value, _current_value, _in_progress, is_personal = task
-                    player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
+                    player_name = cache.get(ally_code) or db_names.get(str(ally_code)) or f"Игрок [{ally_code}]"
 
                     try:
                         deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d").date()
@@ -346,9 +349,10 @@ class TasksCog(commands.Cog):
 
             try:
                 cache = self.bot.guild_roster_caches.get(gid, {})
+                db_names = database.get_player_names(gid)
                 reminder_rows = database.get_tasks_needing_reminder(gid, self.bot.TASK_REMINDER_DAYS_BEFORE)
                 for task_id, ally_code, base_id, target_type, target_value, deadline_str in reminder_rows:
-                    player_name = cache.get(ally_code, f"Игрок [{ally_code}]")
+                    player_name = cache.get(ally_code) or db_names.get(str(ally_code)) or f"Игрок [{ally_code}]"
                     await self._send_reminder(guild_cfg, base_id, target_type, target_value, deadline_str, player_name)
                     database.mark_task_reminder_sent(task_id)
             except Exception as e:
