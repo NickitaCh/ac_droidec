@@ -41,6 +41,25 @@ def level_label(stars, gear, relic) -> str:
     return " ".join(parts)
 
 
+def current_levels_text(players: list[dict], base_ids: list[str]) -> str:
+    """«TEO Nod — G11 5★, AC Ricardo — R5 7★»; при нескольких юнитах — с их именами."""
+    names = {b: database.get_game_unit_name(b) or b for b in base_ids} if len(base_ids) > 1 else {}
+    parts = []
+    for p in players:
+        units = {toon.base_id_of(u): u for u in p.get("rosterUnit") or []}
+        levels = []
+        for b in base_ids:
+            unit = units.get(b)
+            if unit:
+                lv = unit_forecast.current_level(unit)
+                text = level_label(lv["stars"], None if lv["relic"] is not None else lv["gear"], lv["relic"])
+            else:
+                text = "нет"
+            levels.append(f"{names[b]} {text}" if names else text)
+        parts.append(f"{p.get('name') or '?'} — {', '.join(levels)}")
+    return "; ".join(parts)
+
+
 def projected_player(player: dict, base_ids: list[str], stars, gear, relic, suffix: str) -> dict:
     """Копия игрока: выбранные юниты пересчитаны на заданную прокачку, к имени — подпись."""
     roster = []
@@ -282,8 +301,14 @@ class UnitTestCog(commands.Cog):
         if stars is None and (gear is not None or relic is not None):
             stars = 7  # как в /юнит_прогноз: реликвии и высокий гир — только на 7★
         base_ids = params["base_ids"]
+        projection_note = None
         if any(v is not None for v in (stars, gear, relic)):
             suffix = level_label(stars, gear, relic)
+            # Карточка прогноза выглядит как обычная — явно пишем, что уровень не настоящий,
+            # и какой он сейчас (тред 2026-10-21).
+            projection_note = (f"🔮 **Прогноз на {suffix}** — уровень пересчитан, модули текущие. Сейчас: "
+                               + current_levels_text(players, base_ids))
+            suffix = f"прогноз {suffix}"
             if len(players) == 1:
                 current = {**players[0], "name": f"{players[0].get('name') or '?'} (сейчас)"}
                 players = [current, projected_player(players[0], base_ids, stars, gear, relic, suffix)]
@@ -292,6 +317,8 @@ class UnitTestCog(commands.Cog):
 
         oldest = max((a for a in ages if a is not None), default=None)
         note = toon_image.freshness_note(oldest)
+        if projection_note:
+            note = projection_note + "\n" + note
 
         def work():
             return toon_image.render(toon.build(self.bot.stat_calc, players, base_ids))
