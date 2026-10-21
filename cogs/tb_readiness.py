@@ -24,8 +24,7 @@ async def autocomplete_covert_planets(inter: disnake.ApplicationCommandInteracti
 
 
 def _mission_title(m: dict, lead: str) -> str:
-    relic = f"R{m['min_relic']}" if m["min_relic"] is not None else f"{m['min_stars']}★"
-    return f"{m['phase']} · {tb_covert.planet_ru(m['planet'])} — {lead} ({relic} ×{m['count']})"
+    return f"{m['phase']} · {tb_covert.planet_ru(m['planet'])} — {lead} ({tb_covert.mission_label(m)})"
 
 
 class TBReadinessCog(commands.Cog):
@@ -77,11 +76,13 @@ class TBReadinessCog(commands.Cog):
         lines = []
         for m, u, n in zip(r["missions"], r["units"], r["ready_counts"]):
             unlock = f" · открывает {tb_covert.planet_ru(m['unlocks'])}" if m["unlocks"] else ""
-            lines.append(f"**{m['phase']} · {tb_covert.planet_ru(m['planet'])}** — {u['name']}: проходят {n} из {len(r['players'])}{unlock}")
+            reward = tb_covert.reward_text(m)
+            lines.append(f"**{m['phase']} · {tb_covert.planet_ru(m['planet'])}** — {u['name']}: проходят {n} из {len(r['players'])}"
+                         + (f" · за бой: {reward}" if reward else "") + unlock)
         png = await asyncio.to_thread(
             guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления", title,
-            ["✓ — проходит · 3/5 — подходят 3 юнита из 5 · — — нет обязательного персонажа",
-             "Над колонкой — порог реликвии и сколько юнитов нужно, портрет — обязательный персонаж",
+            ["✓ — проходит · R5 — уровень обязательного персонажа ниже порога · — — его нет",
+             "Над колонкой — порог реликвии, портрет — обязательный персонаж; ×5 и 3/5 — только у миссий без обязательных",
              "% — доля пройденных спецмиссий"],
             f"Проходят все: {sum(1 for p in r['players'] if p['ready'])} из {len(r['players'])}",
             128,
@@ -124,7 +125,10 @@ class TBReadinessCog(commands.Cog):
             m = x["mission"]
             lead = " + ".join(n for n, _lv, _ok in x["mandatory"]) or "любые подходящие"
             lines = [f"{'✅' if ok else '❌'} {n}: {lv or 'нет'}" for n, lv, ok in x["mandatory"]]
-            if x["status"] != "ready":
+            reward = tb_covert.reward_text(m)
+            if reward:
+                lines.insert(0, f"🎁 За прохождение: {reward}")
+            if x["status"] != "ready" and not m["mandatory"]:
                 lines.append(f"Подходят {x['have']} из {x['need']}")
                 if x["best"]:
                     lines.append("Докачать: " + ", ".join(f"{n} ({lv})" for n, lv in x["best"]))

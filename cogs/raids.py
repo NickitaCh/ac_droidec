@@ -202,7 +202,7 @@ class RaidsCog(commands.Cog):
             await inter.edit_original_response("❌ Рейд не найден или его состав ещё не загружен из игры — выберите рейд из списка.")
             return
         target = ("relic", str(реликвия)) if реликвия > 0 else ("gear", "13")
-        names = database.get_game_unit_names(entry["units"])
+        names = {**(entry.get("names") or {}), **database.get_game_unit_names(entry["units"])}
         teams = rs.raid_teams(рейд, entry["units"], names)
         if отряд:
             needle = отряд.strip().lower()
@@ -214,6 +214,8 @@ class RaidsCog(commands.Cog):
         grouped = {u: [target] for _name, ids in teams for u in ids}
         r = await asyncio.to_thread(guild_units.readiness_grid, guild_id, grouped)
         r["groups"] = [(name, len(ids)) for name, ids in teams]
+        for u in r["units"]:  # ещё не вышедшие юниты анонса — имени в game_units нет
+            u["name"] = names.get(u["base_id"], u["name"])
         if not r["players"]:
             await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
             return

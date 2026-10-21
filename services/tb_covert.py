@@ -8,7 +8,12 @@ territoryBattleDefinition t05D → covertZoneDefinition[] (zoneId + campaignElem
 юнитов), minimumUnitRarity, minimumRelicTier (сырой тир: 9 = R7). Ветка в zoneId:
 conflict01 — светлая, 02 — тёмная, 03 — смешанная (сверено по составам: Сери Джанда —
 Бракка, Меррин — Датомир, Кира и Хан — Кореллия). bonusZoneDefinition говорит, какая
-зона открывает бонусную планету: Бракка — Зеффо, Татуин — Мандалор."""
+зона открывает бонусную планету: Бракка — Зеффо, Татуин — Мандалор. Награда за одно
+прохождение — covertZoneDefinition[].victoryReward.
+
+Решение пользователя 2026-10-21: если у миссии есть обязательные персонажи, отслеживаем
+только их — добрать остальной отряд («подходят 3 из 5») не считается требованием.
+Число подходящих юнитов проверяем лишь у миссий без обязательных (Зеффо)."""
 
 import json
 import re
@@ -26,11 +31,17 @@ _ZONE_RE = re.compile(r"phase0?(\d)_conflict0?(\d)(_bonus)?_covert0?(\d)")
 _SIDE_BY_CONFLICT = {1: "light", 2: "dark", 3: "mixed"}
 _BONUS_PLANET = {"light": "Zeffo", "mixed": "Mandalore"}
 ANY_UNIT_LIMIT = 200  # «любой персонаж» (все стороны Силы) — не храним список юнитов
+# Валюты наград (локализация SHARED_CURRENCY_*_TERRITORY_BATTLE*).
+CURRENCY_NAMES = {
+    "TERRITORY_BATTLE_CURRENCY_01": "жетонов событий гильдии Mk I",
+    "TERRITORY_BATTLE_CURRENCY_02": "жетонов событий гильдии Mk II",
+    "TERRITORY_BATTLE_CURRENCY_03": "жетонов событий гильдии Mk III",
+}
 
 
 def parse(tb_defs: list, campaigns: list, units: list) -> list[dict]:
     """[{zone_id, phase, planet, side, bonus, mandatory, units|None, count, min_relic,
-    min_stars, unlocks}] — units None значит «любой персонаж»."""
+    min_stars, unlocks, reward: [(id, кол-во)]}] — units None значит «любой персонаж»."""
     tb = next((t for t in tb_defs if t.get("id") == TB_ID), None)
     camp = next((c for c in campaigns if c.get("id") == TB_ID), None)
     if not tb or not camp:
@@ -90,6 +101,7 @@ def parse(tb_defs: list, campaigns: list, units: list) -> list[dict]:
                 not bonus and zone_def.get("linkedConflictId") in unlock_conflicts
                 and special_conflicts.get(zone_def.get("linkedConflictId")) == (zone.get("campaignElementIdentifier") or {}).get("campaignMissionId")
             ) else None,
+            "reward": [(r["id"], r.get("minQuantity") or 1) for r in zone.get("victoryReward") or [] if r.get("id")],
         })
     result.sort(key=lambda x: (x["phase"], x["bonus"], ["dark", "mixed", "light"].index(x["side"]), x["zone_id"]))
     return result
@@ -124,6 +136,25 @@ def resolve_planet(text: str) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
+def reward_text(m: dict) -> str:
+    """«50 жетонов событий гильдии Mk II», «осколки: Третья сестра ×1»; пусто — неизвестно
+    (миссии из bot_state, записанные до 2026-10-21, награды не хранят)."""
+    parts = []
+    for item_id, qty in m.get("reward") or []:
+        if item_id.startswith("unitshard_"):
+            bid = item_id[len("unitshard_"):]
+            parts.append(f"осколки: {database.get_game_unit_names([bid]).get(bid, bid)} ×{qty}")
+        else:
+            parts.append(f"{qty} {CURRENCY_NAMES.get(item_id, item_id)}")
+    return ", ".join(parts)
+
+
+def mission_label(m: dict) -> str:
+    """Порог над колонкой: «R7» — у миссии с обязательными, «R7 ×5» — без них."""
+    relic = f"R{m['min_relic']}" if m["min_relic"] is not None else f"{m['min_stars']}★"
+    return relic if m["mandatory"] else f"{relic} ×{m['count']}"
+
+
 def _unit_ok(unit: dict, mission: dict) -> bool:
     lv = unit_forecast.current_level(unit)
     if lv["stars"] < mission["min_stars"]:
@@ -132,27 +163,28 @@ def _unit_ok(unit: dict, mission: dict) -> bool:
 
 
 def player_status(mission: dict, roster: dict, ships: set = frozenset()) -> dict:
-    """{status: ready|short|missing, have, text} для одного игрока. short — все обязательные
-    и нужное число юнитов есть, но не дотягивают по реликвии/звёздам; missing — нет
-    обязательного персонажа или юнитов из пула меньше, чем нужно."""
+    """{status: ready|short|missing, have, text} для одного игрока. С обязательными: ready —
+    все они на пороге, short — есть, но не дотягивают (text — уровень отстающего), missing —
+    кого-то нет. Без обязательных — по числу подходящих юнитов: short — юнитов хватает, но не
+    дотягивают, missing — юнитов из пула меньше, чем нужно."""
+    if mission["mandatory"]:
+        failing = [b for b in mission["mandatory"] if b not in roster or not _unit_ok(roster[b], mission)]
+        have = len(mission["mandatory"]) - len(failing)
+        if not failing:
+            return {"status": "ready", "have": have, "text": "✓"}
+        if any(b not in roster for b in failing):
+            return {"status": "missing", "have": have, "text": "—"}
+        return {"status": "short", "have": have, "text": _level(roster[failing[0]])}
     pool = mission["units"]
     candidates = [b for b in (pool if pool is not None else roster) if b in roster]
     if pool is None:  # «любой персонаж» — корабли в спецмиссию не берутся
         candidates = [b for b in candidates if b not in ships]
     ok = {b for b in candidates if _unit_ok(roster[b], mission)}
     need = mission["count"]
-    mandatory_ok = all(b in ok for b in mission["mandatory"])
-    # Обязательный, не дотянувший до порога, занимает своё место в отряде впустую — его
-    # слот не закрыть другим юнитом.
-    lead_ok = sum(1 for b in mission["mandatory"] if b in ok)
-    others = len(ok - set(mission["mandatory"]))
-    have = lead_ok + min(others, max(0, need - len(mission["mandatory"])))
-    if mandatory_ok and have >= need:
+    have = len(ok)
+    if have >= need:
         return {"status": "ready", "have": have, "text": "✓"}
-    owned_all = all(b in roster for b in mission["mandatory"]) and len(candidates) >= need
-    no_lead = [b for b in mission["mandatory"] if b not in roster]
-    text = "—" if no_lead else f"{min(have, need)}/{need}"
-    return {"status": "short" if owned_all else "missing", "have": have, "text": text}
+    return {"status": "short" if len(candidates) >= need else "missing", "have": have, "text": f"{have}/{need}"}
 
 
 def _level(unit: dict) -> str:
@@ -175,7 +207,8 @@ def player_report(ms: list[dict], roster: dict) -> list[dict]:
         owned = [b for b in pool if b in roster]
         ok = [b for b in owned if _unit_ok(roster[b], m)]
         mandatory = [(names.get(b, b), _level(roster[b]) if b in roster else None, b in ok) for b in m["mandatory"]]
-        missing_slots = max(0, m["count"] - len(m["mandatory"]) - len([b for b in ok if b not in m["mandatory"]]))
+        # Добор отряда считаем только у миссий без обязательных (см. докстринг модуля).
+        missing_slots = 0 if m["mandatory"] else max(0, m["count"] - len(ok))
 
         def strength(b):
             lv = unit_forecast.current_level(roster[b])
@@ -204,9 +237,8 @@ def guild_grid(guild_id: int, phase: int | None = None, planet: str | None = Non
     for m in ms:
         # Без обязательных (Зеффо: любые светлые клоны) — портрет первого подходящего.
         lead = m["mandatory"][0] if m["mandatory"] else (m["units"] or [None])[0]
-        relic = f"R{m['min_relic']}" if m["min_relic"] is not None else f"{m['min_stars']}★"
         units.append({"base_id": lead, "name": " + ".join(names.get(b, b) for b in m["mandatory"]) or "любые подходящие",
-                      "label": f"{relic} ×{m['count']}"})
+                      "label": mission_label(m)})
     players = []
     for code, name in members:
         roster = rosters.get(code)
