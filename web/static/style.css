@@ -2598,3 +2598,27 @@ form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
 .demo-banner a { color: #1a1a1a; font-weight: 600; text-decoration: underline; }
 .lp-demo { margin-top: 0.9em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; }
 .lp-button-demo { font-weight: 600; }
+
+/* ---- /tb/missions: бои и спецмиссии без широких таблиц ---- */
+.tbm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17em), 1fr)); gap: 0.8em; }
+.tbm-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.7em 0.9em; background: var(--surface); display: flex; flex-direction: column; gap: 0.35em; min-width: 0; }
+.tbm-card-head { overflow-wrap: anywhere; }
+.tbm-small { font-size: 0.88em; overflow-wrap: anywhere; }
+.tbm-label-bad { color: var(--status-critical); font-weight: 600; }
+.tbm-label-warn { color: var(--status-warning); font-weight: 600; }
+.tbm-list { list-style: none; margin: 0; padding: 0; }
+.tbm-row { display: grid; grid-template-columns: minmax(8em, 13em) minmax(7em, auto) minmax(0, 1fr); gap: 0.3em 0.8em; align-items: center; padding: 0.45em 0; border-bottom: 1px solid var(--border); }
+.tbm-row:last-child { border-bottom: none; }
+.tbm-name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.tbm-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em; }
+.tbm-chips { display: flex; flex-wrap: wrap; gap: 0.3em; min-width: 0; }
+.tbm-sub { grid-column: 1 / -1; }
+.tbm-chip { display: inline-block; padding: 0.1em 0.5em; border-radius: 6px; font-size: 0.82em; line-height: 1.5; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg-secondary); white-space: nowrap; }
+.tbm-chip-ok { background: color-mix(in srgb, var(--status-good) 14%, transparent); border-color: transparent; color: var(--status-good); }
+.tbm-chip-bad { background: color-mix(in srgb, var(--status-critical) 14%, transparent); border-color: transparent; color: var(--status-critical); }
+.tbm-chip-warn { background: color-mix(in srgb, var(--status-warning) 18%, transparent); border-color: transparent; color: var(--status-warning); }
+.tbm-chip-none { color: var(--fg-muted); }
+@media (max-width: 40em) {
+    .tbm-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .tbm-chips, .tbm-sub { grid-column: 1 / -1; }
+}
