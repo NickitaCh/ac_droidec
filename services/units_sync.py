@@ -30,6 +30,12 @@ SKILL_DEFINITIONS_FLAG = 4
 # (подтверждено поиском реальных проиндексированных URL). Payload тяжёлый (~19 МБ, ~3 c на
 # VPS) — обёрнут в тот же try/except, что и SkillDefinitions ниже, чтобы не валить весь sync_units.
 ABILITY_DEFINITIONS_FLAG = 2097152
+# 'CategoryDefinitions' (swgoh_comlink DataItems.CATEGORY): id, descKey, visible. Видимых —
+# 52 (проверено 2026-10-21): affiliation_* 23, profession_* 10, species_* 7, role_* 6 и др.
+CATEGORY_FLAG = 1
+FACTIONS_STATE = "unit_factions"  # bot_state guild 0: {category_id: {"name", "units": [base_id]}}
+# Видимые категории, которые не фракции: роли, флагманы, рейд, «только в событиях».
+_NOT_FACTION_PREFIXES = ("role_", "raid_", "shipclass_", "eventonly", "character_")
 
 # Comlink's UnitDefinitions ('units') содержит НЕСКОЛЬКО записей на один baseId: по одной
 # на каждый уровень редкости (rarity 1..7, только у реальных юнитов растёт baseStat с
@@ -59,6 +65,23 @@ def _is_canonical_playable_unit(unit: dict) -> bool:
     if isinstance(rarity, str):
         rarity = _RARITY_ENUM.get(rarity, 0)
     return rarity == 1
+
+
+def _factions(categories: list, units_list: list, units_to_db: dict, loc_kv: dict) -> dict:
+    """Фракции для /фракция: видимые в игре категории (принадлежность, профессия, вид, ГЛ)
+    и их персонажи — только персонажи, без кораблей, как у HotBot /faction."""
+    wanted = {c["id"]: c.get("descKey") for c in categories
+              if c.get("visible") and not c["id"].startswith(_NOT_FACTION_PREFIXES)}
+    members: dict[str, list] = {}
+    for unit in units_list:
+        bid = unit.get("baseId")
+        if not _is_canonical_playable_unit(unit) or bid not in units_to_db or units_to_db[bid][1] != "character":
+            continue
+        for cat in unit.get("categoryId") or []:
+            if cat in wanted:
+                members.setdefault(cat, []).append(bid)
+    return {cat: {"name": loc_kv.get(wanted[cat]) or cat, "units": sorted(set(ids))}
+            for cat, ids in members.items() if len(set(ids)) >= 2}
 
 
 async def _fetch_skill_definitions(comlink) -> list:
@@ -292,6 +315,14 @@ async def sync_units(comlink) -> int:
     # чтобы новые легенды появлялись без правки кода.
     if galactic_legends:
         database.set_bot_state("galactic_legends", json.dumps(sorted(galactic_legends)), guild_id=0)
+    try:
+        categories = (await asyncio.to_thread(comlink.get_game_data, items=str(CATEGORY_FLAG),
+                                               include_pve_units=False)).get("category") or []
+        factions = _factions(categories, units_list, units_to_db, loc_ru_kv)
+        if factions:
+            database.set_bot_state(FACTIONS_STATE, json.dumps(factions, ensure_ascii=False), guild_id=0)
+    except Exception as e:
+        print(f"⚠️ [Справочник] Не удалось обновить фракции: {e}")
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление

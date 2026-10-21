@@ -1,5 +1,6 @@
 """Гильдия по одному юниту и готовность к «Руководству» — по кэшу ежечасного синка:
-/юнит_гильдия (как C3PO `g unit`) и /готовность (как WookieeBot `guild ready journey`).
+/юнит_гильдия (как C3PO `g unit`) и /готовность (как WookieeBot `guild ready journey`);
+/фракция — персонажи фракции у игрока (как HotBot `/faction`, services/faction.py).
 Логика — services/guild_units.py, картинка готовности — services/guild_units_image.py.
 Данные — публичный ростер гильдии, поэтому обе команды открыты всем участникам."""
 
@@ -14,10 +15,15 @@ import guild_resolver
 import stat_engine
 from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from cogs.violations import autocomplete_players
-from services import guild_units, guild_units_image, journey_guide
+from services import faction as faction_svc
+from services import faction_image, guild_units, guild_units_image, journey_guide
 
 FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
 MESSAGE_EMBED_LIMIT = 5800  # лимит Discord — 6000 символов на все эмбеды одного сообщения
+
+
+async def autocomplete_factions(inter: disnake.ApplicationCommandInteraction, string: str):
+    return [disnake.OptionChoice(name=f"{name} ({count})"[:100], value=cid) for cid, name, count in faction_svc.search(string)]
 
 
 async def autocomplete_guides(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -134,28 +140,43 @@ class GuildUnitsCog(commands.Cog):
         if гильдия:
             await self._guild_readiness(inter, guild_id, цель)
             return
+        got = await self._player_roster(inter, guild_id, игрок, аликод, альт)
+        if got is None:
+            return
+        player, roster, note = got
+        ally_code = player.get("allyCode")
+        r = await asyncio.to_thread(guild_units.player_readiness, guild_id, цель, roster)
+        png = await asyncio.to_thread(guild_units_image.render_player, r, player.get("name") or str(ally_code), note)
+        met = sum(1 for u in r["units"] if u["status"] == "met")
+        await inter.edit_original_response(
+            content=f"**{player.get('name')}** — {r['guide']['name']}: выполнено {met} из {len(r['units'])}",
+            file=disnake.File(io.BytesIO(png), filename=f"ready_{цель}_{ally_code}.png"),
+        )
 
+    async def _player_roster(self, inter, guild_id: int, игрок, аликод, альт):
+        """(player, {base_id: rosterUnit}, подпись о свежести) выбранного игрока или None —
+        тогда ошибка уже отправлена. Без игрока — вы, «альт» — ваш второй аккаунт."""
         if аликод:
             ally_code = guild_resolver.normalize_ally_code(аликод)
             if ally_code is None:
                 await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return
+                return None
         elif игрок:
             cache = self.bot.guild_roster_caches.get(guild_id) or {}
             ally_code = cache.get(игрок) if игрок in cache else None
             if ally_code is None:
                 await inter.edit_original_response("❌ Игрок не найден — выберите его из списка.")
-                return
+                return None
         elif альт:
             alt = await guild_resolver.require_alt(inter, "unit_forecast")
             if alt is None:
-                return
+                return None
             ally_code = alt["ally_code"]
         else:
             reg = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not reg:
                 await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация`, выберите игрока или укажите код союзника.")
-                return
+                return None
             ally_code = reg[0]
 
         card_cog = self.bot.get_cog("UnitForecastCog")
@@ -163,16 +184,40 @@ class GuildUnitsCog(commands.Cog):
         player = players[0]
         if not player or not player.get("rosterUnit"):
             await inter.edit_original_response(f"❌ Не удалось получить игрока с кодом {ally_code} из игры.")
-            return
+            return None
+        player.setdefault("allyCode", str(ally_code))
         roster = {guild_units.unit_base_id(u): u for u in player["rosterUnit"]}
-        r = await asyncio.to_thread(guild_units.player_readiness, guild_id, цель, roster)
         note = (f"данные ежечасного обновления, {max(1, int(ages[0]) // 60)} мин назад" if ages[0] is not None
                 else "данные из игры на момент запроса")
-        png = await asyncio.to_thread(guild_units_image.render_player, r, player.get("name") or str(ally_code), note)
-        met = sum(1 for u in r["units"] if u["status"] == "met")
+        return player, roster, note
+
+    @commands.slash_command(name="фракция", description="Все персонажи фракции у игрока картинкой (как HotBot /faction)")
+    async def faction(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        фракция: str = commands.Param(description="Принадлежность, профессия или вид", autocomplete=autocomplete_factions),
+        игрок: str = commands.Param(default=None, description="Игрок гильдии (пусто → вы)", autocomplete=autocomplete_players),
+        аликод: str = commands.Param(default=None, description="Код союзника любого игрока"),
+        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+    ):
+        await inter.response.defer()
+        guild_id = await guild_resolver.require_guild_id(inter)
+        if guild_id is None:
+            return
+        faction_id = faction_svc.resolve(фракция)
+        if faction_id is None:
+            await inter.edit_original_response("❌ Фракция не найдена — выберите её из списка.")
+            return
+        got = await self._player_roster(inter, guild_id, игрок, аликод, альт)
+        if got is None:
+            return
+        player, roster, note = got
+        r = await asyncio.to_thread(faction_svc.build, faction_id, roster)
+        name = player.get("name") or str(player.get("allyCode"))
+        png = await asyncio.to_thread(faction_image.render, r, name, note)
         await inter.edit_original_response(
-            content=f"**{player.get('name')}** — {r['guide']['name']}: выполнено {met} из {len(r['units'])}",
-            file=disnake.File(io.BytesIO(png), filename=f"ready_{цель}_{ally_code}.png"),
+            content=f"**{name}** — {r['name']}: открыто {r['owned']} из {r['total']}",
+            file=disnake.File(io.BytesIO(png), filename=f"faction_{faction_id}.png"),
         )
 
     async def _guild_readiness(self, inter, guild_id: int, guide: str):
