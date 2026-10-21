@@ -530,7 +530,13 @@ class GuildEvents(commands.Cog):
         report = self._format_stats_table("📊 **Итоги Территориальной Битвы (автоотчёт)**", stats)
         channel = self.bot.get_channel(int(guild_cfg["officer_channel_id"])) if guild_cfg.get("officer_channel_id") else None
         if channel:
-            await self.send_as_file(channel, report, "tb_report.txt")
+            try:
+                from services import tb_covert  # лениво: tb_covert → tb_plan_reader → этот модуль
+                covert = tb_covert.earned_rewards_text(result[0])
+            except Exception as e:
+                print(f"Ошибка подсчёта наград за спецмиссии: {e}")
+                covert = ""
+            await self.send_as_file(channel, report, "tb_report.txt", message=covert or None)
 
     def generate_tw_report(self, guild_id: int, tw_results: list):
         """Сохраняет всю доступную историю ВГ (comlink отдаёт только последние ~8) в
@@ -718,11 +724,11 @@ class GuildEvents(commands.Cog):
 
         database.prune_tb_events(guild_id=guild_id)
 
-    async def send_as_file(self, channel, content, filename):
+    async def send_as_file(self, channel, content, filename, message=None):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
             f.write(content)
             f.flush()
-            await channel.send(file=disnake.File(f.name, filename=filename))
+            await channel.send(content=message, file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока (расшифровка по фазам/планетам) ------------------
     def _decode_tb_stats(self, tb_result, member_id):

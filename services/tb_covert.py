@@ -147,8 +147,31 @@ def reward_text(m: dict, short: bool = False) -> str:
             parts.append(f"🧩 {name} ×{qty}" if short else f"осколки: {name} ×{qty}")
         else:
             mk = CURRENCY_NAMES.get(item_id, item_id)
-            parts.append(f"🪙 {qty} {mk}" if short else f"{qty} жетонов событий гильдии {mk}")
+            num = f"{qty:,}".replace(",", " ")
+            parts.append(f"🪙 {num} {mk}" if short else f"{num} жетонов событий гильдии {mk}")
     return ", ".join(parts)
+
+
+COMPLETE_PREFIX = "covert_complete_mission_"
+
+
+def earned_rewards_text(tb_result: dict) -> str:
+    """Сколько гильдия получила за спецмиссии за одну ТБ — для автоотчёта: побед по
+    каждой зоне (finalStat covert_complete_mission_<zone_id>, сумма по игрокам) × награда
+    зоны. «» — побед не было или наград зон ещё нет в bot_state."""
+    reward_by_zone = {m["zone_id"]: m.get("reward") or [] for m in missions()}
+    wins, totals = 0, {}
+    for stat in tb_result.get("finalStat") or []:
+        map_id = stat.get("mapStatId") or ""
+        if not map_id.startswith(COMPLETE_PREFIX):
+            continue
+        n = sum(int(p.get("score") or 0) for p in stat.get("playerStat") or [])
+        wins += n
+        for item_id, qty in reward_by_zone.get(map_id[len(COMPLETE_PREFIX):], []):
+            totals[item_id] = totals.get(item_id, 0) + n * qty
+    if not wins or not any(totals.values()):
+        return ""
+    return f"🎯 Спецмиссии: {wins} побед · " + reward_text({"reward": [(k, v) for k, v in sorted(totals.items()) if v]}, short=True)
 
 
 def mission_label(m: dict) -> str:
