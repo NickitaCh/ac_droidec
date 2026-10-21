@@ -49,6 +49,29 @@
     </div>
 
     {% for p in r.phases %}
+        {% if p.covert %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Этап {{ p.phase }}: спецмиссии{% call ui.help() %}<p>Кто проходит спецмиссию по требованиям игры: обязательные персонажи, нужное число юнитов подходящей фракции, 7★ и порог реликвии. «Не дотягивают» — все юниты есть, но не хватает реликвии или звёзд.</p><p>В Discord — <code>/тб оз_готовность</code>.</p>{% endcall %}</span>
+            </div>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th>Планета</th><th>Обязательные</th><th class="num">Требование</th><th>Проходят</th><th>Не дотягивают</th></tr></thead>
+                    <tbody>
+                        {% for c in p.covert %}
+                            <tr>
+                                <td class="nowrap">{{ planet_ru(c.planet) }}{% if c.unlocks %} <span class="badge badge-neutral">открывает {{ planet_ru(c.unlocks) }}</span>{% endif %}</td>
+                                <td>{% if c.base_id %}{{ game.unit(c.base_id, c.name) }}{% else %}<span class="muted">любые</span>{% endif %}</td>
+                                <td class="num nowrap">{{ c.label }}</td>
+                                <td>{% if c.ready %}<details><summary><span class="badge badge-ok">{{ c.ready|length }}</span></summary><span class="muted">{{ c.ready|join(", ") }}</span></details>{% else %}<span class="badge badge-danger">0</span>{% endif %}</td>
+                                <td>{% if c.short %}<details><summary>{{ c.short|length }}</summary>{{ c.short|join(", ") }}</details>{% else %}<span class="muted">—</span>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
         <div class="panel">
             <div class="panel-title">
                 <span>Этап {{ p.phase }}: узкие места</span>

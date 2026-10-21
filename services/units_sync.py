@@ -323,6 +323,18 @@ async def sync_units(comlink) -> int:
             database.set_bot_state(FACTIONS_STATE, json.dumps(factions, ensure_ascii=False), guild_id=0)
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить фракции: {e}")
+    try:
+        from services import tb_covert
+        tb_defs = (await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.GUILD_DATA_FLAG),
+                                           include_pve_units=False)).get("territoryBattleDefinition") or []
+        campaigns = (await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.CAMPAIGN_FLAG),
+                                             include_pve_units=False)).get("campaign") or []
+        canonical = [u for u in units_list if _is_canonical_playable_unit(u) and u.get("baseId") in units_to_db]
+        covert = tb_covert.parse(tb_defs, campaigns, canonical)
+        if covert:
+            database.set_bot_state(tb_covert.STATE_KEY, json.dumps(covert, ensure_ascii=False), guild_id=0)
+    except Exception as e:
+        print(f"⚠️ [Справочник] Не удалось обновить спецмиссии ТБ: {e}")
 
     # Отдельно от основного справочника (не валим весь sync_units из-за этого) — тот же
     # comlink /data периодически отвечает HTTP 400 на SkillDefinitions, а обновление

@@ -32,12 +32,14 @@ def _row_color(pct: float):
     return (int(96 - 4 * k), int(32 + 52 * k), int(26 - 6 * k))
 
 
-def render(r: dict, guild_name: str, updated_note: str | None = None, title: str | None = None) -> bytes:
-    """title — заголовок вместо «Готовность к «цель»» (рейд); без r["guide"] нет колонки «Цель»."""
+def render(r: dict, guild_name: str, updated_note: str | None = None, title: str | None = None,
+           notes: list[str] | None = None, summary: str | None = None, cell_w: int = CELL_W) -> bytes:
+    """title — заголовок вместо «Готовность к «цель»» (рейд); без r["guide"] нет колонки «Цель».
+    notes — подписи внизу вместо стандартных, summary — строка под заголовком вместо «Готовы: …»."""
     units, players = r["units"], r["players"]
     guide = r.get("guide")
     gw = GUIDE_W if guide else 0
-    width = PAD * 2 + PCT_W + NAME_W + gw + CELL_W * len(units)
+    width = PAD * 2 + PCT_W + NAME_W + gw + cell_w * len(units)
     title_h = 64
     groups = r.get("groups") if len(r.get("groups") or []) > 1 else None
     band_h = 30 if groups else 0
@@ -48,7 +50,7 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
     ready = sum(1 for p in players if p["ready"])
     y = PAD
     draw.text((width // 2, y + 16), (title or f"Готовность к «{guide['name']}»") + f" — {guild_name}", font=_font(22, True), fill=TEXT, anchor="mm")
-    draw.text((width // 2, y + 44), f"Готовы: {ready} · Не готовы: {len(players) - ready}", font=_font(18), fill=GOLD, anchor="mm")
+    draw.text((width // 2, y + 44), summary or f"Готовы: {ready} · Не готовы: {len(players) - ready}", font=_font(18), fill=GOLD, anchor="mm")
     y += title_h
 
     # Шапка: цель, затем требуемые юниты с порогом.
@@ -56,7 +58,7 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
     if groups:  # подписи отрядов над их колонками (рейд)
         x = gx + gw
         for k, (name, count) in enumerate(groups):
-            w = count * CELL_W
+            w = count * cell_w
             draw.rectangle((x + 2, y, x + w - 2, y + band_h - 6), fill=(70, 58, 30) if k % 2 == 0 else (40, 52, 80))
             label = name
             while label and draw.textlength(label, font=_font(15, True)) > w - 10:
@@ -70,12 +72,12 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
             img.paste(portrait, (gx + (gw - PIC) // 2, y + HEAD_H - PIC - 8), portrait)
         draw.text((gx + gw // 2, y + 22), "Цель", font=_font(16, True), fill=GOLD, anchor="mm")
     for i, u in enumerate(units):
-        x = gx + gw + i * CELL_W
-        draw.text((x + CELL_W // 2, y + 12), "Нужно", font=_font(14, True), fill=(230, 80, 80), anchor="mm")
-        draw.text((x + CELL_W // 2, y + 32), u["label"], font=_font(15, True), fill=TEXT, anchor="mm")
+        x = gx + gw + i * cell_w
+        draw.text((x + cell_w // 2, y + 12), "Нужно", font=_font(14, True), fill=(230, 80, 80), anchor="mm")
+        draw.text((x + cell_w // 2, y + 32), u["label"], font=_font(15, True), fill=TEXT, anchor="mm")
         p = _portrait(u["base_id"], PIC)
         if p is not None:
-            img.paste(p, (x + (CELL_W - PIC) // 2, y + HEAD_H - PIC - 8), p)
+            img.paste(p, (x + (cell_w - PIC) // 2, y + HEAD_H - PIC - 8), p)
     draw.line((gx + gw - 3, y + 6, gx + gw - 3, y + HEAD_H + ROW_H * len(players)), fill=(200, 200, 200), width=2)
     y += HEAD_H
 
@@ -91,12 +93,12 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
         if guide:
             draw.text((gx + gw // 2, cy), p["guide_level"] or "—", font=_font(16), fill=TEXT, anchor="mm")
         for i, c in enumerate(p["cells"]):
-            x = gx + gw + i * CELL_W
+            x = gx + gw + i * cell_w
             color = MET_FG if c["met"] else (NONE_FG if c["text"] == "—" else MISS_FG)
-            draw.text((x + CELL_W // 2, cy), c["text"], font=_font(16, c["met"] is False and c["text"] != "—"), fill=color, anchor="mm")
+            draw.text((x + cell_w // 2, cy), c["text"], font=_font(16, c["met"] is False and c["text"] != "—"), fill=color, anchor="mm")
         y += ROW_H
 
-    notes = ["Оранжевым — ещё не дотягивает до нужного", "% — средний прогресс по всем юнитам"]
+    notes = list(notes or ["Оранжевым — ещё не дотягивает до нужного", "% — средний прогресс по всем юнитам"])
     if updated_note:
         notes.append(updated_note)
     lines = [" · ".join(notes)]

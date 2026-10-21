@@ -130,6 +130,20 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
             "ops_closed": sum(p["ops_closed"] for p in rows), "ops_total": len(rows) * len(OPERATIONS),
             "bottlenecks": bottlenecks,
         })
+    # Спецмиссии этапа: кто проходит по требованиям игры (services/tb_covert.py; импорт
+    # здесь — tb_covert сам берёт BRANCHES отсюда).
+    from services import tb_covert
+    grid = tb_covert.guild_grid(guild_id)
+    for i, (m, u) in enumerate(zip(grid["missions"], grid["units"])):
+        if m["bonus"] and not with_bonus:
+            continue
+        cells = [(p["name"], p["cells"][i]["status"]) for p in grid["players"]]
+        phases[m["phase"] - 1].setdefault("covert", []).append({
+            "planet": m["planet"], "base_id": u["base_id"], "name": u["name"], "label": u["label"],
+            "unlocks": m["unlocks"], "bonus": m["bonus"],
+            "ready": sorted(n for n, st in cells if st == "ready"),
+            "short": sorted(n for n, st in cells if st == "short"),
+        })
     return {
         "phases": phases,
         "players": len(players_with_roster),
