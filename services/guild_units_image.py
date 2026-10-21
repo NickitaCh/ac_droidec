@@ -90,3 +90,101 @@ def render(r: dict, guild_name: str, updated_note: str | None = None) -> bytes:
     out = io.BytesIO()
     img.crop((0, 0, width, y + 20)).save(out, format="PNG", optimize=True)
     return out.getvalue()
+
+
+# ---------------------------------------------------------------- один игрок (как C3PO `panic`)
+
+TILE_W, TILE_H, TILE_GAP, TILES_PER_ROW = 150, 196, 8, 5
+STATUS_COLORS = {"met": (60, 190, 80), "short": (235, 190, 40), "missing": (215, 60, 70)}
+STATUS_LABELS = {"met": "выполнено", "short": "не хватает реликвии или гира", "missing": "нет персонажа или не хватает звёзд"}
+
+
+def _level_badge(level: dict | None, is_ship: bool) -> str:
+    if level is None:
+        return ""
+    if is_ship:
+        return ""
+    return str(level["relic"]) if level["relic"] is not None else f"G{level['gear']}"
+
+
+def render_player(r: dict, player_name: str, updated_note: str | None = None) -> bytes:
+    """Плитки требуемых юнитов: портрет, текущие звёзды и реликвия/гир, в углу — сколько нужно;
+    рамка — зелёная (выполнено), жёлтая (не хватает реликвии/гира), красная (нет / мало звёзд)."""
+    units = r["units"]
+    cols = min(TILES_PER_ROW, max(1, len(units)))
+    rows = (len(units) + cols - 1) // cols
+    width = PAD * 2 + cols * TILE_W + (cols - 1) * TILE_GAP
+    width = max(width, 520)
+    head_h = 70
+    height = PAD + head_h + rows * (TILE_H + TILE_GAP) + 120
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+
+    title = f"{player_name} — готовность к «{r['guide']['name']}»"
+    tf = _font(20, True)
+    while draw.textlength(title, font=tf) > width - 2 * PAD and len(title) > 10:
+        title = title[:-2]
+    draw.text((width // 2, PAD + 14), title, font=tf, fill=TEXT, anchor="mm")
+    met = sum(1 for u in units if u["status"] == "met")
+    sub = f"Выполнено {met} из {len(units)} · прогресс {math.floor(r['pct'] + 1e-9)}%"
+    if r.get("guide_level"):
+        sub += " · цель уже открыта"
+    draw.text((width // 2, PAD + 44), sub, font=_font(17), fill=GOLD, anchor="mm")
+    y0 = PAD + head_h
+
+    for i, u in enumerate(units):
+        cx, cy = divmod(i, cols)[1], divmod(i, cols)[0]
+        x = PAD + cx * (TILE_W + TILE_GAP)
+        y = y0 + cy * (TILE_H + TILE_GAP)
+        color = STATUS_COLORS[u["status"]]
+        draw.rounded_rectangle((x, y, x + TILE_W, y + TILE_H), radius=8, fill=(8, 8, 10), outline=color, width=4)
+        # Угол с требованием.
+        draw.polygon([(x + TILE_W - 62, y + 2), (x + TILE_W - 2, y + 2), (x + TILE_W - 2, y + 62)], fill=color)
+        for k, part in enumerate(u["label"].split(" ")[:2]):
+            draw.text((x + TILE_W - 8, y + 6 + k * 17), part, font=_font(14, True), fill=(20, 20, 20), anchor="ra")
+        pic = 96
+        px, py = x + (TILE_W - pic) // 2, y + 22
+        portrait = _portrait(u["base_id"], pic)
+        if portrait is not None:
+            if u["level"] is None:  # юнита нет — серый портрет
+                gray = portrait.convert("LA").convert("RGBA")
+                gray.putalpha(portrait.getchannel("A").point(lambda v: v * 5 // 10))
+                portrait = gray
+            mask = Image.new("L", (pic, pic), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, pic - 1, pic - 1), fill=255)
+            img.paste(portrait, (px, py), Image.composite(portrait.getchannel("A"), mask, mask))
+        badge = _level_badge(u["level"], u["is_ship"])
+        if badge:
+            bx, by = x + TILE_W // 2, py + pic - 4
+            relic = u["level"]["relic"] is not None
+            draw.ellipse((bx - 15, by - 15, bx + 15, by + 15), fill=(120, 30, 30) if relic else (40, 70, 120), outline=(230, 230, 230), width=2)
+            draw.text((bx, by), badge, font=_font(14 if len(badge) > 2 else 16, True), fill=TEXT, anchor="mm")
+        stars = u["level"]["stars"] if u["level"] else 0
+        sy = py + pic + 18
+        for k in range(7):
+            draw.text((x + TILE_W // 2 + (k - 3) * 16, sy), "★", font=_font(15, True),
+                      fill=GOLD if k < stars else (70, 72, 80), anchor="mm")
+        nf = _font(14, True, condensed=True)
+        words, lines, cur = u["name"].split(), [], ""
+        for w in words:
+            if draw.textlength((cur + " " + w).strip(), font=nf) <= TILE_W - 12:
+                cur = (cur + " " + w).strip()
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+        for k, line in enumerate(lines[:2]):
+            draw.text((x + TILE_W // 2, sy + 18 + k * 17), line, font=nf, fill=TEXT, anchor="mm")
+
+    y = y0 + rows * (TILE_H + TILE_GAP) + 6
+    notes = [f"Зелёная рамка — {STATUS_LABELS['met']}", f"Жёлтая — {STATUS_LABELS['short']}",
+             f"Красная — {STATUS_LABELS['missing']}"] + ([updated_note] if updated_note else [])
+    for line in notes:
+        lf = _font(13)
+        while draw.textlength(line, font=lf) > width - 2 * PAD and len(line) > 10:
+            line = line[:-2]
+        draw.text((width // 2, y + 10), line, font=lf, fill=MUTED, anchor="mm")
+        y += 20
+    out = io.BytesIO()
+    img.crop((0, 0, width, y + 10)).save(out, format="PNG", optimize=True)
+    return out.getvalue()

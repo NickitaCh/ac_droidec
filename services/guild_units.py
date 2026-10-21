@@ -16,6 +16,10 @@ from services import journey_guide, unit_forecast
 from services.player_profile import _skill_counts
 
 
+def unit_base_id(unit: dict) -> str:
+    return unit.get("baseId") or (unit.get("definitionId") or "").split(":")[0]
+
+
 def _members(guild_id: int) -> list[tuple[str, str]]:
     """[(ally_code, имя)] текущего состава."""
     return [(code, name) for code, name in database.get_roster_by_player_id(guild_id).values() if code]
@@ -125,3 +129,38 @@ def readiness(guild_id: int, guide_base_id: str) -> dict:
     return {"guide": {"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id),
                       "is_ship": types.get(guide_base_id) == "ship"},
             "units": units, "players": players}
+
+
+def player_readiness(guild_id: int, guide_base_id: str, roster: dict) -> dict:
+    """Готовность одного игрока к цели «Руководства» (как C3PO `panic`): по каждому требуемому
+    юниту — текущая прокачка и статус: met (выполнено), short (звёзды есть, не хватает
+    реликвии/гира) или missing (юнита нет или не хватает звёзд). roster — {base_id: rosterUnit}."""
+    grouped = journey_guide.group_by_unit(database.get_journey_guide_requirements(guide_base_id, guild_id))
+    names = database.get_game_unit_names(list(grouped) + [guide_base_id])
+    types = database.get_unit_types(list(grouped) + [guide_base_id])
+    units, fractions = [], []
+    for unit_id, targets in grouped.items():
+        unit = roster.get(unit_id)
+        is_ship = types.get(unit_id) == "ship"
+        need_stars = max([int(v) for t, v in targets if t == "stars"] + [7 if any(t == "relic" for t, _ in targets) else 0])
+        if unit is not None and all(journey_guide.unit_meets(unit, t, v) for t, v in targets):
+            status = "met"
+        elif unit is None or (unit.get("currentRarity") or 0) < need_stars:
+            status = "missing"
+        else:
+            status = "short"
+        fractions.append(min(_fraction(unit, t, v) for t, v in targets))
+        level = level_of(unit) if unit is not None else None
+        units.append({
+            "base_id": unit_id, "name": names.get(unit_id, unit_id), "is_ship": is_ship,
+            "label": " ".join(journey_guide.short_label(t, v) for t, v in sorted(targets, key=lambda tv: tv[0] != "stars")),
+            "status": status, "level": level,
+        })
+    guide_unit = roster.get(guide_base_id)
+    return {
+        "guide": {"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id)},
+        "guide_level": level_of(guide_unit) if guide_unit is not None else None,
+        "units": units,
+        "pct": sum(fractions) / len(fractions) * 100 if fractions else 0,
+        "ready": all(u["status"] == "met" for u in units),
+    }
