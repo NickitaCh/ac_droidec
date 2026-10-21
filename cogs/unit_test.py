@@ -6,14 +6,14 @@ Ricardo, 2026-10-20), чтобы сравнить с /юнит на практи
   персонажей у всех игроков на эту прокачку в их текущих модулях (services/unit_forecast.
   project); если игрок один — две колонки «сейчас» и «прогноз».
 - вместо 10 одинаковых полей участник/аликод — флаг «сравнение»: бот открывает панель с
-  выбором до 4 игроков (люди из Discord, игроки гильдии из списка, коды союзника через окно
-  ввода) и кнопками «С собой» / «Rokamora».
+  выбором до 4 игроков (люди из Discord, коды союзника через окно ввода) и кнопками «С собой» / «Rokamora».
 
 Картинка — services/toon.py + toon_image.py; корабль (один, без сравнения) — прогноз
 по звёздам, как старая /юнит_прогноз (UnitForecastCog.send_forecast)."""
 
 import asyncio
 import io
+import re
 
 import disnake
 from disnake.ext import commands
@@ -50,56 +50,30 @@ def projected_player(player: dict, base_ids: list[str], stars, gear, relic, suff
 
 
 class CompareSetupView(disnake.ui.View):
-    """Панель выбора игроков для сравнения: до COMPARE_SLOTS слотов из трёх источников."""
+    """Панель выбора игроков для сравнения: до COMPARE_SLOTS слотов — люди с Discord-сервера
+    и коды союзника из одного поля. Списки игроков гильдии убраны (тред 2026-10-21)."""
 
     def __init__(self, cog, inter, guild_id: int, params: dict):
         super().__init__(timeout=PANEL_TIMEOUT)
         self.cog, self.inter, self.guild_id, self.params = cog, inter, guild_id, params
         self.author_id = inter.author.id
         self.users: list[disnake.User] = []
-        self.picked: dict[int, list[str]] = {0: [], 1: []}  # ally_code из двух списков гильдии
         self.codes: list[str] = []
         self.with_self = False
         self.rokamora = False
-        roster = sorted((cog.bot.guild_roster_caches.get(guild_id) or {}).items(), key=lambda kv: kv[0].lower())
-        self.roster_names = {str(code): name for name, code in roster}
 
         self.user_select = disnake.ui.UserSelect(placeholder="Участники Discord", min_values=0, max_values=COMPARE_SLOTS, row=0)
         self.user_select.callback = self._on_users
         self.add_item(self.user_select)
-        self.roster_selects: dict[int, disnake.ui.StringSelect] = {}
-        for i, part in enumerate((roster[:25], roster[25:50])):
-            if not part:
-                continue
-            select = disnake.ui.StringSelect(
-                placeholder=f"Игроки гильдии ({part[0][0][:12]} … {part[-1][0][:12]})",
-                min_values=0, max_values=min(COMPARE_SLOTS, len(part)), row=1 + i,
-                options=[disnake.SelectOption(label=name[:100], value=str(code)) for name, code in part],
-            )
-            select.callback = self._make_pick(i)
-            self.roster_selects[i] = select
-            self.add_item(select)
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
         return interaction.author.id == self.author_id
 
-    def _keep_selection(self):
-        """Discord перерисовывает списки при каждом edit_message без отметок — выбранное
-        «исчезало», хотя было запомнено (тред 2026-10-21). Отмечаем выбранное заново."""
-        for idx, select in self.roster_selects.items():
-            for option in select.options:
-                option.default = option.value in self.picked[idx]
-        self.user_select.default_values = self.users or None
-
     async def _refresh(self, interaction: disnake.MessageInteraction, extra: str = ""):
-        self._keep_selection()
+        # Discord перерисовывает список при каждом edit_message без отметок — выбранные
+        # «исчезали», хотя были запомнены (тред 2026-10-21). Отмечаем их заново.
+        self.user_select.default_values = self.users or None
         await interaction.response.edit_message(content=self.status_text() + extra, view=self)
-
-    def _make_pick(self, idx):
-        async def cb(interaction: disnake.MessageInteraction):
-            self.picked[idx] = list(interaction.values)
-            await self._refresh(interaction)
-        return cb
 
     async def _on_users(self, interaction: disnake.MessageInteraction):
         self.users = list(interaction.resolved_values)
@@ -108,7 +82,6 @@ class CompareSetupView(disnake.ui.View):
     def chosen(self) -> list[tuple[str, str]]:
         """[(подпись, источник)] — что выбрано сейчас, для строки статуса."""
         out = [(u.display_name, "discord") for u in self.users]
-        out += [(self.roster_names.get(c, c), "guild") for idx in (0, 1) for c in self.picked[idx]]
         out += [(c, "code") for c in self.codes]
         return out
 
@@ -122,25 +95,25 @@ class CompareSetupView(disnake.ui.View):
             lines.append("Плюс: " + ", ".join(extras))
         return "\n".join(lines)
 
-    @disnake.ui.button(label="Ввести коды союзника", style=disnake.ButtonStyle.secondary, row=3)
+    @disnake.ui.button(label="Коды союзника", style=disnake.ButtonStyle.secondary, row=1)
     async def codes_button(self, button, interaction: disnake.MessageInteraction):
         await interaction.response.send_modal(CodesModal(self))
 
-    @disnake.ui.button(label="С собой: нет", style=disnake.ButtonStyle.secondary, row=3)
+    @disnake.ui.button(label="С собой: нет", style=disnake.ButtonStyle.secondary, row=1)
     async def self_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         self.with_self = not self.with_self
         button.label = f"С собой: {'да' if self.with_self else 'нет'}"
         button.style = disnake.ButtonStyle.primary if self.with_self else disnake.ButtonStyle.secondary
         await self._refresh(interaction)
 
-    @disnake.ui.button(label="Rokamora: нет", style=disnake.ButtonStyle.secondary, row=3)
+    @disnake.ui.button(label="Rokamora: нет", style=disnake.ButtonStyle.secondary, row=1)
     async def rokamora_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         self.rokamora = not self.rokamora
         button.label = f"Rokamora: {'да' if self.rokamora else 'нет'}"
         button.style = disnake.ButtonStyle.primary if self.rokamora else disnake.ButtonStyle.secondary
         await self._refresh(interaction)
 
-    @disnake.ui.button(label="Сравнить", style=disnake.ButtonStyle.success, row=4)
+    @disnake.ui.button(label="Сравнить", style=disnake.ButtonStyle.success, row=2)
     async def go_button(self, button, interaction: disnake.MessageInteraction):
         chosen = self.chosen()
         if len(chosen) > COMPARE_SLOTS:
@@ -157,10 +130,10 @@ class CompareSetupView(disnake.ui.View):
         for u in self.users:
             reg = database.get_any_main_registration(str(u.id))
             if not reg:
-                error = error or f"❌ {u.mention} не привязал(а) аккаунт через /регистрация — выберите его в списке гильдии или по коду."
+                error = error or f"❌ {u.mention} не привязал(а) аккаунт через /регистрация — введите его код союзника."
                 continue
             codes.append(reg[0])
-        codes += [c for idx in (0, 1) for c in self.picked[idx]] + self.codes
+        codes += self.codes
         if self.rokamora:
             codes.append(ROKAMORA_ALLY_CODE)
         if error:
@@ -175,21 +148,19 @@ class CodesModal(disnake.ui.Modal):
     def __init__(self, view: CompareSetupView):
         self.view = view
         super().__init__(title="Коды союзника", components=[
-            disnake.ui.TextInput(label=f"Код союзника {i + 1}", custom_id=f"code{i}", required=False,
-                                 max_length=11, placeholder="123-456-789",
-                                 value=view.codes[i] if i < len(view.codes) else None)
-            for i in range(COMPARE_SLOTS)
+            disnake.ui.TextInput(label=f"До {COMPARE_SLOTS} кодов через пробел или запятую", custom_id="codes",
+                                 required=False, max_length=60, placeholder="123-456-789, 987-654-321",
+                                 value=", ".join(view.codes) or None),
         ])
 
     async def callback(self, interaction: disnake.ModalInteraction):
         codes, bad = [], []
-        for i in range(COMPARE_SLOTS):
-            raw = (interaction.text_values.get(f"code{i}") or "").strip()
+        for raw in re.split(r"[\s,;]+", interaction.text_values.get("codes") or ""):
             if not raw:
                 continue
             code = guild_resolver.normalize_ally_code(raw)
             (codes if code else bad).append(code or raw)
-        self.view.codes = codes
+        self.view.codes = list(dict.fromkeys(codes))
         await self.view._refresh(interaction, f"\n❌ Не коды союзника: {', '.join(bad)}" if bad else "")
 
 
