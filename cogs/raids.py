@@ -112,7 +112,10 @@ class RaidsCog(commands.Cog):
             try:
                 player = await asyncio.to_thread(self.bot.comlink.get_player, player_id=pid)
             except Exception as e:
-                print(f"⚠️ [Рейды] get_player {pid}: {e!r}")
+                if "not found" in str(e).lower():  # аккаунт удалён — больше не переспрашиваем
+                    database.set_raid_player_identity(gid, pid, "Удалённый аккаунт", None)
+                else:
+                    print(f"⚠️ [Рейды] get_player {pid}: {e!r}")
                 continue
             name = (player or {}).get("name")
             if name:
