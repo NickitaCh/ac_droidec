@@ -7,9 +7,9 @@
     {% call tbui.tb_hero("Бои и спецмиссии", "missions") %}{% endcall %}
 
     {% set ev_q = "&event_id=" ~ selected_event_id if selected_event_id and events and selected_event_id != events[-1][0] else "" %}
-    <nav class="hero-links" style="margin: 0 0 1em;">
+    <nav class="hero-links" style="margin: 0 0 1em;" id="tbm-tabs">
         {% for key, label in [("covert", "Спецмиссии за ТБ"), ("rates", "Спецмиссии: % побед"), ("strikes", "Бои за ТБ")] %}
-            {% if key == tab %}<strong class="hero-link">{{ label }}</strong>{% else %}<a class="hero-link" href="/tb/missions?tab={{ key }}{{ ev_q if key != 'rates' else '' }}">{{ label }}</a>{% endif %}
+            <a class="hero-link" data-tab="{{ key }}" href="/tb/missions?tab={{ key }}{{ ev_q }}"{% if key == tab %} aria-current="page" style="font-weight: 700;"{% endif %}>{{ label }}</a>
         {% endfor %}
     </nav>
 
@@ -20,7 +20,7 @@
     {% macro event_picker() %}
         {% if events|length > 1 %}
             <form method="get" class="tb-event-picker">
-                <input type="hidden" name="tab" value="{{ tab }}">
+                <input type="hidden" name="tab" value="{{ tab }}" class="tbm-tab-input">
                 <select name="event_id" onchange="this.form.submit()">
                     {% for event_id, completed_at in events|reverse %}
                         <option value="{{ event_id }}" {% if event_id == selected_event_id %}selected{% endif %}>{{ completed_at[:10] }}{% if event_id == events[-1][0] %} · последняя{% endif %}</option>
@@ -31,7 +31,8 @@
         {% else %}{{ events[-1][1][:10] }}{% endif %}
     {% endmacro %}
 
-    {% if tab == "covert" %}
+    <div class="tbm-pane" data-pane="covert"{% if tab != "covert" %} hidden{% endif %}>
+    {% with r = covert %}
         <div class="panel">
             <div class="panel-title">
                 <span>Спецмиссии{% call ui.help() %}<p>Кто прошёл каждую спецмиссию (✓), кто зашёл и проиграл (✗) и — только для последней ТБ — кто мог пройти по своему нынешнему составу, но не пошёл (💤). Порог «мог» — тот же, что в <code>/тб оз_готовность</code>.</p><p>Показаны только миссии, в которые кто-то заходил. Данные — итог ТБ из игры, сохраняется после окончания битвы. В Discord — <code>/тб_отчет</code> → «Спецмиссии за ТБ».</p>{% endcall %}</span>
@@ -72,7 +73,10 @@
             {% endif %}
         </div>
 
-    {% elif tab == "rates" %}
+    {% endwith %}
+    </div>
+    <div class="tbm-pane" data-pane="rates"{% if tab != "rates" %} hidden{% endif %}>
+    {% with r = rates %}
         <div class="panel">
             <div class="panel-title">
                 <span>% побед в спецмиссиях{% call ui.help() %}<p>Сколько спецмиссий игрок прошёл из тех, в которые заходил, по всем сохранённым ТБ (до {{ events|length }}). Сверху — с худшим процентом. По ТБ — «побед/заходов», от старых к новым.</p><p>Выбывшие из гильдии не показаны. В Discord — <code>/тб_отчет</code> → «Спецмиссии: % побед».</p>{% endcall %}</span>
@@ -109,7 +113,10 @@
             </div>
         </div>
 
-    {% else %}
+    {% endwith %}
+    </div>
+    <div class="tbm-pane" data-pane="strikes"{% if tab != "strikes" %} hidden{% endif %}>
+    {% with r = strikes %}
         <div class="panel">
             <div class="panel-title">
                 <span>Бои{% call ui.help() %}<p>В клетке — «боёв / волн отбито» на планете. Игра хранит бои только по планете целиком, без разбивки по отдельному бою, поэтому «отбил полностью» (✓) или «недобито N волн» видно только у тех, кто сходил во все бои планеты. У остальных — просто сколько боёв и волн.</p><p>Число боёв и волн на планете — из игровых данных. Сверху — у кого больше недобитых волн. В Discord — <code>/тб_отчет</code> → «Бои за ТБ».</p>{% endcall %}</span>
@@ -142,6 +149,25 @@
             </div>
             {% endif %}
         </div>
-    {% endif %}
+    {% endwith %}
+    </div>
+    <script>
+    (function () {
+        const tabs = document.querySelectorAll("#tbm-tabs [data-tab]");
+        tabs.forEach(a => a.addEventListener("click", e => {
+            if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            const key = a.dataset.tab;
+            document.querySelectorAll(".tbm-pane").forEach(p => { p.hidden = p.dataset.pane !== key; });
+            tabs.forEach(t => {
+                const on = t === a;
+                t.style.fontWeight = on ? "700" : "";
+                if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+            });
+            document.querySelectorAll(".tbm-tab-input").forEach(i => { i.value = key; });
+            history.replaceState(null, "", a.href);
+        }));
+    })();
+    </script>
     {% endif %}
 {% endblock %}

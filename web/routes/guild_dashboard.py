@@ -491,18 +491,18 @@ async def tb_missions_page(request: Request, tab: str = "covert",
     events = database.get_recent_tb_events(guild_id=user["guild_id"])  # старые -> новые
     if tab not in ("covert", "rates", "strikes"):
         tab = "covert"
-    ctx = {"user": user, "tab": tab, "events": events, "r": None, "selected_event_id": None}
+    ctx = {"user": user, "tab": tab, "events": events, "selected_event_id": None}
     if events:
         event_ids = [e[0] for e in events]
         selected = _parse_event_id(request)
         selected = selected if selected in event_ids else event_ids[-1]
         ctx["selected_event_id"] = selected
-        if tab == "covert":
-            ctx["r"] = await asyncio.to_thread(tb_missions.covert_event, user["guild_id"], selected, selected == event_ids[-1])
-        elif tab == "rates":
-            ctx["r"] = await asyncio.to_thread(tb_missions.covert_rates, user["guild_id"], events)
-        else:
-            ctx["r"] = await asyncio.to_thread(tb_missions.strikes_event, user["guild_id"], selected)
+        # Все три вкладки считаются сразу — переключение без перезагрузки (скрипт в шаблоне).
+        ctx["covert"], ctx["rates"], ctx["strikes"] = await asyncio.gather(
+            asyncio.to_thread(tb_missions.covert_event, user["guild_id"], selected, selected == event_ids[-1]),
+            asyncio.to_thread(tb_missions.covert_rates, user["guild_id"], events),
+            asyncio.to_thread(tb_missions.strikes_event, user["guild_id"], selected),
+        )
     return templates.TemplateResponse(request, "tb_missions.html", ctx)
 
 
