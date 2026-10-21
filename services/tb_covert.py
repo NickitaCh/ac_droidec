@@ -99,10 +99,29 @@ def planet_ru(planet: str) -> str:
     return (tb_plan_reader.PLANET_NAME_TO_RU.get(planet) or planet).capitalize()
 
 
-def missions(phase: int | None = None) -> list[dict]:
+def missions(phase: int | None = None, planet: str | None = None) -> list[dict]:
     raw = database.get_bot_state(STATE_KEY, guild_id=0)
     data = json.loads(raw) if raw else []
-    return [m for m in data if phase is None or m["phase"] == phase]
+    return [m for m in data if (phase is None or m["phase"] == phase) and (planet is None or m["planet"] == planet)]
+
+
+def planets() -> list[tuple[str, str, int]]:
+    """[(planet, русское название, этап)] планет со спецмиссиями — в порядке этапов."""
+    out = []
+    for m in missions():
+        if all(p != m["planet"] for p, _ru, _ph in out):
+            out.append((m["planet"], planet_ru(m["planet"]), m["phase"]))
+    return out
+
+
+def resolve_planet(text: str) -> str | None:
+    """Планета из подсказки (английское название) или вписанная руками по-русски."""
+    needle = (text or "").strip().lower()
+    for planet, ru, _phase in planets():
+        if needle in (planet.lower(), ru.lower()):
+            return planet
+    hits = [planet for planet, ru, _phase in planets() if needle and (needle in ru.lower() or needle in planet.lower())]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _unit_ok(unit: dict, mission: dict) -> bool:
@@ -136,10 +155,46 @@ def player_status(mission: dict, roster: dict, ships: set = frozenset()) -> dict
     return {"status": "short" if owned_all else "missing", "have": have, "text": text}
 
 
-def guild_grid(guild_id: int, phase: int | None = None) -> dict:
+def _level(unit: dict) -> str:
+    lv = unit_forecast.current_level(unit)
+    core = f"R{lv['relic']}" if lv["relic"] is not None else f"G{lv['gear']}"
+    return core if lv["stars"] >= 7 else f"{lv['stars']}★ {core}"
+
+
+def player_report(ms: list[dict], roster: dict) -> list[dict]:
+    """Разбор одного игрока по спецмиссиям: [{mission, status, have, need, mandatory:
+    [(имя, уровень|None, ok)], best: [(имя, уровень)] — лучшие из недотянувших, кого
+    докачать, ok_names}]."""
+    ships = {b for b, t in database.get_unit_types(list(roster)).items() if t == "ship"}
+    pool_ids = {b for m in ms for b in (m["units"] or [])} | {b for m in ms for b in m["mandatory"]}
+    names = database.get_game_unit_names(list(pool_ids | set(roster)))
+    out = []
+    for m in ms:
+        s = player_status(m, roster, ships)
+        pool = m["units"] if m["units"] is not None else [b for b in roster if b not in ships]
+        owned = [b for b in pool if b in roster]
+        ok = [b for b in owned if _unit_ok(roster[b], m)]
+        mandatory = [(names.get(b, b), _level(roster[b]) if b in roster else None, b in ok) for b in m["mandatory"]]
+        missing_slots = max(0, m["count"] - len(m["mandatory"]) - len([b for b in ok if b not in m["mandatory"]]))
+
+        def strength(b):
+            lv = unit_forecast.current_level(roster[b])
+            return (lv["stars"], lv["relic"] if lv["relic"] is not None else -1, lv["gear"])
+        under = sorted((b for b in owned if b not in ok and b not in m["mandatory"]), key=strength, reverse=True)
+        out.append({
+            "mission": m, "status": s["status"], "have": min(s["have"], m["count"]), "need": m["count"],
+            "mandatory": mandatory,
+            "best": [(names.get(b, b), _level(roster[b])) for b in under[:missing_slots]],
+            "missing_slots": missing_slots,
+            "ok_names": [names.get(b, b) for b in ok if b not in m["mandatory"]],
+        })
+    return out
+
+
+def guild_grid(guild_id: int, phase: int | None = None, planet: str | None = None) -> dict:
     """Структура для services/guild_units_image.render: units — спецмиссии (портрет —
     первый обязательный персонаж), players — по убыванию числа пройденных."""
-    ms = missions(phase)
+    ms = missions(phase, planet)
     members = [(code, name) for _d, code, name in database.get_all_user_mappings(guild_id)]
     rosters = database.get_player_units_bulk([c for c, _ in members])
     names = database.get_game_unit_names([b for m in ms for b in m["mandatory"]])

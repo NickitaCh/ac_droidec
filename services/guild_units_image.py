@@ -40,16 +40,19 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
     guide = r.get("guide")
     gw = GUIDE_W if guide else 0
     width = PAD * 2 + PCT_W + NAME_W + gw + cell_w * len(units)
+    title_text = (title or f"Готовность к «{guide['name']}»") + f" — {guild_name}"
+    # Одна-две колонки уже заголовка — расширяем картинку под него (иначе он обрезается).
+    width = max(width, int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(title_text, font=_font(22, True))) + PAD * 4)
     title_h = 64
     groups = r.get("groups") if len(r.get("groups") or []) > 1 else None
     band_h = 30 if groups else 0
-    height = PAD + title_h + band_h + HEAD_H + ROW_H * len(players) + 100
+    height = PAD + title_h + band_h + HEAD_H + ROW_H * len(players) + 200  # подписи переносятся по словам
     img = Image.new("RGB", (width, height), BG)
     draw = ImageDraw.Draw(img)
 
     ready = sum(1 for p in players if p["ready"])
     y = PAD
-    draw.text((width // 2, y + 16), (title or f"Готовность к «{guide['name']}»") + f" — {guild_name}", font=_font(22, True), fill=TEXT, anchor="mm")
+    draw.text((width // 2, y + 16), title_text, font=_font(22, True), fill=TEXT, anchor="mm")
     draw.text((width // 2, y + 44), summary or f"Готовы: {ready} · Не готовы: {len(players) - ready}", font=_font(18), fill=GOLD, anchor="mm")
     y += title_h
 
@@ -103,7 +106,16 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
         notes.append(updated_note)
     lines = [" · ".join(notes)]
     if draw.textlength(lines[0], font=_font(14)) > width - 2 * PAD:
-        lines = notes
+        lines = []
+        for note in notes:  # не влезает и одна подпись — переносим по словам
+            cur = ""
+            for word in note.split(" "):
+                if cur and draw.textlength(f"{cur} {word}", font=_font(14)) > width - 2 * PAD:
+                    lines.append(cur)
+                    cur = word
+                else:
+                    cur = f"{cur} {word}".strip()
+            lines.append(cur)
     for line in lines:
         draw.text((width // 2, y + 16), line, font=_font(14), fill=MUTED, anchor="mm")
         y += 20
