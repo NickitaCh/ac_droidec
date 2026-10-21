@@ -139,12 +139,26 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
     return result
 
 
-def raid_entry_units(raid_id: str) -> dict | None:
+def _raid_units_data() -> dict:
     import json
     import database
     raw = database.get_bot_state(RAID_UNITS_STATE, guild_id=0)
-    data = json.loads(raw) if raw else {}
-    return data.get((raid_id or "").lower())
+    return json.loads(raw) if raw else {}
+
+
+def raid_entry_units(raid_id: str) -> dict | None:
+    return _raid_units_data().get((raid_id or "").lower())
+
+
+def resolve_raid_kind(text: str) -> str | None:
+    """Рейд по id или по названию, вписанному руками (подсказка Discord не успела
+    подгрузиться): «order66», «приказ 66», «крайт» → id рейда с загруженным составом."""
+    data = _raid_units_data()
+    needle = (text or "").strip().lower()
+    if needle in data:
+        return needle
+    hits = [k for k in data if needle and (needle in raid_name(k).lower() or needle in k)]
+    return hits[0] if len(hits) == 1 else None
 
 
 # Отряды рейда — как у WookieeBot raid ready (в данных игры деления на отряды нет: только

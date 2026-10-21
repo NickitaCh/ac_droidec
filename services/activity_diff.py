@@ -19,15 +19,21 @@ import stat_engine
 from services import player_profile
 
 
+def _store_player_meta(ally_code: str, player_data: dict) -> None:
+    # Датакроны приходят в том же ответе — сохраняем попутно (деф ВГ: «у кого нужный ДК»).
+    if "datacron" in player_data:
+        database.upsert_player_datacrons(ally_code, player_data.get("datacron") or [])
+    # Статы ВА/ранги арены — для гильдийского /профиль (services/player_profile.py).
+    if player_data.get("profileStat") is not None:
+        database.upsert_player_profile(ally_code, player_profile.player_meta(player_data))
+
+
 async def fetch_player_units(comlink, ally_code: str) -> dict:
     """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
     player_data = await asyncio.to_thread(comlink.get_player, allycode=str(ally_code))
-    # Датакроны приходят в том же ответе — сохраняем попутно (деф ВГ: «у кого нужный ДК»).
-    if "datacron" in player_data:
-        database.upsert_player_datacrons(str(ally_code), player_data.get("datacron") or [])
-    # Статы ВА/ранги арены — для гильдийского /профиль (services/player_profile.py).
-    if player_data.get("profileStat") is not None:
-        database.upsert_player_profile(str(ally_code), player_profile.player_meta(player_data))
+    # Запись в БД — тоже в потоке: на занятой базе commit ждёт блокировку секундами и
+    # держал event loop (watchdog 2026-10-21, падали автодополнения во время синка).
+    await asyncio.to_thread(_store_player_meta, str(ally_code), player_data)
     roster = player_data.get("rosterUnit") or player_data.get("roster") or []
     units = {}
     for u in roster:
@@ -54,7 +60,7 @@ async def refresh_player_units(comlink, ally_code: str) -> bool:
             return False
         units = await fetch_player_units(comlink, ally_code)
         if units:
-            database.upsert_player_units(ally_code, units)
+            await asyncio.to_thread(database.upsert_player_units, ally_code, units)
         return True
 
 
@@ -150,6 +156,15 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
         return False, 0, []
     if not new_units:
         return False, 0, []
+    added, omicron_hits = await asyncio.to_thread(
+        _store_roster_diff, ally_code, new_units, guild_ids, event_date, skill_tier_map
+    )
+    return True, added, omicron_hits
+
+
+def _store_roster_diff(ally_code: str, new_units: dict, guild_ids, event_date: str, skill_tier_map: dict) -> tuple[int, list]:
+    """Дифф против кэша + запись кэша и событий — вне event loop (чтение ~300 юнитов и
+    commit на занятой базе стоили 2–4 с на игрока)."""
     old_units = database.get_player_units(ally_code)
     events = diff_roster(old_units, new_units, is_first_sync=not old_units, skill_tier_map=skill_tier_map)
     database.upsert_player_units(ally_code, new_units)
@@ -166,4 +181,4 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
                 added += 1
                 if action_type == "omicron":
                     omicron_hits.append((event_id, base_id, new_value, guild_id))
-    return True, added, omicron_hits
+    return added, omicron_hits

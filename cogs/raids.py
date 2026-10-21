@@ -58,7 +58,9 @@ async def autocomplete_raid_kinds(inter: disnake.ApplicationCommandInteraction, 
 
 async def autocomplete_raid_teams(inter: disnake.ApplicationCommandInteraction, string: str):
     raid = inter.filled_options.get("рейд")
-    if not raid:
+    if raid:
+        raid = rs.resolve_raid_kind(raid) or raid
+    else:
         guild_id = guild_resolver.resolve_guild_id(inter.author)
         last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
         raid = last[0]["raid_id"] if last else "order66"
@@ -108,8 +110,9 @@ class RaidsCog(commands.Cog):
                     self.bot.comlink.get_guild, cfg["swgoh_guild_id"], include_recent_guild_activity_info=True
                 )
                 # Тот же ответ несёт прошлых соперников по ВГ — для подсказки в /вг_соперник.
-                guild_compare.save_recent_opponents(cfg["id"], resp)
-                saved = store_recent(cfg["id"], resp) if feature_flags.is_enabled(cfg["id"], "raids") else 0
+                await asyncio.to_thread(guild_compare.save_recent_opponents, cfg["id"], resp)
+                saved = (await asyncio.to_thread(store_recent, cfg["id"], resp)
+                         if feature_flags.is_enabled(cfg["id"], "raids") else 0)
                 if saved:
                     print(f"⚔️ [Рейды] [{cfg.get('name')}] сохранено новых рейдов: {saved}")
                 await self._resolve_unnamed(cfg["id"])
@@ -193,15 +196,19 @@ class RaidsCog(commands.Cog):
         if рейд is None:
             last = database.get_raid_results(guild_id, limit=1)
             рейд = last[0]["raid_id"] if last else "order66"
+        else:
+            рейд = rs.resolve_raid_kind(рейд) or рейд
         entry = rs.raid_entry_units(рейд)
         if not entry:
-            await inter.edit_original_response("❌ Состав этого рейда ещё не загружен из игры — попробуйте позже.")
+            await inter.edit_original_response("❌ Рейд не найден или его состав ещё не загружен из игры — выберите рейд из списка.")
             return
         target = ("relic", str(реликвия)) if реликвия > 0 else ("gear", "13")
         names = database.get_game_unit_names(entry["units"])
         teams = rs.raid_teams(рейд, entry["units"], names)
         if отряд:
-            teams = [t for t in teams if t[0] == отряд]
+            needle = отряд.strip().lower()
+            exact = [t for t in teams if t[0].lower() == needle]
+            teams = exact or [t for t in teams if needle in t[0].lower()][:1]
             if not teams:
                 await inter.edit_original_response("❌ Такого отряда в этом рейде нет — выберите из списка.")
                 return
