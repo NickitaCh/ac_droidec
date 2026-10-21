@@ -284,6 +284,7 @@ GUILD_CONFIG_COLUMNS = [
     "antispam_alert_message", "antispam_timeout_minutes",
     "tasks_log_channel_id", "tasks_notify_time",
     "raid_tickets_channel_id",
+    "personal_units",
     "is_active",
     "subscription_expires_at", "subscription_source", "payment_customer_id",
 ]
@@ -360,6 +361,11 @@ def _ensure_guilds_table(cursor):
     try:
         # Канал напоминаний «сдайте энку» (рейдовые билеты) — cogs/raid_tickets.py.
         cursor.execute("ALTER TABLE guilds ADD COLUMN raid_tickets_channel_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Блок «Персональные» в /вг_соперник — base_id через запятую, задают офицеры на /settings.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN personal_units TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
     try:
@@ -7746,3 +7752,18 @@ def set_raid_player_identity(guild_id: int, player_id: str, name: str, ally_code
     )
     conn.commit()
     conn.close()
+
+
+def get_any_main_registration(discord_id: str):
+    """(ally_code, ingame_name) основного аккаунта discord_id в любой гильдии бота — для
+    команд, где можно указать человека из другой гильдии (/юнит участник:@…)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    cursor.execute(
+        "SELECT ally_code, ingame_name FROM user_registration WHERE discord_id = ? ORDER BY is_main DESC, registered_at LIMIT 1",
+        (str(discord_id),),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row

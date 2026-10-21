@@ -64,3 +64,27 @@ async def list_guild_channels(discord_guild_id: str) -> list[dict]:
     ]
     channels.sort(key=lambda c: c.pop("_order"))
     return channels
+
+
+async def find_member_id(discord_guild_ids: list[str], query: str) -> str | None:
+    """ID пользователя по нику (username, глобальное имя или ник на сервере) — поиск по
+    серверам гильдий бота, совпадение без учёта регистра. Нужен, когда в форму вписали
+    ник вместо числового ID (так появились гранты, которые ни с кем не совпадали)."""
+    needle = query.strip().lstrip("@").lower()
+    if not needle:
+        return None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for gid in discord_guild_ids:
+            try:
+                resp = await client.get(f"{DISCORD_API}/guilds/{gid}/members/search",
+                                        params={"query": needle, "limit": 10}, headers=_headers())
+            except httpx.HTTPError:
+                continue
+            if resp.status_code != 200:
+                continue
+            for m in resp.json():
+                user = m.get("user") or {}
+                names = {(user.get("username") or "").lower(), (user.get("global_name") or "").lower(), (m.get("nick") or "").lower()}
+                if needle in names:
+                    return str(user.get("id"))
+    return None

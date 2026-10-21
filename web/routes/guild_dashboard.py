@@ -2284,9 +2284,12 @@ GUILD_SETTINGS_GROUPS = [
     {
         "name": "Территориальная Война (ВГ)",
         "tab": "ВГ",
-        "hint": "Форум-канал с гайдами по контрам, откуда бот забирает данные для /вг_ордер.",
+        "hint": "Форум-канал с гайдами по контрам, откуда бот забирает данные для /вг_ордер. "
+                "«Персональные» — свои персонажи гильдии для блока «Персональные» в /вг_соперник "
+                "(как у HotBot): средние статы у владельцев в нашей гильдии и у соперника.",
         "fields": [
             ("tw_guide_forum_channel_id", "Форум-канал гайдов по контрам ВГ", "channel"),
+            ("personal_units", "Персональные персонажи для /вг_соперник", "units"),
         ],
     },
     {
@@ -2395,6 +2398,45 @@ def _parse_schedule_rows(raw_json: str) -> list[dict]:
     return parsed if parsed else [dict(e) for e in DEFAULT_SCHEDULE_ENTRIES]
 
 
+UNITS_LIMIT = 20  # персонажей в блоке «Персональные»
+
+
+def _unit_label(base_id: str, name: str) -> str:
+    return f"{name} [{base_id}]"
+
+
+def _character_options() -> list[str]:
+    """Подсказки для поля-списка персонажей: «Имя [BASE_ID]» по всем персонажам игры."""
+    rows = database.search_game_units("", limit=2000)
+    types = database.get_unit_types([b for b, _ in rows])
+    return sorted(_unit_label(b, n) for b, n in rows if types.get(b) != "ship")
+
+
+def _unit_entries(value: str) -> list[str]:
+    ids = [b.strip() for b in (value or "").split(",") if b.strip()]
+    names = database.get_game_unit_names(ids)
+    return [_unit_label(b, names.get(b, b)) for b in ids]
+
+
+def _parse_unit_entries(raw_values: list[str]) -> tuple[list[str], str | None]:
+    """«Имя [BASE_ID]» или точное имя → base_id; (список, первая нераспознанная строка)."""
+    result = []
+    for raw in raw_values:
+        raw = (raw or "").strip()
+        if not raw:
+            continue
+        m = re.search(r"\[([A-Z0-9_]+)\]\s*$", raw)
+        base_id = m.group(1) if m else None
+        if base_id is None:
+            match = next(((b, n) for b, n in database.search_game_units(raw, limit=20) if n.lower() == raw.lower()), None)
+            base_id = match[0] if match else None
+        if not base_id or not database.get_game_unit_name(base_id):
+            return [], raw
+        if base_id not in result:
+            result.append(base_id)
+    return result[:UNITS_LIMIT], None
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def guild_settings(request: Request, user: dict = Depends(require_guild_access)):
     guild_cfg = database.get_guild_config(user["guild_id"])
@@ -2444,11 +2486,14 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
                 "field": field, "label": label, "kind": kind, "value": value,
                 "channel_options": await _channel_options(value) if kind == "channel" else None,
                 "schedule_entries": _parse_schedule_rows(value) if kind == "schedule" else None,
+                "unit_entries": _unit_entries(value) if kind == "units" else None,
             })
         groups.append({"name": group["name"], "hint": group["hint"], "rows": rows, "tab": group["tab"]})
+    has_units = any(r["kind"] == "units" for g in groups for r in g["rows"])
     return templates.TemplateResponse(request, "guild_settings.html", {
         "user": user,
         "groups": groups,
+        "unit_options": _character_options() if has_units else [],
         # Вкладки над формой (ТБ / ВГ / Энка / ...) — порядок как в GUILD_SETTINGS_GROUPS.
         "tabs": sorted(dict.fromkeys(g["tab"] for g in groups), key=lambda t: SETTINGS_TAB_ORDER.index(t) if t in SETTINGS_TAB_ORDER else 99),
         "error": request.query_params.get("error"),
@@ -2472,6 +2517,14 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
                 continue  # tasks_notify_time — отдельно, ниже
             if kind == "schedule":
                 continue  # ping_schedule_json — отдельно, ниже
+            if kind == "units":
+                base_ids, bad = _parse_unit_entries(form.getlist(field))
+                if bad:
+                    return RedirectResponse(
+                        f"/settings?{urlencode({'error': 'Персонаж не найден — выберите из подсказки: ' + bad})}", status_code=303
+                    )
+                cleaned[field] = ",".join(base_ids) or None
+                continue
             if kind == "flag":
                 # Не guilds-колонка — services.feature_flags (bot_state), не часть
                 # cleaned/update_guild_config. Чекбокс не приходит в form вообще,

@@ -241,18 +241,27 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
         "gls": with_missing(ordered_gls(gls)),
         "meta_units": with_missing(META_CHARACTERS),
         "fleet": with_missing(FLEET_META),
+        "personal": with_missing(ctx.get("personal") or []),
     }
 
 
-def load_context() -> dict:
-    """Справочники, общие для всех игроков одного вызова (имена, пороги зет/омикронов, ГЛ)."""
+def load_context(personal: list[str] | tuple = ()) -> dict:
+    """Справочники, общие для всех игроков одного вызова (имена, пороги зет/омикронов, ГЛ).
+    personal — блок «Персональные» гильдии (guilds.personal_units, только /вг_соперник)."""
     gls = galactic_legends()
-    ids = list(dict.fromkeys(gls + list(META_CHARACTERS) + list(FLEET_META)))
+    personal = list(personal)
+    ids = list(dict.fromkeys(gls + list(META_CHARACTERS) + list(FLEET_META) + personal))
     return {
         "names": database.get_game_unit_names(ids),
         "skills": database.get_all_skill_tier_info(),
         "gls": gls,
+        "personal": personal,
     }
+
+
+def personal_units(guild_cfg: dict | None) -> list[str]:
+    raw = (guild_cfg or {}).get("personal_units") or ""
+    return [b.strip() for b in raw.split(",") if b.strip()]
 
 
 # ---------------------------------------------------------------- гильдия
@@ -339,4 +348,6 @@ def summarize_guild(guild_name: str, guild_gp: int | None, players: list[dict], 
         "gls": _aggregate_units(players, "gls", gls, ctx["names"]),
         "meta_units": _aggregate_units(players, "meta_units", list(META_CHARACTERS), ctx["names"]),
         "fleet": _aggregate_units(players, "fleet", list(FLEET_META), ctx["names"]),
+        "personal": _aggregate_units(players, "personal", list(ctx.get("personal") or []), ctx["names"]),
+        "personal_ids": list(ctx.get("personal") or []),
     }

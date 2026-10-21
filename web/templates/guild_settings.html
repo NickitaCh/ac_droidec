@@ -31,6 +31,9 @@
         </div>
     </div>
 
+    {% if unit_options %}
+        <datalist id="settings-unit-options">{% for opt in unit_options %}<option value="{{ opt }}">{% endfor %}</datalist>
+    {% endif %}
     <form method="post" action="/settings" class="settings-form" id="settings-form">
         {% for group in groups %}
             <div class="panel settings-group" data-tab="{{ group.tab }}">
@@ -60,6 +63,21 @@
                                 </tbody>
                             </table>
                             <button type="button" class="row-group-add">+ добавить строку</button>
+                        </div>
+                    {% elif row.kind == 'units' %}
+                        <div class="form-block" data-row-group>
+                            <span>{{ row.label }}</span>
+                            <table class="stat-rows-table">
+                                <tbody class="row-group-rows">
+                                    {% for entry in (row.unit_entries or [""]) %}
+                                        <tr class="row-group-row">
+                                            <td><input type="text" name="{{ row.field }}" value="{{ entry }}" list="settings-unit-options" placeholder="начните вводить имя персонажа"></td>
+                                            <td><button type="button" class="row-group-remove" title="Убрать строку">✕</button></td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            <button type="button" class="row-group-add">+ добавить персонажа</button>
                         </div>
                     {% else %}
                     <label>

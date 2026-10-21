@@ -203,7 +203,8 @@ class UnitForecastCog(commands.Cog):
                     return
                 ally_codes.append(registration[0])
         for user in users:
-            registration = database.get_user_registration(str(user.id), guild_id=guild_id)
+            registration = (database.get_user_registration(str(user.id), guild_id=guild_id)
+                            or database.get_any_main_registration(str(user.id)))
             if not registration:
                 await inter.edit_original_response(f"❌ {user.mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника.")
                 return

@@ -99,10 +99,14 @@ def render(a: dict, b: dict, note: str | None = None) -> bytes:
         by = [{r["base_id"]: r for r in g.get(key) or []} for g in guilds]
         order = list(ids) if ids else pp.ordered_gls(list(set(by[0]) | set(by[1])))
         unit_blocks.append((title, [(x, by[0].get(x), by[1].get(x)) for x in order if x in by[0] or x in by[1]]))
+    # «Персональные» — список нашей гильдии (guilds.personal_units); показываем всегда, даже пустой.
+    personal_ids = a.get("personal_ids") or []
+    by = [{r["base_id"]: r for r in g.get("personal") or []} for g in guilds]
+    unit_blocks.append(("Персональные", [(x, by[0].get(x), by[1].get(x)) for x in personal_ids]))
 
     metric_rows = sum((len(c) + 1) // 2 for _t, c in SECTIONS)
     n_units = sum(len(u) for _t, u in unit_blocks)
-    height = PAD + 110 + (len(SECTIONS) + len(unit_blocks)) * 46 + metric_rows * (ROW_H + 4) + n_units * (UNIT_H + 6) + 80
+    height = PAD + 170 + (len(SECTIONS) + len(unit_blocks)) * 46 + metric_rows * (ROW_H + 4) + n_units * (UNIT_H + 6) + 80
     img = Image.new("RGB", (W, height), BG)
     draw = ImageDraw.Draw(img)
 
@@ -157,6 +161,15 @@ def render(a: dict, b: dict, note: str | None = None) -> bytes:
         y += 6
 
     for title, rows in unit_blocks:
+        if not rows and title == "Персональные":
+            section(title)
+            for i in range(2):
+                x = col_x(i)
+                draw.rectangle((x, y, x + COL_W, y + 44), fill=PANEL)
+                draw.text((x + COL_W // 2, y + 22), "Список не задан — его задают офицеры на сайте: Настройки → ВГ",
+                          font=_font(15), fill=MUTED, anchor="mm")
+            y += 50
+            continue
         if not rows:
             continue
         section(f"{title} — средние у владельцев")

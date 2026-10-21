@@ -16,6 +16,7 @@ from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from services import guild_units, guild_units_image, journey_guide
 
 FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
+MESSAGE_EMBED_LIMIT = 5800  # лимит Discord — 6000 символов на все эмбеды одного сообщения
 
 
 async def autocomplete_guides(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -100,14 +101,17 @@ class GuildUnitsCog(commands.Cog):
         if not embeds:
             embeds = [disnake.Embed(title=cfg.get("name") or "Гильдия", description=f"**{r['name']}** — ни у кого нет.")]
         embeds[-1].set_footer(text="Данные ежечасного обновления составов")
-        if sum(len(e) for e in embeds) > 5900 or len(embeds) > 10:  # общий лимит эмбедов сообщения
-            text = "\n\n".join(f"{name}\n{value.strip('`')}" for name, value in blocks)
-            await inter.edit_original_response(
-                content=f"**{r['name']}** — есть у {len(r['owners'])} из {r['members']} (список в файле)",
-                file=disnake.File(io.BytesIO(text.encode("utf-8")), filename=f"{base_id}.txt"),
-            )
-            return
-        await inter.edit_original_response(embeds=embeds)
+        # В одном сообщении — не больше 10 эмбедов и 6000 символов на все; остальное — следующими сообщениями.
+        messages, current = [], []
+        for e in embeds:
+            if current and (len(current) >= 10 or sum(len(x) for x in current) + len(e) > MESSAGE_EMBED_LIMIT):
+                messages.append(current)
+                current = []
+            current.append(e)
+        messages.append(current)
+        await inter.edit_original_response(embeds=messages[0])
+        for chunk in messages[1:]:
+            await inter.followup.send(embeds=chunk)
 
     @commands.slash_command(name="готовность", description="Готовность гильдии к цели «Руководства» картинкой (как Wookiee guild ready)")
     async def readiness(

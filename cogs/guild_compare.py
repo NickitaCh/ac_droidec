@@ -91,7 +91,7 @@ class GuildCompareCog(commands.Cog):
         opp_name = (guild.get("profile") or {}).get("name") or "Соперник"
         opp_gp = int((guild.get("profile") or {}).get("guildGalacticPower") or 0) or None
 
-        ctx = await asyncio.to_thread(pp.load_context)
+        ctx = await asyncio.to_thread(pp.load_context, pp.personal_units(cfg))
         stat_calc = self.bot.stat_calc
         done = 0
         sem = asyncio.Semaphore(PARALLEL)

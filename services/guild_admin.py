@@ -124,6 +124,10 @@ async def add_grant(comlink, discord_id: str, ally_code: str, guild_id: int, tie
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
         return GrantResult(ok=False, error="Код союзника должен состоять ровно из 9 цифр!")
+    discord_id = await resolve_discord_id(discord_id)
+    if discord_id is None:
+        return GrantResult(ok=False, error="Пользователь Discord не найден — укажите числовой ID "
+                                           "(правой кнопкой по человеку → «Копировать ID») или точный ник.")
     if tier not in ("member", "officer"):
         return GrantResult(ok=False, error="Уровень должен быть 'member' или 'officer'.")
     if database.get_guild_config(guild_id) is None:
@@ -139,6 +143,21 @@ async def add_grant(comlink, discord_id: str, ally_code: str, guild_id: int, tie
     database.add_manual_grant(str(discord_id), clean_code, guild_id, tier, granted_by=granted_by, ingame_name=player_data["name"])
     link_grant_registration(str(discord_id), clean_code, guild_id, player_data["name"])
     return GrantResult(ok=True, ingame_name=player_data["name"])
+
+
+async def resolve_discord_id(raw: str) -> str | None:
+    """Числовой ID из ввода: ID как есть, упоминание <@123>, либо ник — поиском по серверам
+    гильдий бота (services/discord_rest.find_member_id)."""
+    raw = str(raw or "").strip()
+    digits = raw.strip("<@!>")
+    if digits.isdigit() and len(digits) >= 15:
+        return digits
+    from services import discord_rest
+    servers = [str(c["discord_guild_id"]) for c in database.get_all_guild_configs() if c.get("discord_guild_id")]
+    try:
+        return await discord_rest.find_member_id(servers, raw)
+    except discord_rest.DiscordRestError:
+        return None
 
 
 def link_grant_registration(discord_id: str, ally_code: str, guild_id: int, ingame_name: str) -> bool:
@@ -180,6 +199,7 @@ def remove_grant(discord_id: str) -> bool:
 # другой гильдией, просто угадав/зная чужой discord_id.
 
 async def add_guild_scoped_grant(comlink, discord_id: str, ally_code: str, tier: str, guild_id: int, granted_by: str) -> GrantResult:
+    discord_id = await resolve_discord_id(discord_id) or discord_id
     existing = database.get_manual_grant(discord_id)
     if existing and existing["guild_id"] != guild_id:
         return GrantResult(ok=False, error="У этого Discord-пользователя уже есть ручной грант в другой гильдии — изменить его может только супер-админ.")
