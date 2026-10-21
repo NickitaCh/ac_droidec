@@ -22,7 +22,7 @@ import database
 import guild_resolver
 import stat_engine
 from cogs.unit_forecast import (
-    LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_ally_codes, autocomplete_character_unit,
+    LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit,
 )
 from services import toon, toon_image, unit_forecast
 
@@ -141,7 +141,7 @@ class CompareSetupView(disnake.ui.View):
             code, error = self.cog.own_code(self.inter, self.guild_id, self.params["альт"])
             codes.append(code)
         for u in self.users:
-            reg = database.get_user_registration(str(u.id), guild_id=self.guild_id) or database.get_any_main_registration(str(u.id))
+            reg = database.get_any_main_registration(str(u.id))
             if not reg:
                 error = error or f"❌ {u.mention} не привязал(а) аккаунт через /регистрация — выберите его в списке гильдии или по коду."
                 continue
@@ -201,9 +201,8 @@ class UnitTestCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
-        игрок: str = commands.Param(default=None, description="Чужой игрок: игрок гильдии из списка или любой код союзника (пусто → вы)",
-                                    autocomplete=autocomplete_ally_codes),
-        участник: disnake.User = commands.Param(default=None, description="Чужой игрок: участник Discord (по его /регистрация)"),
+        участник: disnake.User = commands.Param(default=None, description="Чужой игрок: человек в Discord (по его /регистрация, любая гильдия)"),
+        аликод: str = commands.Param(default=None, description="Чужой игрок: код союзника (9 цифр)"),
         юнит2: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         юнит3: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         сравнение: bool = commands.Param(default=False, description="Панель выбора игроков для сравнения (до 4, вы — по кнопке «С собой»)"),
@@ -221,37 +220,39 @@ class UnitTestCog(commands.Cog):
                 await inter.edit_original_response(f"❌ Персонаж «{base_id}» не найден — выберите его из списка.")
                 return
         ship = any(types.get(b) == "ship" for b in base_ids)
-        if ship and (len(base_ids) > 1 or сравнение or (игрок and участник)):
+        if ship and (len(base_ids) > 1 or сравнение or (аликод and участник)):
             await inter.edit_original_response("❌ Корабль — только один и для одного игрока: у кораблей нет модулей.")
             return
         error = unit_forecast.validate(звёзды, None if ship else гир, None if ship else релик)
         if error:
             await inter.edit_original_response(f"❌ {error}")
             return
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
         params = {"base_ids": base_ids, "звёзды": звёзды, "гир": гир, "релик": релик, "альт": альт, "обновить": обновить}
 
-        # «игрок»/«участник» — посмотреть чужого игрока без панели (вопрос в треде 2026-10-21:
-        # «я только чужого мЛюка пробить хотел»); со «сравнением» — уже выбраны в панели.
+        # «участник»/«аликод» — посмотреть чужого игрока без панели и без привязки к гильдии
+        # (тред 2026-10-21: «я только чужого мЛюка пробить хотел»); со «сравнением» — уже
+        # выбраны в панели. Гильдия нужна только для своего аккаунта и панели.
         others = []
-        if игрок:
-            code = guild_resolver.normalize_ally_code(игрок)
-            if code is None:
-                await inter.edit_original_response(f"❌ «{игрок}» — не код союзника: нужно 9 цифр или игрок из списка.")
-                return
-            others.append(str(code))
         if участник:
-            reg = (database.get_user_registration(str(участник.id), guild_id=guild_id)
-                   or database.get_any_main_registration(str(участник.id)))
+            reg = database.get_any_main_registration(str(участник.id))
             if not reg:
                 await inter.edit_original_response(
-                    f"❌ {участник.mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника в «игрок».")
+                    f"❌ {участник.mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника в «аликод».")
                 return
             others.append(str(reg[0]))
+        if аликод:
+            code = guild_resolver.normalize_ally_code(аликод)
+            if code is None:
+                await inter.edit_original_response(f"❌ «{аликод}» — не код союзника: нужно 9 цифр.")
+                return
+            others.append(str(code))
         others = list(dict.fromkeys(others))
 
+        guild_id = None
+        if сравнение or not others:
+            guild_id = await guild_resolver.require_guild_id(inter)
+            if guild_id is None:
+                return
         if сравнение:
             view = CompareSetupView(self, inter, guild_id, params)
             view.codes = others
