@@ -4,6 +4,7 @@
 сайта (web/static/img/game), эмблема сета красится в цвет тира мода, как в игре."""
 
 import io
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -17,19 +18,18 @@ from services.unit_forecast import STAT_LABELS
 
 GAME_IMG = Path(__file__).resolve().parent.parent / "web" / "static" / "img" / "game"
 
-CARD_W, LEFT_W = 640, 300
+CARD_W, LEFT_W = 590, 300
 PAD, GAP = 12, 8
 TITLE_H = 34
 STAT_H = 25
 MOD_H = 84
 ABIL_H = 26
-PIC = 140
+PIC = 190
+PIC_TOP = 44  # место над портретом под дугу звёзд
 
 BEST_BG = (46, 110, 60)
 MISSING_FG = (120, 124, 134)
 CROSS = (220, 80, 80)
-ZETA_FG = (196, 140, 255)
-OMICRON_FG = (110, 200, 255)
 LEVEL_BG = (36, 58, 82)
 
 # Цвет эмблемы сета по тиру мода E..A (как .mod-tier-N в style.css).
@@ -112,7 +112,7 @@ def _fit(draw, text: str, font, width: int) -> str:
 def _card_height(card: dict) -> int:
     if card["missing"]:
         return TITLE_H + 120
-    left = PIC + 70 + 30 + len(toon.STATS) * STAT_H
+    left = PIC_TOP + PIC + 26 + 32 + len(toon.STATS) * STAT_H
     right = 6 * MOD_H + len(card["abilities"]) * ABIL_H
     return TITLE_H + max(left, right) + 6
 
@@ -132,43 +132,41 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
         draw.text((x0 + CARD_W // 2, y + 60), "Персонажа нет", font=_font(22, True), fill=MISSING_FG, anchor="mm")
         return
 
-    # --- Левая колонка: портрет, звёзды, бейджи, ГМ, статы.
+    # --- Левая колонка: квадратный блок портрета (звёзды дугой, значки по нижнему краю,
+    # как у HotBot /toon), под ним ГМ и статы.
     lx = x0
-    stars_y = y + 16
-    for k in range(7):
-        draw.text((lx + LEFT_W // 2 + (k - 3) * 26, stars_y), "★", font=_font(24, True),
-                  fill=GOLD if k < card["level"]["stars"] else (80, 84, 94), anchor="mm")
-    py = y + 32
+    cx = lx + LEFT_W // 2
+    py = y + PIC_TOP
     portrait = _portrait(base_id, PIC)
-    px = lx + (LEFT_W - PIC) // 2
+    px = cx - PIC // 2
     if portrait is not None:
         mask = Image.new("L", (PIC, PIC), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, PIC - 1, PIC - 1), fill=255)
         img.paste(portrait, (px, py), Image.composite(portrait.getchannel("A"), mask, mask))
     draw.ellipse((px - 2, py - 2, px + PIC + 1, py + PIC + 1), outline=GOLD, width=3)
+    arc_r, arc_cy = PIC // 2 + 22, py + PIC // 2
+    for k in range(7):
+        angle = math.radians(-90 + (k - 3) * 21)
+        draw.text((cx + arc_r * math.cos(angle), arc_cy + arc_r * math.sin(angle)), "★", font=_font(28, True),
+                  fill=GOLD if k < card["level"]["stars"] else (80, 84, 94), anchor="mm")
 
     level = card["level"]
-    badge_y = py + PIC + 4
-    font_b = _font(18, True)
+    badge_y = py + PIC - 8
+    font_b = _font(20, True)
+    _circle(draw, cx - 36, badge_y, 24, LEVEL_BG, str(card["unit_level"]), font_b)
     if level["relic"] is not None:
-        _circle(draw, lx + LEFT_W // 2 + 62, badge_y, 20, RELIC_BG, f"R{level['relic']}", font_b)
+        _circle(draw, cx + 36, badge_y, 24, RELIC_BG, f"R{level['relic']}", font_b)
     else:
-        _circle(draw, lx + LEFT_W // 2 + 62, badge_y, 20, GEAR_BG, f"G{level['gear']}", font_b)
-    _circle(draw, lx + LEFT_W // 2, badge_y, 20, LEVEL_BG, str(card["unit_level"]), font_b)
-    # Зеты и омикроны — числом рядом со значком.
-    bx = lx + LEFT_W // 2 - 62
-    zeta = _badge("zeta", 30)
-    if card["zetas"] and zeta is not None:
-        img.paste(zeta, (bx - 26, badge_y - 15), zeta)
-        draw.text((bx + 6, badge_y), str(card["zetas"]), font=font_b, fill=ZETA_FG, anchor="lm")
-    omicron = _badge("omicron", 26)
-    if card["omicrons"] and omicron is not None:
-        # В том же ряду, справа от реликвии: ниже — уже полоса ГМ.
-        ox = lx + LEFT_W // 2 + 62 + 26
-        img.paste(omicron, (ox, badge_y - 13), omicron)
-        draw.text((ox + 30, badge_y), str(card["omicrons"]), font=font_b, fill=OMICRON_FG, anchor="lm")
+        _circle(draw, cx + 36, badge_y, 24, GEAR_BG, f"G{level['gear']}", font_b)
+    # Зеты слева, омикроны справа — иконкой с числом поверх, как в игре.
+    for kind, count, bx in (("zeta", card["zetas"], cx - 104), ("omicron", card["omicrons"], cx + 104)):
+        icon = _badge(kind, 46)
+        if not count or icon is None:
+            continue
+        img.paste(icon, (bx - 23, badge_y - 23), icon)
+        draw.text((bx, badge_y + 1), str(count), font=font_b, fill=TEXT, anchor="mm", stroke_width=2, stroke_fill=(10, 10, 14))
 
-    y_stats = py + PIC + 30
+    y_stats = py + PIC + 26
     draw.rectangle((lx, y_stats, lx + LEFT_W - 1, y_stats + 30), fill=(120, 30, 30))
     draw.text((lx + LEFT_W // 2, y_stats + 15), f"ГМ {_int(card['gp'])}" if card["gp"] else "ГМ —",
               font=_font(19, True), fill=TEXT, anchor="mm")
@@ -236,11 +234,11 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
                 img.paste(badge, (ix, ry + 1), badge)
             ix += 24
         name = a["name"] + (f" ({a['mode']})" if a["omicron_tier"] is not None and a["mode"] else "")
-        font = _font(15, True, condensed=True)
-        text_w = rw - (ix - rx) - 34
+        font = _font(14, True, condensed=True)
+        missing = (a["zeta_tier"] is not None and not a["zeta"]) or (a["omicron_tier"] is not None and not a["omicron"])
+        text_w = rw - (ix - rx) - (30 if missing else 10)  # место под ✗ — только когда он есть
         draw.text((ix + 4, ry + ABIL_H // 2 - 1), _fit(draw, name, font, text_w), font=font,
                   fill=TEXT if applied else MISSING_FG, anchor="lm")
-        missing = (a["zeta_tier"] is not None and not a["zeta"]) or (a["omicron_tier"] is not None and not a["omicron"])
         if missing:
             draw.text((rx + rw - 14, ry + ABIL_H // 2 - 1), "✗", font=_font(18, True), fill=CROSS, anchor="mm")
 
