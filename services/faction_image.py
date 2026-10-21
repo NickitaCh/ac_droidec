@@ -9,11 +9,13 @@ import math
 from PIL import Image, ImageDraw
 
 from services.profile_image import BG, GOLD, MUTED, TEXT, _font, _portrait
+from services.toon_image import _badge as _badge_icon
 
 PAD = 14
 COLS = 6
 TILE_W, TILE_H, GAP = 150, 198, 8
 PIC = 96
+SKILL_ICON = 34
 HEAD_H = 76
 
 # Цвет кольца — как рамка снаряжения в игре.
@@ -32,6 +34,17 @@ def _ring_color(gear: int):
 def _badge(draw, cx: int, cy: int, r: int, fill, text: str):
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=fill, outline=(225, 225, 230), width=2)
     draw.text((cx, cy), text, font=_font(14 if len(text) > 2 else 15, True), fill=TEXT, anchor="mm")
+
+
+def _skill_icon(img, draw, name: str, cx: int, cy: int, count: int):
+    """Иконка зеты/омикрона (та же, что в /юнит) с числом поверх, как в игре; нет файла — кружок."""
+    icon = _badge_icon(name, SKILL_ICON)
+    if icon is None:
+        _badge(draw, cx, cy, 12, ZETA_BG if name == "zeta" else OMICRON_BG, str(count))
+        return
+    img.paste(icon, (cx - SKILL_ICON // 2, cy - SKILL_ICON // 2), icon)
+    draw.text((cx, cy + 1), str(count), font=_font(15, True), fill=TEXT, anchor="mm",
+              stroke_width=2, stroke_fill=(10, 10, 14))
 
 
 def _wrap(draw, text: str, font, width: int) -> list[str]:
@@ -84,9 +97,9 @@ def _tile(img, draw, x: int, y: int, u: dict):
         else:
             _badge(draw, cx, by, 16, GEAR_BG, f"G{u['gear']}")
         if u["zetas"]:
-            _badge(draw, px - 2, by - 8, 12, ZETA_BG, str(u["zetas"]))
+            _skill_icon(img, draw, "zeta", px - 2, by - 8, u["zetas"])
         if u["omicrons"]:
-            _badge(draw, px + PIC + 2, by - 8, 12, OMICRON_BG, str(u["omicrons"]))
+            _skill_icon(img, draw, "omicron", px + PIC + 2, by - 8, u["omicrons"])
     else:
         draw.text((cx, py + PIC - 2), "нет", font=_font(15, True), fill=MUTED, anchor="mm")
 
@@ -119,7 +132,7 @@ def render(r: dict, player_name: str, updated_note: str | None = None) -> bytes:
         _tile(img, draw, PAD + col * (TILE_W + GAP), y0 + row * (TILE_H + GAP), u)
 
     y = y0 + rows * (TILE_H + GAP) + 4
-    notes = ["Слева — зеты, справа — омикроны, золотая рамка — ГЛ с абсолютной способностью"]
+    notes = ["Золотая рамка — ГЛ с абсолютной способностью"]
     if updated_note:
         notes.append(updated_note)
     for line in notes:
