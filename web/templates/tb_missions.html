@@ -31,6 +31,8 @@
         {% else %}{{ events[-1][1][:10] }}{% endif %}
     {% endmacro %}
 
+    {% macro waves(n) %}{{ n }} {{ "волна" if n % 10 == 1 and n % 100 != 11 else ("волны" if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else "волн") }}{% endmacro %}
+
     {% macro pct_badge(pct, good=100, warn=85) -%}
         {% if pct >= good %}<span class="badge badge-ok">{{ pct|round|int }}%</span>{% elif pct >= warn %}<span class="badge badge-warn">{{ pct|round|int }}%</span>{% else %}<span class="badge badge-danger">{{ pct|round|int }}%</span>{% endif %}
     {%- endmacro %}
@@ -45,6 +47,7 @@
             {% if not r.cols %}
                 <p class="muted">В эту ТБ в спецмиссии никто не заходил.</p>
             {% else %}
+            <p class="muted tbm-small" style="margin-top: 0;">По каждой миссии: ✓ — прошли, ✗ — зашли и проиграли{% if r.with_skipped %}, 💤 — могли пройти по своему нынешнему составу, но не пошли{% endif %}. Ниже — список игроков с проигрышами и пропусками.</p>
             <div class="tbm-cards">
                 {% for c in r.cols %}
                     {% set i = loop.index0 %}
@@ -76,9 +79,9 @@
                     <li class="tbm-row">
                         <div class="tbm-name">{{ p.name }}</div>
                         <div class="tbm-counts">
-                            <span class="badge badge-ok">✓ {{ p.won }}</span>
-                            {% if p.failed %}<span class="badge badge-danger">✗ {{ p.failed }}</span>{% endif %}
-                            {% if p.skipped %}<span class="badge badge-warn">💤 {{ p.skipped }}</span>{% endif %}
+                            <span class="badge badge-ok" title="прошёл">✓ {{ p.won }}</span>
+                            {% if p.failed %}<span class="badge badge-danger" title="проиграл">✗ {{ p.failed }}</span>{% endif %}
+                            {% if p.skipped %}<span class="badge badge-warn" title="не пошёл">💤 {{ p.skipped }}</span>{% endif %}
                         </div>
                         <div class="tbm-chips">
                             {% for c in p.cells %}
@@ -101,37 +104,42 @@
 
     <div class="tbm-pane" data-pane="rates"{% if tab != "rates" %} hidden{% endif %}>
     {% with r = rates %}
+        {% macro times(n) %}{{ n }} раз{{ "а" if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else "" }}{% endmacro %}
         <div class="panel">
             <div class="panel-title">
-                <span>% побед в спецмиссиях{% call ui.help() %}<p>Сколько спецмиссий игрок прошёл из тех, в которые заходил, по всем сохранённым ТБ (до {{ events|length }}). Сверху — с худшим процентом. Метки — «побед/заходов» в каждой ТБ, от старых к новым; красная — были проигрыши.</p><p>Выбывшие из гильдии не показаны. В Discord — <code>/тб_отчет</code> → «Спецмиссии: % побед».</p>{% endcall %}</span>
-                <span class="panel-hint">ТБ: {% for _id, at in events %}{{ at[8:10] }}.{{ at[5:7] }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+                <span>Процент побед в спецмиссиях</span>
+                <span class="panel-hint">{{ events|length }} ТБ: с {{ events[0][1][8:10] }}.{{ events[0][1][5:7] }} по {{ events[-1][1][8:10] }}.{{ events[-1][1][5:7] }}</span>
             </div>
-            <ul class="tbm-list">
-                {% for p in r.players %}
-                    <li class="tbm-row">
-                        <div class="tbm-name">{{ p.name }}</div>
-                        <div class="tbm-counts">{{ pct_badge(p.pct) }} <span class="muted tbm-small">{{ p.won }}/{{ p.attempts }}</span></div>
-                        <div class="tbm-chips">
-                            {% for x in p.per_event %}
-                                {% set at = events[loop.index0][1] %}
-                                {% if x %}<span class="tbm-chip {{ 'tbm-chip-bad' if x[0] < x[1] else 'tbm-chip-ok' }}" title="{{ at[:10] }}">{{ x[0] }}/{{ x[1] }}</span>{% else %}<span class="tbm-chip tbm-chip-none" title="{{ at[:10] }}">—</span>{% endif %}
-                            {% endfor %}
-                        </div>
-                        {% if p.fails %}<div class="tbm-sub muted tbm-small">Проигрыши: {{ p.fails|join("; ") }}</div>{% endif %}
-                    </li>
-                {% endfor %}
-            </ul>
+            <p class="muted tbm-small" style="margin-top: 0;">Считаются только спецмиссии, в которые игрок заходил: сколько из них он прошёл и сколько проиграл. Сверху — у кого процент хуже. Выбывшие из гильдии не показаны.</p>
+            <table class="data tbm-table">
+                <thead><tr><th>Игрок</th><th class="num">Прошёл</th><th class="num">% побед</th></tr></thead>
+                <tbody>
+                    {% for p in r.players %}
+                        <tr>
+                            <td>
+                                <div class="tbm-name">{{ p.name }}</div>
+                                {% if p.fails %}<div class="tbm-small"><span class="tbm-label-bad">Проиграл:</span> {% for label, n in p.fails %}{{ label }}{% if n > 1 %} — {{ times(n) }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+                                <details class="tbm-history tbm-small"><summary class="muted">по битвам</summary>
+                                    {% for x in p.per_event %}{% set at = events[loop.index0][1] %}<div>{{ at[8:10] }}.{{ at[5:7] }} — {% if x %}прошёл {{ x[0] }} из {{ x[1] }}{% if x[0] < x[1] %} <span class="tbm-label-bad">(проиграл {{ x[1] - x[0] }})</span>{% endif %}{% else %}<span class="muted">не заходил</span>{% endif %}</div>{% endfor %}
+                                </details>
+                            </td>
+                            <td class="num nowrap">{{ p.won }} из {{ p.attempts }}</td>
+                            <td class="num">{{ pct_badge(p.pct) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         <div class="panel">
-            <div class="panel-title"><span>По миссиям</span><span class="panel-hint">за все сохранённые ТБ</span></div>
-            <ul class="tbm-list">
-                {% for m in r.missions if m.attempts %}
-                    <li class="tbm-row">
-                        <div class="tbm-name">{{ m.label }} <span class="muted">{{ m.threshold }}</span></div>
-                        <div class="tbm-counts">{{ pct_badge(m.pct, 95) }} <span class="muted tbm-small">{{ m.won }}/{{ m.attempts }}</span></div>
-                    </li>
-                {% endfor %}
-            </ul>
+            <div class="panel-title"><span>По миссиям</span><span class="panel-hint">все игроки, все сохранённые ТБ</span></div>
+            <table class="data tbm-table">
+                <thead><tr><th>Спецмиссия</th><th class="num">Порог</th><th class="num">Прошли</th><th class="num">% побед</th></tr></thead>
+                <tbody>
+                    {% for m in r.missions if m.attempts %}
+                        <tr><td>{{ m.label }}</td><td class="num">{{ m.threshold }}</td><td class="num">{{ m.won }} из {{ m.attempts }}</td><td class="num">{{ pct_badge(m.pct, 95) }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     {% endwith %}
     </div>
@@ -140,34 +148,35 @@
     {% with r = strikes %}
         <div class="panel">
             <div class="panel-title">
-                <span>Бои{% call ui.help() %}<p>Метка планеты — «боёв / волн отбито». Игра хранит бои только по планете целиком, без разбивки по отдельному бою, поэтому «отбил полностью» (зелёная) или «недобито N волн» (красная) видно только у тех, кто сходил во все бои планеты. Серая — сходил не во все бои.</p><p>Число боёв и волн на планете — из игровых данных. Сверху — у кого больше недобитых волн. В Discord — <code>/тб_отчет</code> → «Бои за ТБ».</p>{% endcall %}</span>
+                <span>Бои (боевые задания)</span>
                 <span class="panel-hint">{{ event_picker() }}</span>
             </div>
             {% if not r.zones %}
                 <p class="muted">В эту ТБ в бои никто не заходил.</p>
             {% else %}
-            <details class="tbm-small" style="margin-bottom: 0.8em;"><summary>Планеты: сколько боёв и волн</summary>
-                <div class="tbm-chips" style="margin-top: 0.5em;">{% for z in r.zones %}<span class="tbm-chip tbm-chip-none">{{ z.label }}{% if z.battles %} · {{ z.battles }} б. / {{ z.waves }} в.{% endif %}</span>{% endfor %}</div>
-            </details>
-            <ul class="tbm-list">
-                {% for p in r.players %}
-                    <li class="tbm-row">
-                        <div class="tbm-name">{{ p.name }}</div>
-                        <div class="tbm-counts">
-                            <span class="muted tbm-small">{{ p.attempts }} боёв · {{ p.waves }} волн</span>
-                            {% if p.lost %}<span class="badge badge-danger">−{{ p.lost }}</span>{% endif %}
-                        </div>
-                        <div class="tbm-chips">
-                            {% for c in p.cells %}
-                                {% if c is not none %}
-                                    {% set z = r.zones[loop.index0] %}
-                                    <span class="tbm-chip {{ 'tbm-chip-ok' if c.full else ('tbm-chip-bad' if c.lost else 'tbm-chip-none') }}" title="{% if z.battles %}{{ z.battles }} боёв, {{ z.waves }} волн{% endif %}">{{ z.label }} {{ c.attempts }}/{{ c.waves }}{% if c.lost %} −{{ c.lost }}{% endif %}</span>
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-                    </li>
-                {% endfor %}
-            </ul>
+            <p class="muted tbm-small" style="margin-top: 0;">Боёв — сколько боевых заданий игрок начал за всю ТБ, волн — сколько волн в них отбил. «Недобито» — волны, которые он точно не добил: игра хранит бои только по планете целиком, поэтому потери видны лишь на планетах, где игрок сходил во все бои. Сверху — у кого недобито больше. Разбивка по планетам — по кнопке «по планетам».</p>
+            <table class="data tbm-table">
+                <thead><tr><th>Игрок</th><th class="num">Боёв</th><th class="num">Волн</th><th class="num">Недобито</th></tr></thead>
+                <tbody>
+                    {% for p in r.players %}
+                        <tr>
+                            <td>
+                                <div class="tbm-name">{{ p.name }}</div>
+                                {% set bad = [] %}{% for c in p.cells %}{% if c is not none and c.lost %}{% set _ = bad.append((r.zones[loop.index0].label, c.lost)) %}{% endif %}{% endfor %}
+                                {% if bad %}<div class="tbm-small"><span class="tbm-label-bad">Недобил:</span> {% for label, n in bad %}{{ label }} — {{ waves(n) }}{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+                                <details class="tbm-history tbm-small"><summary class="muted">по планетам</summary>
+                                    {% for c in p.cells %}{% if c is not none %}{% set z = r.zones[loop.index0] %}
+                                        <div>{{ z.label }} — {% if z.battles %}боёв {{ c.attempts }} из {{ z.battles }}, волн {{ c.waves }}{% if c.attempts >= z.battles %} из {{ z.waves }}{% endif %}{% else %}боёв {{ c.attempts }}, волн {{ c.waves }}{% endif %}{% if c.full %} <span class="tbm-label-good">— всё отбито</span>{% elif c.lost %} <span class="tbm-label-bad">— недобито {{ waves(c.lost) }}</span>{% endif %}</div>
+                                    {% endif %}{% endfor %}
+                                </details>
+                            </td>
+                            <td class="num">{{ p.attempts }}</td>
+                            <td class="num">{{ p.waves }}</td>
+                            <td class="num">{% if p.lost %}<strong class="tbm-label-bad">{{ p.lost }}</strong>{% else %}<span class="muted">0</span>{% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
             {% endif %}
         </div>
     {% endwith %}

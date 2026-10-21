@@ -2622,3 +2622,9 @@ form.filter-bar select { flex: 0 0 auto; width: 13em; min-width: 0; }
     .tbm-row { grid-template-columns: minmax(0, 1fr) auto; }
     .tbm-chips, .tbm-sub { grid-column: 1 / -1; }
 }
+.tbm-table { width: 100%; table-layout: auto; }
+.tbm-table td, .tbm-table th { white-space: normal; }
+.tbm-history { margin-top: 0.2em; }
+.tbm-history summary { cursor: pointer; font-size: 0.95em; }
+.tbm-label-good { color: var(--status-good); font-weight: 600; }
+.tbm-table td:first-child { min-width: 0; overflow-wrap: anywhere; }

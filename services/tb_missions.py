@@ -167,7 +167,7 @@ def covert_event(guild_id: int, event_id: int, with_skipped: bool) -> dict:
 def covert_rates(guild_id: int, events: list) -> dict:
     """% побед в спецмиссиях по всем сохранённым ТБ. events — [(event_id, completed_at)]
     от старых к новым. {events, players: [{name, attempts, won, pct, per_event: [(won,
-    attempts)|None], fails: [подпись миссии]}], missions: [{label, attempts, won, pct}]}."""
+    attempts)|None], fails: [(подпись миссии, сколько раз)]}], missions: [{label, attempts, won, pct}]}."""
     event_ids = [e[0] for e in events]
     data = _load(guild_id, event_ids)
     cols = _covert_mission_cols(tb_covert.missions())
@@ -203,7 +203,7 @@ def covert_rates(guild_id: int, events: list) -> dict:
             continue  # выбывшие — не показываем, как в сравнении ТБ
         p["pct"] = p["won"] / p["attempts"] * 100
         p["failed"] = p["attempts"] - p["won"]
-        p["fails"] = [f"{label} ×{n}" if n > 1 else label for label, n in sorted(p["fails"].items(), key=lambda x: -x[1])]
+        p["fails"] = sorted(p["fails"].items(), key=lambda x: -x[1])
         players.append(p)
     players.sort(key=lambda p: (p["pct"], -p["attempts"], p["name"].lower()))
     missions = [{"label": col["label"], "threshold": col["threshold"], **st,
@@ -285,7 +285,7 @@ def covert_rates_text(r: dict, title: str) -> str:
         per = " ".join(f"{x[0]}/{x[1]}" if x else "—" for x in p["per_event"])
         lines.append(f"{p['name']:<{width}}  {p['pct']:5.1f}%  {p['won']}/{p['attempts']}   [{per}]")
         if p["fails"]:
-            lines.append(" " * (width + 2) + "проигрыши: " + "; ".join(p["fails"]))
+            lines.append(" " * (width + 2) + "проигрыши: " + "; ".join(f"{label} ×{n}" if n > 1 else label for label, n in p["fails"]))
     lines += ["", "По миссиям:"]
     for m in r["missions"]:
         if m["attempts"]:
