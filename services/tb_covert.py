@@ -33,9 +33,9 @@ _BONUS_PLANET = {"light": "Zeffo", "mixed": "Mandalore"}
 ANY_UNIT_LIMIT = 200  # «любой персонаж» (все стороны Силы) — не храним список юнитов
 # Валюты наград (локализация SHARED_CURRENCY_*_TERRITORY_BATTLE*).
 CURRENCY_NAMES = {
-    "TERRITORY_BATTLE_CURRENCY_01": "жетонов событий гильдии Mk I",
-    "TERRITORY_BATTLE_CURRENCY_02": "жетонов событий гильдии Mk II",
-    "TERRITORY_BATTLE_CURRENCY_03": "жетонов событий гильдии Mk III",
+    "TERRITORY_BATTLE_CURRENCY_01": "Mk I",
+    "TERRITORY_BATTLE_CURRENCY_02": "Mk II",
+    "TERRITORY_BATTLE_CURRENCY_03": "Mk III",
 }
 
 
@@ -136,16 +136,18 @@ def resolve_planet(text: str) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def reward_text(m: dict) -> str:
-    """«50 жетонов событий гильдии Mk II», «осколки: Третья сестра ×1»; пусто — неизвестно
-    (миссии из bot_state, записанные до 2026-10-21, награды не хранят)."""
+def reward_text(m: dict, short: bool = False) -> str:
+    """«50 жетонов событий гильдии Mk II» / short: «🪙 50 Mk II», «🧩 Третья сестра ×1»;
+    пусто — неизвестно (миссии из bot_state, записанные до 2026-10-21, награды не хранят)."""
     parts = []
     for item_id, qty in m.get("reward") or []:
         if item_id.startswith("unitshard_"):
             bid = item_id[len("unitshard_"):]
-            parts.append(f"осколки: {database.get_game_unit_names([bid]).get(bid, bid)} ×{qty}")
+            name = database.get_game_unit_names([bid]).get(bid, bid)
+            parts.append(f"🧩 {name} ×{qty}" if short else f"осколки: {name} ×{qty}")
         else:
-            parts.append(f"{qty} {CURRENCY_NAMES.get(item_id, item_id)}")
+            mk = CURRENCY_NAMES.get(item_id, item_id)
+            parts.append(f"🪙 {qty} {mk}" if short else f"{qty} жетонов событий гильдии {mk}")
     return ", ".join(parts)
 
 

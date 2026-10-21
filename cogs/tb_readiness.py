@@ -73,12 +73,17 @@ class TBReadinessCog(commands.Cog):
             return
         cfg = database.get_guild_config(guild_id) or {}
         title = "Спецмиссии ВИ" + (f", {tb_covert.planet_ru(planet)}" if planet else "") + (f", этап {этап}" if этап else "")
-        lines = []
+        lines, total, phase = [], len(r["players"]), None
         for m, u, n in zip(r["missions"], r["units"], r["ready_counts"]):
-            unlock = f" · открывает {tb_covert.planet_ru(m['unlocks'])}" if m["unlocks"] else ""
-            reward = tb_covert.reward_text(m)
-            lines.append(f"**{m['phase']} · {tb_covert.planet_ru(m['planet'])}** — {u['name']}: проходят {n} из {len(r['players'])}"
-                         + (f" · за бой: {reward}" if reward else "") + unlock)
+            if m["phase"] != phase:
+                phase = m["phase"]
+                lines.append(f"### Этап {phase}")
+            dot = "🟢" if n >= total * 0.9 else "🟡" if n >= total * 0.5 else "🔴"
+            extra = [x for x in (tb_covert.reward_text(m, short=True),
+                                 f"🔓 {tb_covert.planet_ru(m['unlocks'])}" if m["unlocks"] else "") if x]
+            lines.append(f"{dot} **{tb_covert.planet_ru(m['planet'])}** · {u['name']} — **{n}/{total}**"
+                         + "".join(f" · {x}" for x in extra))
+        lines.append("-# проходят / всего · 🪙 жетоны событий гильдии за одну победу · 🔓 открывает планету")
         png = await asyncio.to_thread(
             guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления", title,
             ["✓ — проходит · R5 — уровень обязательного персонажа ниже порога · — — его нет",
