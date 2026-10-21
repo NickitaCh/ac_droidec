@@ -93,13 +93,19 @@ def _fraction(unit: dict | None, target_type: str, target_value: str) -> float:
 
 
 def readiness(guild_id: int, guide_base_id: str) -> dict:
-    """{guide: {base_id, name}, units: [{base_id, name, label}], players: [{name, pct,
-    ready, guide_level, cells: [{text, met}]}]} — игроки по убыванию готовности."""
-    requirements = database.get_journey_guide_requirements(guide_base_id, guild_id)
-    grouped = journey_guide.group_by_unit(requirements)
+    """Готовность гильдии к цели «Руководства» — см. readiness_grid."""
+    grouped = journey_guide.group_by_unit(database.get_journey_guide_requirements(guide_base_id, guild_id))
+    return readiness_grid(guild_id, grouped, guide_base_id)
+
+
+def readiness_grid(guild_id: int, grouped: dict, guide_base_id: str | None = None) -> dict:
+    """{guide: {base_id, name} | None, units: [{base_id, name, label}], players: [{name, pct,
+    ready, guide_level, cells: [{text, met}]}]} — игроки по убыванию готовности. grouped —
+    {base_id: [(target_type, value), ...]}; без guide_base_id — без колонки «Цель» (рейд)."""
     unit_ids = list(grouped)
-    names = database.get_game_unit_names(unit_ids + [guide_base_id])
-    types = database.get_unit_types(unit_ids + [guide_base_id])
+    extra = [guide_base_id] if guide_base_id else []
+    names = database.get_game_unit_names(unit_ids + extra)
+    types = database.get_unit_types(unit_ids + extra)
     members = _members(guild_id)
     rosters = database.get_player_units_bulk([c for c, _ in members])
 
@@ -120,15 +126,15 @@ def readiness(guild_id: int, guide_base_id: str) -> dict:
             fractions.append(min(_fraction(unit, t, v) for t, v in targets))
             text = "—" if unit is None else level_text(level_of(unit), types.get(unit_id) == "ship")
             cells.append({"text": text, "met": met})
-        guide_unit = roster.get(guide_base_id)
+        guide_unit = roster.get(guide_base_id) if guide_base_id else None
         guide_level = level_text(level_of(guide_unit), types.get(guide_base_id) == "ship") if guide_unit else None
         pct = sum(fractions) / len(fractions) * 100 if fractions else 0
         players.append({"name": name or code, "ally_code": code, "pct": pct,
                         "ready": all(c["met"] for c in cells), "guide_level": guide_level, "cells": cells})
     players.sort(key=lambda p: (-int(p["pct"] + 1e-9), p["guide_level"] is None, p["name"].lower()))
-    return {"guide": {"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id),
-                      "is_ship": types.get(guide_base_id) == "ship"},
-            "units": units, "players": players}
+    guide = ({"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id),
+              "is_ship": types.get(guide_base_id) == "ship"} if guide_base_id else None)
+    return {"guide": guide, "units": units, "players": players}
 
 
 def player_readiness(guild_id: int, guide_base_id: str, roster: dict) -> dict:

@@ -5,6 +5,8 @@
 
 import asyncio
 import io
+import json
+import time
 
 import disnake
 from disnake.ext import commands, tasks
@@ -14,7 +16,7 @@ import guild_resolver
 from cogs.violations import autocomplete_players
 from services import feature_flags, guild_compare
 from services import raids as rs
-from services import raids_image
+from services import guild_units, guild_units_image, raids_image
 
 PLAYER_HISTORY = 12  # рейдов в истории игрока
 
@@ -48,6 +50,12 @@ async def autocomplete_raids(inter: disnake.ApplicationCommandInteraction, strin
     return out
 
 
+async def autocomplete_raid_kinds(inter: disnake.ApplicationCommandInteraction, string: str):
+    raw = database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0)
+    kinds = sorted(json.loads(raw)) if raw else []
+    return [disnake.OptionChoice(name=rs.raid_name(k), value=k) for k in kinds if string.lower() in rs.raid_name(k).lower()][:25]
+
+
 class RaidsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -56,8 +64,30 @@ class RaidsCog(commands.Cog):
     def cog_unload(self):
         self.raids_loop.cancel()
 
+    async def _sync_raid_units(self) -> None:
+        """Раз в сутки: кого пускают в каждый рейд (для /рейд готовность)."""
+        last = database.get_bot_state(rs.RAID_UNITS_STATE + "_at", guild_id=0)
+        if last and time.time() - float(last) < 86400 and database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0):
+            return
+        from services.units_sync import UNIT_DEFINITIONS_FLAG
+        campaigns = (await asyncio.to_thread(self.bot.comlink.get_game_data, items=str(rs.CAMPAIGN_FLAG),
+                                             include_pve_units=False)).get("campaign") or []
+        units = (await asyncio.to_thread(self.bot.comlink.get_game_data, items=str(UNIT_DEFINITIONS_FLAG),
+                                         include_pve_units=False)).get("units") or []
+        known = set(database.get_game_unit_names([u.get("baseId") for u in units if u.get("baseId")]))
+        data = rs.parse_raid_entry_units(campaigns, units, known)
+        if data:
+            database.set_bot_state(rs.RAID_UNITS_STATE, json.dumps(data), guild_id=0)
+            database.set_bot_state(rs.RAID_UNITS_STATE + "_at", str(time.time()), guild_id=0)
+            summary = ", ".join("%s=%d" % (k, len(v["units"])) for k, v in data.items())
+            print(f"⚔️ [Рейды] состав рейдов обновлён: {summary}")
+
     @tasks.loop(hours=3)
     async def raids_loop(self):
+        try:
+            await self._sync_raid_units()
+        except Exception as e:
+            print(f"⚠️ [Рейды] не удалось обновить состав рейдов: {e!r}")
         for cfg in database.get_all_guild_configs():
             if not cfg.get("swgoh_guild_id"):
                 continue
@@ -132,6 +162,43 @@ class RaidsCog(commands.Cog):
         png = await asyncio.to_thread(raids_image.render, raid, s["ranked"], prev, prev_scores, limit)
         await inter.edit_original_response(content="\n".join(lines)[:2000],
                                            file=disnake.File(io.BytesIO(png), filename=f"raid_{raid['raid_id']}.png"))
+
+    @raid_group.sub_command(name="готовность", description="Кто в гильдии готов к рейду: допущенные персонажи на нужной реликвии")
+    async def raid_readiness(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
+        рейд: str = commands.Param(default=None, description="Рейд (пусто → текущий)", autocomplete=autocomplete_raid_kinds),
+    ):
+        await inter.response.defer()
+        guild_id = await guild_resolver.require_feature(inter, "raids")
+        if guild_id is None:
+            return
+        if рейд is None:
+            last = database.get_raid_results(guild_id, limit=1)
+            рейд = last[0]["raid_id"] if last else "order66"
+        entry = rs.raid_entry_units(рейд)
+        if not entry:
+            await inter.edit_original_response("❌ Состав этого рейда ещё не загружен из игры — попробуйте позже.")
+            return
+        target = ("relic", str(реликвия)) if реликвия > 0 else ("gear", "13")
+        names = database.get_game_unit_names(entry["units"])
+        grouped = {u: [target] for u in sorted(entry["units"], key=lambda b: (names.get(b) or b).lower())}
+        r = await asyncio.to_thread(guild_units.readiness_grid, guild_id, grouped)
+        if not r["players"]:
+            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
+            return
+        cfg = database.get_guild_config(guild_id) or {}
+        level = f"R{реликвия}" if реликвия > 0 else "G13"
+        title = f"Готовность к рейду «{rs.raid_name(рейд)}» ({level})"
+        png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия",
+                                      f"в рейд пускают с {entry['min_stars']}★ · данные ежечасного обновления", title)
+        ready = sum(1 for p in r["players"] if p["ready"])
+        await inter.edit_original_response(
+            content=(f"**{rs.raid_name(рейд)}** — {len(entry['units'])} допущенных персонажей, порог {level}: "
+                     f"готовы {ready} из {len(r['players'])}"),
+            file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{рейд}.png"),
+        )
 
     @raid_group.sub_command(name="игрок", description="История очков игрока в рейдах")
     async def raid_player(

@@ -22,6 +22,7 @@ RAID_NAMES = {
     "naboo": "Набу",
     "kraytdragon": "Крайт-дракон",
     "endor": "Эндор",
+    "rotj": "Битва при Эндоре",
     "rancor": "Логово ранкора",
     "rancor_challenge": "Логово ранкора (испытание)",
     "aat": "Танковый рейд",
@@ -98,3 +99,49 @@ def summarize(raid: dict, scores: list[dict]) -> dict:
         "median": median,
         "count": n,
     }
+
+
+# ---------------------------------------------------------------- готовность к рейду
+
+RAID_UNITS_STATE = "raid_entry_units"   # bot_state guild 0: {node_id: {"units": [...], "min_stars": n}}
+CAMPAIGN_FLAG = 274877906944
+
+
+def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
+    """Кого пускают в каждый рейд — из условий входа узла GUILD/RAIDS (категории
+    entryCategoryAllowed + минимум звёзд) и категорий персонажей. Проверено 2026-10-21:
+    ORDER66 → категория raid_order66_allowed, 5★, 38 персонажей — как у WookieeBot raid ready."""
+    by_category: dict[str, set] = {}
+    for u in units:
+        if u.get("rarity") != 7 or not u.get("obtainable") or u.get("baseId") not in known:
+            continue
+        for cat in u.get("categoryId") or []:
+            by_category.setdefault(cat, set()).add(u["baseId"])
+    result = {}
+    for camp in campaigns:
+        if camp.get("id") != "GUILD":
+            continue
+        for cmap in camp.get("campaignMap") or []:
+            if cmap.get("id") != "RAIDS":
+                continue
+            for group in cmap.get("campaignNodeDifficultyGroup") or []:
+                for node in group.get("campaignNode") or []:
+                    allowed_units, min_stars = set(), 0
+                    for mission in node.get("campaignNodeMission") or []:
+                        allowed = mission.get("entryCategoryAllowed") or {}
+                        for cat in allowed.get("categoryId") or []:
+                            allowed_units |= by_category.get(cat, set())
+                        allowed_units |= {m["id"] for m in allowed.get("mandatoryRosterUnit") or [] if m.get("id") in known}
+                        min_stars = max(min_stars, min(allowed.get("minimumUnitRarity") or 0, 7))
+                    # Узлы без поимённого списка (старые рейды «любой персонаж») пропускаем.
+                    if allowed_units and len(allowed_units) < 200:
+                        result[node["id"].lower()] = {"units": sorted(allowed_units), "min_stars": min_stars}
+    return result
+
+
+def raid_entry_units(raid_id: str) -> dict | None:
+    import json
+    import database
+    raw = database.get_bot_state(RAID_UNITS_STATE, guild_id=0)
+    data = json.loads(raw) if raw else {}
+    return data.get((raid_id or "").lower())
