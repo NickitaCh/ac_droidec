@@ -2736,3 +2736,7 @@ dialog.feedback-dialog > form { max-width: none; }
 .tbp-unlock { font-size: 0.9em; }
 .tbp-unlock-ok { color: var(--status-good); }
 .tbp-unlock-bad { color: var(--status-critical); }
+
+/* /tb/goal — условия варианта и нехватка юнитов во взводах */
+.goal-conditions { margin: 0.4em 0 0.6em; padding-left: 1.2em; }
+.goal-conditions li { margin: 0.15em 0; }

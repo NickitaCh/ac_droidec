@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% import "_tb.html" as tbui %}
+{% import "_ui.html" as ui %}
+{% block title %}ВИ: цель по звёздам — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {% call tbui.tb_hero("Цель по звёздам", "goal", True) %}
+        <div class="hero-kpis">
+            {% if fc %}<div class="hero-kpi"><span class="hero-kpi-value">≈ {{ fc.total }}★</span><span class="hero-kpi-label">прогноз сейчас</span></div>{% endif %}
+            {% if goal %}<div class="hero-kpi hero-kpi-good"><span class="hero-kpi-value">{{ goal.target }}★</span><span class="hero-kpi-label">цель</span></div>{% endif %}
+        </div>
+    {% endcall %}
+
+    {% if not fc %}
+        <div class="panel"><p class="muted">Прогноза пока нет: нужны данные о планетах из игры и история прошлых ВИ.</p></div>
+    {% else %}
+    <div class="panel">
+        <div class="panel-title">
+            <span>Сколько звёзд нужно{% call ui.help() %}<p>Считаем несколько вариантов, как набрать нужное число звёзд, — каждый тем же прогнозом, что на вкладке «Проекция», но с изменёнными условиями: весь ГМ залит, больше очков в боях, взводы планеты закрыты целиком, ГМ гильдии больше. У каждого варианта свой план по этапам.</p><p>«Добрать взводы»: планеты, взводы которых надо закрыть целиком, и каких юнитов на нужном уровне не хватает — «не хватает N» значит столько слотов нынешние склады не закрывают (с учётом того, что планету, которую копим, можно добивать на нескольких этапах).</p><p>Очки боёв за этап — среднее за последние {{ fc.history.events }} ВИ, поэтому добавки — оценка порядка величины. Расчёт занимает 10–20 секунд.</p>{% endcall %}</span>
+        </div>
+        <form method="get" action="/tb/goal" class="inline-form" id="goal-form">
+            <label for="goal-stars">Звёзд</label>
+            <input id="goal-stars" type="number" name="stars" min="1" max="{{ fc.max }}" value="{{ stars }}" style="width: 5em;">
+            {% if not bonus %}<input type="hidden" name="bonus" value="0">{% endif %}
+            <button type="submit" class="btn">Посчитать</button>
+            <span class="muted" id="goal-wait" hidden>Считаю, до 20 секунд…</span>
+        </form>
+        <nav class="hero-links" style="margin-top: 0.75em;">
+            {% if bonus %}<a class="hero-link" href="/tb/goal?bonus=0{% if goal %}&stars={{ goal.target }}{% endif %}">Без Зеффо и Мандалора</a>{% else %}<a class="hero-link" href="/tb/goal{% if goal %}?stars={{ goal.target }}{% endif %}">С Зеффо и Мандалором</a>{% endif %}
+        </nav>
+    </div>
+    <script>
+        document.getElementById("goal-form").addEventListener("submit", function () {
+            document.getElementById("goal-wait").hidden = false;
+            this.querySelector("button").disabled = true;
+        });
+    </script>
+
+    {% if goal %}
+        {% if goal.reached %}
+            <div class="panel"><p>Прогноз уже ≈ {{ goal.base_total }}★ — цель {{ goal.target }}★ берётся с нынешними складами, см. «Проекция».</p></div>
+        {% else %}
+            {% for v in goal.variants %}
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>{{ v.title }}</span>
+                        {% if v.ok %}<span class="badge badge-ok">{{ v.result.total }}★</span>{% elif v.result %}<span class="badge badge-danger">только {{ v.result.total }}★</span>{% else %}<span class="badge badge-danger">не хватает</span>{% endif %}
+                    </div>
+                    {% if v.conditions %}
+                        <ul class="goal-conditions">{% for c in v.conditions %}<li>{{ c }}</li>{% endfor %}</ul>
+                    {% endif %}
+                    {% if v.platoons %}
+                        <p>Закрыть все взводы: <strong>{% for s in v.platoons %}{{ planet_ru(s.planet) }}{% if not loop.last %}, {% endif %}{% endfor %}</strong></p>
+                        {% for s in v.platoons %}
+                            <details>
+                                <summary>{{ planet_ru(s.planet) }} — не хватает {{ s.units|sum(attribute="short") }} в {{ s.units|length }} юнитах</summary>
+                                <ul class="goal-conditions">{% for u in s.units %}<li>{{ u.name }} {% if u.ship %}{{ u.need }}★{% else %}R{{ u.need }}{% endif %} — не хватает {{ u.short }}</li>{% endfor %}</ul>
+                            </details>
+                        {% endfor %}
+                    {% endif %}
+                    {% if v.ok and v.result %}
+                        <details>
+                            <summary>План по этапам</summary>
+                            {{ tbui.forecast_table(v.result, planet_ru, compact) }}
+                        </details>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endif %}
+    {% endif %}
+{% endblock %}

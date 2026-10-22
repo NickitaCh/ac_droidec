@@ -278,19 +278,28 @@ def _choices(cells: list, budget: float) -> list:
     return out
 
 
-def _fill_platoons(state: tuple, slots: dict, levels: dict, priority) -> tuple:
+def _platoon_priority(planets: dict):
+    """Порядок планет при раздаче юнитов во взводы: бонусные — в последнюю очередь (в планах
+    офицеров «взводы только по боту»), остальные — по этапу планеты."""
+    return lambda p: (planets[p]["bonus"], planets[p]["phase"])
+
+
+def _fill_platoons(state: tuple, slots: dict, levels: dict, priority, full: frozenset = frozenset()) -> tuple:
     """Взводы одного этапа. state — ((планета, очки, маска заполненных слотов), …). Юнит
     игрока встаёт один раз за этап, на какой бы планете ни был слот; заполненное остаётся,
     поэтому планета, открытая несколько этапов, добирает дефицитные слоты на следующих
     (3 из 6 нужных юнитов — на одном этапе, 3 — на другом). Строгие слоты первыми, затем
     планеты по priority — тогда игроки с высокой реликвией не уходят на слабые слоты.
+    full — планеты, взводы которых считаем закрытыми без юнитов (сценарий «добрать взводы»).
     Возвращает state с новыми масками."""
     demand: dict = {}
+    masks = [(1 << len(slots.get(p) or [])) - 1 if p in full else mask for p, _v, mask in state]
     for i, (p, _v, mask) in enumerate(state):
+        if p in full:
+            continue
         for j, (_op, bid, need) in enumerate(slots.get(p) or []):
             if bid and not mask >> j & 1:
                 demand.setdefault(bid, []).append((-need, priority(p), i, j))
-    masks = [mask for _p, _v, mask in state]
     for bid, wanted in demand.items():
         have = levels.get(bid) or []
         used = 0
@@ -321,6 +330,7 @@ def forecast(zone_data: dict, platoons: dict, covert_ready: dict, hist: dict, gp
     planets = zone_data.get("planets") or {}
     bonus = zone_data.get("bonus") or {}
     slots, levels = platoons.get("slots") or {}, platoons.get("levels") or {}
+    full = frozenset(platoons.get("full") or ())
     budgets = []
     for phase in range(1, 7):
         h = (hist.get("phases") or {}).get(phase) or {"battle": 0, "share": 0.9}
@@ -328,9 +338,7 @@ def forecast(zone_data: dict, platoons: dict, covert_ready: dict, hist: dict, gp
     branch_of = {p: b for b in BRANCHES.values() for p in b}
     memo: dict = {}
 
-    def priority(p: str) -> tuple:
-        # бонусные — в последнюю очередь (в планах офицеров «взводы только по боту»)
-        return planets[p]["bonus"], planets[p]["phase"]
+    priority = _platoon_priority(planets)
 
     def cap(p: str) -> float:
         return (planets[p].get("tiers") or planets[p]["stars"])[0]
@@ -359,7 +367,7 @@ def forecast(zone_data: dict, platoons: dict, covert_ready: dict, hist: dict, gp
         key = (phase, tuple((p, int(v // 1e6), m) for p, v, m in state))
         if key in memo:
             return memo[key]
-        filled = _fill_platoons(state, slots, levels, priority)
+        filled = _fill_platoons(state, slots, levels, priority, full)
         state = tuple((p, v + (_ops_closed(slots.get(p) or [], m) - _ops_closed(slots.get(p) or [], old))
                        * planets[p]["op_points"], m) for (p, v, m), (_p, _v, old) in zip(filled, state))
         deploy, battle = budgets[phase - 1]
@@ -394,3 +402,27 @@ def forecast(zone_data: dict, platoons: dict, covert_ready: dict, hist: dict, gp
                 for (p, _v, m), k, v in zip(state, ks, after)]
         phases.append({"phase": phase, "deploy": deploy, "battle": battle, "planets": rows, "stars": sum(ks)})
     return {"phases": phases, "total": total, "max": sum(len(v["stars"]) for v in planets.values()), "gp": gp}
+
+
+def platoon_shortfall(zone_data: dict, platoons: dict, result: dict, only: set) -> list[dict]:
+    """Каких юнитов не хватает, чтобы закрыть взводы планет only по плану result (forecast,
+    посчитанный с platoons["full"]): прогоняем этапы плана с реальными складами.
+    [{base_id, need, short, planets, ship}] — need это реликвия (у кораблей звёзды)."""
+    planets = zone_data.get("planets") or {}
+    slots, levels = platoons.get("slots") or {}, platoons.get("levels") or {}
+    priority = _platoon_priority(planets)
+    masks: dict = {}
+    for ph in result["phases"]:
+        state = tuple((r["planet"], 0, masks.get(r["planet"], 0)) for r in ph["planets"])
+        for p, _v, m in _fill_platoons(state, slots, levels, priority):
+            masks[p] = m
+    short: dict = {}
+    for p in only:
+        for j, (_op, bid, need) in enumerate(slots.get(p) or []):
+            if not masks.get(p, 0) >> j & 1:
+                row = short.setdefault((bid, need), {"base_id": bid, "need": need, "short": 0, "planets": [],
+                                                     "ship": bid in (platoons.get("ships") or ())})
+                row["short"] += 1
+                if p not in row["planets"]:
+                    row["planets"].append(p)
+    return sorted(short.values(), key=lambda r: (-r["short"], str(r["base_id"])))

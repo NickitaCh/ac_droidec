@@ -1,5 +1,5 @@
 {# Шапка раздела ТБ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
-{% macro tb_hero(title, active) -%}
+{% macro tb_hero(title, active, goal=False) -%}
 <section class="page-hero page-hero-dark">
     <div class="page-hero-top">
         <div>
@@ -8,10 +8,27 @@
         </div>
     </div>
     <nav class="hero-tabs">
-        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/missions", "missions", "Бои и ОЗ"), ("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/projection", "projection", "Проекция")] %}
+        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/missions", "missions", "Бои и ОЗ"), ("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/projection", "projection", "Проекция")] + ([("/tb/goal", "goal", "Цель")] if goal else []) %}
             {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
         {% endfor %}
     </nav>
     {% if caller %}{{ caller() }}{% endif %}
 </section>
+{%- endmacro %}
+
+{# План звёзд по этапам (services/tb_forecast.py) — /tb/projection и /tb/goal. #}
+{% macro forecast_table(fc, planet_ru, compact) -%}
+<table class="data cards-on-phone">
+    <thead><tr><th>Этап</th><th>Планеты</th><th>Очки этапа</th><th class="num">Звёзд</th></tr></thead>
+    <tbody>
+        {% for p in fc.phases %}
+            <tr>
+                <td data-label="Этап"><strong>{{ p.phase }}</strong></td>
+                <td data-label="Планеты"><div>{% for pl in p.planets %}<span>{{ planet_ru(pl.planet) }} {% if pl.skip %}<span class="muted nowrap">не берём</span>{% elif pl.carry %}<span class="muted nowrap">копим {{ compact(pl.points) }}</span>{% else %}<span class="tbp-stars nowrap">{{ "★" * pl.stars }}<span class="muted">{{ "☆" * (pl.max - pl.stars) }}</span></span>{% endif %}<span class="muted nowrap"> · взводы {{ pl.ops_closed }}/6</span></span>{% if not loop.last %}<br>{% endif %}{% endfor %}</div></td>
+                <td data-label="Очки этапа" class="nowrap"><div>ГМ {{ compact(p.deploy) }}<br><span class="muted">бои {{ compact(p.battle) }}</span></div></td>
+                <td data-label="Звёзд" class="num"><strong>{{ p.stars }}</strong></td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
 {%- endmacro %}

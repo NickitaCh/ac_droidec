@@ -516,19 +516,59 @@ PROJECTION_CACHE_SECONDS = 900
 @router.get("/tb/projection", response_class=HTMLResponse)
 async def tb_projection_page(request: Request, bonus: int = 1,
                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    key = (user["guild_id"], bool(bonus))
-    cached = _PROJECTION_CACHE.get(key)
-    if cached and time.time() - cached[0] < PROJECTION_CACHE_SECONDS:
-        r = cached[1]
-    else:
-        # ~50 игроков × ~300 юнитов из player_unit_cache — секунды, поэтому в потоке.
-        r = await asyncio.to_thread(tb_projection.build, user["guild_id"], bool(bonus))
-        _PROJECTION_CACHE[key] = (time.time(), r)
+    _built_at, r = await _projection(user["guild_id"], bool(bonus))
     return templates.TemplateResponse(request, "tb_projection.html", {
         "user": user,
         "r": r,
         "bonus": bool(bonus),
-        "planet_ru": lambda p: (_PLANET_NAME_TO_RU.get(p) or p).capitalize(),
+        "goal_tab": feature_flags.is_enabled(user["guild_id"], "tb_star_goal"),
+        "planet_ru": _planet_ru,
+        "compact": dashboard_data._compact_number,
+    })
+
+
+async def _projection(guild_id: int, bonus: bool) -> tuple:
+    """(время расчёта, проекция) — общий 15-минутный кэш для /tb/projection и /tb/goal."""
+    key = (guild_id, bonus)
+    cached = _PROJECTION_CACHE.get(key)
+    if not cached or time.time() - cached[0] >= PROJECTION_CACHE_SECONDS:
+        # ~50 игроков × ~300 юнитов из player_unit_cache — секунды, поэтому в потоке.
+        cached = (time.time(), await asyncio.to_thread(tb_projection.build, guild_id, bonus))
+        _PROJECTION_CACHE[key] = cached
+    return cached
+
+
+def _planet_ru(planet: str) -> str:
+    return (_PLANET_NAME_TO_RU.get(planet) or planet).capitalize()
+
+
+_GOAL_CACHE: dict = {}
+
+
+@router.get("/tb/goal", response_class=HTMLResponse)
+async def tb_goal_page(request: Request, stars: int = 0, bonus: int = 1,
+                       user: dict = Depends(feature_flags.require_feature("tb_star_goal"))):
+    """«Цель» ВИ-проекции: сколько звёзд нужно → варианты, как их набрать (services/tb_goal.py).
+    Расчёт ~10 с, кэшируется вместе с проекцией."""
+    from services import tb_goal
+    built_at, r = await _projection(user["guild_id"], bool(bonus))
+    fc = r.get("forecast")
+    goal = None
+    if fc and stars:
+        stars = max(1, min(stars, fc["max"]))
+        key = (user["guild_id"], bool(bonus), stars, built_at)
+        if key not in _GOAL_CACHE:
+            for old in [k for k in _GOAL_CACHE if k[3] != built_at]:
+                del _GOAL_CACHE[old]
+            _GOAL_CACHE[key] = await asyncio.to_thread(tb_goal.variants, fc["inputs"], stars, fc)
+        goal = _GOAL_CACHE[key]
+    return templates.TemplateResponse(request, "tb_goal.html", {
+        "user": user,
+        "fc": fc,
+        "goal": goal,
+        "stars": stars or (fc["total"] + 1 if fc else 0),
+        "bonus": bool(bonus),
+        "planet_ru": _planet_ru,
         "compact": dashboard_data._compact_number,
     })
 

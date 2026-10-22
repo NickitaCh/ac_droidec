@@ -163,6 +163,9 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
             zone_data = {**zone_data, "bonus": {}}
         forecast = tb_forecast.forecast(zone_data, platoons, covert_ready, hist, gp)
         forecast["history"] = hist
+        # для вкладки «Цель» (services/tb_goal.py) — те же входы, без повторного чтения складов
+        forecast["inputs"] = {"zone_data": zone_data, "platoons": platoons, "covert_ready": covert_ready,
+                              "hist": hist, "gp": gp, "players": len(players_with_roster)}
     return {
         "phases": phases,
         "forecast": forecast,
@@ -191,7 +194,8 @@ def platoon_inputs(name_to_base_id: dict, types: dict, owners: dict, with_bonus:
         is_ship = types.get(bid) == "ship"
         levels[bid] = sorted((lv["stars"] if is_ship else (lv["relic"] if lv["relic"] is not None else -1)
                               for _code, lv in rows), reverse=True)
-    return {"slots": slots, "levels": levels}
+    ships = {bid for bid in owners if types.get(bid) == "ship"}
+    return {"slots": slots, "levels": levels, "ships": ships}
 
 
 def covert_row(m: dict, rosters: dict, member_names: dict) -> dict:

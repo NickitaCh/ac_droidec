@@ -34,6 +34,7 @@ FEATURES: dict[str, dict] = {
     "tb_ping": {"label": "ТБ — тег на подготовку", "category": "ТБ"},
     "tb_plan_order": {"label": "ТБ — план, автоордер, взвода", "category": "ТБ"},
     "tb_reports": {"label": "ТБ — итоговые отчёты", "category": "ТБ"},
+    "tb_star_goal": {"label": "ТБ — цель по звёздам (варианты, как взять больше)", "category": "ТБ"},
     "tw_order": {"label": "Территориальная Война (ВГ)", "category": "Прочее"},
     "violations": {"label": "Нарушения", "category": "Прочее"},
     "birthdays": {"label": "Дни рождения", "category": "Прочее"},
@@ -56,7 +57,8 @@ FEATURES: dict[str, dict] = {
 
 # Выключено по умолчанию, включается явно. mod_ku_plates — режим МодКу по плейтам, только
 # АС (guild_id=1), решение пользователя 2026-10-14. Сама страница МодКу — только супер-админам.
-OPT_IN = {"tasks_mention", "mod_ku_plates"}
+# tb_star_goal — вкладка «Цель» ВИ-проекции, только АС (решение пользователя 2026-10-22).
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal"}
 
 
 def label(key: str) -> str:
