@@ -157,12 +157,11 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
     forecast = None
     gp = tb_forecast.guild_gp(codes)
     if zone_data.get("planets") and gp:
-        op_points = {pl: v["op_points"] for pl, v in zone_data["planets"].items()}
-        platoon_points = {pl["planet"]: pl["ops_closed"] * op_points.get(pl["planet"], 0) for p in phases for pl in p["planets"]}
+        platoons = platoon_inputs(name_to_base_id, types, owners, with_bonus)
         hist = tb_forecast.history(guild_id)
         if not with_bonus:
             zone_data = {**zone_data, "bonus": {}}
-        forecast = tb_forecast.forecast(zone_data, platoon_points, covert_ready, hist, gp)
+        forecast = tb_forecast.forecast(zone_data, platoons, covert_ready, hist, gp)
         forecast["history"] = hist
     return {
         "phases": phases,
@@ -171,6 +170,28 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
         "members": len(members),
         "unresolved": sorted(n for n in all_names if not name_to_base_id.get(n)),
     }
+
+
+def platoon_inputs(name_to_base_id: dict, types: dict, owners: dict, with_bonus: bool) -> dict:
+    """Для прогноза звёзд (tb_forecast._fill_platoons): слоты каждой планеты
+    [(операция, base_id|None, порог)] и уровни владельцев {base_id: [по убыванию]};
+    порог и уровень — реликвия, у кораблей звёзды."""
+    slots = {}
+    for phase in range(1, 7):
+        for planet in phase_planets(phase, with_bonus):
+            min_relic = tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(planet, 5)
+            slots[planet] = []
+            for op in OPERATIONS:
+                for display in tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, op)) or []:
+                    bid = name_to_base_id.get(display)
+                    need = SHIP_MIN_STARS if types.get(bid) == "ship" else min_relic
+                    slots[planet].append((op, bid, need))
+    levels = {}
+    for bid, rows in owners.items():
+        is_ship = types.get(bid) == "ship"
+        levels[bid] = sorted((lv["stars"] if is_ship else (lv["relic"] if lv["relic"] is not None else -1)
+                              for _code, lv in rows), reverse=True)
+    return {"slots": slots, "levels": levels}
 
 
 def covert_row(m: dict, rosters: dict, member_names: dict) -> dict:
