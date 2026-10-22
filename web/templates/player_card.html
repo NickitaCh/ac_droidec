@@ -64,6 +64,10 @@
                 </form>
                 <p class="muted">Альт должен состоять в гильдии, которую обслуживает бот. Отвязать — <code>/регистрация_отмена</code> в Discord.</p>
             </details>
+            {% if telegram_bot_username() %}
+            <p><a class="link-btn" href="/me/telegram" target="_blank" rel="noopener">📱 Привязать Telegram</a>
+                <span class="muted">— бот в Telegram будет знать вас как этого же игрока</span></p>
+            {% endif %}
         </div>
     {% endif %}
 

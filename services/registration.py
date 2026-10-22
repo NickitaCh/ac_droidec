@@ -23,7 +23,23 @@ class RegistrationResult:
     accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
 
 
-async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False) -> RegistrationResult:
+def _discord_conflict_error(existing_owner: str) -> str:
+    if existing_owner.startswith("tg:"):  # привязал игрок из Telegram-бота (tg_bot/store.py)
+        return (
+            "Этот код союзника уже привязан к игроку в Telegram. Если это вы — свяжите Telegram "
+            "с Discord на сайте («Мой профиль» → «Привязать Telegram»), иначе обратитесь к офицеру."
+        )
+    return (
+        f"Этот код союзника уже привязан к другому участнику Discord (<@{existing_owner}>). "
+        "Если это ошибка, попросите офицера перерегистрировать его через "
+        "`/регистрация участник:@нужный_пользователь`."
+    )
+
+
+async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False,
+                          conflict_error=_discord_conflict_error) -> RegistrationResult:
+    """conflict_error(owner_id) -> текст отказа, когда код уже у другого владельца —
+    у Telegram-бота свой текст (tg_bot/handlers.py), там <@id> не работает."""
     discord_id = str(discord_id)
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
@@ -53,14 +69,7 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     existing_owner = database.find_ally_code_owner(clean_code, guild_id=guild_id)
     if existing_owner and existing_owner != discord_id:
         if not allow_reassign:
-            return RegistrationResult(
-                ok=False,
-                error=(
-                    f"Этот код союзника уже привязан к другому участнику Discord (<@{existing_owner}>). "
-                    "Если это ошибка, попросите офицера перерегистрировать его через "
-                    "`/регистрация участник:@нужный_пользователь`."
-                ),
-            )
+            return RegistrationResult(ok=False, error=conflict_error(existing_owner))
         database.delete_user_registration(existing_owner, clean_code, guild_id=guild_id)
 
     # Первая регистрация в этой гильдии всегда основная, даже если попросили

@@ -2175,12 +2175,14 @@ def get_tasks_needing_reminder(guild_id: int, days_before: int):
 def get_discord_id_for_ally(ally_code: str, guild_id: int = 1):
     """Обратный резолв ally_code -> discord_id основной регистрации в этой гильдии
     (/регистрация) — для личных уведомлений о завершении/провале/дедлайне задачи.
-    None, если игрок не регистрировался."""
+    None, если игрок не регистрировался. Владельцы "tg:<id>" (игрок только в Telegram,
+    tg_bot/store.py) — не Discord-аккаунты: тегнуть/написать им в Discord нельзя."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_user_registration_table(cursor)
     cursor.execute(
-        "SELECT discord_id FROM user_registration WHERE guild_id = ? AND ally_code = ? ORDER BY is_main DESC LIMIT 1",
+        "SELECT discord_id FROM user_registration WHERE guild_id = ? AND ally_code = ? AND discord_id NOT LIKE 'tg:%' "
+        "ORDER BY is_main DESC LIMIT 1",
         (guild_id, ally_code),
     )
     row = cursor.fetchone()
