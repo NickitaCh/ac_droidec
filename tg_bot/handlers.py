@@ -63,7 +63,13 @@ async def cmd_help(ctx: Ctx):
 
 # ---------------------------------------------------------------- аккаунт
 
-def _tg_conflict_error(existing_owner: str) -> str:
+def _link_html(ctx: Ctx) -> str:
+    """Ссылка «связать с Discord»: сайт попросит войти через Discord и сразу вернёт
+    в бота с одноразовым токеном (web/routes/telegram.py)."""
+    return f'<a href="{ctx.app.site_url}/me/telegram">связать Telegram с Discord</a>'
+
+
+def _tg_conflict_error(existing_owner: str, link: str) -> str:
     if store.is_tg_owner(existing_owner):
         return (
             "Этот код союзника уже привязан к другому игроку в Telegram.\n"
@@ -71,7 +77,7 @@ def _tg_conflict_error(existing_owner: str) -> str:
         )
     return (
         "Этот код союзника уже привязан к аккаунту Discord.\n"
-        "Если это ваш Discord — свяжите с ним Telegram: на сайте «Мой профиль» → «Привязать Telegram». "
+        f"Если это ваш Discord — {link} (вход на сайт через Discord, один клик). "
         "Тогда бот в Telegram и в Discord будет знать вас как одного игрока."
     )
 
@@ -106,7 +112,8 @@ async def cmd_reg(ctx: Ctx):
 
     await ctx.action()
     result = await registration.register_player(
-        ctx.app.comlink, owner_id, code, is_alt=is_alt, allow_reassign=allow_reassign, conflict_error=_tg_conflict_error,
+        ctx.app.comlink, owner_id, code, is_alt=is_alt, allow_reassign=allow_reassign,
+        conflict_error=lambda owner: _tg_conflict_error(owner, _link_html(ctx)),
     )
     if not result.ok:
         await ctx.reply(f"❌ {result.error}")
@@ -156,7 +163,7 @@ async def cmd_me(ctx: Ctx):
         cfg = database.get_guild_config(access["guild_id"]) or {}
         lines.append(f"\nГильдия: <b>{esc(cfg.get('name') or '?')}</b>, права: {TIER_LABELS[access['tier']]}")
     if store.is_tg_owner(ctx.owner_id):
-        lines.append("\nDiscord не связан. Если вы есть и в Discord-боте — свяжите на сайте: «Мой профиль» → «Привязать Telegram».")
+        lines.append(f"\nDiscord не связан. Если вы есть и в Discord-боте — {_link_html(ctx)}.")
     else:
         lines.append("\nСвязан с Discord — это один и тот же игрок в обоих ботах. Разорвать связь: /unlink")
     await ctx.reply("\n".join(lines))
@@ -165,7 +172,7 @@ async def cmd_me(ctx: Ctx):
 async def _link_discord(ctx: Ctx, token: str):
     discord_id = store.consume_link_token(token)
     if discord_id is None:
-        await ctx.reply("Ссылка устарела или уже использована — получите новую на сайте («Мой профиль» → «Привязать Telegram»).")
+        await ctx.reply(f"Ссылка устарела или уже использована — получите новую: {_link_html(ctx)}.")
         return
     moved = store.link_to_discord(ctx.user["id"], discord_id)
     ctx.owner_id = discord_id
