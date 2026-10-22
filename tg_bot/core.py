@@ -207,6 +207,10 @@ def _parse_command(text: str, bot_username: str) -> tuple[str, str] | None:
     return name.lower(), rest
 
 
+# Инлайн-подсказки «@бот …» — регистрирует tg_bot/inline.py (там поиск и команды).
+INLINE_HANDLER: dict = {"handler": None}
+
+
 async def handle_update(app: App, update: dict):
     try:
         if "message" in update:
@@ -215,6 +219,8 @@ async def handle_update(app: App, update: dict):
             await _handle_callback(app, update["callback_query"])
         elif "my_chat_member" in update:
             await _handle_membership(app, update["my_chat_member"])
+        elif "inline_query" in update and INLINE_HANDLER["handler"]:
+            await INLINE_HANDLER["handler"](app, update["inline_query"])
     except Exception:
         print(f"❌ [TG] Ошибка обработки обновления {update.get('update_id')}:\n{traceback.format_exc()}")
 

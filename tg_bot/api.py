@@ -55,7 +55,7 @@ class TelegramAPI:
     async def get_updates(self, offset: int | None, timeout: int = 50) -> list[dict]:
         return await self.call(
             "getUpdates", offset=offset, timeout=timeout,
-            allowed_updates=["message", "callback_query", "my_chat_member"],
+            allowed_updates=["message", "callback_query", "my_chat_member", "inline_query"],
         )
 
     async def send_message(self, chat_id, text: str, reply_to: int | None = None, keyboard: list | None = None,

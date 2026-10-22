@@ -57,6 +57,9 @@ def _help_text(ctx: Ctx) -> str:
         lines.append(f"<b>{title}</b>")
         lines.extend(f"{cmd} — {text}" for cmd, text in rows)
         lines.append("")
+    lines.append(f"🔎 Подсказки имён: наберите <code>@{esc(ctx.app.username)} дарт джа</code> — бот покажет список; "
+                 "в начале можно указать «гильдия», «готовность» или «фракция».")
+    lines.append("")
     if ctx.access["tier"] is None:
         lines.append("Начните с привязки аккаунта: <code>/reg 123456789</code>")
     lines.append(f"Сайт с отчётами и настройками: {ctx.app.site_url}")

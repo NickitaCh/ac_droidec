@@ -19,9 +19,9 @@ from cogs.tasks import TasksCog
 from cogs.unit_forecast import UnitForecastCog
 from cogs.unit_test import current_levels_text, level_label, projected_player
 from services import faction as faction_svc
-from services import faction_image, guild_units, guild_units_image, journey_guide, omicron_priority
+from services import faction_image, guild_units, guild_units_image, omicron_priority
 from services import toon, toon_image, unit_forecast, unit_forecast_image
-from tg_bot import markup, store
+from tg_bot import markup, search, store
 from tg_bot.checks import GUILD_WORDS, REFRESH_WORDS, SELF_ONLY, _feature_off, _self_only_error, _split_flags
 from tg_bot.core import TIER_OFFICER, Ctx, callback, command, esc, new_session, session_for_callback
 from tg_bot.handlers import _resolve_target, _stat_calc
@@ -118,9 +118,13 @@ def _parse_levels(words: list[str]) -> tuple[list[str], dict]:
 
 
 def _unit_matches(query: str) -> list[tuple[str, str]]:
-    matches = database.search_game_units(query, limit=200)
-    exact = [m for m in matches if m[1].casefold() == query.casefold() or m[0].casefold() == query.casefold()]
-    return exact or matches
+    return [(b, f"{name}{' 🚀' if ship else ''}") for b, name, ship in search.units(query)]
+
+
+def find_button(text: str, query: str) -> list:
+    """Кнопка, открывающая инлайн-подсказки бота прямо в поле ввода (tg_bot/inline.py) —
+    в Telegram это замена автодополнения параметров Discord."""
+    return [[{"text": text, "switch_inline_query_current_chat": query}]]
 
 
 @command("unit", "Персонаж: статы, модули, зеты; прогноз и сравнение (как /юнит)", aliases=("юнит",))
@@ -132,21 +136,22 @@ async def cmd_unit(ctx: Ctx):
     query = " ".join(rest)
     if not query:
         await ctx.reply(
-            "Укажите персонажа: <code>/unit Рей</code>\n"
+            "Укажите персонажа: <code>/unit Рей</code> — или нажмите «Найти» и начните вводить имя, бот подскажет.\n"
             "Прогноз: <code>/unit Рей r7</code> (r — реликвия, g — гир, 7* — звёзды)\n"
             "Другой игрок: <code>/unit Рей | Ник</code>, код союзника или ответ на сообщение; "
-            "сравнение — несколько через запятую: <code>/unit Рей | Ник, 123456789</code>"
+            "сравнение — несколько через запятую: <code>/unit Рей | Ник, 123456789</code>",
+            keyboard=find_button("🔎 Найти персонажа", "юнит "),
         )
         return
     state = {"user_id": ctx.user["id"], "guild_id": guild_id, "who": who, "levels": levels, "refresh": refresh}
     matches = _unit_matches(query)
     if not matches:
-        await ctx.reply(f"Персонаж «{esc(query)}» не найден.")
+        await ctx.reply(f"Персонаж «{esc(query)}» не найден — попробуйте подсказки:",
+                        keyboard=find_button("🔎 Найти персонажа", f"юнит {query}"))
         return
     if len(matches) > 1:
         token = new_session(state)
-        types_ = database.get_unit_types([b for b, _ in matches[:CHOICES_MAX]])
-        items = [(f"{name}{' 🚀' if types_.get(b) == 'ship' else ''}", b) for b, name in matches]
+        items = [(name, b) for b, name in matches]
         more = f"\n…и ещё {len(matches) - CHOICES_MAX} — уточните." if len(matches) > CHOICES_MAX else ""
         await ctx.reply(f"Какой персонаж?{more}", keyboard=_choice_keyboard("un", token, items))
         return
@@ -260,11 +265,12 @@ async def _ship_forecast(ctx: Ctx, stat_calc, ally_code: str, base_id: str, star
 async def cmd_guildunit(ctx: Ctx):
     query = ctx.args.strip()
     if not query:
-        await ctx.reply("Укажите юнит: <code>/guildunit Рей</code>")
+        await ctx.reply("Укажите юнит: <code>/guildunit Рей</code>", keyboard=find_button("🔎 Найти юнит", "гильдия "))
         return
     matches = _unit_matches(query)
     if not matches:
-        await ctx.reply(f"Юнит «{esc(query)}» не найден.")
+        await ctx.reply(f"Юнит «{esc(query)}» не найден — попробуйте подсказки:",
+                        keyboard=find_button("🔎 Найти юнит", f"гильдия {query}"))
         return
     state = {"user_id": ctx.user["id"], "guild_id": ctx.access["guild_id"]}
     if len(matches) > 1:
@@ -328,11 +334,6 @@ def _html_chunks(blocks: list[str], limit: int = 3900) -> list[str]:
 
 # ======================================================================== /ready
 
-def _guide_matches(query: str) -> list[dict]:
-    options = journey_guide.guide_options()
-    q = query.casefold()
-    exact = [g for g in options if g["name"].casefold() == q or g["base_id"].casefold() == q]
-    return exact or [g for g in options if q in g["name"].casefold() or q in g["base_id"].casefold()]
 
 
 @command("ready", "Готовность к цели «Руководства» картинкой (как /готовность)", aliases=("готовность",))
@@ -342,11 +343,13 @@ async def cmd_ready(ctx: Ctx):
     what, (guild_mode,) = _split_flags(what, GUILD_WORDS)
     if not what:
         await ctx.reply("Укажите цель: <code>/ready Лорд Вейдер</code>; гильдия — <code>/ready Лорд Вейдер гильдия</code>; "
-                        "другой игрок — <code>/ready Лорд Вейдер | Ник</code>")
+                        "другой игрок — <code>/ready Лорд Вейдер | Ник</code>",
+                        keyboard=find_button("🔎 Найти цель", "готовность "))
         return
-    matches = [g for g in _guide_matches(what) if database.get_journey_guide_requirements(g["base_id"], guild_id)]
+    matches = search.guides(what, guild_id)
     if not matches:
-        await ctx.reply(f"Цель «{esc(what)}» не найдена в «Руководстве».")
+        await ctx.reply(f"Цель «{esc(what)}» не найдена в «Руководстве» — попробуйте подсказки:",
+                        keyboard=find_button("🔎 Найти цель", f"готовность {what}"))
         return
     state = {"user_id": ctx.user["id"], "guild_id": guild_id, "who": who, "guild_mode": guild_mode}
     if len(matches) > 1:
@@ -428,19 +431,20 @@ async def _ready_player(ctx: Ctx, state: dict, code: str):
 async def cmd_faction(ctx: Ctx):
     what, who = _split_player(ctx.args)
     if not what:
-        await ctx.reply("Укажите фракцию: <code>/faction Империя</code>; другой игрок — <code>/faction Империя | Ник</code>")
+        await ctx.reply("Укажите фракцию: <code>/faction Империя</code>; другой игрок — <code>/faction Империя | Ник</code>",
+                        keyboard=find_button("🔎 Найти фракцию", "фракция "))
         return
     state = {"user_id": ctx.user["id"], "guild_id": ctx.access["guild_id"], "who": who}
-    exact = faction_svc.resolve(what)
-    hits = faction_svc.search(what, limit=CHOICES_MAX + 1)
-    if exact is None and len(hits) != 1:
+    hits = search.factions(what, limit=CHOICES_MAX + 1)
+    if len(hits) != 1:
         if not hits:
-            await ctx.reply(f"Фракция «{esc(what)}» не найдена.")
+            await ctx.reply(f"Фракция «{esc(what)}» не найдена — попробуйте подсказки:",
+                            keyboard=find_button("🔎 Найти фракцию", f"фракция {what}"))
             return
         token = new_session(state)
         await ctx.reply("Какая фракция?", keyboard=_choice_keyboard("fc", token, [(f"{n} ({c})", cid) for cid, n, c in hits]))
         return
-    await _faction_run(ctx, state, exact or hits[0][0])
+    await _faction_run(ctx, state, hits[0][0])
 
 
 @callback("fc")

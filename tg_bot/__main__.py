@@ -13,7 +13,7 @@ from swgoh_comlink import SwgohComlink
 
 import database
 from services import stat_forecast
-from tg_bot import checks, handlers, more, notifier  # noqa: F401 — регистрируют команды
+from tg_bot import checks, handlers, inline, more, notifier  # noqa: F401 — регистрируют команды
 from tg_bot.api import TelegramAPI
 from tg_bot.core import App, menu_commands, run_polling
 
