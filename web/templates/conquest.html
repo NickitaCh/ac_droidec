@@ -60,12 +60,19 @@
 
         <div class="cq-who-bar">
             <label class="checkbox"><input type="checkbox" id="cq-only-mine"> Только мои — скрыть подвиги, которые нечем пройти</label>
-            {% if accounts|length > 1 %}
+            {% if accounts|length > 1 or typed_code %}
                 <nav class="hero-links">
                     {% for a in accounts %}{% if account and a[0] == account[0] %}<strong class="hero-link">{{ a[1] or a[0] }}</strong>{% else %}<a class="hero-link" href="/conquest?diff={{ diff.key }}&acc={{ a[0] }}">{{ a[1] or a[0] }}</a>{% endif %}{% endfor %}
+                    {% if typed_code %}<strong class="hero-link">{{ typed_code }}</strong>{% endif %}
                 </nav>
             {% endif %}
-            {% call ui.help() %}<p>«Кем пройти?» под подвигом — ваши персонажи, которые под него подходят, сильные первыми. В игре подвиг не связан с персонажами напрямую, связь восстановлена по его тексту: имя персонажа, фракция («полный отряд …», нужно 5) или эффект — у кого он есть в описании способностей.</p><p>Подвиги без подсказки («без танков», «не потеряв ни одной боевой единицы») проходятся любым отрядом.</p>{% if not account %}<p>Ваш аккаунт не привязан — показан общий список подходящих персонажей без ваших уровней.</p>{% endif %}{% endcall %}
+            {% if not accounts %}
+                <span class="cq-code-form">
+                    <input type="text" id="cq-code" inputmode="numeric" maxlength="11" placeholder="Ваш код союзника" value="{{ typed_code or '' }}" aria-label="Код союзника">
+                    <button type="button" class="btn" id="cq-code-go">Показать мой склад</button>
+                </span>
+            {% endif %}
+            {% call ui.help() %}<p>«Кем пройти?» под подвигом — ваши персонажи, которые под него подходят, сильные первыми. В игре подвиг не связан с персонажами напрямую, связь восстановлена по его тексту: имя персонажа, фракция («полный отряд …», нужно 5) или эффект — у кого он есть в описании способностей.</p><p>Подвиги без подсказки («без танков», «не потеряв ни одной боевой единицы») проходятся любым отрядом.</p>{% if not account %}<p>Ваш аккаунт не привязан — показан общий список подходящих персонажей без ваших уровней. Впишите код союзника, чтобы увидеть свой склад.</p>{% endif %}{% endcall %}
         </div>
 
         {% for title, feats in groups %}
@@ -137,6 +144,15 @@
                 panel.querySelectorAll(".cq-feat:checked").forEach(cb => { s += parseInt(cb.dataset.k, 10) || 0; });
                 sum.textContent = s;
             });
+        }
+        const codeGo = document.getElementById("cq-code-go");
+        if (codeGo) {
+            const go = () => {
+                const code = document.getElementById("cq-code").value.replace(/\D/g, "");
+                if (code.length === 9) location.href = "/conquest?diff={{ diff.key }}&acc=" + code;
+            };
+            codeGo.addEventListener("click", go);
+            document.getElementById("cq-code").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
         }
         const onlyMine = document.getElementById("cq-only-mine");
         function applyOnlyMine() {
