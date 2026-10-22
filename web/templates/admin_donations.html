@@ -17,17 +17,17 @@
         <p class="empty-state">Донатов пока нет.</p>
     {% else %}
         <div class="panel">
-            <table class="data">
+            <table class="data cards-on-phone">
                 <thead>
                     <tr><th>Когда</th><th>Кто</th><th>Сумма</th><th>Пожелание</th></tr>
                 </thead>
                 <tbody>
                     {% for d in donations %}
                         <tr{% if d.status != "succeeded" %} class="muted"{% endif %}>
-                            <td class="nowrap">{{ d.paid_at_msk or d.created_at_msk }}{% if d.status != "succeeded" %}<br><span class="badge badge-neutral">ждёт оплаты</span>{% endif %}</td>
-                            <td>{{ d.display_name or d.username or "аноним" }}{% if d.display_name and d.username and d.display_name != d.username %}<br><span class="muted">{{ d.username }}</span>{% endif %}</td>
-                            <td class="nowrap">{{ ui.num(d.amount) }} ₽</td>
-                            <td>{{ d.comment or "" }}</td>
+                            <td class="nowrap" data-label="Когда">{{ d.paid_at_msk or d.created_at_msk }}{% if d.status != "succeeded" %}<br><span class="badge badge-neutral">ждёт оплаты</span>{% endif %}</td>
+                            <td data-label="Кто">{{ d.display_name or d.username or "аноним" }}{% if d.display_name and d.username and d.display_name != d.username %}<br><span class="muted">{{ d.username }}</span>{% endif %}</td>
+                            <td class="nowrap" data-label="Сумма">{{ ui.num(d.amount) }} ₽</td>
+                            <td data-label="Пожелание">{{ d.comment or "" }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

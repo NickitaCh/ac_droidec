@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block title %}Завоевание — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
     <section class="page-hero page-hero-dark">
         <div class="page-hero-top">
@@ -27,28 +28,28 @@
         <div class="panel"><p class="muted">Данных о Завоевании пока нет — они появятся после ежедневного обновления справочника, когда в игре объявят следующее Завоевание.</p></div>
     {% else %}
     {% if not started %}<p class="muted">Это Завоевание ещё не началось — подвиги уже известны, можно планировать заранее.</p>{% endif %}
-    <form method="post" action="/conquest/save" id="cq-form">
+    <form method="post" action="/conquest/save" id="cq-form" class="cq-form">
         <input type="hidden" name="diff" value="{{ diff.key }}">
         <div class="panel">
             <div class="panel-title">
                 <span>Сундуки{% if diff.min_gp %} <span class="muted">· от {{ ui.num(diff.min_gp) }} ГМ</span>{% endif %}</span>
                 <span class="panel-hint">подвиги дают до {{ result.max_feats }} ключ-карт</span>
             </div>
-            <p>
-                <label>Ключ-карты за бои: <input type="number" name="battles" id="cq-battles" min="0" max="10000" value="{{ battles }}" style="width: 7em"></label>
-                <span class="muted">· за подвиги: <strong id="cq-feats">{{ result.feat_keycards }}</strong></span>
+            <div class="cq-battles-row">
+                <label>Ключ-карты за бои <input type="number" name="battles" id="cq-battles" min="0" max="10000" value="{{ battles }}"></label>
+                <span class="muted">за подвиги: <strong id="cq-feats">{{ result.feat_keycards }}</strong></span>
                 <button type="submit" class="btn">Сохранить</button>
-            </p>
+            </div>
             <div class="table-scroll">
-                <table class="data">
+                <table class="data cards-on-phone">
                     <thead><tr><th class="num">Сундук</th><th class="num">Ключ-карт</th><th>Осколки</th><th>Остальное</th></tr></thead>
                     <tbody>
                         {% for c in crates %}
                             <tr class="cq-crate" data-min="{{ c.min }}" data-n="{{ c.n }}"{% if result.crate and result.crate.n == c.n %} style="outline: 2px solid var(--accent, #4ade80);"{% endif %}>
-                                <td class="num"><strong>{{ c.n }}</strong></td>
-                                <td class="num">{{ c.min }}</td>
-                                <td>{% for name, qty in c.shards %}<span class="nowrap">{{ name }} ×{{ qty }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
-                                <td>{% if c.other %}<details><summary class="muted">{{ c.other|length }} предм.</summary><span class="muted">{% for name, qty in c.other %}{{ name }} ×{{ ui.num(qty) }}{% if not loop.last %}; {% endif %}{% endfor %}</span></details>{% endif %}</td>
+                                <td class="num" data-label="Сундук"><strong>{{ c.n }}</strong></td>
+                                <td class="num" data-label="Ключ-карт">{{ c.min }}</td>
+                                <td data-label="Осколки">{% for name, qty in c.shards %}<span class="nowrap">{{ name }} ×{{ qty }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
+                                <td data-label="Остальное">{% if c.other %}<details><summary class="muted">{{ c.other|length }} предм.</summary><span class="muted">{% for name, qty in c.other %}{{ name }} ×{{ ui.num(qty) }}{% if not loop.last %}; {% endif %}{% endfor %}</span></details>{% endif %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

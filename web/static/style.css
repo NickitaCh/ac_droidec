@@ -484,7 +484,12 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     .nav-toggle-checkbox:checked ~ .nav-backdrop { display: block; }
 }
 
+/* width: 100% обязателен: main — элемент flex-колонки .main-area с margin: auto, без этого он
+   подстраивается под содержимое, и широкая таблица (даже в .table-scroll) распирает страницу
+   на телефоне шире экрана (найдено на /conquest 2026-10-22). */
 main {
+    width: 100%;
+    min-width: 0;
     max-width: 40em;
     margin: 2em auto;
     padding: 0 1.5em 4em;
@@ -2674,7 +2679,18 @@ dialog.feedback-dialog > form { max-width: none; }
 .feedback-status-rejected { background: var(--surface-2); color: var(--fg-muted); }
 .error-page { max-width: 36em; margin: 15vh auto; padding: 0 16px; }
 
-.donate-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1em; align-items: start; }
+/* «Поддержать проект» — одна строка-кнопка внизу меню (base.html). */
+.sidebar nav a.nav-donate-widget {
+    display: block; margin: 0.75em 0.5em 0.25em; padding: 0.45em 0.75em; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--fg);
+    font-size: 0.85em; font-weight: 600; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar nav a.nav-donate-widget:hover { border-color: var(--accent); }
+@media (min-width: 56.01em) {
+    html[data-sidebar="collapsed"] .sidebar nav a.nav-donate-widget { display: none; }
+}
+.donate-grid { max-width: 70em; display: grid; grid-template-columns: minmax(0, 3fr) minmax(16em, 2fr); gap: 1em; align-items: start; }
 @media (max-width: 800px) { .donate-grid { grid-template-columns: minmax(0, 1fr); } }
 .donate-form { max-width: none; }
 .donate-presets { display: flex; flex-wrap: wrap; gap: 0.5em; }
@@ -2686,3 +2702,22 @@ dialog.feedback-dialog > form { max-width: none; }
 .donate-supporters { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.4em; }
 .donate-supporters li { padding: 0.3em 0.7em; border-radius: 999px; background: var(--surface-2); }
 .donate-thanks { margin-bottom: 1em; }
+
+/* /conquest: форма обёрнута вокруг всех панелей — снимаем глобальный form { max-width: 20em }. */
+.cq-form { max-width: 70em; }
+.cq-battles-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6em 1em; margin: 0.4em 0 0.8em; }
+.cq-battles-row label { flex: 0 0 auto; }
+.cq-battles-row input { width: 7em; }
+.cq-battles-row .muted { align-self: center; }
+
+/* Таблица → карточки на телефоне: <table class="data cards-on-phone">, у каждого <td> data-label
+   (подпись слева). Вместо горизонтальной прокрутки — правило сайта (2026-10-22). */
+@media (max-width: 40em) {
+    table.cards-on-phone thead { display: none; }
+    table.cards-on-phone, table.cards-on-phone tbody, table.cards-on-phone tr, table.cards-on-phone td { display: block; width: 100%; }
+    table.cards-on-phone tr { padding: 0.55em 0; border-bottom: 1px solid var(--border); }
+    table.cards-on-phone td { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75em; padding: 0.15em 0; border: none; text-align: right; }
+    table.cards-on-phone td::before { content: attr(data-label); flex-shrink: 0; font-size: 0.8em; font-weight: 600; color: var(--fg-muted); text-align: left; }
+    table.cards-on-phone td:not([data-label])::before { content: none; }
+    table.cards-on-phone td .nowrap { white-space: normal; }
+}

@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261022a">
+    <link rel="stylesheet" href="/static/style.css?v=20261022e">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -145,11 +145,7 @@
                     {% endif %}
                 {% endif %}
             {% endif %}
-            <div class="nav-sub-widget nav-donate-widget">
-                <span class="nav-sub-title">💛 Поддержать проект</span>
-                <span class="nav-sub-date">Любая сумма помогает боту и сайту</span>
-                <a class="button" href="/donate">Поддержать</a>
-            </div>
+            <a class="nav-donate-widget" href="/donate" title="Поддержать проект">💛 Поддержать проект</a>
         </nav>
         <div class="sidebar-footer">
             {% if user %}
