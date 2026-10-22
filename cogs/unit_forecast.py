@@ -261,7 +261,7 @@ class UnitForecastCog(commands.Cog):
 
     async def _card_players(self, ally_codes: list[str], guild_id: int, refresh: bool) -> tuple[list, list]:
         """([сырой игрок {name, rosterUnit} | None], [возраст кэша в секундах | None = из игры]).
-        Игрок из кэша синка — без запроса в игру; «обновить» освежает кэш (кулдаун 5 мин,
+        Игрок из кэша синка — без запроса в игру; «обновить» освежает кэш (кулдаун 30 с,
         общий с /статы), игрок не из кэша — всегда свежий get_player."""
         names = database.get_player_names(guild_id)
         profiles = database.get_player_profiles_bulk(ally_codes)
