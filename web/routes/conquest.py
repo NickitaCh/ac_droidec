@@ -1,20 +1,20 @@
 """Калькулятор Завоевания (/conquest) — расчёт и данные в services/conquest.py. Открыт
-всем, кто вошёл через Discord, даже без подключённой гильдии (решение пользователя
-2026-10-22): это личный инструмент игрока, отметки хранятся по Discord-аккаунту
-(conquest_marks). Склад для «Кем пройти?» — свой зарегистрированный аккаунт или код
-союзника, вписанный на странице (?acc=); если его нет в кэше, берём из игры один раз."""
+участникам подключённых гильдий, вошедшим через Discord, включая ручные гранты и
+супер-админов (решение пользователя 2026-10-22): это личный инструмент игрока, отметки
+хранятся по Discord-аккаунту (conquest_marks). Склад для «Кем пройти?» — свой основной
+аккаунт или альт (?acc=), у гранта без регистрации — код союзника из гранта."""
 
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 import guild_resolver
-from services import activity_diff, conquest, guild_units
+from services import conquest, guild_units
 from web.deps import get_current_user, own_accounts
 
 router = APIRouter()
@@ -57,45 +57,43 @@ def _who(feats: list, roster: dict | None) -> dict:
     return out
 
 
+def require_conquest_access(request: Request) -> dict:
+    """Участник подключённой гильдии (регистрация или ручной грант) или супер-админ —
+    у супер-админа гильдии может не быть вовсе, require_member_access его бы не пустил."""
+    user = get_current_user(request)
+    if user.get("is_super_admin") or user.get("real_super_admin"):
+        return user
+    if user.get("tier") not in ("officer", "member") or user.get("guild_id") is None:
+        raise HTTPException(status_code=403, detail="Страница доступна участникам подключённых гильдий")
+    return user
+
+
 def _accounts(user: dict) -> list:
-    """[(ally_code, имя, is_main)] — в своей гильдии как в «Моём профиле», без подключённой
-    гильдии — регистрации во всех гильдиях бота."""
-    if user.get("tier") in ("officer", "member") and user.get("guild_id") is not None:
-        return own_accounts(user)
-    seen, out = set(), []
-    for _gid, code, name, is_main in database.get_all_registrations_for_discord_id(str(user["discord_id"])):
-        if code not in seen:
-            seen.add(code)
-            out.append((code, name, is_main))
-    return sorted(out, key=lambda a: not a[2])
-
-
-async def _roster(ally_code: str) -> dict:
-    roster = database.get_player_units_bulk([ally_code]).get(ally_code)
-    if roster:
-        return roster
-    # Игрок не из подключённой гильдии — его склада нет в кэше: один запрос в игру.
-    try:
-        from swgoh_comlink import SwgohComlink
-        await activity_diff.refresh_player_units(SwgohComlink(url="http://localhost:3000"), ally_code)
-    except Exception as e:
-        print(f"⚠️ [Завоевание] склад {ally_code} не получен: {e!r}")
-        return {}
-    return database.get_player_units_bulk([ally_code]).get(ally_code) or {}
+    """[(ally_code, имя, is_main)]: свои аккаунты в гильдии, как в «Моём профиле»; если их
+    нет — регистрации в других гильдиях бота (супер-админ), потом код из ручного гранта."""
+    accounts = own_accounts(user) if user.get("guild_id") is not None else []
+    if not accounts:
+        seen = set()
+        for _gid, code, name, is_main in database.get_all_registrations_for_discord_id(str(user["discord_id"])):
+            if code not in seen:
+                seen.add(code)
+                accounts.append((code, name, is_main))
+        accounts.sort(key=lambda a: not a[2])
+    if not accounts:
+        code = guild_resolver.resolve_access(user["discord_id"]).get("ally_code")
+        if code:
+            accounts = [(code, code, 1)]
+    return accounts
 
 
 @router.get("", response_class=HTMLResponse)
-async def conquest_page(request: Request, diff: str = "", acc: str = "", user: dict = Depends(get_current_user)):
+async def conquest_page(request: Request, diff: str = "", acc: str = "", user: dict = Depends(require_conquest_access)):
     state = conquest.state()
     ctx = {"user": user, "state": state}
     accounts = _accounts(user)
-    account = next((a for a in accounts if a[0] == acc), None)
-    typed = guild_resolver.normalize_ally_code(acc) if acc and account is None else None
-    if typed:
-        account = (typed, typed, 0)
-    elif account is None:
-        account = next((a for a in accounts if a[2]), None) or (accounts[0] if accounts else None)
-    ctx["typed_code"] = typed
+    account = (next((a for a in accounts if a[0] == acc), None)
+               or next((a for a in accounts if a[2]), None) or (accounts[0] if accounts else None))
+    roster = database.get_player_units_bulk([account[0]]).get(account[0]) if account else None
     if state:
         keys = [d["key"] for d in state["difficulties"]]
         if diff not in keys:
@@ -114,7 +112,8 @@ async def conquest_page(request: Request, diff: str = "", acc: str = "", user: d
         ctx.update({
             "diff": d, "crates": crates, "done": done, "battles": battles, "groups": groups,
             "result": conquest.evaluate(d, done, battles),
-            "who": _who(d["feats"], (await _roster(account[0]) or None) if account else None),
+            "who": _who(d["feats"], roster),
+            "who_roster": bool(roster),
             "accounts": accounts, "account": account,
             "kind_labels": conquest.KIND_LABELS,
             "period": f"{_msk(state['start'])} — {_msk(state['end'])} МСК",
@@ -124,7 +123,7 @@ async def conquest_page(request: Request, diff: str = "", acc: str = "", user: d
 
 
 @router.post("/save")
-async def conquest_save(request: Request, user: dict = Depends(get_current_user)):
+async def conquest_save(request: Request, user: dict = Depends(require_conquest_access)):
     state = conquest.state()
     form = await request.form()
     diff = form.get("diff", "hard")

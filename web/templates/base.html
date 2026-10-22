@@ -49,7 +49,7 @@
             {% if user and user.tier in ("officer", "member") %}
                 <a href="/me" title="Мой профиль"><span class="nav-icon">👤</span><span class="nav-label">Мой профиль</span></a>
             {% endif %}
-            {% if user %}
+            {% if user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
                 <a href="/conquest" title="Завоевание"><span class="nav-icon">🏆</span><span class="nav-label">Завоевание</span></a>
             {% endif %}
             {% if user %}

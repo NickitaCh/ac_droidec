@@ -2736,5 +2736,3 @@ dialog.feedback-dialog > form { max-width: none; }
 .tbp-unlock { font-size: 0.9em; }
 .tbp-unlock-ok { color: var(--status-good); }
 .tbp-unlock-bad { color: var(--status-critical); }
-.cq-code-form { display: inline-flex; flex-wrap: wrap; gap: 0.4em; align-items: center; }
-.cq-code-form input { width: 11em; }
