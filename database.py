@@ -5,6 +5,8 @@ import os
 import re
 import sqlite3
 
+from services import unit_aliases
+
 DB_NAME = "guild_management.db"
 
 # Раз во сколько часов фоново обновлять кэш полного ростера юнитов игроков (см.
@@ -1474,13 +1476,19 @@ def search_game_units(query: str, limit: int = 25):
     rows = cursor.fetchall()
     conn.close()
 
+    # Сокращения (JML, «млюк» — services/unit_aliases.py) — первыми, до совпадений по имени.
+    names = {base_id: name for base_id, name, _en in rows}
+    matches = [(b, names[b]) for b in unit_aliases.matching(query) if b in names][:limit]
+    seen = {b for b, _n in matches}
+
     q = query.lower()
-    matches = []
     for base_id, name, name_en in rows:
+        if len(matches) >= limit:
+            break
+        if base_id in seen:
+            continue
         if q in name.lower() or q in base_id.lower() or (name_en and q in name_en.lower()):
             matches.append((base_id, name))
-            if len(matches) >= limit:
-                break
     return matches
 
 

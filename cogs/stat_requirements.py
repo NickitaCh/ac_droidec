@@ -10,7 +10,7 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 import stat_engine
-from services import activity_diff, feature_flags, mod_search, omicron_priority
+from services import activity_diff, feature_flags, mod_search, omicron_priority, unit_aliases
 from tg_bot import outbox
 from cogs.violations import autocomplete_players
 
@@ -1279,10 +1279,11 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
     if not char_keys:
         return ["❌ У этого плейта нет сохранённых требований."]
     search = string.lower().strip()
+    by_alias = unit_aliases.matching(string)
     options = []
     for base_id in char_keys:
         label = f"{_unit_display_name(base_id)} [{base_id}]"
-        if not search or search in label.lower():
+        if not search or search in label.lower() or base_id in by_alias:
             options.append(disnake.OptionChoice(name=label[:100], value=label))
     return options[:25]
 

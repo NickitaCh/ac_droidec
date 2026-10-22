@@ -16,7 +16,7 @@ import stat_engine
 from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from cogs.violations import autocomplete_players
 from services import faction as faction_svc
-from services import faction_image, guild_units, guild_units_image, journey_guide
+from services import faction_image, guild_units, guild_units_image, journey_guide, unit_aliases
 
 FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
 MESSAGE_EMBED_LIMIT = 5800  # лимит Discord — 6000 символов на все эмбеды одного сообщения
@@ -28,10 +28,12 @@ async def autocomplete_factions(inter: disnake.ApplicationCommandInteraction, st
 
 async def autocomplete_guides(inter: disnake.ApplicationCommandInteraction, string: str):
     needle = string.strip().lower()
+    by_alias = unit_aliases.matching(string)
+    options = sorted(journey_guide.guide_options(), key=lambda g: g["base_id"] not in by_alias)
     out = []
-    for g in journey_guide.guide_options():
+    for g in options:
         label = f"{g['name']} · {g['kind_label']}"
-        if needle in label.lower():
+        if needle in label.lower() or g["base_id"] in by_alias:
             out.append(disnake.OptionChoice(name=label[:100], value=g["base_id"]))
         if len(out) >= 25:
             break

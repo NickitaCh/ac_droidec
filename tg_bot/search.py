@@ -1,6 +1,7 @@
 """Поиск юнитов, целей «Руководства» и фракций по тому, как их пишут в чате: без учёта
 регистра, «ё», дефисов и порядка слов («дарт джа джа» → «Дарт Джа-Джа», «джа дарт» тоже),
-по русскому и английскому имени и base_id. Общий для команд и инлайн-подсказок
+по русскому и английскому имени, base_id и сокращениям («JML», «млюк» —
+services/unit_aliases.py). Общий для команд и инлайн-подсказок
 (tg_bot/inline.py) — в Discord ту же роль играет автодополнение параметров."""
 
 import re
@@ -9,7 +10,7 @@ import time
 
 import database
 from services import faction as faction_svc
-from services import journey_guide
+from services import journey_guide, unit_aliases
 
 _PUNCT_RE = re.compile(r"[\s\-‐–—'’`\"().,:;!?«»/]+")
 _CACHE_TTL = 600
@@ -65,7 +66,7 @@ def units(query: str, limit: int = 50, exact_only: bool = True) -> list[tuple[st
     оно (команда «/unit Мол» не спрашивает, какой из Молов); подсказкам нужны все."""
     hits = []
     for base_id, name, name_en, kind in _all_units():
-        rank = _rank(query, name, name_en, base_id)
+        rank = _rank(query, name, name_en, base_id, *unit_aliases.aliases(base_id))
         if rank is not None:
             hits.append((rank, len(name), name, base_id, kind == "ship"))
     hits.sort()
@@ -78,7 +79,7 @@ def guides(query: str, guild_id: int | None = None, limit: int = 50, exact_only:
     """Цели «Руководства» (journey_guide.guide_options), у которых есть требования."""
     hits = []
     for g in journey_guide.guide_options():
-        rank = _rank(query, g["name"], g["base_id"]) if query else 3
+        rank = _rank(query, g["name"], g["base_id"], *unit_aliases.aliases(g["base_id"])) if query else 3
         if rank is None:
             continue
         if guild_id is not None and not database.get_journey_guide_requirements(g["base_id"], guild_id):
