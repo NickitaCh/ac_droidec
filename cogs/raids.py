@@ -90,10 +90,29 @@ class RaidsCog(commands.Cog):
         known = set(database.get_game_unit_names([u.get("baseId") for u in units if u.get("baseId")]))
         data = rs.parse_raid_entry_units(campaigns, units, known)
         if data:
+            old_raw = database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0)
             database.set_bot_state(rs.RAID_UNITS_STATE, json.dumps(data), guild_id=0)
+            if old_raw:  # на первом проходе «новыми» были бы все рейды
+                await self._announce_new_raids(set(json.loads(old_raw)), data)
             database.set_bot_state(rs.RAID_UNITS_STATE + "_at", str(time.time()), guild_id=0)
             summary = ", ".join("%s=%d" % (k, len(v["units"])) for k, v in data.items())
             print(f"⚔️ [Рейды] состав рейдов обновлён: {summary}")
+
+    async def _announce_new_raids(self, old_ids: set, data: dict) -> None:
+        """Новый рейд появился в данных игры — личка супер-админам: состав уже подхвачен,
+        вручную остаётся только разбивка на отряды (RAID_TEAMS)."""
+        from services import discord_rest
+        for node_id in sorted(set(data) - old_ids):
+            preview = next((p for p in rs.PREVIEW_RAIDS if rs.release_of(p, data) == node_id), None)
+            lines = [f"⚔️ В игре появился рейд «{rs.raid_name(node_id)}» (`{node_id}`): "
+                     f"{len(data[node_id]['units'])} персонажей, вход с {data[node_id]['min_stars']}★ — "
+                     "уже в /рейд готовность."]
+            if preview:
+                lines.append(f"Предварительный список «{rs.raid_name(preview)}» скрыт, порядок колонок и уровни перенесены. "
+                             f"Запись `{preview}` в PREVIEW_RAIDS можно удалить.")
+            if node_id not in rs.RAID_TEAMS:
+                lines.append("Отрядов пока нет (все персонажи одной группой) — заполнить RAID_TEAMS, когда появятся.")
+            await discord_rest.notify_super_admins("\n".join(lines))
 
     @tasks.loop(hours=3)
     async def raids_loop(self):

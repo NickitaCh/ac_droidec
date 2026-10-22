@@ -13,7 +13,7 @@
         {% if state %}
             <nav class="hero-tabs">
                 {% for d in state.difficulties %}
-                    {% if d.key == diff.key %}<strong>{{ d.name }}</strong>{% else %}<a href="/conquest?diff={{ d.key }}">{{ d.name }}</a>{% endif %}
+                    {% if d.key == diff.key %}<strong>{{ d.name }}</strong>{% else %}<a href="/conquest?diff={{ d.key }}{% if account %}&acc={{ account[0] }}{% endif %}">{{ d.name }}</a>{% endif %}
                 {% endfor %}
             </nav>
             <div class="hero-kpis">
@@ -30,6 +30,7 @@
     {% if not started %}<p class="muted">Это Завоевание ещё не началось — подвиги уже известны, можно планировать заранее.</p>{% endif %}
     <form method="post" action="/conquest/save" id="cq-form" class="cq-form">
         <input type="hidden" name="diff" value="{{ diff.key }}">
+        {% if account %}<input type="hidden" name="acc" value="{{ account[0] }}">{% endif %}
         <div class="panel">
             <div class="panel-title">
                 <span>Сундуки{% if diff.min_gp %} <span class="muted">· от {{ ui.num(diff.min_gp) }} ГМ</span>{% endif %}</span>
@@ -57,6 +58,16 @@
             </div>
         </div>
 
+        <div class="cq-who-bar">
+            <label class="checkbox"><input type="checkbox" id="cq-only-mine"> Только мои — скрыть подвиги, которые нечем пройти</label>
+            {% if accounts|length > 1 %}
+                <nav class="hero-links">
+                    {% for a in accounts %}{% if account and a[0] == account[0] %}<strong class="hero-link">{{ a[1] or a[0] }}</strong>{% else %}<a class="hero-link" href="/conquest?diff={{ diff.key }}&acc={{ a[0] }}">{{ a[1] or a[0] }}</a>{% endif %}{% endfor %}
+                </nav>
+            {% endif %}
+            {% call ui.help() %}<p>«Кем пройти?» под подвигом — ваши персонажи, которые под него подходят, сильные первыми. В игре подвиг не связан с персонажами напрямую, связь восстановлена по его тексту: имя персонажа, фракция («полный отряд …», нужно 5) или эффект — у кого он есть в описании способностей.</p><p>Подвиги без подсказки («без танков», «не потеряв ни одной боевой единицы») проходятся любым отрядом.</p>{% if not account %}<p>Ваш аккаунт не привязан — показан общий список подходящих персонажей без ваших уровней.</p>{% endif %}{% endcall %}
+        </div>
+
         {% for title, feats in groups %}
             <div class="panel">
                 <div class="panel-title">
@@ -67,9 +78,27 @@
                     <table class="data">
                         <tbody>
                             {% for f in feats %}
-                                <tr>
+                                {% set w = who.get(f.id) %}
+                                <tr class="cq-feat-row" data-can="{{ 0 if w and not w.can else 1 }}">
                                     <td style="width: 2em"><input type="checkbox" class="cq-feat" name="feat" value="{{ f.id }}" data-k="{{ f.keycards }}" {% if f.id in done %}checked{% endif %} id="f-{{ f.id }}"></td>
-                                    <td><label for="f-{{ f.id }}"><strong>{{ f.name }}</strong>{% if f.kind != "event" and f.kind != "sector" %} <span class="badge badge-neutral">{{ kind_labels[f.kind] }}</span>{% endif %}<br><span class="muted">{{ f.desc }}</span></label></td>
+                                    <td><label for="f-{{ f.id }}"><strong>{{ f.name }}</strong>{% if f.kind != "event" and f.kind != "sector" %} <span class="badge badge-neutral">{{ kind_labels[f.kind] }}</span>{% endif %}<br><span class="muted">{{ f.desc }}</span></label>
+                                        {% if w %}
+                                            <details class="cq-who">
+                                                <summary>Кем пройти?
+                                                    {% if w.have is none %}<span class="muted">· {% if w.kind == "faction" %}{{ w.label }}{% elif w.kind == "effect" %}«{{ w.label }}»{% endif %}</span>
+                                                    {% elif w.kind == "faction" %}<span class="badge {{ 'badge-ok' if w.can else 'badge-danger' }}">{{ w.label }}: {{ w.have }} из {{ w.need }}</span>
+                                                    {% elif w.have %}<span class="badge badge-ok">{{ w.have }}</span>{% else %}<span class="badge badge-danger">нет</span>{% endif %}
+                                                </summary>
+                                                <div class="cq-who-body">
+                                                    {% if w.kind == "effect" %}<p class="muted">У кого «{{ w.label }}» есть в описании способностей.</p>{% endif %}
+                                                    {% if w.units %}
+                                                        <ul>{% for name, lvl in w.units %}<li>{{ name }}{% if lvl %} <span class="muted">{{ lvl }}</span>{% endif %}</li>{% endfor %}</ul>
+                                                        {% if w.more %}<p class="muted">…и ещё {{ w.more }}</p>{% endif %}
+                                                    {% else %}<p class="muted">Подходящих персонажей у вас нет.</p>{% endif %}
+                                                </div>
+                                            </details>
+                                        {% endif %}
+                                    </td>
                                     <td class="num nowrap">{{ f.keycards }} 🔑</td>
                                 </tr>
                             {% endfor %}
@@ -109,6 +138,16 @@
                 sum.textContent = s;
             });
         }
+        const onlyMine = document.getElementById("cq-only-mine");
+        function applyOnlyMine() {
+            document.querySelectorAll(".cq-feat-row").forEach(tr => {
+                tr.hidden = onlyMine.checked && tr.dataset.can === "0";
+            });
+            try { localStorage.setItem("cq-only-mine", onlyMine.checked ? "1" : ""); } catch (e) {}
+        }
+        try { onlyMine.checked = localStorage.getItem("cq-only-mine") === "1"; } catch (e) {}
+        onlyMine.addEventListener("change", applyOnlyMine);
+        applyOnlyMine();
         form.addEventListener("change", recalc);
         form.addEventListener("input", recalc);
     })();

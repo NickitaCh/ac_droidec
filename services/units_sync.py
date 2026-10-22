@@ -343,11 +343,16 @@ async def sync_units(comlink) -> int:
         strikes = tb_missions.parse_strikes(tb_defs, campaigns)
         if strikes:
             database.set_bot_state(tb_missions.STRIKE_STATE_KEY, json.dumps(strikes), guild_id=0)
+        from services import raids
+        raid_names = raids.parse_raid_names(campaigns, loc_ru_kv)
+        if raid_names:
+            database.set_bot_state(raids.RAID_NAMES_STATE, json.dumps(raid_names, ensure_ascii=False), guild_id=0)
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить спецмиссии ТБ: {e}")
     try:
         from services import conquest
-        await conquest.sync(comlink, loc_ru_kv)
+        await conquest.sync(comlink, loc_ru_kv,
+                            [u for u in _canonical_units(units_list) if u.get("baseId") in units_to_db])
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить подвиги Завоевания: {e}")
 

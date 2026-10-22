@@ -124,8 +124,9 @@ def parse(event: dict, inst: dict, challenges: list, conquest_defs: list, myster
             "difficulties": difficulties}
 
 
-async def sync(comlink, loc: dict) -> bool:
-    """Обновляет STATE_KEY. False — Завоевания сейчас нет (старое состояние не трогаем)."""
+async def sync(comlink, loc: dict, units: list | None = None) -> bool:
+    """Обновляет STATE_KEY. False — Завоевания сейчас нет (старое состояние не трогаем).
+    units — канонические юниты игры: с ними к подвигам дописывается «Кем пройти?»."""
     raw = await asyncio.to_thread(comlink.get_events)
     events = raw.get("gameEvent") if isinstance(raw, dict) else raw
     found = current_event(events or [])
@@ -147,6 +148,12 @@ async def sync(comlink, loc: dict) -> bool:
     state = parse(event, inst, challenges, conquest_defs, boxes, materials, loc, unit_names)
     if not any(d["feats"] for d in state["difficulties"]):
         return False
+    if units:
+        try:
+            from services import conquest_who
+            await conquest_who.annotate(comlink, state, units, loc)
+        except Exception as e:  # подсказка не должна ломать сам калькулятор
+            print(f"⚠️ [Завоевание] «Кем пройти?» не посчитано: {e!r}")
     database.set_bot_state(STATE_KEY, json.dumps(state, ensure_ascii=False), guild_id=0)
     return True
 

@@ -31,8 +31,35 @@ RAID_NAMES = {
 }
 
 
+RAID_NAMES_STATE = "raid_names"  # bot_state guild 0: {node_id: русское имя из игры} — пишет units_sync
+
+
+def parse_raid_names(campaigns: list, loc: dict) -> dict:
+    """{id узла GUILD/RAIDS в нижнем регистре: название из русской локализации игры} —
+    чтобы новый рейд сразу назывался по-русски, без правки RAID_NAMES."""
+    names = {}
+    for camp in campaigns:
+        if camp.get("id") != "GUILD":
+            continue
+        for cmap in camp.get("campaignMap") or []:
+            if cmap.get("id") != "RAIDS":
+                continue
+            for group in cmap.get("campaignNodeDifficultyGroup") or []:
+                for node in group.get("campaignNode") or []:
+                    name = loc.get(node.get("nameKey") or "")
+                    if node.get("id") and name:
+                        names[node["id"].lower()] = name.strip()
+    return names
+
+
 def raid_name(raid_id: str) -> str:
-    return RAID_NAMES.get((raid_id or "").lower(), raid_id or "?")
+    key = (raid_id or "").lower()
+    if key in RAID_NAMES:
+        return RAID_NAMES[key]
+    import json
+    import database
+    raw = database.get_bot_state(RAID_NAMES_STATE, guild_id=0)
+    return (json.loads(raw) if raw else {}).get(key) or raid_id or "?"
 
 
 def raid_key(raid_id: str, end_time: int) -> str:
@@ -142,7 +169,9 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
 
 # Анонсированные, но ещё не вышедшие рейды — состав со swgoh.gg (по Community Update CG,
 # 2026-09-28; «может измениться»). Как только рейд появится в данных игры (узел GUILD/RAIDS
-# с почти тем же составом), запись отсюда скрывается сама — тогда её можно удалить.
+# с тем же id или почти тем же составом), предварительный список скрывается сам, а порядок
+# колонок и уровни переходят к настоящему рейду (_raid_units_data); супер-админам уходит
+# личка (cogs/raids.py). Запись отсюда после этого можно удалить.
 # Ещё не вышедшие в игре юниты (Мандалорец и Грогу, новый B1) — под id из таблицы WookieeBot
 # (GLMANDO, B1BATTLEDROID), имена — из "names": в game_units их нет, у всех будет «—».
 PREVIEW_RAIDS = {
@@ -168,11 +197,29 @@ def _raid_units_data() -> dict:
     raw = database.get_bot_state(RAID_UNITS_STATE, guild_id=0)
     data = json.loads(raw) if raw else {}
     for raid_id, entry in PREVIEW_RAIDS.items():
-        units = set(entry["units"])
-        released = raid_id in data or any(len(units & set(v["units"])) >= 0.8 * len(units) for v in data.values())
-        if not released:
-            data[raid_id] = entry
+        released = release_of(raid_id, data)
+        if released is None:
+            data[raid_id] = {**entry, "order": entry["units"]}
+            continue
+        # Вышел: состав и звёзды — из игры, порядок колонок (как у WookieeBot) и уровни — из анонса.
+        real = data[released]
+        real.setdefault("order", entry["units"])
+        if entry.get("tiers"):
+            real.setdefault("tiers", entry["tiers"])
+        real["names"] = {**(entry.get("names") or {}), **(real.get("names") or {})}
     return data
+
+
+def release_of(preview_id: str, data: dict) -> str | None:
+    """id узла игры, под которым вышел анонсированный рейд: тот же id или узел, где есть
+    ≥80% персонажей анонса; None — ещё не вышел."""
+    if preview_id in data:
+        return preview_id
+    units = set(PREVIEW_RAIDS[preview_id]["units"])
+    for node_id, v in data.items():
+        if node_id not in PREVIEW_RAIDS and len(units & set(v.get("units") or [])) >= 0.8 * len(units):
+            return node_id
+    return None
 
 
 def raid_kinds() -> list[str]:
@@ -217,14 +264,14 @@ RAID_TEAMS = {
 
 def raid_teams(raid_id: str, allowed: list[str], names: dict) -> list[tuple[str, list[str]]]:
     """[(отряд, [base_id])] только из допущенных игрой персонажей; без известных отрядов —
-    один «Все персонажи»: сначала в порядке из PREVIEW_RAIDS (как у WookieeBot — по выходу
+    один «Все персонажи»: сначала в порядке анонса (поле order, как у WookieeBot — по выходу
     персонажей), остальные по алфавиту."""
     raid_id = (raid_id or "").lower()
     allowed_set = set(allowed)
     teams = [(name, [b for b in ids if b in allowed_set]) for name, ids in RAID_TEAMS.get(raid_id, [])]
     teams = [(name, ids) for name, ids in teams if ids]
     placed = {b for _n, ids in teams for b in ids}
-    order = {b: i for i, b in enumerate(PREVIEW_RAIDS.get(raid_id, {}).get("units") or [])}
+    order = {b: i for i, b in enumerate((raid_entry_units(raid_id) or {}).get("order") or [])}
     rest = sorted((b for b in allowed if b not in placed),
                   key=lambda b: (order.get(b, len(order)), (names.get(b) or b).lower()))
     if rest:
