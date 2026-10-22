@@ -46,9 +46,11 @@ def parse_raid_names(campaigns: list, loc: dict) -> dict:
                 continue
             for group in cmap.get("campaignNodeDifficultyGroup") or []:
                 for node in group.get("campaignNode") or []:
-                    name = loc.get(node.get("nameKey") or "")
+                    name = (loc.get(node.get("nameKey") or "") or "").strip()
+                    if name.isupper():  # в игре названия рейдов капсом: «ПРИКАЗ 66»
+                        name = name.capitalize()
                     if node.get("id") and name:
-                        names[node["id"].lower()] = name.strip()
+                        names[node["id"].lower()] = name
     return names
 
 
