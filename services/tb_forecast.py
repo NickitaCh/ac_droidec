@@ -2,7 +2,9 @@
 может зайти в каждый бой) и прогноз звёзд на всю битву.
 
 Всё из игровых данных t05D, без входа в аккаунт (проверено 2026-10-22), пишет units_sync:
-- пороги звёзд планеты — conflictZoneDefinition[].victoryPointRewards[].galacticScoreRequirement;
+- пороги звёзд планеты — conflictZoneDefinition[].victoryPointRewards[].galacticScoreRequirement,
+  звезду даёт только порог с reward.type 2 (у Зеффо и Мандалора первые два порога — ящики,
+  type 3, звезда одна и лишь за полное заполнение — сходится с 44★ в наших ВИ);
 - очки за операцию взвода (15/15) — reconZoneDefinition[].platoonDefinition[].reward.value;
 - бонусные планеты — conflictZoneDefinition (isBonus).zoneDefinition.unlockRequirement:
   тип 61 — звезда на планете перед ней, тип 116 — сколько побед в спецмиссии (Зеффо — 30 на
@@ -23,6 +25,7 @@ ZONES_STATE = "tb_zone_data"          # bot_state guild 0: {"planets": {...}, "b
 STRIKES_STATE = "tb_strike_missions"  # bot_state guild 0: [mission, ...]
 HISTORY_EVENTS = 3                    # сколько последних ВИ берём для очков боёв и доли залива
 GP_STAT = "STAT_GALACTIC_POWER_ACQUIRED_NAME"
+STAR_REWARD = 2                       # reward.type порога, который даёт звезду (3 — ящик)
 _ZONE_RE = re.compile(r"phase0?(\d)_conflict0?(\d)(_bonus)?")
 _SIDE_BY_CONFLICT = {1: "light", 2: "dark", 3: "mixed"}
 _BONUS_PLANET = {"light": "Zeffo", "mixed": "Mandalore"}
@@ -54,7 +57,7 @@ def _missions_by_id(campaigns: list) -> dict:
 
 
 def parse_zones(tb_defs: list) -> dict:
-    """{"planets": {планета: {phase, side, bonus, stars: [3 порога], op_points}},
+    """{"planets": {планета: {phase, side, bonus, stars: [пороги звёзд], op_points}},
     "bonus": {бонусная планета: {after: планета, covert_zone, wins}}}."""
     tb = next((t for t in tb_defs if t.get("id") == tb_covert.TB_ID), None)
     if not tb:
@@ -69,7 +72,8 @@ def parse_zones(tb_defs: list) -> dict:
         phase, planet, is_bonus = where
         zone_planet[zone_id] = planet
         planets[planet] = {"phase": phase, "bonus": is_bonus,
-                           "stars": [int(v.get("galacticScoreRequirement") or 0) for v in z.get("victoryPointRewards") or []],
+                           "stars": [int(v.get("galacticScoreRequirement") or 0) for v in z.get("victoryPointRewards") or []
+                                     if (v.get("reward") or {}).get("type") == STAR_REWARD],
                            "op_points": 0}
     for z in tb.get("conflictZoneDefinition") or []:
         zone_def = z.get("zoneDefinition") or {}
@@ -241,65 +245,106 @@ def guild_gp(ally_codes: list) -> int:
     return sum(int((p.get("stats") or {}).get(GP_STAT) or 0) for p in profiles.values())
 
 
+def _choices(cells: list, budget: float) -> list:
+    """Варианты одного этапа: [(звёзд по планетам, остаток очков)]. cells — [(очки, пороги)].
+    0 звёзд = планета копит очки на следующий этап (только пока ниже первого порога).
+    Заведомо худшие варианты отброшены: недобранную звезду, на которую хватает остатка,
+    берём; планету, которую можно сразу закрыть на максимум, не копим."""
+    out = []
+
+    def cost(i, k):
+        progress, thresholds = cells[i]
+        return max(0, thresholds[k - 1] - progress) if k else 0
+
+    def walk(i, ks, spent):
+        if i == len(cells):
+            left = budget - spent
+            for j, k in enumerate(ks):
+                top = len(cells[j][1])
+                if k < top and cost(j, k + 1 if k else top) - cost(j, k) <= left:
+                    return
+            out.append((tuple(ks), left))
+            return
+        progress, thresholds = cells[i]
+        for k in range(len(thresholds) + 1):
+            if not k and progress >= thresholds[0]:
+                continue
+            c = cost(i, k)
+            if spent + c <= budget:
+                walk(i + 1, ks + [k], spent + c)
+
+    walk(0, [], 0)
+    return out
+
+
 def forecast(zone_data: dict, platoon_points: dict, covert_ready: dict, hist: dict, gp: int) -> dict:
     """Звёзды по этапам. platoon_points — {планета: очки закрытых операций}, covert_ready —
     {zone_id спецмиссии: сколько игроков её проходят}. Модель: на каждом этапе гильдия
-    заливает долю ГМ, как в прошлых ВИ, и набирает столько же очков боёв; эти очки жадно
-    раскладываются на самые дешёвые звёзды открытых планет. Планета со звездой закрывается
-    и открывает следующую в ветке, без звезды — остаётся с набранными очками (прелоад).
-    Остаток очков уходит в незакрытую планету, ближе всех к звезде."""
+    заливает долю ГМ, как в прошлых ВИ, и набирает столько же очков боёв; взводы планеты
+    засчитываются, когда она открыта. Планета со звездой закрывается и открывает следующую
+    в ветке; без звезды — копит очки на следующий этап (прелоад, до первого порога).
+    Перебираем все 6 этапов сразу и берём план с наибольшим числом звёзд за битву — как
+    офицеры: «0★ сейчас, 3★ на следующем этапе» часто лучше, чем 1★ сразу."""
     planets = zone_data.get("planets") or {}
     bonus = zone_data.get("bonus") or {}
-    progress = {p: 0 for p in planets}
-    stars: dict[str, int] = {}
-    open_now = [b[0] for b in BRANCHES.values()]
-    platoons_done: set = set()
-    phases = []
+    budgets = []
     for phase in range(1, 7):
         h = (hist.get("phases") or {}).get(phase) or {"battle": 0, "share": 0.9}
-        deploy, battle = gp * h["share"], h["battle"]
-        budget = deploy + battle
-        active = [p for p in open_now if p in planets]
-        for p in active:
-            if p not in platoons_done:  # взводы планеты закрываются один раз, когда она открыта
-                platoons_done.add(p)
-                progress[p] += platoon_points.get(p, 0)
-        got = {p: 0 for p in active}
-        while True:
-            options = []
-            for p in active:
-                k = got[p]
-                thresholds = planets[p]["stars"]
-                if k < len(thresholds):
-                    options.append((max(0, thresholds[k] - progress[p]), p))
-            affordable = [o for o in options if o[0] <= budget]
-            if not affordable:
-                break
-            cost, p = min(affordable)
-            budget -= cost
-            progress[p] += cost
-            got[p] += 1
-        leftover = [p for p in active if got[p] == 0]
-        if leftover and budget > 0:
-            p = min(leftover, key=lambda x: planets[x]["stars"][0] - progress[x])
-            progress[p] += budget
-            budget = 0
-        rows = [{"planet": p, "stars": got[p], "points": progress[p], "thresholds": planets[p]["stars"],
-                 "bonus": planets[p]["bonus"]} for p in active]
-        phases.append({"phase": phase, "deploy": deploy, "battle": battle, "planets": rows,
-                       "stars": sum(got.values())})
+        budgets.append((gp * h["share"], h["battle"]))
+    branch_of = {p: b for b in BRANCHES.values() for p in b}
+    memo: dict = {}
+
+    def opened(p: str) -> tuple:
+        return p, platoon_points.get(p, 0)
+
+    def advance(state: tuple, ks: tuple, after: list) -> tuple:
         nxt = []
-        for p in active:
-            if got[p]:
-                stars[p] = got[p]
-                branch = next((b for b in BRANCHES.values() if p in b), None)
-                if branch and branch.index(p) + 1 < len(branch):
-                    nxt.append(branch[branch.index(p) + 1])
-            else:
-                nxt.append(p)
-        for b_planet, rule in bonus.items():
-            if rule["after"] in active and got.get(rule["after"]) and b_planet not in stars and b_planet not in nxt:
-                if covert_ready.get(rule["covert_zone"], 0) >= rule["wins"]:
-                    nxt.append(b_planet)
-        open_now = nxt
-    return {"phases": phases, "total": sum(stars.values()), "max": 3 * len(planets), "gp": gp}
+        for (p, _v), k, v in zip(state, ks, after):
+            if not k:
+                nxt.append((p, v))
+                continue
+            branch = branch_of.get(p)
+            if branch and branch.index(p) + 1 < len(branch):
+                nxt.append(opened(branch[branch.index(p) + 1]))
+            for b_planet, rule in bonus.items():
+                if rule["after"] == p and b_planet in planets and covert_ready.get(rule["covert_zone"], 0) >= rule["wins"]:
+                    nxt.append(opened(b_planet))
+        return tuple(sorted(nxt))
+
+    def solve(phase: int, state: tuple) -> tuple:
+        """state — ((планета, очки), …) открытых планет → (звёзд, −недобранных планет,
+        −потеряно очков, [(state, ks, after)]). При равных звёздах — как в планах офицеров:
+        обычную планету закрываем на 3★ или копим, а не берём 1–2★."""
+        if phase > 6 or not state:
+            return 0, 0, 0, []
+        key = (phase, tuple((p, int(v // 1e6)) for p, v in state))
+        if key in memo:
+            return memo[key]
+        deploy, battle = budgets[phase - 1]
+        cells = [(v, planets[p]["stars"]) for p, v in state]
+        best = None
+        for ks, left in _choices(cells, deploy + battle):
+            after = [v if not k else max(v, t[k - 1]) for (v, t), k in zip(cells, ks)]
+            # остаток — в копящиеся планеты, сначала в ту, которой дальше всего до максимума
+            for i in sorted((i for i, k in enumerate(ks) if not k), key=lambda i: after[i] - cells[i][1][-1]):
+                put = min(max(0, cells[i][1][0] - 1 - after[i]), left)
+                after[i] += put
+                left -= put
+            stars, neg_partial, neg_waste, rest = solve(phase + 1, advance(state, ks, after))
+            partial = sum(1 for (_v, t), k in zip(cells, ks) if 0 < k < len(t))
+            cand = (stars + sum(ks), neg_partial - partial, neg_waste - left, [(state, ks, after)] + rest)
+            if best is None or cand[:3] > best[:3]:
+                best = cand
+        memo[key] = best
+        return best
+
+    start = tuple(sorted(opened(b[0]) for b in BRANCHES.values() if b[0] in planets))
+    total, _neg_partial, _neg_waste, steps = solve(1, start)
+    phases = []
+    for phase, (state, ks, after) in enumerate(steps, start=1):
+        deploy, battle = budgets[phase - 1]
+        rows = [{"planet": p, "stars": k, "max": len(planets[p]["stars"]), "carry": not k, "points": v,
+                 "thresholds": planets[p]["stars"], "bonus": planets[p]["bonus"]}
+                for (p, _v), k, v in zip(state, ks, after)]
+        phases.append({"phase": phase, "deploy": deploy, "battle": battle, "planets": rows, "stars": sum(ks)})
+    return {"phases": phases, "total": total, "max": sum(len(v["stars"]) for v in planets.values()), "gp": gp}
