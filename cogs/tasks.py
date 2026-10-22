@@ -9,6 +9,7 @@ from services import feature_flags
 from services.units_sync import sync_units
 from services import journey_guide
 from services.equipment_sync import sync_equipment
+from tg_bot import outbox
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
 from cogs.violations import autocomplete_players
 from cogs.datacron_requirements import DATACRON_LIST_COLOR, _lines_to_embeds
@@ -181,6 +182,7 @@ class TasksCog(commands.Cog):
         verb = "выполнена 🎉" if status == "COMPLETED" else "просрочена — истёк срок ⏰"
         target_label = self._format_target_label(target_type, target_value)
         text = f"Задача **{unit_name}** ({target_label}) для **{player_name}** {verb}"
+        outbox.enqueue_guild(guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
 
         log_channel_id = guild_cfg.get("tasks_log_channel_id")
         if not log_channel_id:
@@ -199,7 +201,7 @@ class TasksCog(commands.Cog):
         (tasks.created_by), а не в канал задач (решение пользователя 2026-10-19)."""
         task = database.get_task(task_id)
         discord_id = task[12] if task else None
-        if not discord_id or not str(discord_id).isdigit():
+        if not discord_id:
             return
         unit_name = database.get_game_unit_name(base_id) or base_id
         target_label = self._format_target_label(target_type, target_value)
@@ -207,6 +209,11 @@ class TasksCog(commands.Cog):
             text = f"🎉 Личная задача выполнена: **{unit_name}** ({target_label}) — {player_name}."
         else:
             text = f"⏰ Личная задача просрочена: **{unit_name}** ({target_label}) — {player_name}, срок истёк."
+        if outbox.is_tg_owner(discord_id):  # поставил из Telegram-аккаунта (tg_bot/store.py)
+            outbox.enqueue_dm(discord_id, text)
+            return
+        if not str(discord_id).isdigit():
+            return
         try:
             user = self.bot.get_user(int(discord_id)) or await self.bot.fetch_user(int(discord_id))
             await user.send(text)
@@ -220,6 +227,7 @@ class TasksCog(commands.Cog):
         target_label = self._format_target_label(target_type, target_value)
         text = (f"⏳ Напоминание: у задачи **{unit_name}** ({target_label}) для **{player_name}** "
                 f"истекает срок {deadline}.")
+        outbox.enqueue_guild(guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
 
         log_channel_id = guild_cfg.get("tasks_log_channel_id")
         if not log_channel_id:

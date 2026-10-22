@@ -1298,6 +1298,68 @@ def _format_stat_check_line(check) -> str:
     return f"{icon} {label}: {actual_str} (нужно ≥{check['min_value']:g}%)"
 
 
+def build_player_check(cache, player, set_id, requirements, focused_requirements, guild_id) -> tuple[list, int, int]:
+    """Проверка датакронов одного игрока по требованиям сезона — строки отчёта (Discord-
+    разметка) и итог «закрыто/всего». Общая для /дк_требования проверить и Telegram-бота
+    (tg_bot/commands_more.py)."""
+    season_data = cache["seasons"].get(set_id) if cache else None
+
+    def level_label(level_num, value):
+        options = season_data[f"level{level_num}"] if season_data else []
+        return _level_label(options, value)
+
+    groups = {p: {"items": [], "matched": 0, "total": 0} for p in PRIORITY_ORDER}
+
+    squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
+    requirements, focused_requirements, skipped = _split_by_squad(player, requirements, focused_requirements, squads)
+
+    if requirements:
+        owned = _extract_player_base_datacrons(player, set_id)
+        pairs = _match_requirements(requirements, owned)
+        stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
+        for req, matches in pairs:
+            req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats, _quantity = req
+            group = groups.get(priority, groups[PRIORITY_REQUIRED])
+            l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
+            evaluation = _evaluate_base_requirement(req, matches, stats_by_req.get(req_id))
+            closed_levels = None
+            if matches:
+                m = matches[0]["levels"]
+                closed_levels = (
+                    level_label(3, m[3]) if m[3] else "—",
+                    level_label(6, m[6]) if m[6] else "—",
+                    level_label(9, m[9]) if m[9] else "—",
+                )
+            group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, evaluation, closed_levels, stats, matches))
+            group["total"] += 1
+            if evaluation["matched"]:
+                group["matched"] += 1
+
+    if focused_requirements:
+        owned_focused = _extract_player_focused_datacrons(player, set_id)
+        for req in focused_requirements:
+            _, _, pack, character_key, required_level, comment, _, _, priority = req
+            group = groups.get(priority, groups[PRIORITY_REQUIRED])
+            char_label = _focused_char_label(cache, set_id, character_key)
+            current_level = owned_focused.get(character_key, 0)
+            ok = current_level >= required_level
+            group["items"].append(_focused_check_field(pack, char_label, required_level, current_level, comment, ok))
+            group["total"] += 1
+            if ok:
+                group["matched"] += 1
+
+    priority_items = {p: groups[p]["items"] for p in PRIORITY_ORDER}
+    footer_totals = {
+        p: f"{groups[p]['matched']}/{groups[p]['total']} закрыто"
+        for p in PRIORITY_ORDER if groups[p]["total"] > 0
+    }
+    total_matched = sum(g["matched"] for g in groups.values())
+    total_all = sum(g["total"] for g in groups.values())
+    lines = _build_priority_description(priority_items, footer_totals)
+    lines.extend(_skipped_lines(skipped, cache, set_id))
+    return lines, total_matched, total_all
+
+
 # =====================================================================
 # Автокомплиты (модульные функции — как autocomplete_players/autocomplete_violations)
 # =====================================================================
@@ -1618,59 +1680,9 @@ class DatacronRequirementsCog(commands.Cog):
             # игровое имя из ответа Comlink.
             игрок = player["name"]
 
-        season_data = self.bot.datacron_cache["seasons"].get(set_id) if self.bot.datacron_cache else None
-
-        def level_label(level_num, value):
-            options = season_data[f"level{level_num}"] if season_data else []
-            return _level_label(options, value)
-
-        groups = {p: {"items": [], "matched": 0, "total": 0} for p in PRIORITY_ORDER}
-
-        squads = database.get_datacron_requirement_squads_by_set(set_id, guild_id=guild_id)
-        requirements, focused_requirements, skipped = _split_by_squad(player, requirements, focused_requirements, squads)
-
-        if requirements:
-            owned = _extract_player_base_datacrons(player, set_id)
-            pairs = _match_requirements(requirements, owned)
-            stats_by_req = database.get_datacron_requirement_stats_by_set(set_id, guild_id=guild_id)
-            for req, matches in pairs:
-                req_id, _, pack, l3, l6, l9, comment, _, _, priority, stats, _quantity = req
-                group = groups.get(priority, groups[PRIORITY_REQUIRED])
-                l3_lbl, l6_lbl, l9_lbl = level_label(3, l3), level_label(6, l6), level_label(9, l9)
-                evaluation = _evaluate_base_requirement(req, matches, stats_by_req.get(req_id))
-                closed_levels = None
-                if matches:
-                    m = matches[0]["levels"]
-                    closed_levels = (
-                        level_label(3, m[3]) if m[3] else "—",
-                        level_label(6, m[6]) if m[6] else "—",
-                        level_label(9, m[9]) if m[9] else "—",
-                    )
-                group["items"].append(_base_check_field(pack, l3_lbl, l6_lbl, l9_lbl, comment, evaluation, closed_levels, stats, matches))
-                group["total"] += 1
-                if evaluation["matched"]:
-                    group["matched"] += 1
-
-        if focused_requirements:
-            owned_focused = _extract_player_focused_datacrons(player, set_id)
-            for req in focused_requirements:
-                _, _, pack, character_key, required_level, comment, _, _, priority = req
-                group = groups.get(priority, groups[PRIORITY_REQUIRED])
-                char_label = _focused_char_label(self.bot.datacron_cache, set_id, character_key)
-                current_level = owned_focused.get(character_key, 0)
-                ok = current_level >= required_level
-                group["items"].append(_focused_check_field(pack, char_label, required_level, current_level, comment, ok))
-                group["total"] += 1
-                if ok:
-                    group["matched"] += 1
-
-        priority_items = {p: groups[p]["items"] for p in PRIORITY_ORDER}
-        footer_totals = {
-            p: f"{groups[p]['matched']}/{groups[p]['total']} закрыто"
-            for p in PRIORITY_ORDER if groups[p]["total"] > 0
-        }
-        total_matched = sum(g["matched"] for g in groups.values())
-        total_all = sum(g["total"] for g in groups.values())
+        lines, total_matched, total_all = build_player_check(
+            self.bot.datacron_cache, player, set_id, requirements, focused_requirements, guild_id,
+        )
         if total_matched == total_all:
             color = DATACRON_CHECK_COLOR_FULL
         elif total_matched:
@@ -1678,8 +1690,6 @@ class DatacronRequirementsCog(commands.Cog):
         else:
             color = DATACRON_CHECK_COLOR_NONE
         title = f"📋 Проверка датакронов: {игрок} — {season_label} ({total_matched}/{total_all})"
-        lines = _build_priority_description(priority_items, footer_totals)
-        lines.extend(_skipped_lines(skipped, self.bot.datacron_cache, set_id))
         embeds = _lines_to_embeds(title, color, lines)
 
         view = DatacronCheckRevealView(embeds)

@@ -10,6 +10,8 @@
 
 import asyncio
 import html
+import secrets
+import time
 import traceback
 from dataclasses import dataclass, field
 
@@ -139,6 +141,41 @@ class Ctx:
             await self.api.send_chat_action(self.chat_id, kind, thread_id=self.thread_id)
         except TelegramError:
             pass
+
+
+# Состояние многошаговых ответов (выбор плейта → листание персонажей): в callback_data
+# влезает только короткий ключ, само состояние — здесь, в памяти. После рестарта кнопки
+# старых сообщений просят вызвать команду заново (как панели в Discord).
+SESSION_TTL = 2 * 60 * 60
+_sessions: dict[str, tuple[float, dict]] = {}
+
+
+def new_session(data: dict) -> str:
+    now = time.time()
+    for key in [k for k, (exp, _) in _sessions.items() if exp < now]:
+        _sessions.pop(key, None)
+    token = secrets.token_urlsafe(6)
+    _sessions[token] = (now + SESSION_TTL, data)
+    return token
+
+
+def get_session(token: str) -> dict | None:
+    item = _sessions.get(token)
+    if not item or item[0] < time.time():
+        return None
+    return item[1]
+
+
+async def session_for_callback(ctx: "Ctx", token: str) -> dict | None:
+    """Сессия кнопки + проверка, что жмёт тот, кто вызывал команду (в группе кнопки видят все)."""
+    state = get_session(token)
+    if state is None:
+        await ctx.api.answer_callback(ctx.callback_query["id"], "Кнопка устарела — вызовите команду заново.", alert=True)
+        return None
+    if state.get("user_id") not in (None, ctx.user["id"]):
+        await ctx.api.answer_callback(ctx.callback_query["id"], "Это чужая проверка — вызовите команду сами.", alert=True)
+        return None
+    return state
 
 
 def esc(text) -> str:

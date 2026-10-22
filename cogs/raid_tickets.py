@@ -16,6 +16,7 @@ from disnake.ext import commands, tasks
 import database
 from services import feature_flags
 from services import raid_tickets as rt
+from tg_bot import outbox
 
 STATE_RESET = "raid_tickets:reset"
 STATE_DONE = "raid_tickets:done"   # "<reset>:r120,r30,ok,snap,final"
@@ -51,7 +52,14 @@ class RaidTicketsCog(commands.Cog):
     def _save_snapshot(gid: int, reset: int, members: list) -> None:
         database.set_bot_state(STATE_SNAP, json.dumps({"reset": reset, "data": rt.snapshot(members)}), guild_id=gid)
 
-    async def _send(self, channel_id: str, lines: list[str], mentions: bool) -> None:
+    async def _send(self, cfg: dict, lines: list[str], mentions: bool, tg_lines: list[str] | None = None) -> None:
+        """В Discord-канал энки (если задан) и в Telegram-чаты гильдии, где включена энка
+        (/notify, tg_bot/outbox.py). tg_lines — тот же текст, но с упоминаниями и тех, кто
+        только в Telegram (в Discord их тегнуть нельзя)."""
+        outbox.enqueue_guild(cfg["id"], "raid_tickets", "\n".join(tg_lines or lines))
+        channel_id = cfg.get("raid_tickets_channel_id")
+        if not channel_id:
+            return
         channel = self.bot.get_channel(int(channel_id))
         if channel is None:
             print(f"⚠️ [Энка] Канал {channel_id} не найден")
@@ -66,19 +74,21 @@ class RaidTicketsCog(commands.Cog):
     async def _reminder(self, cfg: dict, reset: int, done: set, members: list, now: int) -> None:
         gid = cfg["id"]
         roster = self._names(gid)
-        debtors = []
+        debtors, tg_debtors = [], []
         for m in sorted((m for m in members if m["current"] < rt.REQUIRED), key=lambda m: m["current"]):
             code, name = roster.get(m["player_id"], (None, None))
             discord_id = database.get_discord_id_for_ally(code, guild_id=gid) if code else None
             debtors.append((name or m["name"], m["current"], discord_id))
+            tg_debtors.append((name or m["name"], m["current"], outbox.owner_for_ally(gid, code) if code else None))
         if not debtors:
             # Все уже сдали — как HotBot, говорим об этом на проверке (один раз за день);
             # похвала с серией дней — в итоге после среза.
             if "ok" not in done:
                 self._mark(gid, reset, done, "ok")
-                await self._send(cfg["raid_tickets_channel_id"], rt.all_done_lines(cfg["name"], reset, now), False)
+                await self._send(cfg, rt.all_done_lines(cfg["name"], reset, now), False)
             return
-        await self._send(cfg["raid_tickets_channel_id"], rt.reminder_lines(cfg["name"], reset, now, debtors), True)
+        await self._send(cfg, rt.reminder_lines(cfg["name"], reset, now, debtors), True,
+                         tg_lines=rt.reminder_lines(cfg["name"], reset, now, tg_debtors))
 
     async def _final(self, cfg: dict, reset: int, members_after: list) -> bool:
         gid = cfg["id"]
@@ -97,7 +107,7 @@ class RaidTicketsCog(commands.Cog):
         database.save_raid_ticket_day(gid, rt.day_label(reset), rows)
         debtors = sorted(((name, t) for _pid, _code, name, t in rows if t < rt.REQUIRED), key=lambda d: d[1])
         streak = database.get_raid_ticket_full_streak(gid, rt.REQUIRED)
-        await self._send(cfg["raid_tickets_channel_id"], rt.final_lines(cfg["name"], debtors, streak), False)
+        await self._send(cfg, rt.final_lines(cfg["name"], debtors, streak), False)
         return True
 
     async def _process_guild(self, cfg: dict, now: int) -> None:
@@ -146,7 +156,9 @@ class RaidTicketsCog(commands.Cog):
     async def raid_tickets_loop(self):
         now = int(time.time())
         for cfg in database.get_all_guild_configs():
-            if not (cfg.get("raid_tickets_channel_id") and cfg.get("swgoh_guild_id")):
+            if not cfg.get("swgoh_guild_id"):
+                continue
+            if not (cfg.get("raid_tickets_channel_id") or outbox.guild_wants(cfg["id"], "raid_tickets")):
                 continue
             if not feature_flags.is_enabled(cfg["id"], "raid_tickets"):
                 continue

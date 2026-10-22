@@ -91,7 +91,13 @@ async def find_member_id(discord_guild_ids: list[str], query: str) -> str | None
 
 
 async def send_dm(user_id: str, content: str) -> None:
-    """Личное сообщение от бота (канал лички создаётся/находится через /users/@me/channels)."""
+    """Личное сообщение от бота (канал лички создаётся/находится через /users/@me/channels).
+    Игроку только из Telegram ("tg:<id>", tg_bot/store.py) — через Telegram-бота."""
+    from tg_bot import outbox
+    if outbox.is_tg_owner(user_id):
+        if not outbox.enqueue_dm(str(user_id), content):
+            raise DiscordRestError("игрок только в Telegram и ещё не писал боту в личку")
+        return
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(f"{DISCORD_API}/users/@me/channels", headers=_headers(), json={"recipient_id": str(user_id)})
         if resp.status_code >= 400:

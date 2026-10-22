@@ -13,7 +13,7 @@ from swgoh_comlink import SwgohComlink
 
 import database
 from services import stat_forecast
-from tg_bot import handlers  # noqa: F401 — регистрирует команды
+from tg_bot import checks, handlers, notifier  # noqa: F401 — регистрируют команды
 from tg_bot.api import TelegramAPI
 from tg_bot.core import App, menu_commands, run_polling
 
@@ -39,9 +39,11 @@ async def main():
     await api.call("deleteWebhook")
     stat_forecast.start_background_build(comlink)
     print(f"✅ [TG] @{me['username']} запущен")
+    notifier_task = asyncio.create_task(notifier.run_notifier(app))
     try:
         await run_polling(app)
     finally:
+        notifier_task.cancel()
         await api.close()
 
 

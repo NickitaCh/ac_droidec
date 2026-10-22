@@ -115,6 +115,11 @@ def format_dm_text(guild_name: str, plan_name: str, round_num: int, player_rows:
 
 
 async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str) -> tuple[bool, str]:
+    from tg_bot import outbox
+    if outbox.is_tg_owner(discord_id):  # игрок только в Telegram (tg_bot/store.py)
+        if outbox.enqueue_dm(discord_id, text):
+            return True, "отправлено в Telegram"
+        return False, "только в Telegram и ещё не писал боту в личку"
     headers = {"Authorization": f"Bot {token}"}
     resp = await client.post(
         f"{DISCORD_API_BASE}/users/@me/channels", headers=headers, json={"recipient_id": discord_id},

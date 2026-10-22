@@ -11,6 +11,7 @@ import database
 import guild_resolver
 import stat_engine
 from services import activity_diff, feature_flags, mod_search, omicron_priority
+from tg_bot import outbox
 from cogs.violations import autocomplete_players
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -1574,14 +1575,24 @@ class StatRequirementsCog(commands.Cog):
         names_by_guild = {}
         channels_by_id: dict[int, object] = {}
         items_by_channel: dict[int, list[tuple[int, str]]] = {}
+        guild_by_channel: dict[int, int] = {}
         for event_id, ally_code, base_id, skill_id, guild_id in hits:
             if not feature_flags.is_enabled(guild_id, "omicron"):
                 continue
             guild_cfg = database.get_guild_config(guild_id)
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
+                # Гильдия без Discord-канала, но с Telegram-чатом (/notify «омикроны») —
+                # объявляем только туда и сразу помечаем, иначе событие висело бы вечно.
+                if outbox.guild_wants(guild_id, "omicrons"):
+                    if guild_id not in names_by_guild:
+                        names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+                    line = self._omicron_line(names_by_guild[guild_id].get(ally_code, ally_code), base_id, skill_id, skill_info)
+                    outbox.enqueue_guild(guild_id, "omicrons", line)
+                    database.mark_activity_event_announced(event_id)
                 continue
             channel_id = int(channel_id)
+            guild_by_channel[channel_id] = guild_id
             if channel_id not in channels_by_id:
                 channel = self.bot.get_channel(channel_id)
                 if channel is None:
@@ -1597,24 +1608,13 @@ class StatRequirementsCog(commands.Cog):
             if guild_id not in names_by_guild:
                 names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
-            ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
-            line = f"**{player_name}** выдал омикрон"
-            if ability_name:
-                line += f" **{ability_name}**"
-                if ability_type:
-                    line += f" ({ability_type})"
-            if omicron_mode:
-                line += f" для {omicron_mode}"
-            line += f" на **{_unit_display_name(base_id)}**."
-            phrase = database.get_omicron_phrase(base_id, skill_id)
-            if phrase:
-                channel = channels_by_id[channel_id]
-                phrase = _resolve_emoji_shortcodes(phrase, getattr(channel, "guild", None))
-                line += f" {phrase}"
+            channel = channels_by_id[channel_id]
+            line = self._omicron_line(player_name, base_id, skill_id, skill_info, getattr(channel, "guild", None))
             items_by_channel.setdefault(channel_id, []).append((event_id, line))
 
         for channel_id, items in items_by_channel.items():
             channel = channels_by_id[channel_id]
+            guild_id = guild_by_channel[channel_id]
             if len(items) >= self.OMICRON_COMBINE_THRESHOLD:
                 header = f"🔁 Накопилось объявлений об омикронах: {len(items)} (бот был недоступен)"
                 for chunk_event_ids, chunk_text in self._chunk_omicron_lines(header, items):
@@ -1623,6 +1623,7 @@ class StatRequirementsCog(commands.Cog):
                     except Exception as e:
                         print(f"⚠️ [Омикрон] Не удалось отправить объединённое объявление в канал {channel_id}: {e}")
                         continue
+                    outbox.enqueue_guild(guild_id, "omicrons", chunk_text)
                     for event_id in chunk_event_ids:
                         database.mark_activity_event_announced(event_id)
             else:
@@ -1632,6 +1633,26 @@ class StatRequirementsCog(commands.Cog):
                         database.mark_activity_event_announced(event_id)
                     except Exception as e:
                         print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
+                        continue
+                    # В Telegram — вслед за Discord (только после успешной отправки, чтобы
+                    # повторная попытка неотправленного не дублировала в Telegram).
+                    outbox.enqueue_guild(guild_id, "omicrons", line)
+
+    @staticmethod
+    def _omicron_line(player_name: str, base_id: str, skill_id: str, skill_info: dict, discord_guild=None) -> str:
+        ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
+        line = f"**{player_name}** выдал омикрон"
+        if ability_name:
+            line += f" **{ability_name}**"
+            if ability_type:
+                line += f" ({ability_type})"
+        if omicron_mode:
+            line += f" для {omicron_mode}"
+        line += f" на **{_unit_display_name(base_id)}**."
+        phrase = database.get_omicron_phrase(base_id, skill_id)
+        if phrase:
+            line += f" {_resolve_emoji_shortcodes(phrase, discord_guild)}"
+        return line
 
     # ------------------ /омикроны отчёт (запрос из офицерского чата гильдии GR,
     # 2026-09-20: рекомендации "что поставить" были видны только в веб-дашборде

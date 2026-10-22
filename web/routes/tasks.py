@@ -23,6 +23,7 @@ from services.config_status import config_warning_html
 from services.units_sync import sync_units
 from services import discord_rest, feature_flags, journey_guide
 from services.dashboard_data import failed_task_activity_url, task_status_badge
+from tg_bot import outbox
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -181,7 +182,16 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
 async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
     """Тег игроков в канале задач о новых задачах — по флагу tasks_mention (включают
     гильдии сами, у AC выключен). Раньше это делала Discord-команда /задачи добавить;
-    постановка теперь только на сайте (2026-10-14). Сбой отправки задачу не отменяет."""
+    постановка теперь только на сайте (2026-10-14). Сбой отправки задачу не отменяет.
+    В Telegram-чаты гильдии (вид «tasks» в /notify) — отдельно от флага, с тегом тех, кто
+    есть в Telegram, и именем остальных."""
+    if lines_by_code and outbox.guild_wants(guild_id, "tasks"):
+        names = database.get_player_names(guild_id)
+        tg_lines = []
+        for code, text in lines_by_code.items():
+            owner = outbox.owner_for_ally(guild_id, code)
+            tg_lines.append(f"{f'<@{owner}> ' if owner else ''}**{names.get(code, code)}** — {text}")
+        outbox.enqueue_guild(guild_id, "tasks", "📝 Новые задачи на прокачку:\n" + "\n".join(tg_lines))
     if not lines_by_code or not feature_flags.is_enabled(guild_id, "tasks_mention"):
         return
     channel_id = (database.get_guild_config(guild_id) or {}).get("tasks_log_channel_id")
