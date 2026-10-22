@@ -88,3 +88,23 @@ async def find_member_id(discord_guild_ids: list[str], query: str) -> str | None
                 if needle in names:
                     return str(user.get("id"))
     return None
+
+
+async def send_dm(user_id: str, content: str) -> None:
+    """Личное сообщение от бота (канал лички создаётся/находится через /users/@me/channels)."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(f"{DISCORD_API}/users/@me/channels", headers=_headers(), json={"recipient_id": str(user_id)})
+        if resp.status_code >= 400:
+            raise DiscordRestError(f"Discord ответил {resp.status_code}: {resp.text[:200]}")
+        channel_id = resp.json()["id"]
+    await send_message(channel_id, content[:2000])
+
+
+async def notify_super_admins(content: str) -> None:
+    """Лички всем супер-админам (bot_admins); сбой одной не мешает остальным."""
+    import database
+    for admin in database.get_all_bot_admins():
+        try:
+            await send_dm(admin["discord_id"], content)
+        except Exception as e:
+            print(f"⚠️ [Уведомление] не отправлено {admin['discord_id']}: {e!r}")

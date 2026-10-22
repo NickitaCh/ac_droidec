@@ -18,7 +18,7 @@ import database
 
 _SKIP_METHODS = {"GET", "HEAD", "OPTIONS"}
 # Пути, где POST ничего не меняет (превью/расчёты) или служебные.
-_SKIP_PREFIXES = ("/login", "/logout", "/auth", "/payments/webhook", "/qa-checklist", "/mod-optimizer", "/static")
+_SKIP_PREFIXES = ("/login", "/logout", "/auth", "/payments/webhook", "/feedback", "/donate", "/qa-checklist", "/mod-optimizer", "/static")
 _SKIP_SUBSTRINGS = ("/api/", "preview", "candidates", "/units/search")
 _SECRET_MARKERS = ("password", "token", "secret", "csrf")
 _MAX_VALUE_LEN = 300

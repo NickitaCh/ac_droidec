@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Обращения — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Обращения с сайта</h1>
+                <p class="page-hero-lead">Ошибки, «не нравится» и идеи от пользователей. Ответ и смена статуса на «Решено» / «Не будем делать» уходят автору в личку Discord.</p>
+            </div>
+        </div>
+        <div class="hero-links">
+            {% for key, label in [("open", "Открытые"), ("new", "Новые"), ("in_progress", "В работе"), ("done", "Решённые"), ("rejected", "Отклонённые"), ("all", "Все")] %}
+                <a class="hero-link"{% if status == key %} aria-current="page"{% endif %} href="/admin/feedback?status={{ key }}">{{ label }}</a>
+            {% endfor %}
+        </div>
+    </section>
+
+    {% if not reports %}
+        <p class="empty-state">Обращений нет.</p>
+    {% else %}
+        <div class="feedback-list">
+            {% for r in reports %}
+                <article class="panel feedback-card" id="report-{{ r.id }}">
+                    <div class="feedback-card-head">
+                        <strong>№{{ r.id }}</strong>
+                        <span class="badge badge-neutral">{{ kinds.get(r.kind, r.kind) }}</span>
+                        <span class="badge feedback-status-{{ r.status }}">{{ statuses.get(r.status, r.status) }}</span>
+                        <span>{{ r.username or r.discord_id }}{% if r.guild_name %} · {{ r.guild_name }}{% endif %}</span>
+                        <span class="muted">{{ r.created_at_msk }} МСК</span>
+                    </div>
+                    {% if r.page_url %}<div class="feedback-page muted">Страница: <a href="{{ r.page_url }}">{{ r.page_url }}</a></div>{% endif %}
+                    <p class="feedback-message">{{ r.message }}</p>
+                    <div class="feedback-files">
+                        <a href="/admin/feedback/{{ r.id }}/log.txt">{{ "Журнал (скачать)" if r.has_log else "Текст обращения (скачать)" }}</a>
+                        {% if r.attachment_name %} · <a href="/admin/feedback/{{ r.id }}/file" target="_blank" rel="noopener">Файл: {{ r.attachment_name }}</a>{% endif %}
+                    </div>
+                    <form method="post" action="/admin/feedback/{{ r.id }}" class="feedback-admin-form">
+                        <input type="hidden" name="back" value="{{ status }}">
+                        <textarea name="reply" rows="2" maxlength="2000" placeholder="Ответ автору (придёт в личку)">{{ r.reply or "" }}</textarea>
+                        <div class="feedback-admin-actions">
+                            <select name="status">
+                                {% for key, label in statuses.items() %}
+                                    <option value="{{ key }}" {% if r.status == key %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit">Сохранить</button>
+                        </div>
+                    </form>
+                </article>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

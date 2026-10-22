@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Донаты — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Донаты</h1>
+                <p class="page-hero-lead">Оплачено: {{ ui.num(paid_count) }} на {{ ui.num(paid_total) }} ₽. «Ждёт оплаты» — ссылку создали, но не оплатили. Время — МСК.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if not donations %}
+        <p class="empty-state">Донатов пока нет.</p>
+    {% else %}
+        <div class="panel">
+            <table class="data">
+                <thead>
+                    <tr><th>Когда</th><th>Кто</th><th>Сумма</th><th>Пожелание</th></tr>
+                </thead>
+                <tbody>
+                    {% for d in donations %}
+                        <tr{% if d.status != "succeeded" %} class="muted"{% endif %}>
+                            <td class="nowrap">{{ d.paid_at_msk or d.created_at_msk }}{% if d.status != "succeeded" %}<br><span class="badge badge-neutral">ждёт оплаты</span>{% endif %}</td>
+                            <td>{{ d.display_name or d.username or "аноним" }}{% if d.display_name and d.username and d.display_name != d.username %}<br><span class="muted">{{ d.username }}</span>{% endif %}</td>
+                            <td class="nowrap">{{ ui.num(d.amount) }} ₽</td>
+                            <td>{{ d.comment or "" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

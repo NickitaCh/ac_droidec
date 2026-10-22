@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Мои обращения — AC Droidec{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Обращения</p>
+                <h1>Мои обращения</h1>
+                <p class="page-hero-lead">Что-то сломалось, неудобно или не хватает функции — напишите. Ответ придёт в личку Discord и появится здесь.</p>
+            </div>
+        </div>
+        <div class="hero-links">
+            <a class="hero-link" href="#" data-feedback-open="bug">Сообщить об ошибке</a>
+            <a class="hero-link" href="#" data-feedback-open="idea">Предложить идею</a>
+        </div>
+    </section>
+
+    {% if sent %}
+        <p class="badge badge-ok feedback-sent">Обращение №{{ sent }} отправлено. Спасибо!</p>
+    {% endif %}
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if not reports %}
+        <p class="empty-state">Обращений пока нет.</p>
+    {% else %}
+        <div class="feedback-list">
+            {% for r in reports %}
+                <article class="panel feedback-card">
+                    <div class="feedback-card-head">
+                        <strong>№{{ r.id }}</strong>
+                        <span class="badge badge-neutral">{{ kinds.get(r.kind, r.kind) }}</span>
+                        <span class="badge feedback-status-{{ r.status }}">{{ statuses.get(r.status, r.status) }}</span>
+                        <span class="muted">{{ r.created_at_msk }} МСК</span>
+                    </div>
+                    <p class="feedback-message">{{ r.message }}</p>
+                    {% if r.reply %}
+                        <div class="feedback-reply">
+                            <span class="muted">Ответ{% if r.replied_at_msk %} · {{ r.replied_at_msk }} МСК{% endif %}</span>
+                            <p>{{ r.reply }}</p>
+                        </div>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

@@ -7842,3 +7842,281 @@ def set_conquest_marks(discord_id: str, conquest_id: str, difficulty: str, feats
     )
     conn.commit()
     conn.close()
+
+
+# =====================================================================
+# Донаты (/donate) — ЮKassa, без продления подписки (services/payments.py, 2026-10-22).
+# =====================================================================
+def _ensure_donations_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS donations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT NOT NULL UNIQUE,
+            amount INTEGER NOT NULL,
+            discord_id TEXT,
+            username TEXT,
+            display_name TEXT,
+            comment TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            paid_at TEXT
+        )
+    """)
+
+
+def record_donation(order_id: str, amount: int, discord_id: str | None, username: str | None,
+                    display_name: str | None, comment: str | None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_donations_table(cursor)
+    cursor.execute(
+        "INSERT OR IGNORE INTO donations (order_id, amount, discord_id, username, display_name, comment, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+        (order_id, int(amount), discord_id, username, display_name or None, comment or None),
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_donation_succeeded(order_id: str) -> dict | None:
+    """Строка доната, если она только что стала оплаченной; None — не найдена или уже была
+    оплачена (повторный вебхук)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_donations_table(cursor)
+    cursor.execute(
+        "UPDATE donations SET status = 'succeeded', paid_at = datetime('now') WHERE order_id = ? AND status != 'succeeded'",
+        (order_id,),
+    )
+    conn.commit()
+    row = None
+    if cursor.rowcount > 0:
+        cursor.execute("SELECT amount, username, display_name, comment FROM donations WHERE order_id = ?", (order_id,))
+        r = cursor.fetchone()
+        row = {"amount": r[0], "username": r[1], "display_name": r[2], "comment": r[3]}
+    conn.close()
+    return row
+
+
+def get_donations(limit: int = 500) -> list[dict]:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_donations_table(cursor)
+    cursor.execute(
+        "SELECT id, order_id, amount, discord_id, username, display_name, comment, status, "
+        "datetime(created_at, '+3 hours'), datetime(paid_at, '+3 hours') "
+        "FROM donations ORDER BY id DESC LIMIT ?", (limit,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "order_id": r[1], "amount": r[2], "discord_id": r[3], "username": r[4], "display_name": r[5],
+         "comment": r[6], "status": r[7], "created_at_msk": r[8], "paid_at_msk": r[9]}
+        for r in rows
+    ]
+
+
+def get_donation_supporters(limit: int = 30) -> list[str]:
+    """Имена оплативших, кто согласился показать имя на /donate — новые первыми, без повторов."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_donations_table(cursor)
+    cursor.execute(
+        "SELECT display_name FROM donations WHERE status = 'succeeded' AND display_name IS NOT NULL "
+        "GROUP BY display_name ORDER BY MAX(paid_at) DESC LIMIT ?", (limit,),
+    )
+    names = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return names
+
+
+# =====================================================================
+# Обращения с сайта (/feedback) и журнал ошибок сервера для них (web_errors), 2026-10-22.
+# =====================================================================
+WEB_ERRORS_KEEP = 2000
+
+
+def _ensure_bug_reports_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bug_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            discord_id TEXT,
+            username TEXT,
+            guild_id INTEGER,
+            kind TEXT NOT NULL,
+            page_url TEXT,
+            message TEXT NOT NULL,
+            log_text TEXT,
+            user_agent TEXT,
+            attachment_name TEXT,
+            attachment_type TEXT,
+            attachment BLOB,
+            status TEXT NOT NULL DEFAULT 'new',
+            reply TEXT,
+            replied_at TEXT
+        )
+    """)
+
+
+def _ensure_web_errors_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS web_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            discord_id TEXT,
+            method TEXT,
+            path TEXT,
+            error TEXT
+        )
+    """)
+
+
+def create_bug_report(discord_id: str, username: str, guild_id: int | None, kind: str, page_url: str,
+                      message: str, log_text: str | None, user_agent: str | None,
+                      attachment_name: str | None = None, attachment_type: str | None = None,
+                      attachment: bytes | None = None) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    cursor.execute(
+        "INSERT INTO bug_reports (created_at, discord_id, username, guild_id, kind, page_url, message, log_text, "
+        "user_agent, attachment_name, attachment_type, attachment) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(discord_id), username, guild_id, kind, page_url, message, log_text, user_agent,
+         attachment_name, attachment_type, attachment),
+    )
+    report_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return report_id
+
+
+def count_recent_bug_reports(discord_id: str, hours: int = 1) -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    cursor.execute(
+        "SELECT COUNT(*) FROM bug_reports WHERE discord_id = ? AND created_at >= datetime('now', ?)",
+        (str(discord_id), f"-{int(hours)} hours"),
+    )
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+_BUG_REPORT_COLUMNS = (
+    "b.id, datetime(b.created_at, '+3 hours'), b.discord_id, b.username, b.guild_id, g.name, b.kind, b.page_url, "
+    "b.message, b.log_text IS NOT NULL AND b.log_text != '', b.attachment_name, b.status, b.reply, "
+    "datetime(b.replied_at, '+3 hours')"
+)
+
+
+def _bug_report_row(r) -> dict:
+    return {
+        "id": r[0], "created_at_msk": r[1], "discord_id": r[2], "username": r[3], "guild_id": r[4],
+        "guild_name": r[5], "kind": r[6], "page_url": r[7], "message": r[8], "has_log": bool(r[9]),
+        "attachment_name": r[10], "status": r[11], "reply": r[12], "replied_at_msk": r[13],
+    }
+
+
+def get_bug_reports(status: str | None = None, discord_id: str | None = None, limit: int = 300) -> list[dict]:
+    """Без журнала и вложения (их отдаёт get_bug_report_blob)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    _ensure_guilds_table(cursor)
+    where, params = [], []
+    if status:
+        where.append("b.status = ?")
+        params.append(status)
+    if discord_id:
+        where.append("b.discord_id = ?")
+        params.append(str(discord_id))
+    sql = f"SELECT {_BUG_REPORT_COLUMNS} FROM bug_reports b LEFT JOIN guilds g ON g.id = b.guild_id"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    cursor.execute(sql + " ORDER BY b.id DESC LIMIT ?", (*params, limit))
+    rows = [_bug_report_row(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_bug_report(report_id: int) -> dict | None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    _ensure_guilds_table(cursor)
+    cursor.execute(f"SELECT {_BUG_REPORT_COLUMNS} FROM bug_reports b LEFT JOIN guilds g ON g.id = b.guild_id WHERE b.id = ?", (report_id,))
+    r = cursor.fetchone()
+    conn.close()
+    return _bug_report_row(r) if r else None
+
+
+def get_bug_report_blob(report_id: int) -> dict | None:
+    """{"log_text", "user_agent", "attachment_name", "attachment_type", "attachment"}."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    cursor.execute(
+        "SELECT log_text, user_agent, attachment_name, attachment_type, attachment FROM bug_reports WHERE id = ?",
+        (report_id,),
+    )
+    r = cursor.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {"log_text": r[0], "user_agent": r[1], "attachment_name": r[2], "attachment_type": r[3], "attachment": r[4]}
+
+
+def update_bug_report(report_id: int, status: str, reply: str | None) -> None:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    cursor.execute(
+        "UPDATE bug_reports SET status = ?, "
+        "replied_at = CASE WHEN COALESCE(?, '') != COALESCE(reply, '') THEN datetime('now') ELSE replied_at END, "
+        "reply = ? WHERE id = ?",
+        (status, reply or None, reply or None, report_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def count_new_bug_reports() -> int:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_bug_reports_table(cursor)
+    cursor.execute("SELECT COUNT(*) FROM bug_reports WHERE status = 'new'")
+    n = cursor.fetchone()[0]
+    conn.close()
+    return n
+
+
+def log_web_error(discord_id: str | None, method: str, path: str, error: str) -> int:
+    """Необработанная ошибка страницы сайта — для журнала в обращении. Хранятся последние WEB_ERRORS_KEEP."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_errors_table(cursor)
+    cursor.execute(
+        "INSERT INTO web_errors (created_at, discord_id, method, path, error) VALUES (datetime('now'), ?, ?, ?, ?)",
+        (str(discord_id) if discord_id else None, method, path[:500], error[-8000:]),
+    )
+    error_id = cursor.lastrowid
+    cursor.execute("DELETE FROM web_errors WHERE id <= ?", (error_id - WEB_ERRORS_KEEP,))
+    conn.commit()
+    conn.close()
+    return error_id
+
+
+def get_recent_web_errors(discord_id: str, hours: int = 24, limit: int = 20) -> list[dict]:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_web_errors_table(cursor)
+    cursor.execute(
+        "SELECT id, datetime(created_at, '+3 hours'), method, path, error FROM web_errors "
+        "WHERE discord_id = ? AND created_at >= datetime('now', ?) ORDER BY id DESC LIMIT ?",
+        (str(discord_id), f"-{int(hours)} hours", limit),
+    )
+    rows = [{"id": r[0], "created_at_msk": r[1], "method": r[2], "path": r[3], "error": r[4]} for r in cursor.fetchall()]
+    conn.close()
+    return rows

@@ -108,6 +108,60 @@ async def build_payment_link(guild_id: int, guild_name: str, period_days: int, r
     return PaymentLinkResult(ok=True, url=confirmation_url, order_id=order_id)
 
 
+# Донат (/donate, 2026-10-22): тот же магазин ЮKassa, metadata.kind="donation" — вебхук
+# отмечает донат оплаченным и подписку не трогает.
+DONATION_MIN = 50
+DONATION_MAX = 100000
+DONATION_PRESETS = [100, 300, 500, 1000, 3000]
+DONATION_RETURN_URL = f"{SITE_URL}/donate?thanks=1"
+
+
+async def build_donation_link(amount: int, discord_id: str | None, username: str | None,
+                              display_name: str | None, comment: str | None) -> PaymentLinkResult:
+    if not (DONATION_MIN <= amount <= DONATION_MAX):
+        return PaymentLinkResult(ok=False, error=f"Сумма — от {DONATION_MIN} до {DONATION_MAX} ₽.")
+    if not _shop_id() or not _secret_key():
+        return PaymentLinkResult(ok=False, error="Оплата временно недоступна (не настроен платёжный кабинет).")
+
+    body = {
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+        "capture": True,
+        "confirmation": {"type": "redirect", "return_url": DONATION_RETURN_URL},
+        "description": "Поддержка проекта AC Droidec",
+        "metadata": {"kind": "donation", "discord_id": str(discord_id or "")},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{API_BASE}/payments", json=body, auth=_auth(),
+                headers={"Idempotence-Key": uuid.uuid4().hex},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return PaymentLinkResult(ok=False, error=f"Не удалось создать платёж в ЮKassa: {e}")
+
+    order_id = data.get("id")
+    confirmation_url = (data.get("confirmation") or {}).get("confirmation_url")
+    if not order_id or not confirmation_url:
+        return PaymentLinkResult(ok=False, error="ЮKassa вернула неожиданный ответ без ссылки на оплату.")
+    database.record_donation(order_id, amount, discord_id, username, display_name, comment)
+    return PaymentLinkResult(ok=True, url=confirmation_url, order_id=order_id)
+
+
+async def _handle_donation(order_id: str) -> "WebhookResult":
+    donation = database.mark_donation_succeeded(order_id)
+    if donation is None:
+        return WebhookResult(ok=True, already_processed=True)
+    from services import discord_rest
+    who = donation["display_name"] or donation["username"] or "аноним"
+    text = f"💛 Донат {donation['amount']} ₽ от {who}"
+    if donation["comment"]:
+        text += f"\n> {donation['comment']}"
+    await discord_rest.notify_super_admins(text)
+    return WebhookResult(ok=True)
+
+
 async def _fetch_payment(order_id: str) -> dict | None:
     """Authoritative-запрос статуса платежа через сам API — единственная реальная
     проверка подлинности вебхука (см. докстринг файла). None — сбой сети/API,
@@ -164,6 +218,8 @@ async def handle_webhook(payload: dict) -> WebhookResult:
         return WebhookResult(ok=True)
 
     metadata = payment.get("metadata") or {}
+    if metadata.get("kind") == "donation":
+        return await _handle_donation(order_id)
     try:
         guild_id = int(metadata.get("guild_id"))
         period_days = int(metadata.get("period_days"))

@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261021d">
+    <link rel="stylesheet" href="/static/style.css?v=20261022a">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -26,6 +26,7 @@
             } catch (e) {}
         })();
     </script>
+    <script src="/static/feedback.js?v=20261022a"></script>
     <script src="/static/dashboard.js?v=20261015a" defer></script>
 </head>
 <body>
@@ -42,6 +43,7 @@
         <nav>
             <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
             <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
+            <a href="/donate" title="Поддержать проект"><span class="nav-icon">💛</span><span class="nav-label">Поддержать</span></a>
             {% if user and user.tier != "officer" %}
                 <a href="/subscribe" title="Подписка"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
             {% endif %}
@@ -110,6 +112,8 @@
                     <details class="nav-dropdown">
                         <summary title="СуперАдмин меню"><span class="nav-icon">👑</span><span class="nav-label">СуперАдмин меню</span></summary>
                         <div class="nav-dropdown-menu">
+                            <a href="/admin/feedback"><span class="nav-icon">📨</span><span class="nav-label">Обращения</span></a>
+                            <a href="/admin/donations"><span class="nav-icon">💛</span><span class="nav-label">Донаты</span></a>
                             <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии и подписки</span></a>
                             <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
                             <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
@@ -166,6 +170,7 @@
                         <noscript><button type="submit">Переключить</button></noscript>
                     </form>
                 {% endif %}
+                <a href="/feedback" title="Мои обращения"><span class="nav-icon">📨</span><span class="nav-label">Мои обращения</span></a>
                 <span class="user">{{ user.username }}{% if guild_cfg %} · {{ guild_cfg.name }}{% endif %}</span>
                 <a href="/logout" title="Выйти"><span class="nav-icon">🚪</span><span class="nav-label">Выйти</span></a>
             {% else %}
@@ -245,5 +250,41 @@
         {% endif %}
     </div>
     </div>
+    {% if user and not user.is_demo %}
+        <button type="button" class="feedback-fab" data-feedback-open="" title="Сообщить о проблеме или предложить идею" aria-label="Сообщить о проблеме">💬<span class="feedback-fab-label">Сообщить о проблеме</span></button>
+        <dialog class="edit-modal feedback-dialog" id="feedback-dialog" aria-labelledby="feedback-dialog-title">
+            <form method="post" action="/feedback" enctype="multipart/form-data">
+                <div class="edit-modal-header">
+                    <h3 id="feedback-dialog-title">Сообщить о проблеме</h3>
+                    <button type="button" class="link-btn" data-feedback-close aria-label="Закрыть">✕</button>
+                </div>
+                <div class="edit-modal-body">
+                    <label>Что это
+                        <select name="kind">
+                            <option value="bug">Ошибка — что-то не работает</option>
+                            <option value="dislike">Не нравится — неудобно, непонятно</option>
+                            <option value="idea">Идея — чего не хватает</option>
+                        </select>
+                    </label>
+                    <label>Что случилось
+                        <textarea name="message" rows="5" maxlength="4000" required placeholder="Что делали, что ожидали увидеть и что получилось"></textarea>
+                    </label>
+                    <label>Скриншот или файл (до 5 МБ)
+                        <input type="file" name="attachment">
+                    </label>
+                    <label class="checkbox"><input type="checkbox" name="attach_log" checked> Приложить журнал ошибок</label>
+                    <details class="feedback-log-details">
+                        <summary>Что в журнале</summary>
+                        <textarea name="log_text" data-feedback-log rows="8" readonly></textarea>
+                    </details>
+                    <p class="muted feedback-status" data-feedback-status role="status"></p>
+                </div>
+                <div class="edit-modal-footer">
+                    <button type="button" class="button-secondary" data-feedback-download>Скачать журнал</button>
+                    <button type="submit" data-feedback-submit>Отправить</button>
+                </div>
+            </form>
+        </dialog>
+    {% endif %}
 </body>
 </html>

@@ -8,13 +8,14 @@
 database.py/guild_resolver.py/services/, которые лежат рядом с cogs/, не внутри web/)."""
 
 import os
+import traceback
 from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,7 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, tasks, tw_defense, unit_images
+from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tw_defense, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -51,6 +52,36 @@ async def _redirect_unauthenticated_to_login(request: Request, exc: StarletteHTT
         # (services/dashboard_data.py), не нужно дублировать текст тут.
         return RedirectResponse("/")
     return await http_exception_handler(request, exc)
+
+@app.exception_handler(Exception)
+async def _log_server_error(request: Request, exc: Exception):
+    """Необработанная ошибка страницы: трассировка — в web_errors (её подмешивает журнал
+    обращения /feedback, web/routes/support.py), пользователю — страница с номером ошибки и
+    кнопкой «Сообщить о проблеме» вместо голого «Internal Server Error»."""
+    import database
+    discord_id = None
+    try:
+        discord_id = (request.session.get("user") or {}).get("discord_id")
+    except Exception:
+        pass
+    trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(f"❌ [web] {request.method} {request.url.path}\n{trace}")
+    try:
+        error_id = database.log_web_error(discord_id, request.method, str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""), trace)
+    except Exception:
+        error_id = None
+    number = f" №{error_id}" if error_id else ""
+    return HTMLResponse(_ERROR_PAGE.format(number=number), status_code=500)
+
+
+_ERROR_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Ошибка — AC Droidec</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="error-page"><h1>Что-то пошло не так</h1>
+<p>На сервере произошла ошибка{number}. Она уже записана в журнал.</p>
+<p><a class="button" href="/feedback">Сообщить о проблеме</a> <a class="button button-secondary" href="javascript:history.back()">Назад</a></p>
+</main></body></html>"""
+
 
 @app.on_event("startup")
 async def _warm_stat_calc():
@@ -96,6 +127,7 @@ app.include_router(mod_analysis.router, prefix="/mod-analysis", tags=["mod-analy
 app.include_router(mod_ku.router, prefix="/mod-ku", tags=["mod-ku"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
 app.include_router(subscribe.router, tags=["subscribe"])
+app.include_router(support.router, tags=["support"])
 app.include_router(qa_checklist.router, prefix="/qa-checklist", tags=["qa-checklist"])
 app.include_router(gear_farm.router, prefix="/farm", tags=["gear-farm"])
 app.include_router(raid_tickets.router, prefix="/tickets", tags=["raid-tickets"])

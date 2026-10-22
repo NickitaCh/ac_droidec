@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Поддержать — AC Droidec{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Поддержать</p>
+                <h1>Поддержать проект</h1>
+                <p class="page-hero-lead">Бот и сайт делаются в свободное время, а сервер и доступ к игре стоят денег. Любая сумма помогает держать всё это в рабочем состоянии и делать новое.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if thanks %}
+        <div class="panel donate-thanks">
+            <div class="panel-title"><span>💛 Спасибо!</span></div>
+            <p>Если оплата прошла, она появится у нас в течение минуты. Это правда очень помогает.</p>
+        </div>
+    {% endif %}
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div class="donate-grid">
+        <div class="panel">
+            <div class="panel-title"><span>Сумма</span></div>
+            <form method="post" action="/donate" class="donate-form">
+                <div class="donate-presets" role="radiogroup" aria-label="Готовые суммы">
+                    {% for p in presets %}
+                        <label class="donate-chip">
+                            <input type="radio" name="preset" value="{{ p }}" {% if p == 300 %}checked{% endif %} data-donate-preset>
+                            <span>{{ ui.num(p) }} ₽</span>
+                        </label>
+                    {% endfor %}
+                </div>
+                <label>
+                    Своя сумма, ₽
+                    <input type="number" name="amount" value="300" min="{{ min_amount }}" max="{{ max_amount }}" step="1" inputmode="numeric" required data-donate-amount>
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" name="show_name" value="1" {% if user %}checked{% endif %} data-donate-show-name>
+                    Показать моё имя в списке поддержавших
+                </label>
+                <label data-donate-name-row>
+                    Имя для списка
+                    <input type="text" name="display_name" maxlength="40" value="{{ user.username if user else '' }}" placeholder="Как вас подписать">
+                </label>
+                <label>
+                    Пожелание (необязательно)
+                    <textarea name="comment" rows="2" maxlength="300" placeholder="Видим только мы"></textarea>
+                </label>
+                <button type="submit">Перейти к оплате</button>
+                <p class="muted">Оплата картой или СБП через ЮKassa. Это добровольная поддержка, она не продлевает подписку гильдии. Подписка оплачивается <a href="/subscribe">отдельно</a>.</p>
+            </form>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Нас поддержали</span></div>
+            {% if supporters %}
+                <ul class="donate-supporters">
+                    {% for name in supporters %}<li>{{ name }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">Пока никого — можно стать первым.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var amount = document.querySelector("[data-donate-amount]");
+            document.querySelectorAll("[data-donate-preset]").forEach(function (r) {
+                r.addEventListener("change", function () { amount.value = r.value; });
+            });
+            amount.addEventListener("input", function () {
+                document.querySelectorAll("[data-donate-preset]").forEach(function (r) { r.checked = r.value === amount.value; });
+            });
+            var show = document.querySelector("[data-donate-show-name]");
+            var row = document.querySelector("[data-donate-name-row]");
+            function sync() { row.hidden = !show.checked; }
+            show.addEventListener("change", sync);
+            sync();
+        })();
+    </script>
+{% endblock %}
