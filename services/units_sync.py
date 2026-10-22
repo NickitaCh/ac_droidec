@@ -321,6 +321,7 @@ async def sync_units(comlink) -> int:
     # чтобы новые легенды появлялись без правки кода.
     if galactic_legends:
         database.set_bot_state("galactic_legends", json.dumps(sorted(galactic_legends)), guild_id=0)
+    categories = []
     try:
         categories = (await asyncio.to_thread(comlink.get_game_data, items=str(CATEGORY_FLAG),
                                                include_pve_units=False)).get("category") or []
@@ -343,6 +344,15 @@ async def sync_units(comlink) -> int:
         strikes = tb_missions.parse_strikes(tb_defs, campaigns)
         if strikes:
             database.set_bot_state(tb_missions.STRIKE_STATE_KEY, json.dumps(strikes), guild_id=0)
+        from services import tb_forecast
+        zone_data = tb_forecast.parse_zones(tb_defs)
+        if zone_data.get("planets"):
+            database.set_bot_state(tb_forecast.ZONES_STATE, json.dumps(zone_data), guild_id=0)
+        category_names = {c["id"]: loc_ru_kv.get(c.get("descKey")) for c in categories if c.get("id")}
+        strike_missions = tb_forecast.parse_strike_missions(
+            tb_defs, campaigns, [u for u in _canonical_units(units_list) if u.get("baseId") in units_to_db], category_names)
+        if strike_missions:
+            database.set_bot_state(tb_forecast.STRIKES_STATE, json.dumps(strike_missions, ensure_ascii=False), guild_id=0)
         from services import raids
         raid_names = raids.parse_raid_names(campaigns, loc_ru_kv)
         if raid_names:

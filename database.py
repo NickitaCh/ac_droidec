@@ -3025,6 +3025,23 @@ def get_tb_player_summary_for_events(event_ids):
     conn.close()
     return rows
 
+def get_tb_round_totals(event_id: int) -> list[dict]:
+    """[{этап: {power, summary, …}}] по игрокам одной ВИ — для прогноза звёзд
+    (services/tb_forecast.py: очки боёв = summary − power)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("SELECT round_totals_json FROM tb_player_detail WHERE event_id = ?", (event_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    out = []
+    for (raw,) in rows:
+        try:
+            out.append(json.loads(raw) or {})
+        except (TypeError, ValueError):
+            continue
+    return out
+
 def get_tb_zone_data_for_events(event_ids) -> list:
     """[(event_id, member_id, player_name, zone_data_json)] — расшифровка по планетам для
     services/tb_missions.py (бои и спецмиссии по игрокам)."""

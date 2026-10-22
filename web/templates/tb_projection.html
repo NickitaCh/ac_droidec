@@ -4,12 +4,22 @@
 {% import "_ui.html" as ui %}
 {% block title %}ВИ-проекция — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
+{% macro names_list(items, pairs=False) -%}
+{% if pairs %}{% for n, t in items %}<span class="nowrap">{{ n }}</span> <span class="muted">— {{ t }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+{% else %}<span class="muted">{{ items|join(", ") }}</span>{% endif %}
+{%- endmacro %}
+{% macro count_details(items, badge="", pairs=False) -%}
+{% if items %}<details><summary>{% if badge %}<span class="badge {{ badge }}">{{ items|length }}</span>{% else %}{{ items|length }}{% endif %}</summary>{{ names_list(items, pairs) }}</details>{% else %}<span class="muted">0</span>{% endif %}
+{%- endmacro %}
 {% block content %}
+    {% set fc = r.forecast %}
     {% call tbui.tb_hero("ВИ-проекция гильдии", "projection") %}
         <div class="hero-kpis">
-            {% for p in r.phases %}
-                <div class="hero-kpi{% if p.pct == 100 %} hero-kpi-good{% endif %}"><span class="hero-kpi-value">{{ p.pct }}%</span><span class="hero-kpi-label">этап {{ p.phase }} · {{ p.ops_closed }}/{{ p.ops_total }} опер.</span></div>
-            {% endfor %}
+            {% if fc %}
+                <div class="hero-kpi hero-kpi-good"><span class="hero-kpi-value">≈ {{ fc.total }}★</span><span class="hero-kpi-label">прогноз из {{ fc.max }}</span></div>
+                {% if fc.history.last_stars %}<div class="hero-kpi"><span class="hero-kpi-value">{{ fc.history.last_stars }}★</span><span class="hero-kpi-label">прошлая ВИ</span></div>{% endif %}
+            {% endif %}
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ r.players }} из {{ r.members }}</span><span class="hero-kpi-label">игроков в расчёте</span></div>
         </div>
     {% endcall %}
 
@@ -18,89 +28,148 @@
         <a class="hero-link" href="/tb/platoons">Конструктор взводов</a>
     </nav>
 
+    {% if fc %}
     <div class="panel">
         <div class="panel-title">
-            <span>Покрытие взводов по этапам{% call ui.help() %}<p>Что гильдия закроет во взводах с нынешними складами (данные ежечасного обновления). Раскладка взводов — стандартная, та же, что в конструкторе; реальная раскладка игры в битве может отличаться.</p><p>Этап планеты — её место в ветке: Мустафар, Кореллия и Корусант — 1, Джеонозис, Фелуция и Бракка — 2 и т.д.; Зеффо — 3 этап, Мандалор — 4.</p><p>Юнит игрока встаёт во взвод один раз за этап, на какой бы планете ни был слот, поэтому слоты всех планет этапа считаются вместе. Нехватка ложится на последние операции планеты, «операций 15/15» — сколько закрыть целиком.</p><p>Порог: персонаж — реликвия планеты, корабль — 7★.</p>{% endcall %}</span>
-            <span class="panel-hint">в расчёте {{ r.players }} из {{ r.members }} игроков{% if r.players < r.members %} — у остальных ещё нет данных{% endif %}</span>
+            <span>Прогноз звёзд{% call ui.help() %}<p>Сколько звёзд гильдия возьмёт с нынешними складами. На каждом этапе гильдия заливает такую же долю ГМ и набирает столько же очков в боях, как в среднем за последние {{ fc.history.events }} ВИ; к ним добавляются очки закрытых операций взводов (по разделу «Взводы» ниже).</p><p>Очки раскладываются на самые дешёвые звёзды открытых планет. Планета со звездой закрывается и открывает следующую в ветке; без звезды — остаётся на следующий этап с набранными очками. Зеффо и Мандалор открываются, если на Бракке / Татуине будет звезда и спецмиссию проходит не меньше игроков, чем нужно побед.</p><p>Это оценка, а не план: реальный залив, отбитые волны и порядок действий в битве её сдвигают.</p>{% endcall %}</span>
+            <span class="panel-hint">ГМ гильдии {{ compact(fc.gp) }}</span>
         </div>
-        <div class="table-scroll">
-            <table class="data">
-                <thead><tr><th>Этап</th><th>Планета</th><th class="num">Порог</th><th>Слоты</th><th class="num">Операций 15/15</th></tr></thead>
+        <table class="data cards-on-phone">
+            <thead><tr><th>Этап</th><th>Планеты</th><th>Очки этапа</th><th class="num">Звёзд</th></tr></thead>
+            <tbody>
+                {% for p in fc.phases %}
+                    <tr>
+                        <td data-label="Этап"><strong>{{ p.phase }}</strong></td>
+                        <td data-label="Планеты"><div>{% for pl in p.planets %}<span>{{ planet_ru(pl.planet) }} <span class="tbp-stars nowrap">{{ "★" * pl.stars }}<span class="muted">{{ "☆" * (3 - pl.stars) }}</span></span></span>{% if not loop.last %}<br>{% endif %}{% endfor %}</div></td>
+                        <td data-label="Очки этапа" class="nowrap"><div>ГМ {{ compact(p.deploy) }}<br><span class="muted">бои {{ compact(p.battle) }}</span></div></td>
+                        <td data-label="Звёзд" class="num"><strong>{{ p.stars }}</strong></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <nav class="hero-links tbp-tabs" id="tbp-tabs">
+        {% for p in r.phases %}<a class="hero-link" href="#phase-{{ p.phase }}" data-tab="{{ p.phase }}"{% if loop.first %} aria-current="page"{% endif %}>Этап {{ p.phase }} · {{ p.pct }}%</a>{% endfor %}
+    </nav>
+
+    {% for p in r.phases %}
+    <div class="tbp-pane" data-pane="{{ p.phase }}" id="phase-{{ p.phase }}"{% if not loop.first %} hidden{% endif %}>
+        <div class="panel">
+            <div class="panel-title">
+                <span>Этап {{ p.phase }}: взводы{% call ui.help() %}<p>Что гильдия закроет во взводах с нынешними складами (данные ежечасного обновления). Раскладка взводов — стандартная, та же, что в конструкторе; реальная раскладка игры в битве может отличаться.</p><p>Юнит игрока встаёт во взвод один раз за этап, на какой бы планете ни был слот, поэтому слоты всех планет этапа считаются вместе. Нехватка ложится на последние операции планеты, «операций 15/15» — сколько закрыть целиком.</p><p>Порог: персонаж — реликвия планеты, корабль — 7★.</p>{% endcall %}</span>
+                <span class="panel-hint">{{ p.filled }} из {{ p.slots }} слотов · {{ p.ops_closed }} из {{ p.ops_total }} операций</span>
+            </div>
+            <table class="data cards-on-phone">
+                <thead><tr><th>Планета</th><th class="num">Порог</th><th>Слоты</th><th class="num">Операций 15/15</th></tr></thead>
                 <tbody>
-                    {% for p in r.phases %}
-                        {% for pl in p.planets %}
-                            <tr>
-                                {% if loop.first %}<td rowspan="{{ p.planets|length }}" class="nowrap"><strong>{{ p.phase }}</strong><br><span class="muted">{{ p.filled }}/{{ p.slots }}</span></td>{% endif %}
-                                <td class="nowrap">{{ planet_ru(pl.planet) }}{% if pl.bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}</td>
-                                <td class="num">R{{ pl.min_relic }}</td>
-                                <td style="min-width: 220px">
-                                    <div class="meter">
-                                        <div class="meter-track"><div class="meter-fill" style="width: {{ (pl.filled / pl.slots * 100) if pl.slots else 0 }}%"></div></div>
-                                        <span class="meter-value">{{ pl.filled }}/{{ pl.slots }}</span>
-                                    </div>
-                                </td>
-                                <td class="num">{% if pl.ops_closed == 6 %}<span class="badge badge-ok">6/6</span>{% elif pl.ops_closed == 0 %}<span class="badge badge-danger">0/6</span>{% else %}<span class="badge badge-warn">{{ pl.ops_closed }}/6</span>{% endif %}</td>
-                            </tr>
-                        {% endfor %}
+                    {% for pl in p.planets %}
+                        <tr>
+                            <td data-label="Планета" class="nowrap"><div>{{ planet_ru(pl.planet) }}{% if pl.bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}</div></td>
+                            <td data-label="Порог" class="num">R{{ pl.min_relic }}</td>
+                            <td data-label="Слоты">
+                                <div class="meter">
+                                    <div class="meter-track"><div class="meter-fill" style="width: {{ (pl.filled / pl.slots * 100) if pl.slots else 0 }}%"></div></div>
+                                    <span class="meter-value">{{ pl.filled }} из {{ pl.slots }}</span>
+                                </div>
+                            </td>
+                            <td data-label="Операций 15/15" class="num">{% if pl.ops_closed == 6 %}<span class="badge badge-ok">6 из 6</span>{% elif pl.ops_closed == 0 %}<span class="badge badge-danger">0 из 6</span>{% else %}<span class="badge badge-warn">{{ pl.ops_closed }} из 6</span>{% endif %}</td>
+                        </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-    </div>
 
-    {% for p in r.phases %}
         {% if p.covert %}
         <div class="panel">
             <div class="panel-title">
-                <span>Этап {{ p.phase }}: спецмиссии{% call ui.help() %}<p>Кто проходит спецмиссию по требованиям игры: обязательные персонажи, нужное число юнитов подходящей фракции, 7★ и порог реликвии. «Не дотягивают» — все юниты есть, но не хватает реликвии или звёзд.</p><p>В Discord — <code>/тб оз_готовность</code>.</p>{% endcall %}</span>
+                <span>Этап {{ p.phase }}: спецмиссии{% call ui.help() %}<p>Кто проходит спецмиссию по требованиям игры: обязательные персонажи на пороге реликвии и 7★ (у Зеффо — нужное число подходящих юнитов).</p><p>«В шаге» — все отстающие обязательные в одной-двух реликвиях от порога; «Не дотягивают» — дальше. Раскройте число — видно, кого и до какого уровня качать. У кого обязательных персонажей нет вовсе, в списки не попадает.</p><p>В Discord — <code>/тб оз_готовность</code>.</p>{% endcall %}</span>
             </div>
-            <div class="table-scroll">
-                <table class="data">
-                    <thead><tr><th>Планета</th><th>Обязательные</th><th class="num">Требование</th><th>Проходят</th><th>Не дотягивают</th></tr></thead>
+            <table class="data cards-on-phone">
+                <thead><tr><th>Миссия</th><th>Проходят</th><th>В шаге</th><th>Не дотягивают</th></tr></thead>
+                <tbody>
+                    {% for c in p.covert %}
+                        <tr>
+                            <td data-label="Миссия"><div>
+                                <strong>{{ planet_ru(c.planet) }}</strong> <span class="muted">{{ c.label }}</span><br>
+                                {% if c.base_id %}{{ game.unit(c.base_id, c.name) }}{% else %}<span class="muted">{{ c.name }}</span>{% endif %}
+                                {% if c.unlocks %}<br><span class="tbp-unlock {{ 'tbp-unlock-ok' if c.ready|length >= (c.unlock_wins or 0) else 'tbp-unlock-bad' }}">{{ "✓" if c.ready|length >= (c.unlock_wins or 0) else "✗" }} открывает {{ planet_ru(c.unlocks) }}{% if c.unlock_wins %}: нужно {{ c.unlock_wins }} побед, проходят {{ c.ready|length }}{% endif %}</span>{% endif %}
+                            </div></td>
+                            <td data-label="Проходят">{{ count_details(c.ready, "badge-ok" if c.ready else "") }}</td>
+                            <td data-label="В шаге">{{ count_details(c.step, "badge-warn", pairs=True) }}</td>
+                            <td data-label="Не дотягивают">{{ count_details(c.short, pairs=True) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if p.strikes %}
+        <div class="panel">
+            <div class="panel-title">
+                <span>Этап {{ p.phase }}: боевые миссии{% call ui.help() %}<p>Кто может зайти в бой по условиям игры: нужное число юнитов подходящей категории (сторона Силы, фракция) на пороге реликвии или 7★ у кораблей, плюс обязательные юниты, если они есть. Пройдёт ли игрок все волны, по складу не узнать — это зависит от отряда и модов.</p><p>«Не дотягивают» — юниты есть, но реликвии или звёзд не хватает.</p>{% endcall %}</span>
+            </div>
+            <table class="data cards-on-phone">
+                <thead><tr><th>Бой</th><th>Могут зайти</th><th>Не дотягивают</th></tr></thead>
+                <tbody>
+                    {% for s in p.strikes %}
+                        <tr>
+                            <td data-label="Бой"><div><strong>{{ planet_ru(s.planet) }} · {{ s.n }}</strong>{% if s.fleet %} <span class="badge badge-neutral">флот</span>{% endif %}<br><span class="muted">{{ s.requirement }}</span></div></td>
+                            <td data-label="Могут зайти">{% set badge = 'badge-ok' if s.ready|length >= r.players * 0.8 else ('badge-warn' if s.ready else 'badge-danger') %}{% if s.ready %}<details><summary><span class="badge {{ badge }}">{{ s.ready|length }} из {{ r.players }}</span></summary>{{ names_list(s.ready) }}</details>{% else %}<span class="badge badge-danger">0 из {{ r.players }}</span>{% endif %}</td>
+                            <td data-label="Не дотягивают">{{ count_details(s.short) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>Этап {{ p.phase }}: узкие места взводов{% call ui.help() %}<p>Юниты, которых не хватает во взводах этапа. «В шаге» — не хватает одной-двух реликвий до порога (корабль — одной звезды): их проще всего докачать, чтобы закрыть слот.</p>{% endcall %}</span>
+                <span class="panel-hint">{% if p.bottlenecks %}{{ p.slots - p.filled }} слотов не закрыть{% else %}все слоты закрываются{% endif %}</span>
+            </div>
+            {% if p.bottlenecks %}
+                <table class="data cards-on-phone">
+                    <thead><tr><th>Юнит</th><th class="num">Не хватает</th><th>Проходят</th><th>В шаге</th></tr></thead>
                     <tbody>
-                        {% for c in p.covert %}
+                        {% for b in p.bottlenecks %}
                             <tr>
-                                <td class="nowrap">{{ planet_ru(c.planet) }}{% if c.unlocks %} <span class="badge badge-neutral">открывает {{ planet_ru(c.unlocks) }}</span>{% endif %}</td>
-                                <td>{% if c.base_id %}{{ game.unit(c.base_id, c.name) }}{% else %}<span class="muted">любые</span>{% endif %}</td>
-                                <td class="num nowrap">{{ c.label }}</td>
-                                <td>{% if c.ready %}<details><summary><span class="badge badge-ok">{{ c.ready|length }}</span></summary><span class="muted">{{ c.ready|join(", ") }}</span></details>{% else %}<span class="badge badge-danger">0</span>{% endif %}</td>
-                                <td>{% if c.short %}<details><summary>{{ c.short|length }}</summary>{{ c.short|join(", ") }}</details>{% else %}<span class="muted">—</span>{% endif %}</td>
+                                <td data-label="Юнит"><div>{{ game.unit(b.base_id, b.name) }}<br><span class="muted">{{ "7★" if b.is_ship else "R" ~ b.min_relic }} · нужно {{ b.need }} · {% for pl in b.planets %}{{ planet_ru(pl) }}{% if not loop.last %}, {% endif %}{% endfor %}</span></div></td>
+                                <td data-label="Не хватает" class="num"><span class="badge badge-danger">{{ b.short }} из {{ b.need }}</span></td>
+                                <td data-label="Проходят">{{ count_details(b.ready) }}</td>
+                                <td data-label="В шаге">{{ count_details(b.step, "badge-warn") }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
-            </div>
-        </div>
-        {% endif %}
-        <div class="panel">
-            <div class="panel-title">
-                <span>Этап {{ p.phase }}: узкие места</span>
-                <span class="panel-hint">{% if p.bottlenecks %}{{ p.bottlenecks|length }} юнит{{ "" if p.bottlenecks|length % 10 == 1 and p.bottlenecks|length % 100 != 11 else ("а" if p.bottlenecks|length % 10 in [2,3,4] and p.bottlenecks|length % 100 not in [12,13,14] else "ов") }}, {{ p.slots - p.filled }} слотов не закрыть{% else %}все слоты закрываются{% endif %}</span>
-            </div>
-            {% if p.bottlenecks %}
-                <div class="table-scroll">
-                    <table class="data">
-                        <thead><tr><th>Юнит</th><th class="num">Порог</th><th class="num">Нужно</th><th class="num">Не хватает</th><th>Проходят</th><th>В шаге{% call ui.help() %}<p>Не хватает одной-двух реликвий до порога (корабль — одной звезды). Их проще всего докачать, чтобы закрыть слот.</p>{% endcall %}</th><th>Планеты</th></tr></thead>
-                        <tbody>
-                            {% for b in p.bottlenecks %}
-                                <tr>
-                                    <td>{{ game.unit(b.base_id, b.name) }}</td>
-                                    <td class="num nowrap">{{ "7★" if b.is_ship else "R" ~ b.min_relic }}</td>
-                                    <td class="num">{{ b.need }}</td>
-                                    <td class="num"><span class="badge badge-danger">{{ b.short }}</span></td>
-                                    <td>{% if b.ready %}<details><summary>{{ b.ready|length }}</summary><span class="muted">{{ b.ready|join(", ") }}</span></details>{% else %}<span class="muted">0</span>{% endif %}</td>
-                                    <td>{% if b.step %}<details><summary>{{ b.step|length }}</summary>{{ b.step|join(", ") }}</details>{% else %}<span class="muted">—</span>{% endif %}</td>
-                                    <td class="nowrap">{% for pl in b.planets %}{{ planet_ru(pl) }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
             {% endif %}
         </div>
+    </div>
     {% endfor %}
 
     {% if r.unresolved %}
         <p class="muted">Не распознаны в справочнике юнитов (в расчёт не вошли): {{ r.unresolved|join(", ") }}</p>
     {% endif %}
+    <script>
+    (function () {
+        const tabs = document.querySelectorAll("#tbp-tabs [data-tab]");
+        function show(key) {
+            tabs.forEach(t => {
+                const on = t.dataset.tab === key;
+                if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+            });
+            document.querySelectorAll(".tbp-pane").forEach(p => { p.hidden = p.dataset.pane !== key; });
+        }
+        tabs.forEach(a => a.addEventListener("click", e => {
+            e.preventDefault();
+            show(a.dataset.tab);
+            history.replaceState(null, "", "#phase-" + a.dataset.tab);
+        }));
+        const m = location.hash.match(/^#phase-(\d)$/);
+        if (m) show(m[1]);
+    })();
+    </script>
 {% endblock %}

@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -506,16 +507,29 @@ async def tb_missions_page(request: Request, tab: str = "covert",
     return templates.TemplateResponse(request, "tb_missions.html", ctx)
 
 
+# (guild_id, bonus) -> (время, результат): разбор складов гильдии — ~10 с, а склады
+# обновляются раз в час, поэтому пересчитываем не чаще раза в 15 минут.
+_PROJECTION_CACHE: dict = {}
+PROJECTION_CACHE_SECONDS = 900
+
+
 @router.get("/tb/projection", response_class=HTMLResponse)
 async def tb_projection_page(request: Request, bonus: int = 1,
                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    # ~50 игроков × ~300 юнитов из player_unit_cache — секунды, поэтому в потоке.
-    r = await asyncio.to_thread(tb_projection.build, user["guild_id"], bool(bonus))
+    key = (user["guild_id"], bool(bonus))
+    cached = _PROJECTION_CACHE.get(key)
+    if cached and time.time() - cached[0] < PROJECTION_CACHE_SECONDS:
+        r = cached[1]
+    else:
+        # ~50 игроков × ~300 юнитов из player_unit_cache — секунды, поэтому в потоке.
+        r = await asyncio.to_thread(tb_projection.build, user["guild_id"], bool(bonus))
+        _PROJECTION_CACHE[key] = (time.time(), r)
     return templates.TemplateResponse(request, "tb_projection.html", {
         "user": user,
         "r": r,
         "bonus": bool(bonus),
         "planet_ru": lambda p: (_PLANET_NAME_TO_RU.get(p) or p).capitalize(),
+        "compact": dashboard_data._compact_number,
     })
 
 

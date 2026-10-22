@@ -2720,6 +2720,7 @@ dialog.feedback-dialog > form { max-width: none; }
     table.cards-on-phone td::before { content: attr(data-label); flex-shrink: 0; font-size: 0.8em; font-weight: 600; color: var(--fg-muted); text-align: left; }
     table.cards-on-phone td:not([data-label])::before { content: none; }
     table.cards-on-phone td .nowrap { white-space: normal; }
+    table.cards-on-phone td > * { min-width: 0; overflow-wrap: anywhere; }
 }
 .cq-who-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em 1em; margin: 0 0 1em; }
 .cq-who-bar .hero-links { margin: 0; }
@@ -2729,3 +2730,9 @@ dialog.feedback-dialog > form { max-width: none; }
 .cq-who-body ul { margin: 0.2em 0; padding-left: 1.2em; columns: 2 14em; column-gap: 1.5em; }
 .cq-who-body p { margin: 0.2em 0; }
 .cq-crate details, .cq-crate details > span { display: block; max-width: 100%; overflow-wrap: anywhere; }
+.tbp-tabs { margin: 0 0 1em; }
+.tbp-tabs [aria-current] { font-weight: 700; }
+.tbp-stars { color: var(--status-warning); letter-spacing: 0.05em; }
+.tbp-unlock { font-size: 0.9em; }
+.tbp-unlock-ok { color: var(--status-good); }
+.tbp-unlock-bad { color: var(--status-critical); }

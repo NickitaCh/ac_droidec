@@ -62,10 +62,14 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
     types = database.get_unit_types(base_ids)
     unit_names = database.get_game_unit_names(base_ids)
 
-    # base_id -> [(ally_code, level)] по всей гильдии, один запрос.
+    # Склады гильдии читаем один раз (разбор JSON — самое дорогое на странице): из них и
+    # взводы, и спецмиссии, и боевые миссии. base_id -> [(ally_code, level)].
+    rosters = database.get_player_units_bulk(codes)
+    wanted = set(base_ids)
     owners: dict[str, list] = {}
-    for row in database.get_player_unit_owners_bulk(codes, base_ids):
-        owners.setdefault(row["base_id"], []).append((row["ally_code"], _level(row["unit"])))
+    for code, roster in rosters.items():
+        for bid in wanted & roster.keys():
+            owners.setdefault(bid, []).append((code, _level(roster[bid])))
     players_with_roster = {code for rows in owners.values() for code, _ in rows}
 
     phases = []
@@ -130,23 +134,77 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
             "ops_closed": sum(p["ops_closed"] for p in rows), "ops_total": len(rows) * len(OPERATIONS),
             "bottlenecks": bottlenecks,
         })
-    # Спецмиссии этапа: кто проходит по требованиям игры (services/tb_covert.py; импорт
-    # здесь — tb_covert сам берёт BRANCHES отсюда).
-    from services import tb_covert
-    grid = tb_covert.guild_grid(guild_id)
-    for i, (m, u) in enumerate(zip(grid["missions"], grid["units"])):
+    # Спецмиссии, боевые миссии и прогноз звёзд (импорт здесь — tb_covert и tb_forecast
+    # сами берут BRANCHES отсюда).
+    from services import tb_covert, tb_forecast
+    member_names = {code: names.get(code) or name or code for code, name in members}
+    covert_ready = {}
+    for m in tb_covert.missions():
         if m["bonus"] and not with_bonus:
             continue
-        cells = [(p["name"], p["cells"][i]["status"]) for p in grid["players"]]
-        phases[m["phase"] - 1].setdefault("covert", []).append({
-            "planet": m["planet"], "base_id": u["base_id"], "name": u["name"], "label": u["label"],
-            "unlocks": m["unlocks"], "bonus": m["bonus"],
-            "ready": sorted(n for n, st in cells if st == "ready"),
-            "short": sorted(n for n, st in cells if st == "short"),
-        })
+        row = covert_row(m, rosters, member_names)
+        covert_ready[m["zone_id"]] = len(row["ready"])
+        phases[m["phase"] - 1].setdefault("covert", []).append(row)
+    zone_data = tb_forecast.zones()
+    for rule in (zone_data.get("bonus") or {}).values():
+        for p in phases:
+            for c in p.get("covert") or []:
+                if c["zone_id"] == rule["covert_zone"]:
+                    c["unlock_wins"] = rule["wins"]
+    strikes = tb_forecast.strikes_by_phase(rosters, member_names, with_bonus)
+    for p in phases:
+        p["strikes"] = strikes.get(p["phase"], [])
+    forecast = None
+    gp = tb_forecast.guild_gp(codes)
+    if zone_data.get("planets") and gp:
+        op_points = {pl: v["op_points"] for pl, v in zone_data["planets"].items()}
+        platoon_points = {pl["planet"]: pl["ops_closed"] * op_points.get(pl["planet"], 0) for p in phases for pl in p["planets"]}
+        hist = tb_forecast.history(guild_id)
+        if not with_bonus:
+            zone_data = {**zone_data, "bonus": {}}
+        forecast = tb_forecast.forecast(zone_data, platoon_points, covert_ready, hist, gp)
+        forecast["history"] = hist
     return {
         "phases": phases,
+        "forecast": forecast,
         "players": len(players_with_roster),
         "members": len(members),
         "unresolved": sorted(n for n in all_names if not name_to_base_id.get(n)),
+    }
+
+
+def covert_row(m: dict, rosters: dict, member_names: dict) -> dict:
+    """Спецмиссия по гильдии: ready — проходят, step — «в шаге» (все отстающие обязательные
+    в 1–2 реликвиях от порога), short — не дотягивают сильнее; у двух последних — что
+    докачать. Без обязательных (Зеффо) — сколько подходящих юнитов из нужных."""
+    from services import tb_covert
+    all_ids = {b for r in rosters.values() for b in r}
+    ships = {b for b, t in database.get_unit_types(list(all_ids)).items() if t == "ship"}
+    unit_names = database.get_game_unit_names(m["mandatory"])
+    ready, step, short = [], [], []
+    for code, roster in rosters.items():
+        s = tb_covert.player_status(m, roster, ships)
+        name = member_names.get(code, code)
+        if s["status"] == "ready":
+            ready.append(name)
+            continue
+        if s["status"] != "short":
+            continue
+        if not m["mandatory"]:
+            short.append((name, s["text"]))
+            continue
+        lagging = [b for b in m["mandatory"] if not tb_covert._unit_ok(roster[b], m)]
+        text = ", ".join(f"{unit_names.get(b, b)} {tb_covert._level(roster[b])}" for b in lagging)
+        close = m["min_relic"] is not None and all(
+            _level(roster[b])["stars"] >= m["min_stars"] and (_level(roster[b])["relic"] or -9) >= m["min_relic"] - STEP_RELICS
+            for b in lagging)
+        (step if close else short).append((name, text))
+    lead = m["mandatory"][0] if m["mandatory"] else (m["units"] or [None])[0]
+    return {
+        "zone_id": m["zone_id"], "planet": m["planet"], "base_id": lead,
+        "name": " + ".join(unit_names.get(b, b) for b in m["mandatory"]) or "любые подходящие",
+        "label": tb_covert.mission_label(m), "unlocks": m["unlocks"], "bonus": m["bonus"],
+        "ready": sorted(ready, key=str.lower),
+        "step": sorted(step, key=lambda x: x[0].lower()),
+        "short": sorted(short, key=lambda x: x[0].lower()),
     }
