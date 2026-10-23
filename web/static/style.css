@@ -2764,6 +2764,11 @@ form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; mar
 .mp-miss details[open] { display: flex; flex-direction: column; gap: 0.35em; }
 .mp-snaps { margin: 0.5em 0 0; padding-left: 1.2em; }
 .mp-snaps li { margin: 0.2em 0; }
+.mp-sdvig { display: flex; flex-direction: column; gap: 0.2em; align-items: flex-start; text-align: left; }
+.mp-sdvig details { font-size: 0.9em; }
+.mp-sdvig details > summary { cursor: pointer; color: var(--fg-secondary); }
+.mp-sdvig ul { margin: 0.1em 0 0; padding-left: 1.1em; }
+.mp-sdvig li { margin: 0.1em 0; }
 .mp-legend { display: flex; flex-wrap: wrap; gap: 0.5em; }
 .mp-cell { display: inline-block; padding: 0.1em 0.45em; border-radius: 4px; font-variant-numeric: tabular-nums; }
 .mp-ok { background: color-mix(in srgb, var(--status-good) 18%, transparent); }

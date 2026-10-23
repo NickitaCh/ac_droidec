@@ -458,6 +458,25 @@ def _counts(player_values: dict, reqs_by_key: dict) -> tuple[int, int]:
     return done, total
 
 
+def _changed_required(cur_vals: dict, other_vals: dict, reqs_latest: dict) -> list[dict]:
+    """Какие обязательные требования сменили статус (не выполнено ↔ выполнено) между
+    текущим снимком и другим (прошлым/первым) — для «Сдвиг»: список {char, label, req, to}
+    в порядке плейта, to="ok" — закрыл, to="fail" — откатился. Строки, которых нет в одном
+    из снимков (требование отсутствовало тогда, или не считалось этому игроку), пропускаются
+    — "сдвиг" тут про смену статуса, а не про появление/исчезновение требования."""
+    changed = []
+    for key, req in reqs_latest.items():  # порядок плейта
+        if req["priority"] != "required" or key not in cur_vals or key not in other_vals:
+            continue
+        _cur_value, _cur_margin, cur_ok = cur_vals[key]
+        _other_value, _other_margin, other_ok = other_vals[key]
+        if cur_ok is None or other_ok is None or cur_ok == other_ok:
+            continue
+        changed.append({"char": req["char"], "label": req["label"], "req": req["req"],
+                         "to": "ok" if cur_ok else "fail"})
+    return changed
+
+
 def _gap_text(value, margin, req: dict) -> str:
     """Сколько не хватает до нормы — только у числовых требований (стат, сравнение с
     персонажем: норма начинается с оператора); у основ, сетов, омикронов — пусто."""
@@ -468,7 +487,9 @@ def _gap_text(value, margin, req: dict) -> str:
 
 def guild_summary(guild_id: int, tracker_id: int, scenario: str = SCENARIO_RAW) -> dict | None:
     """Сводка по гильдии на последнем снимке сценария: выполнено X из Y обязательных, сдвиг
-    с прошлого и с первого снимка, что не выполнено (по персонажам, с нехваткой)."""
+    с прошлого и с первого снимка (число + changed_prev/changed_first — какие именно
+    требования закрыл/откатил, см. _changed_required), что не выполнено (по персонажам, с
+    нехваткой)."""
     tracker = get_tracker(guild_id, tracker_id)
     if not tracker:
         return None
@@ -512,8 +533,10 @@ def guild_summary(guild_id: int, tracker_id: int, scenario: str = SCENARIO_RAW) 
                  "missing_count": sum(len(items) for _char, items in missing)}
         if prev and ally_code in prev_vals:
             entry["delta_prev"] = done - _counts(prev_vals[ally_code], reqs_prev)[0]
+            entry["changed_prev"] = _changed_required(pv, prev_vals[ally_code], reqs_latest)
         if first_vals and ally_code in first_vals:
             entry["delta_first"] = done - _counts(first_vals[ally_code], reqs_first)[0]
+            entry["changed_first"] = _changed_required(pv, first_vals[ally_code], reqs_latest)
         result["players"].append(entry)
     conn.close()
     result["players"].sort(key=lambda e: (e["done"] - e["total"], e["name"].lower()))
