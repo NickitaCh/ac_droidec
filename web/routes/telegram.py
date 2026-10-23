@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 import database
 from tg_bot import store
 from web.deps import own_accounts, require_member_access
-from web.routes import guild_dashboard
+from web.routes import dashboard, guild_dashboard
 
 router = APIRouter()
 
@@ -23,9 +23,11 @@ def bot_username() -> str | None:
     return database.get_bot_state(BOT_USERNAME_STATE_KEY, guild_id=0)
 
 
-# Кнопка «Привязать Telegram» в карточке игрока (player_card.html) видна, только когда
-# бот хоть раз запускался — у каждого роута свой Jinja2Templates, поэтому регистрируем тут.
+# Кнопка «Привязать Telegram» (player_card.html) и упоминания бота на публичных
+# страницах (dashboard.html, start.html) видны, только когда бот хоть раз запускался —
+# у каждого роута свой Jinja2Templates, поэтому регистрируем тут на обоих.
 guild_dashboard.templates.env.globals["telegram_bot_username"] = bot_username
+dashboard.templates.env.globals["telegram_bot_username"] = bot_username
 
 
 @router.get("/me/telegram")

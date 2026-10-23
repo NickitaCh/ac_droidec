@@ -22,6 +22,19 @@ sys.stdout.reconfigure(line_buffering=True)
 COMLINK_URL = "http://localhost:3000"
 SITE_URL = "https://swgoh-sng.ru"
 
+# Профильные тексты бота в Telegram (BotFather «Edit Bot» их тоже покажет, но отсюда
+# они переустанавливаются сами при каждом запуске — не нужно помнить поправить руками
+# после переименования сайта и т.п.). Картинку профиля бота Bot API ставить не умеет —
+# она выставляется вручную через @BotFather → /setuserpic (файл: assets/tg_bot_avatar.png).
+BOT_DESCRIPTION = (
+    "«Дроидец» — бот для гильдий Star Wars: Galaxy of Heroes, тот же, что работает в Discord.\n\n"
+    "Статы по нормам гильдии, датакроны, профиль игрока и гильдии картинкой, задачи на прокачку, "
+    "нарушения, оповещения гильдии в чат.\n\n"
+    "Привяжите код союзника — /reg 123456789, затем /help — список команд.\n\n"
+    "Гильдия ещё не подключена к боту? swgoh-sng.ru/start"
+)
+BOT_SHORT_DESCRIPTION = "«Дроидец» — бот гильдий SWGOH: статы, датакроны, профиль, задачи. Тот же, что и в Discord."
+
 
 async def main():
     load_dotenv()
@@ -33,6 +46,8 @@ async def main():
     comlink = SwgohComlink(url=COMLINK_URL)
     app = App(api=api, comlink=comlink, username=me["username"], bot_id=me["id"], site_url=SITE_URL)
     await api.set_my_commands(menu_commands())
+    await api.set_my_description(BOT_DESCRIPTION)
+    await api.set_my_short_description(BOT_SHORT_DESCRIPTION)
     # Сайт строит ссылку «Привязать Telegram» на этого бота (web/routes/telegram.py).
     database.set_bot_state("telegram_bot_username", me["username"], guild_id=0)
     # Вебхук и polling несовместимы — на случай, если кто-то ставил вебхук руками.

@@ -16,7 +16,9 @@ main.py::_access_denied_message) годами обещали "подключит
   build_payment_link. Discord OAuth тут только identify-скоуп, список серверов
   пользователя не получить без отдельного разрешения — поэтому ID Discord-сервера
   вводится руками (тот же приём "ручной ID", что уже прижился в проекте, см.
-  память feedback_curated_list_needs_manual_escape_hatch).
+  память feedback_curated_list_needs_manual_escape_hatch). С 2026-10-23 это поле
+  необязательно — гильдия без Discord-сервера (работает только через Telegram)
+  может завестись и оплатиться без него.
 
 Доступ — Depends(get_current_user) (обязателен логин через Discord, чтобы знать,
 кто инициировал), НЕ require_officer_access — по духу той же лёгкой проверки,
@@ -152,16 +154,21 @@ async def subscribe_submit(
         if not re.fullmatch(r"[1-9]{9}", clean_code):
             context["error"] = "Код союзника должен состоять ровно из 9 цифр без нуля (1-9)."
             return templates.TemplateResponse(request, "subscribe.html", context)
-        # Discord snowflake ID — 64-битное число, у реальных ID сейчас 18-19 цифр
-        # (минимум за всю историю Discord — 17); 17-20 даёт небольшой запас на будущее
-        # без риска пропустить откровенный мусор вроде "123" или вставленный код союзника.
-        if not (17 <= len(clean_discord_id) <= 20):
-            context["error"] = "ID Discord-сервера должен быть 17-20-значным числом (ПКМ по иконке сервера → Копировать ID, нужен включённый режим разработчика в Discord)."
-            return templates.TemplateResponse(request, "subscribe.html", context)
-        bot_present, bot_error = await _verify_bot_in_guild(clean_discord_id)
-        if not bot_present:
-            context["error"] = bot_error
-            return templates.TemplateResponse(request, "subscribe.html", context)
+        # ID Discord-сервера необязателен — гильдии, которые работают только через
+        # Telegram, подключаются без него (discord_guild_id хранится пустой строкой,
+        # колонка NOT NULL в guilds допускает ""). Валидируем/проверяем бота только
+        # если поле заполнено.
+        if clean_discord_id:
+            # Discord snowflake ID — 64-битное число, у реальных ID сейчас 18-19 цифр
+            # (минимум за всю историю Discord — 17); 17-20 даёт небольшой запас на будущее
+            # без риска пропустить откровенный мусор вроде "123" или вставленный код союзника.
+            if not (17 <= len(clean_discord_id) <= 20):
+                context["error"] = "ID Discord-сервера должен быть 17-20-значным числом (ПКМ по иконке сервера → Копировать ID, нужен включённый режим разработчика в Discord)."
+                return templates.TemplateResponse(request, "subscribe.html", context)
+            bot_present, bot_error = await _verify_bot_in_guild(clean_discord_id)
+            if not bot_present:
+                context["error"] = bot_error
+                return templates.TemplateResponse(request, "subscribe.html", context)
 
         comlink = _get_comlink()
         add_result = await add_guild(comlink, clean_code, clean_discord_id, is_active=False)

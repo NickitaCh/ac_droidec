@@ -115,3 +115,11 @@ class TelegramAPI:
         return await self.call(
             "setMyCommands", commands=[{"command": c, "description": d} for c, d in commands], scope=scope,
         )
+
+    async def set_my_description(self, description: str):
+        """Текст на пустом экране бота до первого /start (до 512 символов)."""
+        return await self.call("setMyDescription", description=description)
+
+    async def set_my_short_description(self, short_description: str):
+        """Текст в профиле бота и при пересылке ссылки на него (до 120 символов)."""
+        return await self.call("setMyShortDescription", short_description=short_description)

@@ -2741,6 +2741,16 @@ dialog.feedback-dialog > form { max-width: none; }
 .goal-conditions { margin: 0.4em 0 0.6em; padding-left: 1.2em; }
 .goal-conditions li { margin: 0.15em 0; }
 
+/* /admin/unit-aliases — сокращения юнитов. */
+.ua-toolbar { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: center; margin-bottom: 1em; }
+.ua-toolbar input[type="search"] { flex: 1 1 16em; max-width: 28em; }
+.ua-id { font-size: 0.8em; }
+.ua-table td:last-child { width: 1%; white-space: nowrap; }
+.ua-dialog { width: min(34em, 94vw); }
+.ua-dialog > form.ua-form { max-width: none; }
+.ua-dialog input[type="text"] { width: 100%; }
+.ua-table tr[hidden], .ua-dialog [hidden] { display: none !important; }
+
 /* Прогресс модинга (/mod-progress). */
 .mp-actions { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: center; }
 form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; margin: 0; gap: 0.4em; }
