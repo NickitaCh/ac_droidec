@@ -82,13 +82,14 @@ async def mod_progress_create(request: Request, plate: str = Form(...), period_d
 
 @router.get("/{tracker_id}", response_class=HTMLResponse)
 async def mod_progress_tracker(request: Request, tracker_id: int, user: dict = Depends(require_officer_access)):
-    summary = mod_progress.guild_summary(user["guild_id"], tracker_id)
+    scenario = mod_progress.scenario_or_default(request.query_params.get("scenario"))
+    summary = mod_progress.guild_summary(user["guild_id"], tracker_id, scenario)
     if summary is None:
         raise HTTPException(status_code=404, detail="Трекер не найден")
     current = mod_progress.plate_requirements(summary["tracker"]["plate_name"], user["guild_id"])
     latest = mod_progress.sync_version(tracker_id)
     return templates.TemplateResponse(request, "mod_progress_tracker.html", {
-        "user": user, **summary, "periods": mod_progress.PERIODS,
+        "user": user, **summary, "periods": mod_progress.PERIODS, "scenarios": mod_progress.SCENARIOS,
         "running": _is_running(tracker_id), "job_error": _errors.get(tracker_id),
         "plate_missing": not current, "latest_version": latest,
     })
@@ -123,7 +124,10 @@ async def mod_progress_snapshot_delete(tracker_id: int, snapshot_id: int, user: 
 @router.get("/{tracker_id}/player/{ally_code}", response_class=HTMLResponse)
 async def mod_progress_player(request: Request, tracker_id: int, ally_code: str, user: dict = Depends(require_officer_access)):
     show_all = request.query_params.get("all") == "1"
-    table = mod_progress.player_table(user["guild_id"], tracker_id, ally_code, limit=None if show_all else 6)
+    scenario = mod_progress.scenario_or_default(request.query_params.get("scenario"))
+    table = mod_progress.player_table(user["guild_id"], tracker_id, ally_code, limit=None if show_all else 6,
+                                      scenario=scenario)
     if table is None:
         raise HTTPException(status_code=404, detail="Трекер не найден")
-    return templates.TemplateResponse(request, "mod_progress_player.html", {"user": user, **table, "show_all": show_all})
+    return templates.TemplateResponse(request, "mod_progress_player.html", {"user": user, **table, "show_all": show_all,
+                                                                          "scenarios": mod_progress.SCENARIOS})

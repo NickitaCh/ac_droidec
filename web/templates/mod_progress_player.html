@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
+{% import "_mod_progress_scen.html" as scen %}
 {% block title %}{{ name }} — {{ tracker.plate_name }} — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
+<div id="mp-module">
     <section class="page-hero page-hero-light">
         <div class="page-hero-top">
             <div>
@@ -10,14 +12,16 @@
                 <h1>{{ name }}{% call ui.help(side="left") %}<p>Строки — требования плейта, столбцы — снимки. Норма — по текущей версии плейта; если в снимке она была другой, это написано в ячейке.</p><p>«Убрано из плейта» — требования, которых в плейте больше нет.</p>{% endcall %}</h1>
             </div>
         </div>
-        <div class="hero-links"><a class="hero-link" href="/mod-progress/{{ tracker.id }}">Вся гильдия</a><a class="hero-link" href="/player/{{ ally_code }}">Карточка игрока</a>
-            {% if hidden %}<a class="hero-link" href="?all=1">Все снимки ({{ columns|length + hidden }})</a>{% elif show_all %}<a class="hero-link" href="?">Последние 6</a>{% endif %}</div>
+        <div class="hero-links"><a class="hero-link" href="/mod-progress/{{ tracker.id }}?scenario={{ scenario }}">Вся гильдия</a><a class="hero-link" href="/player/{{ ally_code }}">Карточка игрока</a>
+            {% if hidden %}<a class="hero-link" href="?scenario={{ scenario }}&all=1">Все снимки ({{ columns|length + hidden }})</a>{% elif show_all %}<a class="hero-link" href="?scenario={{ scenario }}">Последние 6</a>{% endif %}</div>
     </section>
+
+    {{ scen.switch(scenarios, scenario, "&all=1" if show_all else "") }}
 
     <p class="mp-legend"><span class="mp-cell mp-ok">выполнено</span> <span class="mp-cell mp-up">ближе к норме</span> <span class="mp-cell mp-stall">без сдвига</span> <span class="mp-cell mp-down">хуже, чем было</span></p>
 
     {% if not columns %}
-        <p class="empty-state">В снимках этого трекера игрока нет.</p>
+        <p class="empty-state">В снимках этого сценария игрока нет{% if scenario != "raw" %} — снимки, снятые раньше, посчитаны только «как есть»{% endif %}.</p>
     {% else %}
         {% for g in groups %}
             <div class="panel">
@@ -45,4 +49,5 @@
             </div>
         {% endfor %}
     {% endif %}
+</div>
 {% endblock %}

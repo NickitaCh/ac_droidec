@@ -8,9 +8,11 @@
 версией, ничего не пересчитывается. Ключ строки — cogs.stat_requirements.progress_row_key
 (без порога), так что изменённая норма — та же строка с новой нормой.
 
-Снимок считает тот же _evaluate_character_player, что /статы и /stats-check, сценарий «как
-есть» (SCENARIO_RAW, решение пользователя 2026-10-23), по кэшу player_unit_cache — без
-запросов к Comlink. Игроки без отряда плейта (stat_plate_squads) не проверяются.
+Снимок считает тот же _evaluate_character_player, что /статы и /stats-check, по кэшу
+player_unit_cache — без запросов к Comlink, сразу во всех трёх сценариях /статы (SCENARIOS);
+сценарий выбирают при просмотре (просьба NicolozZ 2026-10-23: «как в ХБ или с перекрутом
+вверх»). «Как есть» лежит в mod_progress_values, остальные — в mod_progress_scen_values;
+снимки, снятые до этого, есть только «как есть» (scenarios IS NULL). Игроки без отряда плейта (stat_plate_squads) не проверяются.
 Автоснимки и поиск изменений плейта — cogs/mod_progress.py (раз в час)."""
 
 import asyncio
@@ -22,13 +24,15 @@ from zoneinfo import ZoneInfo
 
 import database
 from cogs.stat_requirements import (
-    SCENARIO_RAW, _char_squad_skip, _evaluate_character_player, _missing_plate_squads,
+    SCENARIO_FULL, SCENARIO_RAW, SCENARIO_UP, _char_squad_skip, _fmt_compact, _evaluate_character_player, _missing_plate_squads,
     _unit_display_name, progress_row_key, progress_row_text,
 )
 
 MSK = ZoneInfo("Europe/Moscow")
 PERIODS = {0: "только вручную", 1: "каждый день", 3: "раз в 3 дня", 7: "раз в неделю", 14: "раз в 2 недели"}
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
+# Сценарии — те же, что в /статы (SCENARIO_CHOICES); короткие подписи для переключателя.
+SCENARIOS = {SCENARIO_RAW: "Как есть (как в ХБ)", SCENARIO_UP: "Релик вверх", SCENARIO_FULL: "Полный подгон релика"}
 
 # Снимки одного трекера не должны идти параллельно (кнопка + автоснимок).
 _locks: dict[int, asyncio.Lock] = {}
@@ -86,6 +90,22 @@ def _ensure_tables(cursor):
             PRIMARY KEY (snapshot_id, ally_code, req_key)
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_scen_values (
+            snapshot_id INTEGER NOT NULL,
+            scenario TEXT NOT NULL,
+            ally_code TEXT NOT NULL,
+            req_key TEXT NOT NULL,
+            value TEXT,
+            margin REAL,
+            ok INTEGER,
+            PRIMARY KEY (snapshot_id, scenario, ally_code, req_key)
+        )
+    """)
+    try:
+        cursor.execute("ALTER TABLE mod_progress_snapshots ADD COLUMN scenarios TEXT")
+    except sqlite3.OperationalError:
+        pass
 
 
 def _connect():
@@ -247,6 +267,7 @@ def delete_tracker(guild_id: int, tracker_id: int) -> bool:
     snap_ids = [r[0] for r in cursor.fetchall()]
     for sid in snap_ids:
         cursor.execute("DELETE FROM mod_progress_values WHERE snapshot_id = ?", (sid,))
+        cursor.execute("DELETE FROM mod_progress_scen_values WHERE snapshot_id = ?", (sid,))
         cursor.execute("DELETE FROM mod_progress_players WHERE snapshot_id = ?", (sid,))
     cursor.execute("DELETE FROM mod_progress_snapshots WHERE tracker_id = ?", (tracker_id,))
     cursor.execute("DELETE FROM mod_progress_versions WHERE tracker_id = ?", (tracker_id,))
@@ -264,6 +285,7 @@ def delete_snapshot(guild_id: int, tracker_id: int, snapshot_id: int) -> bool:
     deleted = bool(cursor.rowcount)
     if deleted:
         cursor.execute("DELETE FROM mod_progress_values WHERE snapshot_id = ?", (snapshot_id,))
+        cursor.execute("DELETE FROM mod_progress_scen_values WHERE snapshot_id = ?", (snapshot_id,))
         cursor.execute("DELETE FROM mod_progress_players WHERE snapshot_id = ?", (snapshot_id,))
     conn.commit()
     conn.close()
@@ -328,21 +350,23 @@ async def take_snapshot(bot_like, tracker_id: int, kind: str, taken_by: str | No
                 skip_plates, skip_reason = _char_squad_skip(plate_name, base_id, guild_id, missing)
                 if skip_reason:
                     continue
-                out = []
-                result = await _evaluate_character_player(
-                    bot_like, plate_name, base_id, ally_code, False, name, guild_id=guild_id,
-                    scenario=SCENARIO_RAW, skip_plates=skip_plates, rows_out=out,
-                )
-                if result is None:
-                    continue
-                evaluated += 1
-                if not out:
-                    # Юнита нет у игрока (не открыт) — все его требования не выполнены.
-                    out = [{"key": k, "value": "нет юнита", "margin": None, "ok": False}
-                           for k, source in keys if source not in skip_plates]
-                for item in out:
-                    ok = None if item["ok"] is None else int(bool(item["ok"]))
-                    values.append((ally_code, item["key"], item["value"], item["margin"], ok))
+                for scenario in SCENARIOS:
+                    out = []
+                    result = await _evaluate_character_player(
+                        bot_like, plate_name, base_id, ally_code, False, name, guild_id=guild_id,
+                        scenario=scenario, skip_plates=skip_plates, rows_out=out,
+                    )
+                    if result is None:
+                        continue
+                    if scenario == SCENARIO_RAW:
+                        evaluated += 1
+                    if not out:
+                        # Юнита нет у игрока (не открыт) — все его требования не выполнены.
+                        out = [{"key": k, "value": "нет юнита", "margin": None, "ok": False}
+                               for k, source in keys if source not in skip_plates]
+                    for item in out:
+                        ok = None if item["ok"] is None else int(bool(item["ok"]))
+                        values.append((scenario, ally_code, item["key"], item["value"], item["margin"], ok))
             players.append((ally_code, name, None if evaluated else "нет отряда плейта"))
             await asyncio.sleep(0)
 
@@ -350,14 +374,16 @@ async def take_snapshot(bot_like, tracker_id: int, kind: str, taken_by: str | No
         conn = _connect()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO mod_progress_snapshots (tracker_id, version_id, taken_at, kind, taken_by)
-            VALUES (?, ?, ?, ?, ?)
-        """, (tracker_id, version["id"], now, kind, taken_by))
+            INSERT INTO mod_progress_snapshots (tracker_id, version_id, taken_at, kind, taken_by, scenarios)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (tracker_id, version["id"], now, kind, taken_by, ",".join(SCENARIOS)))
         snapshot_id = cursor.lastrowid
         cursor.executemany("INSERT OR REPLACE INTO mod_progress_players VALUES (?, ?, ?, ?)",
                            [(snapshot_id, a, n, reason) for a, n, reason in players])
         cursor.executemany("INSERT OR REPLACE INTO mod_progress_values VALUES (?, ?, ?, ?, ?, ?)",
-                           [(snapshot_id, *v) for v in values])
+                           [(snapshot_id, *v[1:]) for v in values if v[0] == SCENARIO_RAW])
+        cursor.executemany("INSERT OR REPLACE INTO mod_progress_scen_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+                           [(snapshot_id, *v) for v in values if v[0] != SCENARIO_RAW])
         cursor.execute("UPDATE mod_progress_trackers SET last_snapshot_at = ? WHERE id = ?", (now, tracker_id))
         conn.commit()
         conn.close()
@@ -366,15 +392,22 @@ async def take_snapshot(bot_like, tracker_id: int, kind: str, taken_by: str | No
 
 # ---------------- чтение для страниц ----------------
 
-def _snapshots(cursor, tracker_id: int) -> list[dict]:
+def scenario_or_default(scenario: str | None) -> str:
+    return scenario if scenario in SCENARIOS else SCENARIO_RAW
+
+
+def _snapshots(cursor, tracker_id: int, scenario: str = SCENARIO_RAW) -> list[dict]:
+    """Снимки трекера, в которых посчитан этот сценарий (старые — только «как есть»)."""
     cursor.execute("""
-        SELECT s.id, s.taken_at, s.kind, v.version_num, v.id
+        SELECT s.id, s.taken_at, s.kind, v.version_num, v.id, s.scenarios
         FROM mod_progress_snapshots s JOIN mod_progress_versions v ON v.id = s.version_id
         WHERE s.tracker_id = ? ORDER BY s.taken_at, s.id
     """, (tracker_id,))
     snaps = []
     prev_version = None
-    for sid, taken_at, kind, vnum, vid in cursor.fetchall():
+    for sid, taken_at, kind, vnum, vid, scenarios in cursor.fetchall():
+        if scenario not in (scenarios or SCENARIO_RAW).split(","):
+            continue
         snaps.append({"id": sid, "taken_at": taken_at, "date": msk_short(taken_at),
                       "datetime": msk_date(taken_at, True), "kind": kind, "version_num": vnum, "version_id": vid,
                       "plate_changed": prev_version is not None and vnum != prev_version})
@@ -396,14 +429,17 @@ def _versions(cursor, tracker_id: int) -> dict[int, dict]:
             for vid, num, rj, created_at in cursor.fetchall()}
 
 
-def _snapshot_values(cursor, snapshot_id: int, ally_code: str | None = None) -> dict:
+def _snapshot_values(cursor, snapshot_id: int, ally_code: str | None = None, scenario: str = SCENARIO_RAW) -> dict:
     """{ally_code: {req_key: (value, margin, ok)}}"""
-    if ally_code:
-        cursor.execute("SELECT ally_code, req_key, value, margin, ok FROM mod_progress_values WHERE snapshot_id = ? AND ally_code = ?",
-                       (snapshot_id, ally_code))
+    if scenario == SCENARIO_RAW:
+        sql, args = "SELECT ally_code, req_key, value, margin, ok FROM mod_progress_values WHERE snapshot_id = ?", [snapshot_id]
     else:
-        cursor.execute("SELECT ally_code, req_key, value, margin, ok FROM mod_progress_values WHERE snapshot_id = ?",
-                       (snapshot_id,))
+        sql = "SELECT ally_code, req_key, value, margin, ok FROM mod_progress_scen_values WHERE snapshot_id = ? AND scenario = ?"
+        args = [snapshot_id, scenario]
+    if ally_code:
+        sql += " AND ally_code = ?"
+        args.append(ally_code)
+    cursor.execute(sql, args)
     result = {}
     for ac, key, value, margin, ok in cursor.fetchall():
         result.setdefault(ac, {})[key] = (value, margin, ok)
@@ -422,26 +458,36 @@ def _counts(player_values: dict, reqs_by_key: dict) -> tuple[int, int]:
     return done, total
 
 
-def guild_summary(guild_id: int, tracker_id: int) -> dict | None:
-    """Сводка по гильдии на последнем снимке: выполнено X из Y обязательных, сдвиг с прошлого
-    и с первого снимка, что не выполнено (по персонажам)."""
+def _gap_text(value, margin, req: dict) -> str:
+    """Сколько не хватает до нормы — только у числовых требований (стат, сравнение с
+    персонажем: норма начинается с оператора); у основ, сетов, омикронов — пусто."""
+    if margin is None or margin >= 0 or not value or req["req"][:1] not in ("<", ">", "="):
+        return ""
+    return _fmt_compact(-margin)
+
+
+def guild_summary(guild_id: int, tracker_id: int, scenario: str = SCENARIO_RAW) -> dict | None:
+    """Сводка по гильдии на последнем снимке сценария: выполнено X из Y обязательных, сдвиг
+    с прошлого и с первого снимка, что не выполнено (по персонажам, с нехваткой)."""
     tracker = get_tracker(guild_id, tracker_id)
     if not tracker:
         return None
     conn = _connect()
     cursor = conn.cursor()
-    snaps = _snapshots(cursor, tracker_id)
+    snaps = _snapshots(cursor, tracker_id, scenario)
+    all_snaps = _snapshots(cursor, tracker_id) if scenario != SCENARIO_RAW else snaps
     versions = _versions(cursor, tracker_id)
     result = {"tracker": tracker, "snapshots": snaps, "players": [], "skipped": [],
+              "scenario": scenario, "older_snapshots": len(all_snaps) - len(snaps),
               "changes": [v for v in sorted(versions.values(), key=lambda v: v["num"]) if v["num"] > 1]}
     if not snaps:
         conn.close()
         return result
     latest, prev, first = snaps[-1], (snaps[-2] if len(snaps) > 1 else None), snaps[0]
     reqs_latest = {r["key"]: r for r in versions[latest["version_id"]]["reqs"]}
-    cur = _snapshot_values(cursor, latest["id"])
-    prev_vals = _snapshot_values(cursor, prev["id"]) if prev else {}
-    first_vals = _snapshot_values(cursor, first["id"]) if len(snaps) > 1 else {}
+    cur = _snapshot_values(cursor, latest["id"], scenario=scenario)
+    prev_vals = _snapshot_values(cursor, prev["id"], scenario=scenario) if prev else {}
+    first_vals = _snapshot_values(cursor, first["id"], scenario=scenario) if len(snaps) > 1 else {}
     reqs_prev = {r["key"]: r for r in versions[prev["version_id"]]["reqs"]} if prev else {}
     reqs_first = {r["key"]: r for r in versions[first["version_id"]]["reqs"]}
     names = database.get_player_names(guild_id)
@@ -454,12 +500,16 @@ def guild_summary(guild_id: int, tracker_id: int) -> dict | None:
         pv = cur.get(ally_code, {})
         done, total = _counts(pv, reqs_latest)
         missing_by_char = {}
-        for key, (value, _margin, ok) in pv.items():
-            req = reqs_latest.get(key)
-            if req and req["priority"] == "required" and ok == 0:
-                missing_by_char.setdefault(req["char"], []).append(f"{req['label']} {req['req']} (сейчас {value or '—'})")
-        entry = {"ally_code": ally_code, "name": name, "done": done, "total": total,
-                 "missing": sorted(missing_by_char.items(), key=lambda x: -len(x[1]))}
+        for key, req in reqs_latest.items():  # порядок плейта
+            if key not in pv or req["priority"] != "required":
+                continue
+            value, margin, ok = pv[key]
+            if ok == 0:
+                missing_by_char.setdefault(req["char"], []).append(
+                    {"label": req["label"], "req": req["req"], "value": value or "—", "gap": _gap_text(value, margin, req)})
+        missing = sorted(missing_by_char.items(), key=lambda x: -len(x[1]))
+        entry = {"ally_code": ally_code, "name": name, "done": done, "total": total, "missing": missing,
+                 "missing_count": sum(len(items) for _char, items in missing)}
         if prev and ally_code in prev_vals:
             entry["delta_prev"] = done - _counts(prev_vals[ally_code], reqs_prev)[0]
         if first_vals and ally_code in first_vals:
@@ -491,7 +541,8 @@ def _cell_state(ok, margin, prev_margin, prev_ok) -> str:
     return "stall"
 
 
-def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | None = 6) -> dict | None:
+def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | None = 6,
+                 scenario: str = SCENARIO_RAW) -> dict | None:
     """Таблица игрока: строки — требования (по персонажам), колонки — снимки (последние
     limit, None — все). Норма берётся из версии каждого снимка; если в колонке она другая,
     чем в последней версии, — показывается в ячейке."""
@@ -500,7 +551,7 @@ def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | No
         return None
     conn = _connect()
     cursor = conn.cursor()
-    snaps = _snapshots(cursor, tracker_id)
+    snaps = _snapshots(cursor, tracker_id, scenario)
     versions = _versions(cursor, tracker_id)
     cursor.execute("""
         SELECT p.snapshot_id, p.name, p.skip_reason FROM mod_progress_players p
@@ -509,10 +560,11 @@ def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | No
     """, (tracker_id, ally_code))
     presence = {sid: (name, reason) for sid, name, reason in cursor.fetchall()}
     snaps = [s for s in snaps if s["id"] in presence]
-    all_values = {s["id"]: _snapshot_values(cursor, s["id"], ally_code).get(ally_code, {}) for s in snaps}
+    all_values = {s["id"]: _snapshot_values(cursor, s["id"], ally_code, scenario).get(ally_code, {}) for s in snaps}
     conn.close()
     if not snaps:
-        return {"tracker": tracker, "columns": [], "groups": [], "name": ally_code, "hidden": 0}
+        return {"tracker": tracker, "columns": [], "groups": [], "name": ally_code, "ally_code": ally_code,
+                "hidden": 0, "scenario": scenario}
 
     name = database.get_player_names(guild_id).get(ally_code) or presence[snaps[-1]["id"]][0] or ally_code
     shown = snaps if limit is None else snaps[-limit:]
@@ -560,4 +612,4 @@ def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | No
         group["rows"].append({"label": m["label"], "req": m["req"], "priority": m["priority"],
                               "removed": m["removed"], "cells": cells})
     return {"tracker": tracker, "name": name, "ally_code": ally_code, "columns": columns,
-            "groups": list(groups.values()), "hidden": hidden}
+            "groups": list(groups.values()), "hidden": hidden, "scenario": scenario}

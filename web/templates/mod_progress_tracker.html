@@ -1,14 +1,16 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
+{% import "_mod_progress_scen.html" as scen %}
 {% block title %}{{ tracker.plate_name }} — прогресс модинга — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% macro delta(v) %}{% if v is none %}<span class="muted">—</span>{% elif v > 0 %}<span class="mp-plus">+{{ v }}</span>{% elif v < 0 %}<span class="mp-minus">−{{ -v }}</span>{% else %}<span class="muted">0</span>{% endif %}{% endmacro %}
 {% block content %}
+<div id="mp-module">
     <section class="page-hero page-hero-light">
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Прогресс модинга</p>
-                <h1>{{ tracker.plate_name }}{% call ui.help(side="left") %}<p>Считаются только обязательные требования плейта, «как есть» — как в /статы. «Сдвиг» — сколько требований игрок закрыл с прошлого и с первого снимка (минус — стало меньше).</p><p>Игроки без отряда плейта не проверяются. Нажмите на игрока — откроется его таблица по датам.</p>{% endcall %}</h1>
+                <h1>{{ tracker.plate_name }}{% call ui.help(side="left") %}<p>Считаются только обязательные требования плейта. Сценарий — как в /статы: «как есть» (как в ХБ), «релик вверх» тем, кто ниже цели плейта, или полный подгон релика вверх и вниз. Каждый снимок считается сразу во всех трёх. «Сдвиг» — сколько требований игрок закрыл с прошлого и с первого снимка (минус — стало меньше).</p><p>Игроки без отряда плейта не проверяются. Нажмите на игрока — откроется его таблица по датам.</p>{% endcall %}</h1>
                 <p class="page-hero-lead">Автоснимки: {{ tracker.period_label }}. Создан {{ tracker.created_msk }}.</p>
             </div>
         </div>
@@ -21,6 +23,8 @@
         {% endif %}
         <div class="hero-links"><a class="hero-link" href="/mod-progress">Все трекеры</a><a class="hero-link" href="/plates">Плейты</a></div>
     </section>
+
+    {{ scen.switch(scenarios, scenario) }}
 
     {% if plate_missing %}<p class="config-warning">Плейта «{{ tracker.plate_name }}» больше нет или в нём нет требований — новые снимки идут по последней сохранённой версии.</p>{% endif %}
     {% if changes %}
@@ -46,7 +50,7 @@
     </div>
 
     {% if not snapshots %}
-        <p class="empty-state">Снимков пока нет.</p>
+        <p class="empty-state">{% if older_snapshots %}В этом сценарии снимков ещё нет: снимки, снятые раньше ({{ older_snapshots }}), посчитаны только «как есть». Нажмите «Снять сейчас».{% else %}Снимков пока нет.{% endif %}</p>
     {% else %}
         <div class="panel">
             <table class="data cards-on-phone">
@@ -54,15 +58,19 @@
                 <tbody>
                     {% for p in players %}
                         <tr>
-                            <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}">{{ p.name }}</a></div></td>
+                            <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}?scenario={{ scenario }}">{{ p.name }}</a></div></td>
                             <td data-label="Выполнено" class="nowrap"><div>{% if p.total and p.done == p.total %}<span class="mp-plus">{{ p.done }} из {{ p.total }}</span>{% else %}{{ p.done }} из {{ p.total }}{% endif %}</div></td>
                             <td data-label="Сдвиг" class="nowrap"><div>{{ delta(p.get("delta_prev")) }} с прошлого{% if snapshots|length > 2 %} · {{ delta(p.get("delta_first")) }} с первого{% endif %}</div></td>
-                            <td data-label="Не выполнено"><div>
+                            <td data-label="Не выполнено"><div class="mp-miss">
                                 {% if not p.missing %}<span class="muted">всё выполнено</span>
                                 {% else %}
-                                    <details class="mp-missing"><summary>{{ p.missing|length }} перс.: {{ p.missing|map("first")|list|join(", ")|truncate(60) }}</summary>
-                                        <ul>{% for char, items in p.missing %}<li><strong>{{ char }}</strong>: {{ items|join("; ") }}</li>{% endfor %}</ul>
-                                    </details>
+                                    {% for char, items in p.missing %}
+                                        {% if loop.index == 3 %}<details><summary>ещё {{ loop.length - 2 }} перс.</summary>{% endif %}
+                                        <div class="mp-miss-char"><strong>{{ char }}</strong>
+                                            <ul>{% for it in items %}<li>{{ it.label }} {{ it.req }}: <span class="mp-cell mp-stall">{{ it.value }}</span>{% if it.gap %} <span class="mp-minus">не хватает {{ it.gap }}</span>{% endif %}</li>{% endfor %}</ul>
+                                        </div>
+                                        {% if loop.last and loop.length > 2 %}</details>{% endif %}
+                                    {% endfor %}
                                 {% endif %}
                             </div></td>
                         </tr>
@@ -87,4 +95,5 @@
             </ul>
         </details>
     {% endif %}
+</div>
 {% endblock %}

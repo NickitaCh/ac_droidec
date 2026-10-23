@@ -1,0 +1,8 @@
+{# Переключатель сценария «Прогресса модинга» (те же сценарии, что в /статы). extra — прочие параметры ссылки. #}
+{% macro switch(scenarios, scenario, extra="") %}
+<div class="segmented-toggle mp-scen">
+    <div class="segmented-toggle-options">
+        {% for key, label in scenarios.items() %}<a href="?scenario={{ key }}{{ extra }}" data-ajax-swap="mp-module"{% if key == scenario %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+    </div>
+</div>
+{% endmacro %}

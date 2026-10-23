@@ -2756,8 +2756,12 @@ dialog.feedback-dialog > form { max-width: none; }
 form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; margin: 0; gap: 0.4em; }
 .mp-plus { color: var(--status-good); font-weight: 600; }
 .mp-minus { color: var(--status-critical); font-weight: 600; }
-.mp-missing > summary { cursor: pointer; }
-.mp-missing ul { margin: 0.3em 0 0; padding-left: 1.2em; font-size: 0.9em; }
+.mp-scen .segmented-toggle-options { flex-wrap: wrap; }
+.mp-miss { display: flex; flex-direction: column; gap: 0.35em; align-items: flex-start; text-align: left; }
+.mp-miss-char ul { margin: 0.1em 0 0; padding-left: 1.1em; font-size: 0.9em; }
+.mp-miss-char li { margin: 0.1em 0; }
+.mp-miss details > summary { cursor: pointer; color: var(--fg-secondary); }
+.mp-miss details[open] { display: flex; flex-direction: column; gap: 0.35em; }
 .mp-snaps { margin: 0.5em 0 0; padding-left: 1.2em; }
 .mp-snaps li { margin: 0.2em 0; }
 .mp-legend { display: flex; flex-wrap: wrap; gap: 0.5em; }
