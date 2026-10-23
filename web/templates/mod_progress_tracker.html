@@ -4,7 +4,7 @@
 {% block title %}{{ tracker.plate_name }} — прогресс модинга — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% macro delta(v) %}{% if v is none %}<span class="muted">—</span>{% elif v > 0 %}<span class="mp-plus">+{{ v }}</span>{% elif v < 0 %}<span class="mp-minus">−{{ -v }}</span>{% else %}<span class="muted">0</span>{% endif %}{% endmacro %}
-{% macro changed_list(items) %}{% if items %}<details><summary>что изменилось ({{ items|length }})</summary><ul>{% for c in items %}<li class="{{ 'mp-plus' if c.to == 'ok' else 'mp-minus' }}">{{ '✅' if c.to == 'ok' else '❌' }} {{ c.label }} {{ c.req }} — {{ c.char }}</li>{% endfor %}</ul></details>{% endif %}{% endmacro %}
+{% macro changed_list(items) %}{% if items %}<ul>{% for c in items %}<li class="{{ 'mp-plus' if c.to == 'ok' else 'mp-minus' }}">{{ '✅' if c.to == 'ok' else '❌' }} {{ c.label }} {{ c.req }} — {{ c.char }}</li>{% endfor %}</ul>{% endif %}{% endmacro %}
 {% block content %}
 <div id="mp-module">
     <section class="page-hero page-hero-light">
@@ -53,6 +53,9 @@
     {% if not snapshots %}
         <p class="empty-state">{% if older_snapshots %}В этом сценарии снимков ещё нет: снимки, снятые раньше ({{ older_snapshots }}), посчитаны только «как есть». Нажмите «Снять сейчас».{% else %}Снимков пока нет.{% endif %}</p>
     {% else %}
+        {% set latest_snap = snapshots[-1] %}
+        {% set prev_snap = snapshots[-2] if snapshots|length > 1 else None %}
+        {% set first_snap = snapshots[0] %}
         <div class="panel">
             <table class="data cards-on-phone">
                 <thead><tr><th>Игрок</th><th>Выполнено</th><th>Сдвиг</th><th>Не выполнено</th></tr></thead>
@@ -62,10 +65,10 @@
                             <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}?scenario={{ scenario }}">{{ p.name }}</a></div></td>
                             <td data-label="Выполнено" class="nowrap"><div>{% if p.total and p.done == p.total %}<span class="mp-plus">{{ p.done }} из {{ p.total }}</span>{% else %}{{ p.done }} из {{ p.total }}{% endif %}</div></td>
                             <td data-label="Сдвиг"><div class="mp-sdvig">
-                                <div class="nowrap">{{ delta(p.get("delta_prev")) }} с прошлого</div>
+                                <div class="nowrap">{{ delta(p.get("delta_prev")) }} с прошлого{% if prev_snap %} <span class="mp-note muted">({{ prev_snap.datetime }} → {{ latest_snap.datetime }})</span>{% endif %}</div>
                                 {{ changed_list(p.get("changed_prev")) }}
                                 {% if snapshots|length > 2 %}
-                                    <div class="nowrap">{{ delta(p.get("delta_first")) }} с первого</div>
+                                    <div class="nowrap">{{ delta(p.get("delta_first")) }} с первого <span class="mp-note muted">({{ first_snap.datetime }} → {{ latest_snap.datetime }})</span></div>
                                     {{ changed_list(p.get("changed_first")) }}
                                 {% endif %}
                             </div></td>
