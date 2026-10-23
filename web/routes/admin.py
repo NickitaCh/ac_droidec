@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from command_catalog import COMMAND_GROUPS
-from services import datacron_catalog, datacron_shorts, feature_flags, fun_features, openrouter_router, openrouter_vision, tb_schedule
+from services import datacron_catalog, datacron_shorts, feature_flags, fun_features, openrouter_router, openrouter_vision, tb_schedule, unit_aliases
 from services.guild_admin import (
     add_grant,
     add_guild,
@@ -581,3 +581,64 @@ async def ai_models_page(request: Request, user: dict = Depends(require_super_ad
         "used_today": database.get_openrouter_requests_today(),
         "daily_limit": openrouter_vision.OPENROUTER_DAILY_REQUEST_LIMIT,
     })
+
+
+# =====================================================================
+# Сокращения юнитов (JML, «млюк») — глобальные, см. services/unit_aliases.py.
+# Правка заменяет весь список юнита (английские + русские); «Вернуть встроенные» удаляет правку.
+# =====================================================================
+@router.get("/unit-aliases", response_class=HTMLResponse)
+async def unit_aliases_page(request: Request, user: dict = Depends(require_super_admin)):
+    units = database.search_game_units("", limit=5000)
+    names = dict(units)
+    custom = unit_aliases.custom_ids()
+    rows = []
+    for base_id, items in unit_aliases.table().items():
+        rows.append({
+            "base_id": base_id,
+            "name": names.get(base_id) or base_id,
+            "en": [a for a in items if not unit_aliases.is_russian(a)],
+            "ru": [a for a in items if unit_aliases.is_russian(a)],
+            "custom": base_id in custom,
+            "builtin": base_id in unit_aliases.ALIASES,
+        })
+    # Юниты, у которых правкой убрали все сокращения, — чтобы их можно было вернуть.
+    for base_id in custom:
+        if not unit_aliases.aliases(base_id) and base_id in unit_aliases.ALIASES:
+            rows.append({"base_id": base_id, "name": names.get(base_id) or base_id, "en": [], "ru": [], "custom": True, "builtin": True})
+    rows.sort(key=lambda r: r["name"].lower())
+    return templates.TemplateResponse(request, "admin_unit_aliases.html", {
+        "user": user,
+        "rows": rows,
+        "units": sorted(units, key=lambda u: u[1].lower()),
+        "max_len": unit_aliases.MAX_ALIAS_LEN,
+        "saved": request.query_params.get("saved"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/unit-aliases/save", response_class=HTMLResponse)
+async def unit_aliases_save(
+    request: Request,
+    unit: str = Form(default=""),
+    en: str = Form(default=""),
+    ru: str = Form(default=""),
+    reset: str = Form(default=""),
+    user: dict = Depends(require_super_admin),
+):
+    # «Имя [BASE_ID]» из списка или голый base_id.
+    raw = unit.strip()
+    base_id = raw[raw.rfind("[") + 1:raw.rfind("]")].strip() if raw.endswith("]") and "[" in raw else raw.upper()
+    known = dict(database.search_game_units("", limit=5000))
+    if base_id not in known:
+        return RedirectResponse(f"/admin/unit-aliases?{urlencode({'error': f'Юнит «{raw}» не найден — выберите из списка.'})}", status_code=303)
+    if reset:
+        database.save_custom_unit_aliases(base_id, None, updated_by=user["discord_id"])
+    else:
+        items = unit_aliases.parse(en + "," + ru)
+        error = unit_aliases.validate(base_id, items, known)
+        if error:
+            return RedirectResponse(f"/admin/unit-aliases?{urlencode({'error': error})}", status_code=303)
+        database.save_custom_unit_aliases(base_id, items, updated_by=user["discord_id"])
+    unit_aliases.invalidate()
+    return RedirectResponse(f"/admin/unit-aliases?{urlencode({'saved': base_id})}#ua-{base_id}", status_code=303)

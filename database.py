@@ -3873,6 +3873,64 @@ def get_datacron_shorts_version() -> str:
 
 
 # =====================================================================
+# СОКРАЩЕНИЯ ЮНИТОВ (JML, «млюк»): правки супер-админа на /admin/unit-aliases поверх
+# встроенного списка services/unit_aliases.py. Строка целиком заменяет встроенный
+# список юнита (пустой список = у юнита нет сокращений); нет строки — встроенный.
+# Глобальные, как сокращения ДК; версия в bot_state 'unit_aliases_version' (guild_id=0).
+# =====================================================================
+UNIT_ALIASES_VERSION_KEY = "unit_aliases_version"
+
+
+def _ensure_unit_aliases_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS unit_aliases (
+            base_id TEXT PRIMARY KEY,
+            aliases_json TEXT NOT NULL,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+
+def get_custom_unit_aliases() -> dict[str, list[str]]:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_unit_aliases_table(cursor)
+    conn.commit()
+    cursor.execute("SELECT base_id, aliases_json FROM unit_aliases")
+    rows = cursor.fetchall()
+    conn.close()
+    return {base_id: json.loads(raw) for base_id, raw in rows}
+
+
+def save_custom_unit_aliases(base_id: str, aliases: list[str] | None, updated_by: str = None):
+    """aliases=None — удалить правку (вернуть встроенный список)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_unit_aliases_table(cursor)
+    _ensure_bot_state_table(cursor)
+    if aliases is None:
+        cursor.execute("DELETE FROM unit_aliases WHERE base_id = ?", (base_id,))
+    else:
+        cursor.execute("""
+            INSERT INTO unit_aliases (base_id, aliases_json, updated_by, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(base_id) DO UPDATE SET
+                aliases_json = excluded.aliases_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+        """, (base_id, json.dumps(aliases, ensure_ascii=False), updated_by))
+    cursor.execute(
+        "INSERT OR REPLACE INTO bot_state (guild_id, key, value) VALUES (0, ?, ?)",
+        (UNIT_ALIASES_VERSION_KEY, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_unit_aliases_version() -> str:
+    return get_bot_state(UNIT_ALIASES_VERSION_KEY, guild_id=0) or ""
+
+
+# =====================================================================
 # СТАТ-ТРЕБОВАНИЯ К ОБЫЧНЫМ ДАТАКРОНАМ: до 5 пар (stat_id из UnitStat-каталога,
 # минимальный % — мягкая проверка "больше или равно"). Отдельная дочерняя таблица,
 # а не колонка в datacron_requirements — на одно требование может быть до 5 строк.

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Сокращения юнитов — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Администрирование</p>
+                <h1>Сокращения юнитов {% call ui.help() %}По сокращению юнит находится в Discord (подсказки при вводе юнита), в Telegram-боте и в выборе юнита на сайте. Регистр, «ё», дефисы и пробелы не важны: «GL Rey» = «glrey». Одно сокращение — только у одного юнита. Изменения подхватываются в течение минуты, перезапуск не нужен.{% endcall %}</h1>
+                <p class="page-hero-lead">Юнитов с сокращениями: {{ rows|length }}. Правки общие для всех гильдий.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if saved %}<p class="muted">Сохранено: {{ saved }}.</p>{% endif %}
+
+    <div class="table-toolbar ua-toolbar">
+        <input type="search" id="ua-filter" placeholder="Поиск: юнит или сокращение" autocomplete="off">
+        <button type="button" id="ua-add">+ Добавить</button>
+    </div>
+
+    <div class="panel">
+        <table class="data cards-on-phone ua-table">
+            <thead>
+                <tr><th>Юнит</th><th>Английские</th><th>Русские</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                    <tr id="ua-{{ r.base_id }}" data-search="{{ (r.name ~ ' ' ~ r.base_id ~ ' ' ~ (r.en + r.ru)|join(' '))|lower }}">
+                        <td data-label="Юнит">
+                            <div>
+                                {{ r.name }}
+                                {% if r.custom %}<span class="badge badge-ok">изменено</span>{% endif %}
+                                <div class="muted ua-id">{{ r.base_id }}</div>
+                            </div>
+                        </td>
+                        <td data-label="Английские"><div>{{ r.en|join(", ") or "—" }}</div></td>
+                        <td data-label="Русские"><div>{{ r.ru|join(", ") or "—" }}</div></td>
+                        <td>
+                            <button type="button" class="button-secondary ua-edit"
+                                    data-unit="{{ r.name }} [{{ r.base_id }}]"
+                                    data-en="{{ r.en|join(', ') }}" data-ru="{{ r.ru|join(', ') }}"
+                                    data-resettable="{{ '1' if r.custom and r.builtin else '' }}">Изменить</button>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="empty-state" id="ua-empty" hidden>Ничего не найдено.</p>
+    </div>
+
+    <datalist id="ua-units">
+        {% for base_id, name in units %}<option value="{{ name }} [{{ base_id }}]"></option>{% endfor %}
+    </datalist>
+
+    <dialog class="edit-modal ua-dialog" id="ua-dialog">
+        <form method="post" action="/admin/unit-aliases/save" class="ua-form">
+            <div class="edit-modal-header">
+                <h3 id="ua-dialog-title">Сокращения</h3>
+                <button type="button" class="button-secondary" data-ua-close>✕</button>
+            </div>
+            <div class="edit-modal-body">
+                <label>Юнит
+                    <input type="text" name="unit" id="ua-unit" list="ua-units" required autocomplete="off" placeholder="Начните вводить имя">
+                </label>
+                <label>Английские (через запятую)
+                    <input type="text" name="en" id="ua-en" autocomplete="off" placeholder="JML, JMLS">
+                </label>
+                <label>Русские (через запятую)
+                    <input type="text" name="ru" id="ua-ru" autocomplete="off" placeholder="млюк, мастер люк">
+                </label>
+                <p class="muted">До {{ max_len }} символов в сокращении. Очистите оба поля, чтобы убрать все сокращения юнита.</p>
+            </div>
+            <div class="edit-modal-footer">
+                <button type="submit" name="reset" value="1" class="button-secondary" id="ua-reset" formnovalidate>Вернуть встроенные</button>
+                <button type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script>
+    (function () {
+        const dialog = document.getElementById("ua-dialog");
+        const unit = document.getElementById("ua-unit");
+        const en = document.getElementById("ua-en");
+        const ru = document.getElementById("ua-ru");
+        const reset = document.getElementById("ua-reset");
+        const title = document.getElementById("ua-dialog-title");
+
+        function open(data) {
+            unit.value = data.unit || "";
+            unit.readOnly = !!data.unit;
+            en.value = data.en || "";
+            ru.value = data.ru || "";
+            reset.hidden = !data.resettable;
+            title.textContent = data.unit ? "Изменить сокращения" : "Добавить сокращения";
+            dialog.showModal();
+            (data.unit ? en : unit).focus();
+        }
+        document.getElementById("ua-add").addEventListener("click", () => open({}));
+        document.querySelectorAll(".ua-edit").forEach((btn) => btn.addEventListener("click", () => open(btn.dataset)));
+        dialog.querySelector("[data-ua-close]").addEventListener("click", () => dialog.close());
+        dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+
+        // Выбор юнита, у которого сокращения уже есть, — подставить их, а не затереть.
+        unit.addEventListener("change", () => {
+            const btn = Array.from(document.querySelectorAll(".ua-edit")).find((b) => b.dataset.unit === unit.value);
+            if (btn) { en.value = btn.dataset.en; ru.value = btn.dataset.ru; reset.hidden = !btn.dataset.resettable; }
+        });
+
+        const filter = document.getElementById("ua-filter");
+        const rows = Array.from(document.querySelectorAll(".ua-table tbody tr"));
+        filter.addEventListener("input", () => {
+            const q = filter.value.trim().toLowerCase().replaceAll("ё", "е");
+            let shown = 0;
+            rows.forEach((tr) => {
+                const hit = !q || tr.dataset.search.replaceAll("ё", "е").includes(q);
+                tr.hidden = !hit;
+                if (hit) shown++;
+            });
+            document.getElementById("ua-empty").hidden = shown > 0;
+        });
+    })();
+    </script>
+{% endblock %}
