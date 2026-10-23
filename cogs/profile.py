@@ -13,7 +13,6 @@ from disnake.ext import commands
 import database
 import stat_engine
 import guild_resolver
-from cogs.violations import autocomplete_players
 from services import player_profile as pp
 from services import profile_image
 
@@ -40,8 +39,8 @@ class ProfileCog(commands.Cog):
     async def profile(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Пусто → вы (/регистрация)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника любого игрока, в том числе не из гильдии"),
+        участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
+        аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
         гильдия: bool = commands.Param(default=False, description="Сводка по всей гильдии: итоги, средний игрок, средние статы ГЛ и меты"),
     ):
         await inter.response.defer()
@@ -56,27 +55,18 @@ class ProfileCog(commands.Cog):
             await self._guild_profile(inter, guild_id, ctx)
             return
 
-        if аликод is not None:
-            if игрок is not None:
-                await inter.edit_original_response("❌ Укажите либо игрока из списка, либо код союзника — не оба сразу.")
-                return
-            ally_code = guild_resolver.normalize_ally_code(аликод)
-            if ally_code is None:
-                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return
-        elif игрок is None:
+        ally_code, _name, error = guild_resolver.target_player(участник, аликод, guild_id)
+        if error:
+            await inter.edit_original_response(error)
+            return
+        if ally_code is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
                 await inter.edit_original_response(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите игрока или код союзника."
+                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите участника или код союзника."
                 )
                 return
             ally_code = registration[0]
-        else:
-            ally_code = self.bot.guild_roster_caches.get(guild_id, {}).get(игрок)
-            if not ally_code:
-                await inter.edit_original_response("❌ Игрок не найден в составе гильдии.")
-                return
 
         try:
             player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(ally_code))

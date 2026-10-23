@@ -11,7 +11,6 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
-from cogs.violations import autocomplete_players
 from services import activity_diff, guild_units_image, tb_covert
 
 STATUS_ICON = {"ready": "✅", "short": "⚠️", "missing": "❌"}
@@ -41,8 +40,8 @@ class TBReadinessCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         планета: str = commands.Param(default=None, description="Планета (пусто → все со спецмиссиями)", autocomplete=autocomplete_covert_planets),
         этап: int = commands.Param(default=None, ge=1, le=6, description="Этап ВИ (пусто → все этапы)"),
-        игрок: str = commands.Param(default=None, description="Один игрок гильдии — разбор, чего не хватает", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника любого игрока вместо выбора из списка"),
+        участник: disnake.User = commands.Param(default=None, description="Один игрок — разбор, чего не хватает: человек в Discord (по его /регистрация)"),
+        аликод: str = commands.Param(default=None, description="Один игрок — разбор, чего не хватает: код союзника (9 цифр)"),
     ):
         await inter.response.defer()
         guild_id = await guild_resolver.require_guild_id(inter)
@@ -63,8 +62,8 @@ class TBReadinessCog(commands.Cog):
                 f"❌ У планеты {tb_covert.planet_ru(planet)} нет спецмиссий на {этап} этапе." if planet
                 else f"На {этап} этапе спецмиссий нет.")
             return
-        if игрок or аликод:
-            await self._player(inter, guild_id, ms, игрок, аликод)
+        if участник or аликод:
+            await self._player(inter, guild_id, ms, участник, аликод)
             return
 
         r = await asyncio.to_thread(tb_covert.guild_grid, guild_id, этап, planet)
@@ -98,19 +97,11 @@ class TBReadinessCog(commands.Cog):
             file=disnake.File(io.BytesIO(png), filename="tb_covert_ready.png"),
         )
 
-    async def _player(self, inter, guild_id: int, ms: list, игрок, аликод):
-        if аликод:
-            ally_code = guild_resolver.normalize_ally_code(аликод)
-            if ally_code is None:
-                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return
-        else:
-            cache = self.bot.guild_roster_caches.get(guild_id) or {}
-            ally_code = cache.get(игрок) if игрок in cache else None
-            if ally_code is None:
-                await inter.edit_original_response("❌ Игрок не найден — выберите его из списка.")
-                return
-        ally_code = str(ally_code)
+    async def _player(self, inter, guild_id: int, ms: list, участник, аликод):
+        ally_code, игрок, error = guild_resolver.target_player(участник, аликод, guild_id)
+        if error:
+            await inter.edit_original_response(error)
+            return
         roster = await asyncio.to_thread(database.get_player_units, ally_code)
         note = "данные ежечасного обновления"
         if not roster:  # не из гильдии — берём из игры

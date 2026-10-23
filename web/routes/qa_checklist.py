@@ -71,7 +71,6 @@ PAGES = [
     ("plate_detail", "Модули — карточка плейта (клик из списка)", "/plates/{plate_name}", "officers"),
     ("stats_check", "Модули — Статы", "/stats-check", "officers"),
     ("stats_relic", "Модули — Статы (релик)", "/stats-check/relic", "officers"),
-    ("mod_builder", "Модули — Калькулятор", "/mod-builder", "officers"),
     ("mod_search", "Модули — Поиск модулей", "/mod-search", "officers"),
     ("mod_analysis", "Модули — Анализ модинга", "/mod-analysis", "officers"),
     ("mod_scan", "Модули — Скан модулей (только AbsoluteChaos)", "/mod-scan", "officers"),
@@ -86,6 +85,7 @@ PAGES = [
     ("player_card", "Карточка игрока (клик из ростера/отчётов)", "/player/{ally_code}", "officers"),
     # ---- Доступно игрокам (get_current_user — любой залогиненный, не только офицер) ----
     ("subscribe", "Подписка", "/subscribe", "players"),
+    ("mod_builder", "Модули — Калькулятор (участникам: своя история, пресеты только применить)", "/mod-builder", "players"),
     # ---- Доступно всем (без логина) ----
     ("home", "Главная", "/", "everyone"),
     ("start", "Начало работы", "/start", "everyone"),

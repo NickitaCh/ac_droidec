@@ -151,14 +151,16 @@ def _preset_rows(guild_id: int):
     ]
 
 
-def _history_rows(guild_id: int):
+def _history_rows(guild_id: int, only_by: str | None = None):
+    """only_by — discord_id: участнику (не офицеру) показываем только его расчёты."""
     return [
         {
             "id": hid, "char_name": _char_label(char_key), "relic": relic, "rarity": rarity,
             "sets_summary": _sets_summary(sets), "primaries_summary": _primaries_summary(primaries),
             "stats_summary": _stats_summary(stats), "created_at": created_at,
         }
-        for hid, char_key, relic, sets, primaries, stats, _created_by, created_at, rarity in database.get_stat_hypothetical_history(guild_id=guild_id)
+        for hid, char_key, relic, sets, primaries, stats, created_by, created_at, rarity in database.get_stat_hypothetical_history(guild_id=guild_id)
+        if only_by is None or str(created_by) == only_by
     ]
 
 
@@ -256,8 +258,12 @@ def _redirect_qs(mapping) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
-async def builder_form(request: Request, user: dict = Depends(feature_flags.require_feature("mod_builder"))):
+async def builder_form(request: Request, user: dict = Depends(feature_flags.require_feature_member("mod_builder"))):
     guild_id = user["guild_id"]
+    # Участникам калькулятор открыт (2026-10-23), но история — только своя, а пресеты
+    # гильдии — только применить: сохраняют и удаляют их офицеры.
+    is_officer = user.get("tier") == "officer"
+    history_owner = None if is_officer else str(user["discord_id"])
     qp = request.query_params
 
     character = qp.get("character", "")
@@ -273,7 +279,7 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
     reopened_from_history = False
     if history_id:
         entry = database.get_stat_hypothetical_history_entry(int(history_id), guild_id=guild_id)
-        if entry:
+        if entry and (history_owner is None or str(entry[6]) == history_owner):
             _, character, relic_int, set_counts, primaries, manual_stats, _, _, rarity_int = entry
             relic_raw = str(relic_int)
             rarity_raw = str(rarity_int)
@@ -307,7 +313,8 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
         "primaries": primaries,
         "manual_stat_rows": [(name, _fmt_value(value)) for name, value in manual_stats.items()] if manual_stats else [("", "")],
         "presets": _preset_rows(guild_id),
-        "history": _history_rows(guild_id),
+        "history": _history_rows(guild_id, history_owner),
+        "can_edit_presets": is_officer,
         "result": None,
         "loading": False,
         "error": qp.get("error"),
@@ -396,7 +403,7 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
 
     if not reopened_from_history:
         database.add_stat_hypothetical_history(character, relic, set_counts, primaries, manual_stats, user["discord_id"], guild_id=guild_id, rarity=rarity)
-        context["history"] = _history_rows(guild_id)
+        context["history"] = _history_rows(guild_id, history_owner)
 
     return templates.TemplateResponse(request, "stat_builder.html", context)
 

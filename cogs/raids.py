@@ -13,7 +13,6 @@ from disnake.ext import commands, tasks
 
 import database
 import guild_resolver
-from cogs.violations import autocomplete_players
 from services import feature_flags, guild_compare
 from services import raids as rs
 from services import guild_units, guild_units_image, raids_image
@@ -261,28 +260,21 @@ class RaidsCog(commands.Cog):
     async def raid_player(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        игрок: str = commands.Param(default=None, description="Игрок гильдии (пусто → вы)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника вместо выбора из списка"),
+        участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
+        аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
     ):
         await inter.response.defer()
         guild_id = await guild_resolver.require_feature(inter, "raids")
         if guild_id is None:
             return
-        if аликод:
-            ally_code = guild_resolver.normalize_ally_code(аликод)
-            if ally_code is None:
-                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return
-        elif игрок:
-            cache = self.bot.guild_roster_caches.get(guild_id) or {}
-            ally_code = cache.get(игрок) if игрок in cache else None
-            if ally_code is None:
-                await inter.edit_original_response("❌ Игрок не найден — выберите его из списка.")
-                return
-        else:
+        ally_code, _name, error = guild_resolver.target_player(участник, аликод, guild_id)
+        if error:
+            await inter.edit_original_response(error)
+            return
+        if ally_code is None:
             registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not registration:
-                await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация` или выберите игрока.")
+                await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация` или укажите участника.")
                 return
             ally_code = registration[0]
         ally_code = str(ally_code)

@@ -52,6 +52,9 @@
             {% if user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
                 <a href="/conquest" title="Завоевание"><span class="nav-icon">🏆</span><span class="nav-label">Завоевание</span></a>
             {% endif %}
+            {% if user and user.tier == "member" %}
+                <a href="/mod-builder" title="Калькулятор модулей"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор модулей</span></a>
+            {% endif %}
             {% if user %}
                 {% if user.tier == "officer" %}
                     <a href="/activity" title="Активность"><span class="nav-icon">📈</span><span class="nav-label">Активность</span></a>

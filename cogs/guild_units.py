@@ -14,7 +14,6 @@ import database
 import guild_resolver
 import stat_engine
 from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
-from cogs.violations import autocomplete_players
 from services import faction as faction_svc
 from services import faction_image, guild_units, guild_units_image, journey_guide, unit_aliases
 
@@ -127,8 +126,8 @@ class GuildUnitsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         цель: str = commands.Param(description="ГЛ, флагман или персонаж из «Руководства»", autocomplete=autocomplete_guides),
-        игрок: str = commands.Param(default=None, description="Игрок гильдии (пусто → вы)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника любого игрока"),
+        участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
+        аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
         гильдия: bool = commands.Param(default=False, description="Вся гильдия одной таблицей вместо одного игрока"),
     ):
@@ -142,7 +141,7 @@ class GuildUnitsCog(commands.Cog):
         if гильдия:
             await self._guild_readiness(inter, guild_id, цель)
             return
-        got = await self._player_roster(inter, guild_id, игрок, аликод, альт)
+        got = await self._player_roster(inter, guild_id, участник, аликод, альт)
         if got is None:
             return
         player, roster, note = got
@@ -155,29 +154,22 @@ class GuildUnitsCog(commands.Cog):
             file=disnake.File(io.BytesIO(png), filename=f"ready_{цель}_{ally_code}.png"),
         )
 
-    async def _player_roster(self, inter, guild_id: int, игрок, аликод, альт):
+    async def _player_roster(self, inter, guild_id: int, участник, аликод, альт):
         """(player, {base_id: rosterUnit}, подпись о свежести) выбранного игрока или None —
         тогда ошибка уже отправлена. Без игрока — вы, «альт» — ваш второй аккаунт."""
-        if аликод:
-            ally_code = guild_resolver.normalize_ally_code(аликод)
-            if ally_code is None:
-                await inter.edit_original_response("❌ Код союзника должен состоять из 9 цифр.")
-                return None
-        elif игрок:
-            cache = self.bot.guild_roster_caches.get(guild_id) or {}
-            ally_code = cache.get(игрок) if игрок in cache else None
-            if ally_code is None:
-                await inter.edit_original_response("❌ Игрок не найден — выберите его из списка.")
-                return None
-        elif альт:
+        ally_code, _name, error = guild_resolver.target_player(участник, аликод, guild_id)
+        if error:
+            await inter.edit_original_response(error)
+            return None
+        if ally_code is None and альт:
             alt = await guild_resolver.require_alt(inter, "unit_forecast")
             if alt is None:
                 return None
             ally_code = alt["ally_code"]
-        else:
+        elif ally_code is None:
             reg = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
             if not reg:
-                await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация`, выберите игрока или укажите код союзника.")
+                await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация`, укажите участника или код союзника.")
                 return None
             ally_code = reg[0]
 
@@ -198,8 +190,8 @@ class GuildUnitsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         фракция: str = commands.Param(description="Принадлежность, профессия или вид", autocomplete=autocomplete_factions),
-        игрок: str = commands.Param(default=None, description="Игрок гильдии (пусто → вы)", autocomplete=autocomplete_players),
-        аликод: str = commands.Param(default=None, description="Код союзника любого игрока"),
+        участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
+        аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
@@ -210,7 +202,7 @@ class GuildUnitsCog(commands.Cog):
         if faction_id is None:
             await inter.edit_original_response("❌ Фракция не найдена — выберите её из списка.")
             return
-        got = await self._player_roster(inter, guild_id, игрок, аликод, альт)
+        got = await self._player_roster(inter, guild_id, участник, аликод, альт)
         if got is None:
             return
         player, roster, note = got

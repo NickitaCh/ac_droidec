@@ -36,6 +36,35 @@ def normalize_ally_code(raw: str | None) -> str | None:
     return digits if len(digits) == 9 else None
 
 
+def target_player(участник=None, аликод: str | None = None, guild_id: int | None = None):
+    """Чужой игрок из параметров «участник» (человек в Discord) / «аликод» команд, которые
+    смотрят одного игрока: (ally_code, имя или None, текст ошибки или None). Участник
+    ищется по его /регистрация в ЛЮБОЙ гильдии бота (тред 2026-10-22: «через дс, а не по
+    гильдии»), сначала в guild_id. Ничего не указано — (None, None, None): вызывающий
+    берёт аккаунт автора."""
+    if участник is not None and аликод:
+        return None, None, "❌ Укажите либо участника, либо код союзника — не оба сразу."
+    if аликод:
+        code = normalize_ally_code(аликод)
+        if code is None:
+            return None, None, f"❌ «{аликод}» — не код союзника: нужно 9 цифр."
+        return code, None, None
+    if участник is None:
+        return None, None, None
+    reg = None
+    if guild_id is not None:
+        reg = database.get_user_registration(_discord_id(участник), guild_id=guild_id)
+    reg = reg or database.get_any_main_registration(_discord_id(участник))
+    if not reg:
+        mention = getattr(участник, "mention", "Участник")
+        return None, None, f"❌ {mention} не привязал(а) аккаунт через `/регистрация` — укажите его код союзника в «аликод»."
+    return str(reg[0]), reg[1], None
+
+
+TARGET_USER_DESCRIPTION = "Чужой игрок: человек в Discord (по его /регистрация, любая гильдия)"
+TARGET_CODE_DESCRIPTION = "Чужой игрок: код союзника (9 цифр)"
+
+
 def _tier_for_level(level: int | None) -> str | None:
     if level is None:
         return None
@@ -188,7 +217,7 @@ async def require_alt(inter, feature_key: str, other_target: bool = False) -> di
     from services import feature_flags
 
     if other_target:
-        await _reply(inter, "❌ «альт» — это ваш второй аккаунт; не указывайте вместе с ним «игрок», «аликод» или «гильдия».")
+        await _reply(inter, "❌ «альт» — это ваш второй аккаунт; не указывайте вместе с ним «участник», «аликод» или «гильдия».")
         return None
     alt = alt_account(inter.author)
     if alt is None:
@@ -226,7 +255,7 @@ GUILD_WIDE_OFFICER_ONLY = (
 )
 
 
-def self_only_error(author, guild_id: int, ally_code: str | None, param_hint: str = "«игрок» / «аликод»") -> str | None:
+def self_only_error(author, guild_id: int, ally_code: str | None, param_hint: str = "«участник» / «аликод»") -> str | None:
     """Рядовой участник может смотреть через "проверочные" команды только себя (основной
     аккаунт или свой альт из /регистрация). Возвращает текст ошибки, если author — не
     офицер и ally_code не его; None — можно показывать."""
@@ -245,7 +274,7 @@ def self_only_error(author, guild_id: int, ally_code: str | None, param_hint: st
     return (
         "❌ Участники гильдии могут проверять только себя — указанный игрок не привязан к вашему Discord.\n"
         f"Чтобы посмотреть свои данные, оставьте {param_hint} пустым — бот сам возьмёт ваш аккаунт"
-        + (" (альт можно выбрать в «игрок»)." if len(own) > 1 else ".")
+        + (" (второй аккаунт — «альт: True»)." if len(own) > 1 else ".")
         + "\nЧужих игроков и всю гильдию проверяют офицеры."
     )
 

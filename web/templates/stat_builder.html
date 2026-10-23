@@ -33,7 +33,7 @@
         <form method="get" action="/mod-builder" class="builder-form">
             <label>
                 Персонаж
-                <div class="unit-search" data-unit-search>
+                <div class="unit-search" data-live-search data-url="/me/api/units" data-value-field="base_id" data-label-field="name">
                     <input type="text" class="unit-search-input" placeholder="Имя персонажа — можно на русском или английском…" autocomplete="off" required value="{{ selected_character_label }}">
                     <input type="hidden" name="character" class="unit-search-value" required value="{{ selected_character }}">
                     <div class="unit-search-results"></div>
@@ -168,6 +168,7 @@
             </div>
         </div>
 
+        {% if can_edit_presets %}
         <div class="panel" style="max-width: 30em;">
             <div class="panel-title"><span>Сохранить как пресет</span></div>
             <form method="post" action="/mod-builder/presets/save" class="inline-form">
@@ -196,12 +197,13 @@
                 <button type="submit">Сохранить</button>
             </form>
         </div>
+        {% endif %}
     {% endif %}
 
     <div class="panel">
         <div class="panel-title"><span>Пресеты</span><span class="panel-hint">модули + статы, применимые к любому персонажу</span></div>
         {% if not presets %}
-            <p class="empty-state">Пока нет сохранённых пресетов — посчитайте сборку выше и сохраните.</p>
+            <p class="empty-state">Пока нет сохранённых пресетов{% if can_edit_presets %} — посчитайте сборку выше и сохраните{% endif %}.</p>
         {% else %}
             <div class="table-scroll">
                 <table class="data">
@@ -217,10 +219,12 @@
                                 <td>{{ p.stats_summary }}</td>
                                 <td class="row-actions">
                                     <a class="link-btn" href="/mod-builder?preset_id={{ p.id }}">применить</a>
+                                    {% if can_edit_presets %}
                                     <form method="post" action="/mod-builder/presets/{{ p.id }}/delete"
                                           onsubmit="return confirm('Удалить пресет «{{ p.name }}»?');">
                                         <button type="submit" class="button-danger">Удалить</button>
                                     </form>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% endfor %}
@@ -231,7 +235,7 @@
     </div>
 
     <div class="panel">
-        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} расчётов гильдии</span></div>
+        <div class="panel-title"><span>История</span><span class="panel-hint">последние {{ history|length }} {% if can_edit_presets %}расчётов гильдии{% else %}ваших расчётов{% endif %}</span></div>
         {% if not history %}
             <p class="empty-state">Пока нет расчётов — посчитайте сборку выше.</p>
         {% else %}

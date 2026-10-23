@@ -113,3 +113,16 @@ def require_feature(key: str):
         return user
 
     return _dep
+
+
+def require_feature_member(key: str):
+    """Как require_feature, но пускает и участников подключённой гильдии
+    (require_member_access), не только офицеров."""
+    from web.deps import require_member_access
+
+    async def _dep(user: dict = Depends(require_member_access)) -> dict:
+        if not is_enabled(user.get("guild_id"), key):
+            raise HTTPException(status_code=403, detail=f"Функция «{label(key)}» отключена для вашей гильдии.")
+        return user
+
+    return _dep
