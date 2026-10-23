@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}{{ name }} — {{ tracker.plate_name }} — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Прогресс модинга · {{ tracker.plate_name }}</p>
+                <h1>{{ name }}{% call ui.help(side="left") %}<p>Строки — требования плейта, столбцы — снимки. Норма — по текущей версии плейта; если в снимке она была другой, это написано в ячейке.</p><p>«Убрано из плейта» — требования, которых в плейте больше нет.</p>{% endcall %}</h1>
+            </div>
+        </div>
+        <div class="hero-links"><a class="hero-link" href="/mod-progress/{{ tracker.id }}">Вся гильдия</a><a class="hero-link" href="/player/{{ ally_code }}">Карточка игрока</a>
+            {% if hidden %}<a class="hero-link" href="?all=1">Все снимки ({{ columns|length + hidden }})</a>{% elif show_all %}<a class="hero-link" href="?">Последние 6</a>{% endif %}</div>
+    </section>
+
+    <p class="mp-legend"><span class="mp-cell mp-ok">выполнено</span> <span class="mp-cell mp-up">ближе к норме</span> <span class="mp-cell mp-stall">без сдвига</span> <span class="mp-cell mp-down">хуже, чем было</span></p>
+
+    {% if not columns %}
+        <p class="empty-state">В снимках этого трекера игрока нет.</p>
+    {% else %}
+        {% for g in groups %}
+            <div class="panel">
+                <h2>{{ g.char }}</h2>
+                <table class="data cards-on-phone mp-table">
+                    <thead><tr>
+                        <th>Требование</th>
+                        {% for c in columns %}<th class="nowrap">{{ c.date }}{% if c.plate_changed %} <span class="badge badge-warn" title="Плейт изменён {{ c.version_date }}">ТП изм.</span>{% endif %}</th>{% endfor %}
+                    </tr></thead>
+                    <tbody>
+                        {% for r in g.rows %}
+                            <tr{% if r.removed %} class="muted"{% endif %}>
+                                <td><div><strong>{{ r.label }}</strong> {{ r.req }}{% if r.removed %} <span class="badge badge-neutral">убрано из плейта</span>{% endif %}</div></td>
+                                {% for cell in r.cells %}
+                                    {% set c = columns[loop.index0] %}
+                                    <td data-label="{{ c.date }}{% if c.plate_changed %} · ТП изм.{% endif %}"><div>
+                                        {% if cell.state == "absent" %}<span class="muted" title="{{ cell.note }}">{{ cell.value or "—" }}</span>
+                                        {% else %}<span class="mp-cell mp-{{ cell.state }}">{{ cell.value }}</span>{% if cell.note %}<br><span class="muted mp-note">{{ cell.note }}</span>{% endif %}{% endif %}
+                                    </div></td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock %}

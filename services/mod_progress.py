@@ -1,0 +1,563 @@
+"""«Прогресс модинга» (web /mod-progress, только офицеры) — трекер по плейту: снимки того,
+как каждый игрок выполняет требования плейта, по датам (заказ Ricardo, тред 2026-10-23;
+раньше Дима делал это руками в таблице).
+
+Трекер = гильдия + плейт + период автоснимков (0 — только вручную). Требования плейта
+хранятся версиями (mod_progress_versions, JSON): при создании — версия 1, дальше при каждом
+изменении плейта новая версия с датой («ТП изменён …»). Старые снимки остаются со своей
+версией, ничего не пересчитывается. Ключ строки — cogs.stat_requirements.progress_row_key
+(без порога), так что изменённая норма — та же строка с новой нормой.
+
+Снимок считает тот же _evaluate_character_player, что /статы и /stats-check, сценарий «как
+есть» (SCENARIO_RAW, решение пользователя 2026-10-23), по кэшу player_unit_cache — без
+запросов к Comlink. Игроки без отряда плейта (stat_plate_squads) не проверяются.
+Автоснимки и поиск изменений плейта — cogs/mod_progress.py (раз в час)."""
+
+import asyncio
+import hashlib
+import json
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import database
+from cogs.stat_requirements import (
+    SCENARIO_RAW, _char_squad_skip, _evaluate_character_player, _missing_plate_squads,
+    _unit_display_name, progress_row_key, progress_row_text,
+)
+
+MSK = ZoneInfo("Europe/Moscow")
+PERIODS = {0: "только вручную", 1: "каждый день", 3: "раз в 3 дня", 7: "раз в неделю", 14: "раз в 2 недели"}
+_TIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+# Снимки одного трекера не должны идти параллельно (кнопка + автоснимок).
+_locks: dict[int, asyncio.Lock] = {}
+
+
+def _ensure_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_trackers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            plate_name TEXT NOT NULL,
+            period_days INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT,
+            created_at TEXT NOT NULL,
+            last_snapshot_at TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tracker_id INTEGER NOT NULL,
+            version_num INTEGER NOT NULL,
+            req_hash TEXT NOT NULL,
+            reqs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tracker_id INTEGER NOT NULL,
+            version_id INTEGER NOT NULL,
+            taken_at TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            taken_by TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_players (
+            snapshot_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            name TEXT,
+            skip_reason TEXT,
+            PRIMARY KEY (snapshot_id, ally_code)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mod_progress_values (
+            snapshot_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            req_key TEXT NOT NULL,
+            value TEXT,
+            margin REAL,
+            ok INTEGER,
+            PRIMARY KEY (snapshot_id, ally_code, req_key)
+        )
+    """)
+
+
+def _connect():
+    conn = sqlite3.connect(database.DB_NAME)
+    _ensure_tables(conn.cursor())
+    conn.commit()
+    return conn
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime(_TIME_FMT)
+
+
+def _parse(ts: str) -> datetime:
+    return datetime.strptime(ts, _TIME_FMT).replace(tzinfo=timezone.utc)
+
+
+def msk_date(ts: str | None, with_time: bool = False) -> str:
+    if not ts:
+        return ""
+    return _parse(ts).astimezone(MSK).strftime("%d.%m.%Y %H:%M" if with_time else "%d.%m.%Y")
+
+
+def msk_short(ts: str) -> str:
+    return _parse(ts).astimezone(MSK).strftime("%d.%m")
+
+
+# ---------------- требования плейта и версии ----------------
+
+def plate_requirements(plate_name: str, guild_id: int) -> list[dict]:
+    """Текущие требования плейта в порядке /статы: [{key, base_id, char, label, req, priority}]."""
+    reqs = []
+    seen = set()
+    for base_id in database.get_stat_requirement_characters(plate_name, guild_id=guild_id):
+        char_name = _unit_display_name(base_id)
+        for row in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
+            key = progress_row_key(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            label, req = progress_row_text(row)
+            reqs.append({"key": key, "base_id": base_id, "char": char_name, "label": label,
+                         "req": req, "priority": row[6], "source": row[1]})
+    return reqs
+
+
+def _hash(reqs: list[dict]) -> str:
+    payload = json.dumps([(r["key"], r["req"], r["priority"]) for r in reqs], ensure_ascii=False)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _latest_version(cursor, tracker_id: int):
+    cursor.execute("""
+        SELECT id, version_num, req_hash, reqs_json, created_at FROM mod_progress_versions
+        WHERE tracker_id = ? ORDER BY version_num DESC LIMIT 1
+    """, (tracker_id,))
+    return cursor.fetchone()
+
+
+def sync_version(tracker_id: int) -> dict | None:
+    """Сверяет требования плейта с последней версией трекера; если плейт изменился — пишет
+    новую версию с текущей датой. Удалённый/опустевший плейт версию не меняет.
+    Возвращает последнюю версию {id, num, reqs, created_at} или None, если трекера нет."""
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT guild_id, plate_name FROM mod_progress_trackers WHERE id = ?", (tracker_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    guild_id, plate_name = row
+    latest = _latest_version(cursor, tracker_id)
+    reqs = plate_requirements(plate_name, guild_id)
+    if reqs:
+        req_hash = _hash(reqs)
+        if latest is None or latest[2] != req_hash:
+            num = (latest[1] if latest else 0) + 1
+            cursor.execute("""
+                INSERT INTO mod_progress_versions (tracker_id, version_num, req_hash, reqs_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (tracker_id, num, req_hash, json.dumps(reqs, ensure_ascii=False), _now()))
+            conn.commit()
+            latest = _latest_version(cursor, tracker_id)
+    conn.close()
+    if latest is None:
+        return None
+    return {"id": latest[0], "num": latest[1], "reqs": json.loads(latest[3]), "created_at": latest[4]}
+
+
+# ---------------- трекеры ----------------
+
+def create_tracker(guild_id: int, plate_name: str, period_days: int, created_by: str) -> int | None:
+    """None — у плейта нет требований (следить не за чем)."""
+    if not plate_requirements(plate_name, guild_id):
+        return None
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO mod_progress_trackers (guild_id, plate_name, period_days, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (guild_id, plate_name, period_days if period_days in PERIODS else 0, created_by, _now()))
+    tracker_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    sync_version(tracker_id)
+    return tracker_id
+
+
+def _tracker_dict(row) -> dict:
+    tid, guild_id, plate_name, period_days, created_by, created_at, last_snapshot_at = row
+    return {"id": tid, "guild_id": guild_id, "plate_name": plate_name, "period_days": period_days,
+            "period_label": PERIODS.get(period_days, f"раз в {period_days} дн."), "created_by": created_by,
+            "created_at": created_at, "created_msk": msk_date(created_at),
+            "last_snapshot_at": last_snapshot_at, "last_snapshot_msk": msk_date(last_snapshot_at, True)}
+
+
+def get_tracker(guild_id: int, tracker_id: int) -> dict | None:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM mod_progress_trackers WHERE id = ? AND guild_id = ?", (tracker_id, guild_id))
+    row = cursor.fetchone()
+    conn.close()
+    return _tracker_dict(row) if row else None
+
+
+def list_trackers(guild_id: int) -> list[dict]:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM mod_progress_trackers WHERE guild_id = ? ORDER BY plate_name, id", (guild_id,))
+    trackers = [_tracker_dict(r) for r in cursor.fetchall()]
+    for t in trackers:
+        cursor.execute("SELECT COUNT(*) FROM mod_progress_snapshots WHERE tracker_id = ?", (t["id"],))
+        t["snapshots"] = cursor.fetchone()[0]
+        cursor.execute("SELECT created_at FROM mod_progress_versions WHERE tracker_id = ? AND version_num > 1 ORDER BY version_num",
+                       (t["id"],))
+        t["changes"] = [msk_date(r[0]) for r in cursor.fetchall()]
+    conn.close()
+    return trackers
+
+
+def set_period(guild_id: int, tracker_id: int, period_days: int) -> None:
+    if period_days not in PERIODS:
+        return
+    conn = _connect()
+    conn.execute("UPDATE mod_progress_trackers SET period_days = ? WHERE id = ? AND guild_id = ?",
+                 (period_days, tracker_id, guild_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_tracker(guild_id: int, tracker_id: int) -> bool:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM mod_progress_trackers WHERE id = ? AND guild_id = ?", (tracker_id, guild_id))
+    if not cursor.rowcount:
+        conn.close()
+        return False
+    cursor.execute("SELECT id FROM mod_progress_snapshots WHERE tracker_id = ?", (tracker_id,))
+    snap_ids = [r[0] for r in cursor.fetchall()]
+    for sid in snap_ids:
+        cursor.execute("DELETE FROM mod_progress_values WHERE snapshot_id = ?", (sid,))
+        cursor.execute("DELETE FROM mod_progress_players WHERE snapshot_id = ?", (sid,))
+    cursor.execute("DELETE FROM mod_progress_snapshots WHERE tracker_id = ?", (tracker_id,))
+    cursor.execute("DELETE FROM mod_progress_versions WHERE tracker_id = ?", (tracker_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def delete_snapshot(guild_id: int, tracker_id: int, snapshot_id: int) -> bool:
+    if not get_tracker(guild_id, tracker_id):
+        return False
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM mod_progress_snapshots WHERE id = ? AND tracker_id = ?", (snapshot_id, tracker_id))
+    deleted = bool(cursor.rowcount)
+    if deleted:
+        cursor.execute("DELETE FROM mod_progress_values WHERE snapshot_id = ?", (snapshot_id,))
+        cursor.execute("DELETE FROM mod_progress_players WHERE snapshot_id = ?", (snapshot_id,))
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def all_tracker_ids(guild_ids: set[int]) -> list[int]:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, guild_id FROM mod_progress_trackers")
+    ids = [tid for tid, gid in cursor.fetchall() if gid in guild_ids]
+    conn.close()
+    return ids
+
+
+def due_tracker_ids(guild_ids: set[int]) -> list[int]:
+    """Трекеры с автоснимками, у которых период уже прошёл (с допуском в час, чтобы снимок
+    не уезжал каждый раз на час позже из-за часового цикла)."""
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, guild_id, period_days, last_snapshot_at FROM mod_progress_trackers WHERE period_days > 0")
+    now = datetime.now(timezone.utc)
+    due = []
+    for tid, gid, period, last in cursor.fetchall():
+        if gid not in guild_ids:
+            continue
+        if last is None or now - _parse(last) >= timedelta(days=period) - timedelta(hours=1):
+            due.append(tid)
+    conn.close()
+    return due
+
+
+# ---------------- снимок ----------------
+
+async def take_snapshot(bot_like, tracker_id: int, kind: str, taken_by: str | None = None) -> int | None:
+    """Снимок всех игроков гильдии по текущей версии плейта. bot_like — объект с .comlink и
+    .stat_calc (бот или services.stat_forecast._bot_stand_in). Возвращает id снимка."""
+    lock = _locks.setdefault(tracker_id, asyncio.Lock())
+    async with lock:
+        version = sync_version(tracker_id)
+        if version is None:
+            return None
+        conn = _connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT guild_id, plate_name FROM mod_progress_trackers WHERE id = ?", (tracker_id,))
+        guild_id, plate_name = cursor.fetchone()
+        conn.close()
+
+        keys_by_char: dict[str, list[tuple[str, str]]] = {}
+        for r in version["reqs"]:
+            keys_by_char.setdefault(r["base_id"], []).append((r["key"], r.get("source") or plate_name))
+        squads = database.get_stat_plate_squads(guild_id)
+
+        players, values = [], []
+        for _discord_id, ally_code, name in database.get_all_user_mappings(guild_id):
+            missing = _missing_plate_squads(ally_code, guild_id, squads) if squads else {}
+            if plate_name in missing:
+                players.append((ally_code, name, missing[plate_name]))
+                continue
+            evaluated = 0
+            for base_id, keys in keys_by_char.items():
+                skip_plates, skip_reason = _char_squad_skip(plate_name, base_id, guild_id, missing)
+                if skip_reason:
+                    continue
+                out = []
+                result = await _evaluate_character_player(
+                    bot_like, plate_name, base_id, ally_code, False, name, guild_id=guild_id,
+                    scenario=SCENARIO_RAW, skip_plates=skip_plates, rows_out=out,
+                )
+                if result is None:
+                    continue
+                evaluated += 1
+                if not out:
+                    # Юнита нет у игрока (не открыт) — все его требования не выполнены.
+                    out = [{"key": k, "value": "нет юнита", "margin": None, "ok": False}
+                           for k, source in keys if source not in skip_plates]
+                for item in out:
+                    ok = None if item["ok"] is None else int(bool(item["ok"]))
+                    values.append((ally_code, item["key"], item["value"], item["margin"], ok))
+            players.append((ally_code, name, None if evaluated else "нет отряда плейта"))
+            await asyncio.sleep(0)
+
+        now = _now()
+        conn = _connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO mod_progress_snapshots (tracker_id, version_id, taken_at, kind, taken_by)
+            VALUES (?, ?, ?, ?, ?)
+        """, (tracker_id, version["id"], now, kind, taken_by))
+        snapshot_id = cursor.lastrowid
+        cursor.executemany("INSERT OR REPLACE INTO mod_progress_players VALUES (?, ?, ?, ?)",
+                           [(snapshot_id, a, n, reason) for a, n, reason in players])
+        cursor.executemany("INSERT OR REPLACE INTO mod_progress_values VALUES (?, ?, ?, ?, ?, ?)",
+                           [(snapshot_id, *v) for v in values])
+        cursor.execute("UPDATE mod_progress_trackers SET last_snapshot_at = ? WHERE id = ?", (now, tracker_id))
+        conn.commit()
+        conn.close()
+        return snapshot_id
+
+
+# ---------------- чтение для страниц ----------------
+
+def _snapshots(cursor, tracker_id: int) -> list[dict]:
+    cursor.execute("""
+        SELECT s.id, s.taken_at, s.kind, v.version_num, v.id
+        FROM mod_progress_snapshots s JOIN mod_progress_versions v ON v.id = s.version_id
+        WHERE s.tracker_id = ? ORDER BY s.taken_at, s.id
+    """, (tracker_id,))
+    snaps = []
+    prev_version = None
+    for sid, taken_at, kind, vnum, vid in cursor.fetchall():
+        snaps.append({"id": sid, "taken_at": taken_at, "date": msk_short(taken_at),
+                      "datetime": msk_date(taken_at, True), "kind": kind, "version_num": vnum, "version_id": vid,
+                      "plate_changed": prev_version is not None and vnum != prev_version})
+        prev_version = vnum
+    # Несколько снимков за день — в подписи столбца ещё и время.
+    per_day = {}
+    for s in snaps:
+        per_day[s["date"]] = per_day.get(s["date"], 0) + 1
+    for s in snaps:
+        if per_day[s["date"]] > 1:
+            s["date"] = _parse(s["taken_at"]).astimezone(MSK).strftime("%d.%m %H:%M")
+    return snaps
+
+
+def _versions(cursor, tracker_id: int) -> dict[int, dict]:
+    cursor.execute("SELECT id, version_num, reqs_json, created_at FROM mod_progress_versions WHERE tracker_id = ?",
+                   (tracker_id,))
+    return {vid: {"num": num, "reqs": json.loads(rj), "created_at": created_at, "date": msk_date(created_at)}
+            for vid, num, rj, created_at in cursor.fetchall()}
+
+
+def _snapshot_values(cursor, snapshot_id: int, ally_code: str | None = None) -> dict:
+    """{ally_code: {req_key: (value, margin, ok)}}"""
+    if ally_code:
+        cursor.execute("SELECT ally_code, req_key, value, margin, ok FROM mod_progress_values WHERE snapshot_id = ? AND ally_code = ?",
+                       (snapshot_id, ally_code))
+    else:
+        cursor.execute("SELECT ally_code, req_key, value, margin, ok FROM mod_progress_values WHERE snapshot_id = ?",
+                       (snapshot_id,))
+    result = {}
+    for ac, key, value, margin, ok in cursor.fetchall():
+        result.setdefault(ac, {})[key] = (value, margin, ok)
+    return result
+
+
+def _counts(player_values: dict, reqs_by_key: dict) -> tuple[int, int]:
+    """(выполнено, всего) по обязательным требованиям версии снимка."""
+    done = total = 0
+    for key, (_value, _margin, ok) in player_values.items():
+        req = reqs_by_key.get(key)
+        if req is None or req["priority"] != "required" or ok is None:
+            continue
+        total += 1
+        done += ok
+    return done, total
+
+
+def guild_summary(guild_id: int, tracker_id: int) -> dict | None:
+    """Сводка по гильдии на последнем снимке: выполнено X из Y обязательных, сдвиг с прошлого
+    и с первого снимка, что не выполнено (по персонажам)."""
+    tracker = get_tracker(guild_id, tracker_id)
+    if not tracker:
+        return None
+    conn = _connect()
+    cursor = conn.cursor()
+    snaps = _snapshots(cursor, tracker_id)
+    versions = _versions(cursor, tracker_id)
+    result = {"tracker": tracker, "snapshots": snaps, "players": [], "skipped": [],
+              "changes": [v for v in sorted(versions.values(), key=lambda v: v["num"]) if v["num"] > 1]}
+    if not snaps:
+        conn.close()
+        return result
+    latest, prev, first = snaps[-1], (snaps[-2] if len(snaps) > 1 else None), snaps[0]
+    reqs_latest = {r["key"]: r for r in versions[latest["version_id"]]["reqs"]}
+    cur = _snapshot_values(cursor, latest["id"])
+    prev_vals = _snapshot_values(cursor, prev["id"]) if prev else {}
+    first_vals = _snapshot_values(cursor, first["id"]) if len(snaps) > 1 else {}
+    reqs_prev = {r["key"]: r for r in versions[prev["version_id"]]["reqs"]} if prev else {}
+    reqs_first = {r["key"]: r for r in versions[first["version_id"]]["reqs"]}
+    names = database.get_player_names(guild_id)
+    cursor.execute("SELECT ally_code, name, skip_reason FROM mod_progress_players WHERE snapshot_id = ?", (latest["id"],))
+    for ally_code, name, skip_reason in cursor.fetchall():
+        name = names.get(ally_code) or name or ally_code
+        if skip_reason:
+            result["skipped"].append({"name": name, "reason": skip_reason})
+            continue
+        pv = cur.get(ally_code, {})
+        done, total = _counts(pv, reqs_latest)
+        missing_by_char = {}
+        for key, (value, _margin, ok) in pv.items():
+            req = reqs_latest.get(key)
+            if req and req["priority"] == "required" and ok == 0:
+                missing_by_char.setdefault(req["char"], []).append(f"{req['label']} {req['req']} (сейчас {value or '—'})")
+        entry = {"ally_code": ally_code, "name": name, "done": done, "total": total,
+                 "missing": sorted(missing_by_char.items(), key=lambda x: -len(x[1]))}
+        if prev and ally_code in prev_vals:
+            entry["delta_prev"] = done - _counts(prev_vals[ally_code], reqs_prev)[0]
+        if first_vals and ally_code in first_vals:
+            entry["delta_first"] = done - _counts(first_vals[ally_code], reqs_first)[0]
+        result["players"].append(entry)
+    conn.close()
+    result["players"].sort(key=lambda e: (e["done"] - e["total"], e["name"].lower()))
+    result["skipped"].sort(key=lambda e: e["name"].lower())
+    result["total_done"] = sum(e["done"] for e in result["players"])
+    result["total_reqs"] = sum(e["total"] for e in result["players"])
+    result["full"] = sum(1 for e in result["players"] if e["total"] and e["done"] == e["total"])
+    return result
+
+
+def _cell_state(ok, margin, prev_margin, prev_ok) -> str:
+    """ok — выполнено; up — не выполнено, но ближе к норме, чем в прошлом снимке; down —
+    было выполнено/ближе, стало хуже; stall — без сдвига; none — нет данных."""
+    if ok is None:
+        return "none"
+    if ok:
+        return "ok"
+    if prev_ok:
+        return "down"
+    if margin is not None and prev_margin is not None:
+        if margin > prev_margin + 1e-9:
+            return "up"
+        if margin < prev_margin - 1e-9:
+            return "down"
+    return "stall"
+
+
+def player_table(guild_id: int, tracker_id: int, ally_code: str, limit: int | None = 6) -> dict | None:
+    """Таблица игрока: строки — требования (по персонажам), колонки — снимки (последние
+    limit, None — все). Норма берётся из версии каждого снимка; если в колонке она другая,
+    чем в последней версии, — показывается в ячейке."""
+    tracker = get_tracker(guild_id, tracker_id)
+    if not tracker:
+        return None
+    conn = _connect()
+    cursor = conn.cursor()
+    snaps = _snapshots(cursor, tracker_id)
+    versions = _versions(cursor, tracker_id)
+    cursor.execute("""
+        SELECT p.snapshot_id, p.name, p.skip_reason FROM mod_progress_players p
+        JOIN mod_progress_snapshots s ON s.id = p.snapshot_id
+        WHERE s.tracker_id = ? AND p.ally_code = ?
+    """, (tracker_id, ally_code))
+    presence = {sid: (name, reason) for sid, name, reason in cursor.fetchall()}
+    snaps = [s for s in snaps if s["id"] in presence]
+    all_values = {s["id"]: _snapshot_values(cursor, s["id"], ally_code).get(ally_code, {}) for s in snaps}
+    conn.close()
+    if not snaps:
+        return {"tracker": tracker, "columns": [], "groups": [], "name": ally_code, "hidden": 0}
+
+    name = database.get_player_names(guild_id).get(ally_code) or presence[snaps[-1]["id"]][0] or ally_code
+    shown = snaps if limit is None else snaps[-limit:]
+    hidden = len(snaps) - len(shown)
+    first_shown_idx = len(snaps) - len(shown)
+    latest_reqs = versions[snaps[-1]["version_id"]]["reqs"]
+
+    # Порядок строк: последняя версия плейта, затем убранные из плейта (из старых версий).
+    order, meta = [], {}
+    for r in latest_reqs:
+        order.append(r["key"])
+        meta[r["key"]] = {**r, "removed": False}
+    for s in reversed(shown):
+        for r in versions[s["version_id"]]["reqs"]:
+            if r["key"] not in meta:
+                order.append(r["key"])
+                meta[r["key"]] = {**r, "removed": True}
+
+    columns = []
+    for i, s in enumerate(shown):
+        reason = presence[s["id"]][1]
+        columns.append({**s, "skip_reason": reason, "version_date": versions[s["version_id"]]["date"]})
+
+    groups: dict[str, dict] = {}
+    for key in order:
+        m = meta[key]
+        cells = []
+        for idx, s in enumerate(shown):
+            reqs_here = {r["key"]: r for r in versions[s["version_id"]]["reqs"]}
+            abs_idx = first_shown_idx + idx
+            prev = all_values[snaps[abs_idx - 1]["id"]].get(key) if abs_idx > 0 else None
+            if key not in reqs_here:
+                cells.append({"state": "absent", "value": "", "note": "не было в плейте"})
+                continue
+            if key not in all_values[s["id"]]:
+                cells.append({"state": "absent", "value": "—", "note": presence[s["id"]][1] or ""})
+                continue
+            value, margin, ok = all_values[s["id"]][key]
+            note = reqs_here[key]["req"] if reqs_here[key]["req"] != m["req"] else ""
+            cells.append({"state": _cell_state(ok, margin, prev[1] if prev else None, prev[2] if prev else None),
+                          "value": value or "нет данных", "note": f"норма тогда: {note}" if note else ""})
+        if all(c["state"] == "absent" and not c["value"] for c in cells):
+            continue
+        group = groups.setdefault(m["base_id"], {"char": m["char"], "rows": []})
+        group["rows"].append({"label": m["label"], "req": m["req"], "priority": m["priority"],
+                              "removed": m["removed"], "cells": cells})
+    return {"tracker": tracker, "name": name, "ally_code": ally_code, "columns": columns,
+            "groups": list(groups.values()), "hidden": hidden}

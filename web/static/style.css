@@ -2740,3 +2740,25 @@ dialog.feedback-dialog > form { max-width: none; }
 /* /tb/goal — условия варианта и нехватка юнитов во взводах */
 .goal-conditions { margin: 0.4em 0 0.6em; padding-left: 1.2em; }
 .goal-conditions li { margin: 0.15em 0; }
+
+/* Прогресс модинга (/mod-progress). */
+.mp-actions { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: center; }
+form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; margin: 0; gap: 0.4em; }
+.mp-plus { color: var(--status-good); font-weight: 600; }
+.mp-minus { color: var(--status-critical); font-weight: 600; }
+.mp-missing > summary { cursor: pointer; }
+.mp-missing ul { margin: 0.3em 0 0; padding-left: 1.2em; font-size: 0.9em; }
+.mp-snaps { margin: 0.5em 0 0; padding-left: 1.2em; }
+.mp-snaps li { margin: 0.2em 0; }
+.mp-legend { display: flex; flex-wrap: wrap; gap: 0.5em; }
+.mp-cell { display: inline-block; padding: 0.1em 0.45em; border-radius: 4px; font-variant-numeric: tabular-nums; }
+.mp-ok { background: color-mix(in srgb, var(--status-good) 18%, transparent); }
+.mp-up { background: color-mix(in srgb, var(--status-warning) 25%, transparent); }
+.mp-stall, .mp-down { background: color-mix(in srgb, var(--status-critical) 16%, transparent); }
+.mp-down { box-shadow: inset 0 0 0 1px var(--status-critical); }
+.mp-none { background: var(--surface-2); }
+.mp-note { font-size: 0.8em; }
+.mp-table td:first-child { min-width: 14em; }
+@media (max-width: 40em) {
+    .mp-table td:first-child { min-width: 0; text-align: left; }
+}

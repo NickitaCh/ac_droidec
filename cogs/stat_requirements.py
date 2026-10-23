@@ -586,6 +586,32 @@ def _resolve_scheme(rows: list, mod_primaries: dict, mod_set_counts: dict, force
     return active_scheme, scheme_label, is_forced
 
 
+def progress_row_key(row) -> str:
+    """Стабильный ключ строки требования для «Прогресса модинга» (services/mod_progress.py):
+    не id строки (при переимпорте плейта он меняется), а что именно проверяется — плейт-
+    источник, персонаж, стат, омикрон/сет/слот, с кем сравнение, схема. Порог в ключ не
+    входит: изменённая норма — та же строка с новой нормой."""
+    return "|".join(str(x or "") for x in (row[1], row[2], row[3], row[11], row[12], row[13], row[14]))
+
+
+def progress_row_text(row) -> tuple[str, str]:
+    """(подпись, норма) строки требования без привязки к игроку — для версий плейта в
+    «Прогрессе модинга». Те же подписи, что в /статы."""
+    _, _, _, stat_name, operator, threshold, priority, _, _, _, _, skill_id, mod_slot, compare_key, _ = row
+    if stat_name in (STAT_SET_ANY, STAT_SET_ONLY):
+        return _mod_set_list_label(stat_name, priority), _mod_set_list_req_text(stat_name, skill_id)
+    if compare_key:
+        return (_compare_label(stat_name, compare_key, priority),
+                f"{operator} {_unit_display_name(compare_key)}{_compare_offset_text(operator, threshold or 0.0)}")
+    if stat_name == STAT_MOD_PRIMARY:
+        return _mod_primary_label(mod_slot, priority), _mod_primary_req_text(mod_slot, threshold, skill_id).split(": ", 1)[-1]
+    if stat_name == STAT_OMICRON:
+        return _omicron_label(skill_id, priority), "разблокирован"
+    if stat_name == STAT_SET:
+        return _mod_set_label(skill_id, priority), _mod_set_req_text(skill_id, threshold)
+    return _stat_label(stat_name, priority), f"{operator} {_fmt_compact(threshold)}"
+
+
 def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1, skip_plates=None):
     """Общий префикс для обоих режимов расчёта: сохранённые требования персонажа в плейте,
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
@@ -631,7 +657,7 @@ def _char_squad_skip(plate_name: str, base_id: str, guild_id: int, missing: dict
     return skip, None
 
 
-async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None, only_failed: bool = False):
+async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_code, force_refresh: bool, player_label, guild_id: int = 1, scenario: str = SCENARIO_RAW, forced_scheme: int | None = None, skip_plates=None, only_failed: bool = False, rows_out: list | None = None):
     """Возвращает (char_name, block, matched, total, updated_at, failed_required, required_total,
     active_scheme, scheme_label) для одного персонажа плейта у конкретного игрока — статы берутся
     из его реальных модов/шмота, прогноз на релик плейта. active_scheme/scheme_label — None,
@@ -664,7 +690,9 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     Возвращает None, если для этого персонажа нет сохранённых требований (пропускается в отчёте).
     skip_plates — см. _load_char_rows (отбор по отрядам, _char_squad_skip).
     only_failed — в блок попадают только строки с ❌ (режим «только кресты» в /статы);
-    подсчёты matched/total/failed_required от него не зависят."""
+    подсчёты matched/total/failed_required от него не зависят.
+    rows_out — если передан, сюда дописывается по строке на каждое проверенное требование:
+    {"key", "value", "margin", "ok"} (снимки «Прогресса модинга», services/mod_progress.py)."""
     loaded = _load_char_rows(plate_name, base_id, guild_id, skip_plates=skip_plates)
     if loaded is None:
         return None
@@ -795,6 +823,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         is_set_list = stat_name in (STAT_SET_ANY, STAT_SET_ONLY)
         is_compare = bool(compare_character_key)
         is_relic_row = stat_name == "Relic"
+        row_key = progress_row_key(row)
 
         primary_req_text = None
         if is_mod_primary:
@@ -812,6 +841,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             suffix = "*" if priority in ("optional", "useful") else ""
             ok = current_values.get(key, 0.0) >= 1.0
             mod_set_lines.append((f"{req_cell}{suffix}", f"{_worn_sets_text(mod_set_counts)} {'✅' if ok else '❌'}"))
+            if rows_out is not None:
+                rows_out.append({"key": row_key, "value": _worn_sets_text(mod_set_counts), "margin": None, "ok": ok})
             total += 1
             matched += ok
             if priority == PRIORITY_REQUIRED:
@@ -833,6 +864,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             if compare_unit is None:
                 suffix = "*" if priority in ("optional", "useful") else ""
                 compare_lines.append(f"⚠️ {_stat_label(stat_name, '')} vs {compare_char_name}{suffix}: нет данных у сравниваемого")
+                if rows_out is not None:
+                    rows_out.append({"key": row_key, "value": None, "margin": None, "ok": None})
                 continue
             compare_stats = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, compare_unit)))
             compare_stats["Relic"] = stat_engine.get_current_relic_level(compare_unit)
@@ -869,6 +902,8 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         cur_val = current_values.get(lookup_key)
         suffix = "*" if priority in ("optional", "useful") else ""
         if cur_val is None or threshold is None:
+            if rows_out is not None:
+                rows_out.append({"key": row_key, "value": None, "margin": None, "ok": None})
             if is_omicron:
                 omicron_lines.append(f"⚠️ {_omicron_ability_label(skill_id)}{suffix}: нет данных")
             elif is_mod_primary:
@@ -966,6 +1001,21 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
             continue
 
         scenario_ok = _compare(scenario_val, operator, threshold)
+        if rows_out is not None:
+            if is_mod_primary:
+                shown = _mod_primary_stat_label(mod_slot, cur_val) if _mod_primary_option(mod_slot, cur_val) else "другая основа"
+            elif is_omicron:
+                shown = "есть" if scenario_ok else "нет"
+            elif is_mod_set:
+                shown = f"{int(cur_val)} из {int(threshold)}" if (threshold or 1) > 1 else ("надет" if scenario_ok else "не надет")
+            elif is_compare:
+                shown = f"{_fmt_compact(cur_val)} vs {_fmt_compact(compare_value)}"
+            else:
+                shown = _fmt_compact(scenario_val)
+            # margin — запас до нормы (>0 — с запасом, <0 — не хватает): по нему «Прогресс
+            # модинга» видит, сдвинулся ли игрок к норме между снимками. Для основ — нет.
+            margin = None if is_mod_primary else _compare_offset_sign(operator) * (scenario_val - threshold)
+            rows_out.append({"key": row_key, "value": shown, "margin": margin, "ok": scenario_ok})
         total += 1
         if scenario_ok:
             matched += 1

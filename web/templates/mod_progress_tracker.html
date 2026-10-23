@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}{{ tracker.plate_name }} — прогресс модинга — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% macro delta(v) %}{% if v is none %}<span class="muted">—</span>{% elif v > 0 %}<span class="mp-plus">+{{ v }}</span>{% elif v < 0 %}<span class="mp-minus">−{{ -v }}</span>{% else %}<span class="muted">0</span>{% endif %}{% endmacro %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Прогресс модинга</p>
+                <h1>{{ tracker.plate_name }}{% call ui.help(side="left") %}<p>Считаются только обязательные требования плейта, «как есть» — как в /статы. «Сдвиг» — сколько требований игрок закрыл с прошлого и с первого снимка (минус — стало меньше).</p><p>Игроки без отряда плейта не проверяются. Нажмите на игрока — откроется его таблица по датам.</p>{% endcall %}</h1>
+                <p class="page-hero-lead">Автоснимки: {{ tracker.period_label }}. Создан {{ tracker.created_msk }}.</p>
+            </div>
+        </div>
+        {% if snapshots %}
+        <div class="hero-kpis">
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ full }} из {{ players|length }}</span><span class="hero-kpi-label">выполнили всё</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ ui.num(total_done) }} из {{ ui.num(total_reqs) }}</span><span class="hero-kpi-label">требований выполнено</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ snapshots|length }}</span><span class="hero-kpi-label">снимков, последний {{ snapshots[-1].datetime }}</span></div>
+        </div>
+        {% endif %}
+        <div class="hero-links"><a class="hero-link" href="/mod-progress">Все трекеры</a><a class="hero-link" href="/plates">Плейты</a></div>
+    </section>
+
+    {% if plate_missing %}<p class="config-warning">Плейта «{{ tracker.plate_name }}» больше нет или в нём нет требований — новые снимки идут по последней сохранённой версии.</p>{% endif %}
+    {% if changes %}
+        <p>{% for v in changes %}<span class="badge badge-warn">плейт изменён {{ v.date }}</span> {% endfor %}</p>
+    {% endif %}
+    {% if running %}<p class="config-warning">Снимок делается — страница обновится сама.</p><script>setTimeout(function () { location.reload(); }, 10000);</script>{% endif %}
+    {% if job_error %}<p class="config-warning">Последний ручной снимок не получился: {{ job_error }}</p>{% endif %}
+
+    <div class="panel">
+        <div class="mp-actions">
+            <form method="post" action="/mod-progress/{{ tracker.id }}/snapshot" class="mp-inline">
+                <button type="submit"{% if running %} disabled{% endif %}>Снять сейчас</button>
+            </form>
+            <form method="post" action="/mod-progress/{{ tracker.id }}/period" class="mp-inline">
+                <select name="period_days" aria-label="Автоснимки" onchange="this.form.submit()">
+                    {% for days, label in periods.items() %}<option value="{{ days }}"{% if days == tracker.period_days %} selected{% endif %}>Автоснимки: {{ label }}</option>{% endfor %}
+                </select>
+            </form>
+            <form method="post" action="/mod-progress/{{ tracker.id }}/delete" class="mp-inline" onsubmit="return confirm('Удалить трекер со всеми снимками?')">
+                <button type="submit" class="button-danger">Удалить трекер</button>
+            </form>
+        </div>
+    </div>
+
+    {% if not snapshots %}
+        <p class="empty-state">Снимков пока нет.</p>
+    {% else %}
+        <div class="panel">
+            <table class="data cards-on-phone">
+                <thead><tr><th>Игрок</th><th>Выполнено</th><th>Сдвиг</th><th>Не выполнено</th></tr></thead>
+                <tbody>
+                    {% for p in players %}
+                        <tr>
+                            <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}">{{ p.name }}</a></div></td>
+                            <td data-label="Выполнено" class="nowrap"><div>{% if p.total and p.done == p.total %}<span class="mp-plus">{{ p.done }} из {{ p.total }}</span>{% else %}{{ p.done }} из {{ p.total }}{% endif %}</div></td>
+                            <td data-label="Сдвиг" class="nowrap"><div>{{ delta(p.get("delta_prev")) }} с прошлого{% if snapshots|length > 2 %} · {{ delta(p.get("delta_first")) }} с первого{% endif %}</div></td>
+                            <td data-label="Не выполнено"><div>
+                                {% if not p.missing %}<span class="muted">всё выполнено</span>
+                                {% else %}
+                                    <details class="mp-missing"><summary>{{ p.missing|length }} перс.: {{ p.missing|map("first")|list|join(", ")|truncate(60) }}</summary>
+                                        <ul>{% for char, items in p.missing %}<li><strong>{{ char }}</strong>: {{ items|join("; ") }}</li>{% endfor %}</ul>
+                                    </details>
+                                {% endif %}
+                            </div></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if skipped %}
+                <p class="muted">Без отряда плейта (не проверялись): {% for s in skipped %}{{ s.name }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+            {% endif %}
+        </div>
+
+        <details class="panel">
+            <summary>Снимки ({{ snapshots|length }})</summary>
+            <ul class="mp-snaps">
+                {% for s in snapshots|reverse %}
+                    <li>{{ s.datetime }} · {{ "авто" if s.kind == "auto" else "вручную" }}{% if s.plate_changed %} · <span class="badge badge-warn">плейт изменён</span>{% endif %}
+                        <form method="post" action="/mod-progress/{{ tracker.id }}/snapshot/{{ s.id }}/delete" class="mp-inline" onsubmit="return confirm('Удалить снимок {{ s.datetime }}?')">
+                            <button type="submit" class="link-btn">удалить</button>
+                        </form>
+                    </li>
+                {% endfor %}
+            </ul>
+        </details>
+    {% endif %}
+{% endblock %}

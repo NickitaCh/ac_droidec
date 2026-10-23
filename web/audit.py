@@ -29,7 +29,7 @@ SECTION_LABELS = {
     "omicron": "Омикроны", "omicrons": "Омикроны", "registration": "Регистрация", "birthdays": "Дни рождения",
     "tb": "ТБ", "tw": "ВГ", "violations": "Нарушения", "settings": "Настройки", "mod-search": "Поиск модов",
     "mod-scan": "Скан модов", "mod-builder": "Калькулятор модов", "steal-build": "Кража билда",
-    "mod-analysis": "Анализ модов", "subscribe": "Подписка", "activity": "Активность", "player": "Карточка игрока",
+    "mod-analysis": "Анализ модов", "mod-progress": "Прогресс модинга", "subscribe": "Подписка", "activity": "Активность", "player": "Карточка игрока",
     "guild-access": "Доступ гильдии",
 }
 

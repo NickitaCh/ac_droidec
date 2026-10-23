@@ -43,7 +43,7 @@
         <nav>
             <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
             <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
-            {% if user and user.tier != "officer" %}
+            {% if user and user.tier not in ("officer", "member") %}
                 <a href="/subscribe" title="Подписка"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
             {% endif %}
             {% if user and user.tier in ("officer", "member") %}
@@ -86,6 +86,7 @@
                             <a href="/mod-builder"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор</span></a>
                             <a href="/mod-search"><span class="nav-icon">🔍</span><span class="nav-label">Поиск модулей</span></a>
                             <a href="/mod-analysis"><span class="nav-icon">📈</span><span class="nav-label">Анализ модинга</span></a>
+                            <a href="/mod-progress"><span class="nav-icon">📅</span><span class="nav-label">Прогресс модинга</span></a>
                             {% if user.guild_id == 1 %}
                                 <a href="/mod-scan"><span class="nav-icon">📡</span><span class="nav-label">Скан модулей</span></a>
                             {% endif %}
@@ -135,20 +136,23 @@
                         </div>
                     </details>
                     {% endif %}
-                    {% if user.subscription %}
-                        {% set sub = user.subscription %}
-                        <div class="nav-sub-widget{% if sub.urgent %} nav-sub-widget-urgent{% endif %}">
-                            <span class="nav-sub-title">💳 Подписка</span>
-                            {% if sub.unlimited %}
-                                <span class="nav-sub-days">бессрочно</span>
-                            {% else %}
-                                <span class="nav-sub-days">осталось {{ sub.days_left }} дн.</span>
-                                <span class="nav-sub-date">до {{ sub.date }}</span>
-                                <a class="button" href="/subscribe">Оплатить</a>
-                            {% endif %}
-                        </div>
-                    {% endif %}
                 {% endif %}
+            {% endif %}
+            {# Офицерам — с кнопкой «Оплатить»; участникам только срок (продлевают офицеры). #}
+            {% if user and user.subscription %}
+                {% set sub = user.subscription %}
+                <div class="nav-sub-widget{% if sub.urgent %} nav-sub-widget-urgent{% endif %}">
+                    <span class="nav-sub-title">💳 Подписка</span>
+                    {% if sub.unlimited %}
+                        <span class="nav-sub-days">бессрочно</span>
+                    {% else %}
+                        <span class="nav-sub-days">осталось {{ sub.days_left }} дн.</span>
+                        <span class="nav-sub-date">до {{ sub.date }}</span>
+                        {% if user.tier == "officer" %}
+                            <a class="button" href="/subscribe">Оплатить</a>
+                        {% endif %}
+                    {% endif %}
+                </div>
             {% endif %}
             <a class="nav-donate-widget" href="/donate" title="Поддержать проект">💛 Поддержать проект</a>
         </nav>

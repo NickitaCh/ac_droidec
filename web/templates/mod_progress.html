@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Прогресс модинга — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Модули</p>
+                <h1>Прогресс модинга{% call ui.help(side="left") %}<p>Выберите плейт — бот запомнит его требования и сразу сделает первый снимок: кто из игроков что выполняет. Дальше снимки идут сами по выбранному периоду или по кнопке.</p><p>Сравнение «как есть», без подгона релика — как в /статы. Если плейт изменят, у трекера появится отметка «плейт изменён» с датой, и новые снимки пойдут по новым требованиям; старые остаются как были.</p>{% endcall %}</h1>
+                <p class="page-hero-lead">Как гильдия догоняет требования плейта — по датам.</p>
+            </div>
+        </div>
+    </section>
+
+    {% if error == "empty" %}<p class="config-warning">У этого плейта нет требований — следить не за чем.</p>{% endif %}
+
+    <div class="panel">
+        <h2>Новый трекер</h2>
+        <form method="post" action="/mod-progress/create" class="filter-row">
+            <label>Плейт
+                <select name="plate" required>
+                    {% for p in plates %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                </select>
+            </label>
+            <label>Автоснимки
+                <select name="period_days">
+                    {% for days, label in periods.items() %}<option value="{{ days }}"{% if days == 7 %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </label>
+            <button type="submit">Создать и снять</button>
+        </form>
+    </div>
+
+    {% if not trackers %}
+        <p class="empty-state">Трекеров пока нет.</p>
+    {% else %}
+        <div class="panel">
+            <table class="data cards-on-phone">
+                <thead><tr><th>Плейт</th><th>Автоснимки</th><th>Снимков</th><th>Последний</th></tr></thead>
+                <tbody>
+                    {% for t in trackers %}
+                        <tr>
+                            <td data-label="Плейт"><div><a href="/mod-progress/{{ t.id }}">{{ t.plate_name }}</a>
+                                {% for d in t.changes %}<span class="badge badge-warn">плейт изменён {{ d }}</span> {% endfor %}</div></td>
+                            <td data-label="Автоснимки"><div>{{ t.period_label }}</div></td>
+                            <td data-label="Снимков"><div>{{ t.snapshots }}</div></td>
+                            <td data-label="Последний"><div>{% if t.running %}делается…{% else %}{{ t.last_snapshot_msk or "—" }}{% endif %}</div></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

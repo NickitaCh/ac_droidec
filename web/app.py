@@ -24,7 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, telegram, tw_defense, unit_images
+from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, telegram, tw_defense, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -124,6 +124,7 @@ app.include_router(mod_scan.router, prefix="/mod-scan", tags=["mod-scan"])
 app.include_router(mod_search.router, prefix="/mod-search", tags=["mod-search"])
 app.include_router(steal_build.router, prefix="/steal-build", tags=["steal-build"])
 app.include_router(mod_analysis.router, prefix="/mod-analysis", tags=["mod-analysis"])
+app.include_router(mod_progress.router, prefix="/mod-progress", tags=["mod-progress"])
 app.include_router(mod_ku.router, prefix="/mod-ku", tags=["mod-ku"])
 app.include_router(payments.router, prefix="/payments", tags=["payments"])
 app.include_router(subscribe.router, tags=["subscribe"])

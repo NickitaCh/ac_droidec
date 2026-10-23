@@ -64,6 +64,9 @@ def _with_subscription_status(user: dict) -> dict:
     if user.get("tier") == "officer":
         return {**user, "subscription_warning": subscription_status.warning_for(user.get("guild_id")),
                 "subscription": subscription_status.info_for(user.get("guild_id"))}
+    if user.get("tier") == "member":
+        # Участнику — только виджет «сколько осталось» (продлевают офицеры).
+        return {**user, "subscription": subscription_status.info_for(user.get("guild_id"))}
     if user.get("tier") is None:
         return {**user, "expired_guild": subscription_status.expired_officer_guild(user["discord_id"])}
     return user
