@@ -5,7 +5,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
-from services.registration import register_player, unregister_player
+from services.registration import CONSENT_NOTE, notified_note, register_player, unregister_player
 
 
 async def autocomplete_own_registrations(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -58,6 +58,7 @@ class SelfRegistrationCog(commands.Cog):
                 for code, name, row_is_main in result.accounts
             ]
             embed.add_field(name="Все привязанные аккаунты", value="\n".join(lines), inline=False)
+        embed.set_footer(text=CONSENT_NOTE if target_user.id == inter.author.id else notified_note(result))
 
         await inter.edit_original_response(embed=embed)
 

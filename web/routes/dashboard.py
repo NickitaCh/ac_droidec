@@ -113,6 +113,13 @@ async def oferta(request: Request, user: dict | None = Depends(get_current_user_
     return templates.TemplateResponse(request, "oferta.html", {"user": user, "show_footer": True})
 
 
+@router.get("/privacy", response_class=HTMLResponse)
+async def privacy(request: Request, user: dict | None = Depends(get_current_user_optional)):
+    # Политика обработки данных (2026-10-26): на неё ссылаются ответы /регистрация в
+    # Discord и Telegram и сообщение игроку, которого привязал офицер.
+    return templates.TemplateResponse(request, "privacy.html", {"user": user, "show_footer": True})
+
+
 @router.get("/start", response_class=HTMLResponse)
 async def start_guide(request: Request, user: dict | None = Depends(get_current_user_optional)):
     # Публичная (не officer-only) страница-онбординг — её главная аудитория как

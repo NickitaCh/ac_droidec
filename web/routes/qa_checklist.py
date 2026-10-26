@@ -91,6 +91,7 @@ PAGES = [
     ("start", "Начало работы", "/start", "everyone"),
     ("commands", "Документация (команды)", "/commands", "everyone"),
     ("oferta", "Публичная оферта", "/oferta", "everyone"),
+    ("privacy", "Политика обработки данных", "/privacy", "everyone"),
     ("login_password", "Вход по логину и паролю", "/login/password", "everyone"),
     # ---- Скрыто (нет ссылки нигде в интерфейсе — только по прямой ссылке) ----
     ("qa_checklist", "QA-чеклист (эта страница)", "/qa-checklist", "hidden"),

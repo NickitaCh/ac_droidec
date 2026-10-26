@@ -21,6 +21,7 @@ class RegistrationResult:
     ingame_name: str = None
     is_main: bool = None
     accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
+    notified: bool | None = None  # чужая привязка: дошло ли сообщение игроку (None — привязал сам)
 
 
 def _discord_conflict_error(existing_owner: str) -> str:
@@ -36,17 +37,23 @@ def _discord_conflict_error(existing_owner: str) -> str:
     )
 
 
+PRIVACY_URL = "https://swgoh-sng.ru/privacy"
+# Строка о согласии — в ответах на регистрацию (Discord, Telegram) и в личке при чужой привязке.
+CONSENT_NOTE = f"Привязывая аккаунт, вы соглашаетесь с обработкой данных: {PRIVACY_URL}"
+
 # Игровые ранги, чьи коды офицер не привязывает другим (лидер 4, офицер 3): права в боте
 # идут от ранга привязанного кода, так что такая привязка = выдать офицерский доступ.
 _OFFICER_LEVELS = (3, 4)
 
 
-async def _notify(owner_id: str, text: str) -> None:
+async def _notify(owner_id: str, text: str) -> bool:
     from services import discord_rest
     try:
         await discord_rest.send_dm(owner_id, text)
+        return True
     except Exception as e:  # закрытая личка и т.п. — привязка от этого не отменяется
         print(f"⚠️ [Регистрация] Не удалось написать {owner_id}: {e}")
+        return False
 
 
 async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False,
@@ -110,12 +117,14 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     except Exception as e:
         return RegistrationResult(ok=False, error=f"Не удалось сохранить регистрацию: {e}")
 
+    notified = None
     if registered_by:
         guild_name = guild_cfg.get("name") or "гильдия"
-        await _notify(discord_id, (
+        notified = await _notify(discord_id, (
             f"🔗 {registered_by} привязал(а) к вам игровой аккаунт {ingame_name} (код союзника {clean_code}, {guild_name})"
             f"{'' if is_main else ' как альт'}. Теперь бот считает этот аккаунт вашим.\n"
-            f"Если это не ваш аккаунт — отвяжите его командой /регистрация_отмена {clean_code} или напишите офицерам."
+            f"Если это не ваш аккаунт или вы не согласны — отвяжите его командой /регистрация_отмена {clean_code} "
+            f"или напишите офицерам. Какие данные хранит бот: {PRIVACY_URL}"
         ))
         if moved_from:
             await _notify(moved_from, (
@@ -124,7 +133,16 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
             ))
 
     accounts = database.get_user_registrations(discord_id, guild_id=guild_id)
-    return RegistrationResult(ok=True, ally_code=clean_code, ingame_name=ingame_name, is_main=is_main, accounts=accounts)
+    return RegistrationResult(ok=True, ally_code=clean_code, ingame_name=ingame_name, is_main=is_main, accounts=accounts,
+                              notified=notified)
+
+
+def notified_note(result: RegistrationResult) -> str:
+    """Подпись к ответу офицеру после чужой привязки."""
+    if result.notified:
+        return f"Игроку отправлено сообщение в личку. Обработка данных: {PRIVACY_URL}"
+    return ("Написать игроку в личку не получилось (закрыта личка или он не писал боту) — "
+            f"предупредите его сами. Обработка данных: {PRIVACY_URL}")
 
 
 @dataclass

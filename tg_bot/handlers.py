@@ -149,6 +149,10 @@ async def cmd_reg(ctx: Ctx):
         lines.append("Права появятся, когда бот обновит состав гильдии (раз в час).")
     else:
         lines.append(f"Права: {TIER_LABELS[access['tier']]}. Список команд — /help")
+    if registered_by:
+        lines.append(esc(registration.notified_note(result)))
+    else:
+        lines.append(registration.CONSENT_NOTE)
     await ctx.reply("\n".join(lines))
 
 
