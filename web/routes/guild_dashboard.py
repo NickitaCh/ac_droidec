@@ -467,10 +467,10 @@ def _resolve_viewed_plan(guild_id: int, plan_id_param: str | None) -> tuple[dict
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_id = guild_cfg.get("tb_active_plan_id")
     if not active_id:
-        return None, "Нет активного плана ордера — выберите его на странице «Планы ордера»."
+        return None, "Нет активного ордера: опубликуйте его из плана (вкладка «План» → «Опубликовать ордер») или выберите на вкладке «Ордер»."
     plan = database.get_tb_saved_plan(int(active_id))
     if not plan or plan["guild_id"] != guild_id:
-        return None, "Активный план не найден — выберите его заново на странице «Планы ордера»."
+        return None, "Активный ордер не найден — выберите его заново на вкладке «Ордер»."
     return plan, None
 
 
@@ -728,6 +728,23 @@ async def tb_plan_settings(plan_id: int, deploy_pct: str = Form(default=""), bon
     data["bonus"] = [b for b in bonus if b in (inp["zone_data"].get("bonus") or {})]
     _plan_save(guild_id, plan_id, inp, data)
     return _plan_back(plan_id, msg="Настройки сохранены. Чтобы подобрать звёзды под них — «Подобрать заново».")
+
+
+@router.post("/tb/plan/{plan_id}/platoons", response_class=HTMLResponse)
+async def tb_plan_platoons(plan_id: int, phase: int = Form(...), planet: str = Form(...), off: str = Form(default=""),
+                           user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Взводы на планете этапа не ставим (off=1) / ставим. Звёзды плана не меняются — меняется
+    расчёт (операции этой планеты на этапе не закрываются), в ордере будет «Взводы: нет»."""
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    data = dict(plan["data"])
+    skip = {k: [p for p in v if p != planet] for k, v in (data.get("no_platoons") or {}).items()}
+    if off:
+        skip.setdefault(str(phase), []).append(planet)
+    data["no_platoons"] = {k: v for k, v in skip.items() if v}
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, phase)
 
 
 @router.post("/tb/plan/{plan_id}/resuggest", response_class=HTMLResponse)

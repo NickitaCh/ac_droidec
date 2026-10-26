@@ -195,10 +195,12 @@ def order_data(result: dict) -> dict:
             if r["bonus"]:
                 # у бонусной планеты одна звезда за полное заполнение — в ордере это «3»
                 row["bonus"].append({"planet": r["planet"], "stars": 3 if r["stars"] else 0,
-                                     "preload": None if r["stars"] else r["points"]})
+                                     "preload": None if r["stars"] else r["points"],
+                                     "no_platoons": r["no_platoons"]})
             else:
                 row[SIDE_OF[r["planet"]]] = {"planet": r["planet"], "stars": r["stars"],
-                                             "preload": None if r["stars"] else r["points"]}
+                                             "preload": None if r["stars"] else r["points"],
+                                             "no_platoons": r["no_platoons"]}
         rounds.append(row)
     while len(rounds) < 6:
         rounds.append({"round": len(rounds) + 1, "dark": None, "mixed": None, "light": None, "bonus": []})

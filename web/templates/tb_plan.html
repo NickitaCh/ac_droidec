@@ -72,7 +72,7 @@
     <div class="panel">
         <div class="panel-title">
             <span>План по этапам{% call ui.help() %}<p>Как HotUtils Strategy: на каждом этапе выбираете, сколько звёзд брать на каждой открытой планете, или «копим» — набираем очки и закрываем планету на следующем этапе. Маршрут строится сам: планета со звездой закрывается и открывает следующую в ветке; Зеффо и Мандалор — после звезды на Бракке / Татуине и нужного числа побед в спецмиссии.</p><p><b>Как считаем.</b> Залив ГМ идёт в любую планету: {{ (result.deploy_share * 100)|round|int }}% ГМ гильдии на этап (столько гильдия заливала в прошлых ВИ, можно поменять ниже). Бои — только в свою планету: максимум (все игроки проходят все боевые миссии планеты) × доля, которую гильдия отбивала на этой планете в последних ВИ; долю можно поменять в карточке планеты. Взводы — по нынешним складам; операции платят, когда планета берёт звезду (на копящей планете их можно закрыть заранее).</p><p>«Не хватает» — даже весь залив и ожидаемые бои не набирают выбранные звёзды. «Бои: нужно N%» — какую долю максимума боёв этапа пришлось бы отбить, если залить весь доступный ГМ; рядом — сколько ждём по истории.</p><p>Меняете звёзды на этапе — этапы после него подбираются заново под ваш выбор, этапы до него не трогаются.</p>{% endcall %}</span>
-            <span class="panel-hint">{{ plan.name }}{% if order %} · ордер «{{ order.name }}»{% if order_active %} (активный){% endif %}{% endif %}</span>
+            <span class="panel-hint">{{ plan.name }}{% if order %} · ордер «{{ order.name }}»{% if order_active %} (активный){% endif %} · <a href="/tb/platoons?plan_id={{ order.id }}">взводы</a>{% endif %}</span>
         </div>
         <table class="data cards-on-phone tbplan-summary">
             <thead><tr><th>Этап</th><th>Планеты</th><th>Хватает?</th><th class="num">★</th></tr></thead>
@@ -160,6 +160,12 @@
                             {% else %}<span class="badge {{ 'badge-ok' if row.ops_closed == 6 else ('badge-danger' if row.ops_closed == 0 else 'badge-warn') }}">{{ row.ops_closed }} из 6</span>
                                 {% if row.stars %}+{{ mln(row.ops_points) }}{% elif row.ops_pending %}<span class="muted">+{{ mln(row.ops_pending) }} при закрытии</span>{% endif %}
                             {% endif %}
+                            <form method="post" action="/tb/plan/{{ plan.id }}/platoons" class="tbplan-inline">
+                                <input type="hidden" name="phase" value="{{ ph.phase }}">
+                                <input type="hidden" name="planet" value="{{ row.planet }}">
+                                {% if row.no_platoons %}<button type="submit" class="link-btn">ставить взводы</button>
+                                {% else %}<input type="hidden" name="off" value="1"><button type="submit" class="link-btn">не ставить на этом этапе</button>{% endif %}
+                            </form>
                         </dd>
                         <dt>Бои</dt><dd>
                             {{ mln(row.battle_used) }} <span class="muted">из {{ mln(row.battle.expected) }} ждём · макс. {{ mln(row.battle.max) }}{% if row.battle.estimated %} (оценка){% endif %}</span>
@@ -206,7 +212,7 @@
 
         <div class="panel">
             <div class="panel-title">
-                <span>Этап {{ ph.phase }}: кого не хватает во взводах{% call ui.help() %}<p>Слоты взводов на планетах этого этапа, которые нынешние склады не закрывают (юнит игрока встаёт один раз за этап; на копящей планете дефицитные юниты можно добирать на следующих этапах). «В шаге» — у кого юнит в одной-двух реликвиях от порога (корабль — в одной звезде).</p><p>Расставить игроков по слотам — вкладка «Взводы».</p>{% endcall %}</span>
+                <span>Этап {{ ph.phase }}: кого не хватает во взводах{% call ui.help() %}<p>Слоты взводов на планетах этого этапа, которые нынешние склады не закрывают (юнит игрока встаёт один раз за этап; на копящей планете дефицитные юниты можно добирать на следующих этапах). «В шаге» — у кого юнит в одной-двух реликвиях от порога (корабль — в одной звезде).</p><p>Расставить игроков по слотам — вкладка «Взводы»: она берёт планеты из опубликованного ордера, поэтому сначала опубликуйте план. Планета с «не ставить на этом этапе» уходит в ордер как «Взводы: нет», и конструктор её пропускает.</p>{% endcall %}</span>
                 <span class="panel-hint">{% if ph.shortages %}{{ ph.shortages|sum(attribute="short") }} слотов не закрыть{% else %}все слоты закрываются{% endif %}</span>
             </div>
             {% if ph.shortages %}

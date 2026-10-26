@@ -118,23 +118,26 @@ def build_order_blocks(data: dict):
         for zone in ("dark", "mixed", "light"):
             cell = round_data.get(zone)
             if cell and cell.get("planet"):
-                entries.append((zone, cell.get("planet"), int(cell.get("stars") or 0), cell.get("preload")))
+                entries.append((zone, cell.get("planet"), int(cell.get("stars") or 0), cell))
         for cell in round_data.get("bonus") or []:
             if cell and cell.get("planet"):
-                entries.append(("bonus", cell.get("planet"), int(cell.get("stars") or 0), cell.get("preload")))
+                entries.append(("bonus", cell.get("planet"), int(cell.get("stars") or 0), cell))
 
         active = []
-        for zone, planet, stars, preload in entries:
+        for zone, planet, stars, cell in entries:
             total += _overall_contribution(zone, stars)
             if phase == 6 and stars <= 0:
                 continue
-            active.append((zone, planet, stars, preload))
+            active.append((zone, planet, stars, cell))
 
         lines = [f"## Восход Империи — {phase} этап"]
         if not active:
             lines.append("> (нет активных планет на этом этапе)")
-        for i, (zone, planet, stars, preload) in enumerate(active):
-            if stars > 0:
+        for i, (zone, planet, stars, cell) in enumerate(active):
+            preload = cell.get("preload")
+            if cell.get("no_platoons"):  # план с сайта: на этой планете этапа взводы не ставим
+                vzvod = "нет"
+            elif stars > 0:
                 vzvod = "все"
             elif zone == "bonus":
                 vzvod = "только по боту"
