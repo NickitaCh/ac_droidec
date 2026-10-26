@@ -36,12 +36,29 @@ def _discord_conflict_error(existing_owner: str) -> str:
     )
 
 
+# Игровые ранги, чьи коды офицер не привязывает другим (лидер 4, офицер 3): права в боте
+# идут от ранга привязанного кода, так что такая привязка = выдать офицерский доступ.
+_OFFICER_LEVELS = (3, 4)
+
+
+async def _notify(owner_id: str, text: str) -> None:
+    from services import discord_rest
+    try:
+        await discord_rest.send_dm(owner_id, text)
+    except Exception as e:  # закрытая личка и т.п. — привязка от этого не отменяется
+        print(f"⚠️ [Регистрация] Не удалось написать {owner_id}: {e}")
+
+
 async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False,
-                          conflict_error=_discord_conflict_error, officer_guild_id: int | None = None) -> RegistrationResult:
+                          conflict_error=_discord_conflict_error, officer_guild_id: int | None = None,
+                          registered_by: str | None = None) -> RegistrationResult:
     """conflict_error(owner_id) -> текст отказа, когда код уже у другого владельца —
     у Telegram-бота свой текст (tg_bot/handlers.py), там <@id> не работает.
     officer_guild_id — офицер регистрирует другого человека: код должен быть из гильдии
-    офицера (раньше проверялось только «офицер хоть какой-то гильдии»)."""
+    офицера (раньше проверялось только «офицер хоть какой-то гильдии») и не должен быть
+    кодом офицера/лидера в игре (это может сам игрок или супер-админ).
+    registered_by — имя того, кто привязывает ДРУГОГО человека (не себя и не своего альта):
+    тому уходит сообщение в личку, а прежнему владельцу перенесённого кода — что код забрали."""
     discord_id = str(discord_id)
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
@@ -64,6 +81,11 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     guild_id = guild_cfg["id"]
     if officer_guild_id is not None and guild_id != officer_guild_id:
         return RegistrationResult(ok=False, error="Этот код союзника из другой гильдии — офицер регистрирует только игроков своей гильдии.")
+    if officer_guild_id is not None and database.get_member_level(guild_id, clean_code) in _OFFICER_LEVELS:
+        return RegistrationResult(ok=False, error=(
+            "Это код офицера или лидера гильдии в игре — привязка дала бы офицерский доступ к боту. "
+            "Такой код привязывает только сам игрок (/регистрация без участника) или админ бота."
+        ))
 
     # Один и тот же ally_code нельзя привязать сразу к нескольким Discord-аккаунтам
     # в пределах гильдии — иначе статы/задания одного игрока будет видеть и
@@ -71,10 +93,12 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     # /регистрация участник:@X в боте, либо весь веб-дашборд — он и так officer-only)
     # снимает старую привязку и переносит код на нового владельца.
     existing_owner = database.find_ally_code_owner(clean_code, guild_id=guild_id)
+    moved_from = None
     if existing_owner and existing_owner != discord_id:
         if not allow_reassign:
             return RegistrationResult(ok=False, error=conflict_error(existing_owner))
         database.delete_user_registration(existing_owner, clean_code, guild_id=guild_id)
+        moved_from = existing_owner
 
     # Первая регистрация в этой гильдии всегда основная, даже если попросили
     # альт — иначе получится аккаунт без единого основного.
@@ -85,6 +109,19 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
         database.set_user_registration(discord_id, clean_code, ingame_name, is_main=is_main, guild_id=guild_id)
     except Exception as e:
         return RegistrationResult(ok=False, error=f"Не удалось сохранить регистрацию: {e}")
+
+    if registered_by:
+        guild_name = guild_cfg.get("name") or "гильдия"
+        await _notify(discord_id, (
+            f"🔗 {registered_by} привязал(а) к вам игровой аккаунт {ingame_name} (код союзника {clean_code}, {guild_name})"
+            f"{'' if is_main else ' как альт'}. Теперь бот считает этот аккаунт вашим.\n"
+            f"Если это не ваш аккаунт — отвяжите его командой /регистрация_отмена {clean_code} или напишите офицерам."
+        ))
+        if moved_from:
+            await _notify(moved_from, (
+                f"🔓 Код союзника {clean_code} ({ingame_name}, {guild_name}) отвязан от вас и привязан к другому участнику — "
+                f"это сделал(а) {registered_by}. Если это ошибка — напишите офицерам."
+            ))
 
     accounts = database.get_user_registrations(discord_id, guild_id=guild_id)
     return RegistrationResult(ok=True, ally_code=clean_code, ingame_name=ingame_name, is_main=is_main, accounts=accounts)

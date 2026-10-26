@@ -78,8 +78,9 @@ async def submit_registration(
     # services/registration.py::register_player про allow_reassign.
     # Чужого человека офицер регистрирует только в своей гильдии (супер-админ — в любой).
     officer_guild_id = None if target_discord_id == user["discord_id"] or user.get("is_super_admin") else user["guild_id"]
+    registered_by = (user.get("username") or "Офицер") if target_discord_id != user["discord_id"] else None
     result = await register_player(comlink, target_discord_id, ally_code, is_alt=is_alt, allow_reassign=True,
-                                   officer_guild_id=officer_guild_id)
+                                   officer_guild_id=officer_guild_id, registered_by=registered_by)
     if not result.ok:
         return RedirectResponse(f"{next}?{urlencode({error_key: result.error})}", status_code=303)
     params = {success_key: result.ingame_name} if target_discord_id != user["discord_id"] else {}

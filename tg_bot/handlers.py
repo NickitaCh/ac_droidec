@@ -129,10 +129,15 @@ async def cmd_reg(ctx: Ctx):
         officer_guild_id = None if ctx.access.get("is_super_admin") else ctx.access["guild_id"]
         whose = f"Аккаунт для {esc(target.get('first_name') or target.get('username') or 'игрока')}"
 
+    registered_by = None
+    if owner_id != ctx.owner_id:
+        registered_by = " ".join(p for p in (ctx.user.get("first_name"), ctx.user.get("last_name")) if p) or ctx.user.get("username") or "Офицер"
+
     await ctx.action()
     result = await registration.register_player(
         ctx.app.comlink, owner_id, code, is_alt=is_alt, allow_reassign=allow_reassign,
         conflict_error=lambda owner: _tg_conflict_error(owner, _link_html(ctx)), officer_guild_id=officer_guild_id,
+        registered_by=registered_by,
     )
     if not result.ok:
         await ctx.reply(f"❌ {result.error}")

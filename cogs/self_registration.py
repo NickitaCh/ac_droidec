@@ -31,8 +31,10 @@ class SelfRegistrationCog(commands.Cog):
         self.bot = bot
 
     async def _do_registration(self, inter, target_user, ally_code, альт, allow_reassign=False, officer_guild_id=None):
+        registered_by = inter.author.display_name if target_user.id != inter.author.id else None
         result = await register_player(self.bot.comlink, str(target_user.id), ally_code, is_alt=альт,
-                                       allow_reassign=allow_reassign, officer_guild_id=officer_guild_id)
+                                       allow_reassign=allow_reassign, officer_guild_id=officer_guild_id,
+                                       registered_by=registered_by)
         if not result.ok:
             await inter.edit_original_response(content=f"❌ **Ошибка:** {result.error}")
             return
