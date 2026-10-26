@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import traceback
 import disnake
 from disnake.ext import commands
 from dotenv import load_dotenv
@@ -504,9 +505,23 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
         if not inter.response.is_done():
             await inter.response.send_message(_access_denied_message(inter, tier), ephemeral=True)
     else:
-        print(f"❌ Непредвиденная ошибка при выполнении команды: {error}")
+        # Трассировка — в web_errors (как у сайта): docker logs теряются при пересоздании
+        # контейнера, а ошибку игрока потом приходится разбирать задним числом.
+        trace = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        try:
+            options = " ".join(f"{k}={v}" for k, v in (inter.filled_options or {}).items())
+            call = f"/{_invoked_command_name(inter)} {options}".strip()
+        except Exception:
+            call = "/?"
+        print(f"❌ Непредвиденная ошибка при выполнении команды {call}:\n{trace}")
+        error_id = None
+        try:
+            error_id = database.log_web_error(str(inter.author.id), "slash", call, trace)
+        except Exception:
+            pass
+        number = f" (ошибка №{error_id})" if error_id else ""
         # Без ответа Discord так и показывает «бот думает…» — сообщаем об ошибке явно.
-        text = "❌ Не удалось выполнить команду из-за внутренней ошибки. Попробуйте ещё раз; если повторится — сообщите офицерам."
+        text = f"❌ Не удалось выполнить команду из-за внутренней ошибки{number}. Попробуйте ещё раз; если повторится — сообщите офицерам."
         try:
             if inter.response.is_done():
                 await inter.edit_original_response(content=text, embeds=[], attachments=[])
