@@ -187,24 +187,60 @@ def strike_status(m: dict, levels: dict, ships: set) -> str:
     return "short" if len(owned) >= m["count"] else "missing"
 
 
+STRIKE_STEP_RELICS = 2  # «в шаге» — как у спецмиссий: до двух реликвий (у кораблей — одной звезды)
+
+
+def _level_label(level: tuple, fleet: bool) -> str:
+    stars, relic = level
+    if fleet:
+        return f"{stars}★"
+    return f"R{relic}" if relic is not None else (f"{stars}★ без реликвии" if stars >= 7 else f"{stars}★")
+
+
+def strike_gap(m: dict, levels: dict, ships: set) -> tuple[list, bool]:
+    """Для игрока со статусом short: что докачать, чтобы зайти — [(base_id, уровень)] — и
+    «в шаге» ли он. Сначала отстающие обязательные, затем, если подходящих юнитов на пороге
+    всё равно не хватит, — ближайшие к порогу из остальных подходящих."""
+    pool = m["units"] if m["units"] is not None else [b for b in levels if (b in ships) == m["fleet"]]
+    owned = {b for b in pool if b in levels} | set(m["mandatory"])
+    ok = {b for b in owned if _ok(levels[b], m)}
+    lagging = [b for b in m["mandatory"] if b not in ok]
+    extra = max(0, m["count"] - len(ok) - len(lagging))
+    rest = sorted((b for b in owned - ok - set(m["mandatory"])),
+                  key=lambda b: (-levels[b][0], -(levels[b][1] if levels[b][1] is not None else -9)))
+    to_level = lagging + rest[:extra]
+
+    def close(b):
+        stars, relic = levels[b]
+        if m["fleet"] or m["min_relic"] is None:
+            return stars >= m["min_stars"] - 1
+        return stars >= m["min_stars"] and relic is not None and relic >= m["min_relic"] - STRIKE_STEP_RELICS
+    return [(b, _level_label(levels[b], m["fleet"])) for b in to_level], all(close(b) for b in to_level)
+
+
 def strikes_by_phase(rosters: dict, names: dict, with_bonus: bool) -> dict:
-    """{этап: [{planet, n, fleet, label, requirement, ready: [ники], short: [ники]}]}."""
+    """{этап: [{planet, n, fleet, label, requirement, ready: [ники], step/short: [(ник, что
+    докачать)], missing: сколько без нужных юнитов}]}."""
     ms = strike_missions()
     all_ids = {b for r in rosters.values() for b in r}
     ships = {b for b, t in database.get_unit_types(list(all_ids)).items() if t == "ship"}
-    unit_names = database.get_game_unit_names(sorted({b for m in ms for b in m["mandatory"]}))
+    unit_names = database.get_game_unit_names(sorted(all_ids))
     levels = {code: roster_levels(roster) for code, roster in rosters.items()}
     out: dict[int, list] = {}
     for m in ms:
         if m["planet"] in _BONUS_PLANET.values() and not with_bonus:
             continue
-        ready, short = [], []
+        ready, step, short, missing = [], [], [], 0
         for code, lv in levels.items():
             st = strike_status(m, lv, ships)
             if st == "ready":
                 ready.append(names.get(code, code))
             elif st == "short":
-                short.append(names.get(code, code))
+                gap, is_close = strike_gap(m, lv, ships)
+                text = ", ".join(f"{unit_names.get(b, b)} {label}" for b, label in gap)
+                (step if is_close else short).append((names.get(code, code), text))
+            else:
+                missing += 1
         level = f"{m['min_stars']}★" if m["fleet"] else f"R{m['min_relic']}"
         must = ", ".join(unit_names.get(b, b) for b in m["mandatory"])
         if m["mandatory"] and m["count"] <= len(m["mandatory"]):
@@ -213,7 +249,9 @@ def strikes_by_phase(rosters: dict, names: dict, with_bonus: bool) -> dict:
             req = f"{'флот' if m['fleet'] else m['label']} {level} ×{m['count']}" + (f" · {must}" if must else "")
         out.setdefault(m["phase"], []).append({
             "planet": m["planet"], "n": m["n"], "fleet": m["fleet"], "requirement": req,
-            "ready": sorted(ready, key=str.lower), "short": sorted(short, key=str.lower),
+            "ready": sorted(ready, key=str.lower),
+            "step": sorted(step, key=lambda x: x[0].lower()), "short": sorted(short, key=lambda x: x[0].lower()),
+            "missing": missing,
         })
     return out
 

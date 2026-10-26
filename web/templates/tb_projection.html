@@ -97,16 +97,17 @@
         {% if p.strikes %}
         <div class="panel">
             <div class="panel-title">
-                <span>Этап {{ p.phase }}: боевые миссии{% call ui.help() %}<p>Кто может зайти в бой по условиям игры: нужное число юнитов подходящей категории (сторона Силы, фракция) на пороге реликвии или 7★ у кораблей, плюс обязательные юниты, если они есть. Пройдёт ли игрок все волны, по складу не узнать — это зависит от отряда и модов.</p><p>«Не дотягивают» — юниты есть, но реликвии или звёзд не хватает.</p>{% endcall %}</span>
+                <span>Этап {{ p.phase }}: боевые миссии{% call ui.help() %}<p>Кто может зайти в бой по условиям игры: нужное число юнитов подходящей категории (сторона Силы, фракция) на пороге реликвии или 7★ у кораблей, плюс обязательные юниты, если они есть. Пройдёт ли игрок все волны, по складу не узнать — это зависит от отряда и модов.</p><p>«В шаге» — юниты есть, и всем, кого надо докачать, не хватает одной-двух реликвий (кораблю — одной звезды); «Не дотягивают» — нужно больше. Раскройте число — видно, кого и с какого уровня качать: сначала обязательные, потом ближайшие к порогу подходящие, если их на пороге не хватает. Нет нужных юнитов вовсе — в списки не попадает, их число — под таблицей боя.</p>{% endcall %}</span>
             </div>
             <table class="data cards-on-phone">
-                <thead><tr><th>Бой</th><th>Могут зайти</th><th>Не дотягивают</th></tr></thead>
+                <thead><tr><th>Бой</th><th>Могут зайти</th><th>В шаге</th><th>Не дотягивают</th></tr></thead>
                 <tbody>
                     {% for s in p.strikes %}
                         <tr>
-                            <td data-label="Бой"><div><strong>{{ planet_ru(s.planet) }} · {{ s.n }}</strong>{% if s.fleet %} <span class="badge badge-neutral">флот</span>{% endif %}<br><span class="muted">{{ s.requirement }}</span></div></td>
+                            <td data-label="Бой"><div><strong>{{ planet_ru(s.planet) }} · {{ s.n }}</strong>{% if s.fleet %} <span class="badge badge-neutral">флот</span>{% endif %}<br><span class="muted">{{ s.requirement }}</span>{% if s.missing %}<br><span class="muted">нет нужных юнитов: {{ s.missing }}</span>{% endif %}</div></td>
                             <td data-label="Могут зайти">{% set badge = 'badge-ok' if s.ready|length >= r.players * 0.8 else ('badge-warn' if s.ready else 'badge-danger') %}{% if s.ready %}<details><summary><span class="badge {{ badge }}">{{ s.ready|length }} из {{ r.players }}</span></summary>{{ names_list(s.ready) }}</details>{% else %}<span class="badge badge-danger">0 из {{ r.players }}</span>{% endif %}</td>
-                            <td data-label="Не дотягивают">{{ count_details(s.short) }}</td>
+                            <td data-label="В шаге">{{ count_details(s.step, "badge-warn", pairs=True) }}</td>
+                            <td data-label="Не дотягивают">{{ count_details(s.short, pairs=True) }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
