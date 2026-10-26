@@ -1,7 +1,10 @@
 {# Шапка раздела ТБ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
-{# Раздел ТБ (2026-10-26): «План» (калькулятор + готовность) → «Взводы» → «Ордер» (ветки
-   Discord) → «Итоги» (отчёт, бои и ОЗ). active — ключ вкладки. #}
-{% macro tb_hero(title, active) -%}
+{# Раздел ТБ (2026-10-26): две вкладки — «План» и «Итоги». Внутри плана шаги «Звёзды и залив»
+   (калькулятор) → «Взводы» → «Ордер» (ветки Discord); plan_id/order_id — какой план открыт, чтобы
+   шаги вели к нему же. Флаг tb_classic_nav возвращает прежние 4 вкладки (запасной путь).
+   active — ключ страницы. Импортировать «with context» (нужен user). #}
+{% macro tb_hero(title, active, plan_id=None, order_id=None) -%}
+{% set classic = tb_classic_nav(user) %}
 <section class="page-hero page-hero-dark">
     <div class="page-hero-top">
         <div>
@@ -9,11 +12,26 @@
             <h1>{{ title }}</h1>
         </div>
     </div>
+    {% if classic %}
     <nav class="hero-tabs">
         {% for href, key, label in [("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/order", "order", "Ордер"), ("/tb", "results", "Итоги")] %}
             {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
         {% endfor %}
     </nav>
+    {% else %}
+    {% set in_plan = active in ("plan", "platoons", "order", "goal") %}
+    <nav class="hero-tabs">
+        {% if in_plan and active == "plan" %}<strong>План</strong>{% else %}<a href="/tb/plan{{ '?id=' ~ plan_id if plan_id else '' }}"{% if in_plan %} aria-current="page"{% endif %}>План</a>{% endif %}
+        {% if active == "results" %}<strong>Итоги</strong>{% else %}<a href="/tb">Итоги</a>{% endif %}
+    </nav>
+    {% if in_plan %}
+    <nav class="hero-links tb-subnav tb-steps" aria-label="Шаги плана">
+        {% for href, key, label in [("/tb/plan" ~ ("?id=" ~ plan_id if plan_id else ""), "plan", "1 · Звёзды и залив"), ("/tb/platoons" ~ ("?plan_id=" ~ order_id if order_id else ""), "platoons", "2 · Взводы"), ("/tb/order" ~ ("?plan=" ~ plan_id if plan_id else ""), "order", "3 · Ордер в Discord")] %}
+            <a class="hero-link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+    {% endif %}
     {% if caller %}{{ caller() }}{% endif %}
 </section>
 {%- endmacro %}

@@ -107,6 +107,9 @@ def _sync_status_text(sync_status: dict) -> dict:
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+# Шапка ТБ (_tb.html::tb_hero): прежние 4 вкладки, если гильдия включила запасной старый вид.
+templates.env.globals["tb_classic_nav"] = lambda user: bool((user or {}).get("guild_id")) and \
+    feature_flags.is_enabled(user["guild_id"], "tb_classic_nav")
 
 # Подписи веток — намеренно те же самые, что в choices Discord-команды тб_отчет план
 # (cogs/guild_events.py::tb_set_plan) для консистентности офицерского UX между ботом и
@@ -248,6 +251,12 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
             "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
         })
 
+    # Шаг «Ордер» плана (?plan=<id плана>): по умолчанию — активный план.
+    calc_plans = tb_plan.list_plans(guild_id)
+    step_raw = request.query_params.get("plan", "")
+    step_id = int(step_raw) if step_raw.isdigit() else tb_plan.active_plan_id(guild_id, calc_plans)
+    step_plan = next((p for p in calc_plans if p["id"] == step_id), None)
+
     preview = None
     preview_plan = None
     preview_error = None
@@ -270,6 +279,8 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
         "conflict_options": TB_PLAN_CONFLICT_OPTIONS,
         "plans": plans,
         "active_plan": next((p for p in plans if p["active"]), None),
+        "step_plan": step_plan,
+        "step_order_id": step_plan.get("order_plan_id") if step_plan else None,
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
         "config_warning": config_warning_html(guild_cfg, "tb_plan_order"),
@@ -614,8 +625,13 @@ def _parse_number(raw: str) -> float | None:
 async def tb_plan_page(request: Request, id: int = 0,
                        user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
+    try:
+        import_errors = await tb_plan.import_orders(guild_id)
+    except Exception as e:  # перенос старых ордеров не должен ронять страницу плана
+        import_errors = [f"Не удалось перенести ордера в планы: {e}"]
     plans = tb_plan.list_plans(guild_id)
-    plan = next((p for p in plans if p["id"] == id), None) if id else (plans[0] if plans else None)
+    active_id = tb_plan.active_plan_id(guild_id, plans)
+    plan = next((p for p in plans if p["id"] == (id or active_id)), None) or (plans[0] if plans else None)
     _built_at, r = await _projection(guild_id, True)
     fc = r.get("forecast")
     result = None
@@ -637,9 +653,10 @@ async def tb_plan_page(request: Request, id: int = 0,
         "bonus_planets": sorted(((fc or {}).get("inputs") or {}).get("zone_data", {}).get("bonus") or {}),
         "order": order if order and order["guild_id"] == guild_id else None,
         "order_active": bool(order and order["id"] == active_order_id),
+        "active_id": active_id,
         "goal_enabled": feature_flags.is_enabled(guild_id, "tb_star_goal"),
         "msg": request.query_params.get("msg"),
-        "error": request.query_params.get("error"),
+        "error": request.query_params.get("error") or "; ".join(import_errors) or None,
         "today": datetime.now(MSK).strftime("%d.%m"),
         "planet_ru": _planet_ru,
         "compact": dashboard_data._compact_number,
@@ -773,6 +790,18 @@ async def tb_plan_delete(plan_id: int, user: dict = Depends(feature_flags.requir
     _plan_or_404(user["guild_id"], plan_id)
     tb_plan.delete_plan(user["guild_id"], plan_id)
     return RedirectResponse("/tb/plan", status_code=303)
+
+
+@router.post("/tb/plan/{plan_id}/activate", response_class=HTMLResponse)
+async def tb_plan_activate(plan_id: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Активный план = активный ордер (guilds.tb_active_plan_id): по нему бот публикует этапы,
+    взводы по умолчанию — тоже его."""
+    plan = _plan_or_404(user["guild_id"], plan_id)
+    order = database.get_tb_saved_plan(plan["order_plan_id"]) if plan.get("order_plan_id") else None
+    if not order or order["guild_id"] != user["guild_id"]:
+        return _plan_back(plan_id, error="Сначала опубликуйте ордер плана — активным становится опубликованный план.")
+    database.update_guild_config(user["guild_id"], tb_active_plan_id=order["id"])
+    return _plan_back(plan_id, msg="План активный: бот публикует по нему этапы, взводы открываются по нему.")
 
 
 @router.post("/tb/plan/{plan_id}/publish", response_class=HTMLResponse)
@@ -1091,6 +1120,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
         "view": view,
         "error": error,
         "plan": plan,
+        "step_plan": tb_plan.plan_for_order(guild_id, plan["id"]) if plan else None,
         "saved_plans": saved_plans,
         "active_plan_id": active_plan_id,
         "autofill_summary": request.query_params.get("autofill_summary"),

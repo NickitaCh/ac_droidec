@@ -36,6 +36,9 @@ PLANET_NAME_TO_RU = {
     "Zeffo": "зеффо", "Mandalore": "мандалор",
 }
 RU_TO_PLANET_NAME = {ru: en for en, ru in PLANET_NAME_TO_RU.items()}
+# «Ордер из картинки» (services/tb_order_image.py::PLANET_RU) пишет «Кашик» — без этого
+# Кашиик из таких ордеров пропадала и во взводах, и при переносе в план.
+RU_TO_PLANET_NAME["кашик"] = "Kashyyyk"
 
 
 def _scan_field(lines: list, start_i: int, field_ru: str, max_lines: int = 6):
@@ -145,11 +148,17 @@ async def fetch_plan_planets(plan: dict) -> tuple:
             # max_lines по умолчанию (6) здесь безопасен — "Взводы:" не используется для
             # разграничения планета/не-планета (это уже решено выше), только для no_platoons.
             vzvod = _scan_field(lines, i, "Взводы")
+            # «Цель: 3 звезды» / «Копим: до 120 млн» — для переноса старого ордера в план
+            # (services/tb_plan.py::import_orders); остальным потребителям не нужны.
+            goal = re.search(r"\d+", _scan_field(lines, i, "Цель") or "")
+            carry = re.search(r"(\d+(?:[.,]\d+)?)\s*млн", _scan_field(lines, i, "Копим") or "")
             entries.append({
                 "planet": planet,
                 "raw": stripped[1:].strip(" *#"),
                 "round": round_num,
                 "no_platoons": bool(vzvod) and vzvod.strip().lower().rstrip(".") == "нет",
+                "stars": int(goal.group()) if goal else None,
+                "preload": float(carry.group(1).replace(",", ".")) * 1e6 if carry else None,
             })
     return entries, None
 

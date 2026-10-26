@@ -35,6 +35,7 @@ FEATURES: dict[str, dict] = {
     "tb_plan_order": {"label": "ТБ — план, автоордер, взвода", "category": "ТБ"},
     "tb_reports": {"label": "ТБ — итоговые отчёты", "category": "ТБ"},
     "tb_star_goal": {"label": "ТБ — цель по звёздам (варианты, как взять больше)", "category": "ТБ"},
+    "tb_classic_nav": {"label": "ТБ — старый вид раздела (4 вкладки: План · Взводы · Ордер · Итоги)", "category": "ТБ"},
     "tw_order": {"label": "Территориальная Война (ВГ)", "category": "Прочее"},
     "violations": {"label": "Нарушения", "category": "Прочее"},
     "birthdays": {"label": "Дни рождения", "category": "Прочее"},
@@ -58,7 +59,9 @@ FEATURES: dict[str, dict] = {
 # Выключено по умолчанию, включается явно. mod_ku_plates — режим МодКу по плейтам, только
 # АС (guild_id=1), решение пользователя 2026-10-14. Сама страница МодКу — только супер-админам.
 # tb_star_goal — вкладка «Цель» ВИ-проекции, только АС (решение пользователя 2026-10-22).
-OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal"}
+# tb_classic_nav — запасной путь на случай поломки нового «План · Итоги» (2026-10-26): включённый
+# возвращает прежние 4 вкладки; данные у обоих видов общие.
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav"}
 
 
 def label(key: str) -> str:

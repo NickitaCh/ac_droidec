@@ -184,6 +184,71 @@ def set_stars(inp: dict, data: dict, phase: int, planet: str, stars: int) -> dic
     return suggest(inp, data, fixed_until=phase)
 
 
+# ------------------------------------------------------------------ ордера без плана
+
+IMPORTED_STATE = "tb_plan_imported_orders"  # bot_state гильдии: JSON-список id ордеров, уже ставших планами
+ALL_PLANETS = [p for branch in BRANCHES.values() for p in branch] + ["Zeffo", "Mandalore"]
+
+
+def order_to_data(entries: list[dict]) -> dict:
+    """Разбор ветки ордера (tb_plan_reader.fetch_plan_planets) → data плана. Планета, которой нет
+    в ордере этапа, — 0 звёзд (ордер не пишет 0★ на 6 этапе), иначе simulate взял бы максимум."""
+    choices = {str(ph): {p: 0 for p in ALL_PLANETS} for ph in range(1, 7)}
+    preload, no_platoons, bonus = {}, {}, set()
+    for e in entries:
+        planet, ph = e.get("planet"), str(e["round"])
+        if not planet:
+            continue
+        if planet in ("Zeffo", "Mandalore"):
+            bonus.add(planet)
+        stars = e.get("stars") or 0
+        if planet in ("Zeffo", "Mandalore"):
+            stars = 1 if stars >= 3 else 0  # в ордере бонусная «3 звезды» = одна звезда в зачёт
+        choices[ph][planet] = stars
+        if not stars and e.get("preload"):
+            preload.setdefault(ph, {})[planet] = e["preload"]
+        if e.get("no_platoons"):
+            no_platoons.setdefault(ph, []).append(planet)
+    return {"choices": choices, "preload": preload, "no_platoons": no_platoons,
+            "bonus": sorted(bonus), "imported": True}
+
+
+async def import_orders(guild_id: int) -> list[str]:
+    """Ордера (database.tb_saved_plans), у которых нет плана, — в планы (звёзды из текста ветки).
+    Каждый ордер переносится один раз: удалённый потом план не возвращается. → ошибки чтения."""
+    import tb_plan_reader
+
+    linked = {p["order_plan_id"] for p in list_plans(guild_id) if p.get("order_plan_id")}
+    done = set(json.loads(database.get_bot_state(IMPORTED_STATE, guild_id=guild_id) or "[]"))
+    errors = []
+    for order in database.get_tb_saved_plans(guild_id):
+        if order["id"] in linked or order["id"] in done:
+            continue
+        entries, error = await tb_plan_reader.fetch_plan_planets({**order, "guild_id": guild_id})
+        if error:
+            errors.append(error)
+            continue
+        plan_id = create_plan(guild_id, order["name"][:80], order_to_data(entries), order.get("total_stars"),
+                              "import:order")
+        update_plan(guild_id, plan_id, order_plan_id=order["id"])
+        done.add(order["id"])
+        database.set_bot_state(IMPORTED_STATE, json.dumps(sorted(done)), guild_id=guild_id)
+    return errors
+
+
+def active_plan_id(guild_id: int, plans: list[dict]) -> int | None:
+    """План, чей ордер активный (guilds.tb_active_plan_id)."""
+    cfg = database.get_guild_config(guild_id) or {}
+    order_id = cfg.get("tb_active_plan_id")
+    if not order_id:
+        return None
+    return next((p["id"] for p in plans if p.get("order_plan_id") == int(order_id)), None)
+
+
+def plan_for_order(guild_id: int, order_id: int) -> dict | None:
+    return next((p for p in list_plans(guild_id) if p.get("order_plan_id") == order_id), None)
+
+
 # ------------------------------------------------------------------ ордер в Discord
 
 def order_data(result: dict) -> dict:

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_tb.html" as tbui %}
+{% import "_tb.html" as tbui with context %}
 {% import "_ui.html" as ui %}
 {% block title %}Ордер ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {{ tbui.tb_hero("Ордер ТБ", "order") }}
+    {{ tbui.tb_hero("Ордер ТБ", "order", step_plan.id if step_plan else None, step_order_id) }}
 
     {% if config_warning %}
         <p class="config-warning">{{ config_warning|safe }}</p>
@@ -16,9 +16,28 @@
         <p><span class="badge badge-ok">Сохранено</span></p>
     {% endif %}
 
+    {% set classic = tb_classic_nav(user) %}
+    {% if not classic and step_plan %}
+        {% set step_order = plans|selectattr("id", "equalto", step_plan.order_plan_id)|first if step_plan.order_plan_id else None %}
+        <div class="panel">
+            <div class="panel-title"><span>Ордер плана «{{ step_plan.name }}»</span></div>
+            {% if step_order %}
+                <p>Опубликован{% if step_order.thread_link %} в <a href="{{ step_order.thread_link }}" target="_blank" rel="noopener">ветку Discord ↗</a>{% endif %} · {{ step_order.total_stars }}★ ·
+                    {% if step_order.active %}<span class="badge badge-ok">активный</span> — бот публикует по нему этапы{% else %}<span class="muted">не активный</span>{% endif %}</p>
+                <div class="hero-links tb-order-step">
+                    <a class="hero-link" href="/tb/order?plan={{ step_plan.id }}&preview_plan_id={{ step_order.id }}#preview">Предпросмотр этапов</a>
+                    {% if not step_order.active %}<form method="post" action="/tb/plan/{{ step_plan.id }}/activate"><button type="submit">Сделать активным</button></form>{% endif %}
+                    <a class="hero-link" href="/tb/plan?id={{ step_plan.id }}#publish">Опубликовать заново</a>
+                </div>
+            {% else %}
+                <p class="empty-state">Ордер этого плана ещё не опубликован. <a href="/tb/plan?id={{ step_plan.id }}#publish">Опубликовать из плана</a> — бот выложит 6 этапов в ветку Discord.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+
     <div class="panel">
         <div class="panel-title">
-            <span>Ордеры в Discord{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
+            <span>{{ "Ордеры в Discord" if classic else "Все ордера в Discord" }}{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
         </div>
         {% if not plans %}
             <p class="empty-state">Ордеров пока нет — опубликуйте его из <a href="/tb/plan">плана</a>, соберите из картинки или зарегистрируйте готовую ветку формами ниже.</p>
@@ -28,7 +47,7 @@
                 <thead><tr><th>Название</th><th class="num">★</th><th>Ветка</th><th></th></tr></thead>
                 <tbody>
                     {% for row in plans %}
-                        <tr>
+                        <tr{% if step_plan and row.id == step_plan.order_plan_id %} class="row-highlight"{% endif %}>
                             <td>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</td>
                             <td class="num">{{ row.total_stars }}</td>
                             <td>
@@ -90,6 +109,7 @@
     {% endif %}
 
     {% set branches = conflict_options if has_bonus else conflict_options|rejectattr("value", "equalto", "bonus")|list %}
+    {% if not classic %}<details class="panel tb-order-grid-details"><summary>⚙ Планеты по этапам для отчёта</summary>{% endif %}
     <div class="panel">
         <div class="panel-title">
             <span>Планеты по этапам{% call ui.help() %}<p>Какая планета на каком этапе — по объявлениям офицеров в канале плана ТБ и по активному ордеру. По этой сетке отчёт по ТБ подписывает планеты.</p><p>Нажмите на этап — откроется сообщение, которое бот опубликует на этот этап.</p>{% endcall %}</span>
@@ -118,6 +138,7 @@
             </table>
         </div>
     </div>
+    {% if not classic %}</details>{% endif %}
 
     <dialog class="edit-modal" id="tb-stage-modal">
         <div class="edit-modal-header">
@@ -163,7 +184,7 @@
 
     <div class="tb-plan-forms">
         <div class="panel" id="from-image">
-            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Запасной путь, если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её, опубликует в ветку 6 сообщений по этапам, сохранит ордер и расставит взводы.") }}</span></div>
+            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Запасной путь, если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её, опубликует в ветку 6 сообщений по этапам, сохранит ордер и расставит взводы. Ордер сам появится в списке планов («План») со звёздами из ветки.") }}</span></div>
             {% if image_job %}
                 {% if image_job.state == "running" %}
                     <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>

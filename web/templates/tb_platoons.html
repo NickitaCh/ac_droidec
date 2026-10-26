@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_tb.html" as tbui %}
+{% import "_tb.html" as tbui with context %}
 {% import "_game.html" as game %}
 {% block title %}Взводы ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {{ tbui.tb_hero("Конструктор взводов", "platoons") }}
+    {{ tbui.tb_hero("Конструктор взводов", "platoons", step_plan.id if step_plan else None, plan.id if plan else None) }}
     <nav class="hero-links" style="margin: 0 0 1em;"><a class="hero-link" href="/tb/platoons/filters"><span class="hero-link-icon">⚙️</span>Фильтры автозаполнения</a></nav>
 
     <div class="platoon-switchers">

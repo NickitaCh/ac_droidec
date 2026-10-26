@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_tb.html" as tbui %}
+{% import "_tb.html" as tbui with context %}
 {% import "_game.html" as game %}
 {% import "_ui.html" as ui %}
 {% block title %}План ТБ — AC Droidec{% endblock %}
@@ -16,7 +16,7 @@
 {% if row.stars %}<span class="tbp-stars">{{ "★" * row.stars }}</span>{% if not row.bonus %}<span class="muted">{{ "☆" * (row.max - row.stars) }}</span>{% endif %}{% elif row.carry %}<span class="muted nowrap">копим {{ mln(row.points) }}</span>{% else %}<span class="muted nowrap">не берём</span>{% endif %}
 {%- endmacro %}
 {% block content %}
-    {% call tbui.tb_hero("План ТБ", "plan") %}
+    {% call tbui.tb_hero("План ТБ", "plan", plan.id if plan else None, order.id if order else None) %}
         <div class="hero-kpis">
             {% if result %}
                 <div class="hero-kpi {{ 'hero-kpi-good' if result.ok else 'hero-kpi-danger' }}"><span class="hero-kpi-value">{{ result.total }}★</span><span class="hero-kpi-label">{{ "план из " ~ result.max if result.ok else "в плане, но не на всё хватает" }}</span></div>
@@ -38,13 +38,16 @@
         {% if plans %}
             <form method="get" action="/tb/plan" class="tbplan-pick">
                 <select id="tbplan-select" name="id" onchange="this.form.submit()" aria-label="План">
-                    {% for p in plans %}<option value="{{ p.id }}"{% if plan and p.id == plan.id %} selected{% endif %}>{{ p.name }}{% if p.stars is not none %} · {{ p.stars }}★{% endif %}</option>{% endfor %}
+                    {% for p in plans %}<option value="{{ p.id }}"{% if plan and p.id == plan.id %} selected{% endif %}>{% if p.id == active_id %}★ {% endif %}{{ p.name }}{% if p.stars is not none %} · {{ p.stars }}★{% endif %}{% if p.id == active_id %} · активный{% endif %}</option>{% endfor %}
                 </select>
                 <noscript><button type="submit">Открыть</button></noscript>
             </form>
         {% endif %}
         <div class="tbplan-actions">
             <form method="post" action="/tb/plan/new"><button type="submit">＋ Новый план</button></form>
+            {% if plan and order and not order_active %}
+                <form method="post" action="/tb/plan/{{ plan.id }}/activate"><button type="submit">Сделать активным</button></form>
+            {% endif %}
             {% if plan %}
                 <form method="post" action="/tb/plan/new"><input type="hidden" name="copy_id" value="{{ plan.id }}"><button type="submit" class="button-secondary">Копия</button></form>
                 <details class="tbplan-menu">
@@ -62,6 +65,15 @@
             {% endif %}
         </div>
     </div>
+
+    {% if plan and not tb_classic_nav(user) %}
+        <p class="muted tbplan-active-note">
+            {% if order_active %}<span class="badge badge-ok">активный</span> бот публикует этапы по ордеру этого плана, взводы открываются по нему.
+            {% elif order %}Ордер опубликован, но план не активный — бот публикует другой.
+            {% else %}Ордер ещё не опубликован — <a href="#publish">опубликовать</a>; после этого план можно сделать активным.{% endif %}
+            {% if plan.data.imported %} Перенесён из ордера «{{ order.name if order else plan.name }}»: звёзды взяты из ветки Discord, правки здесь в ветку не уходят, пока не опубликуете заново.{% endif %}
+        </p>
+    {% endif %}
 
     {% if not plan %}
         <div class="panel">
