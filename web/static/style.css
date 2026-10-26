@@ -612,6 +612,14 @@ select { background: var(--page); }
     padding: 0.9em 1.1em;
     min-width: 0; /* иначе широкие таблицы внутри узкой колонки распирают весь грид */
 }
+/* Левая колонка: состав гильдии, под ним задачи на прокачку (2026-10-26 — иначе
+   слева под длинным составом было пусто, а все виджеты теснились справа). */
+.widget-primary {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+    min-width: 0;
+}
 .widget-secondary {
     grid-column: span 2;
     display: flex;
@@ -686,11 +694,23 @@ select { background: var(--page); }
         flex-shrink: 0;
     }
 }
+/* Задачи на прокачку в левой колонке: 5 столбцов не влезают, когда колонка узкая
+   (окно чуть шире 60em) — те же карточки, что у cards-on-phone, но по ширине виджета. */
+.widget-tasks { container-type: inline-size; }
+@container (max-width: 34em) {
+    .widget-tasks table.cards-on-phone thead { display: none; }
+    .widget-tasks table.cards-on-phone, .widget-tasks table.cards-on-phone tbody, .widget-tasks table.cards-on-phone tr, .widget-tasks table.cards-on-phone td { display: block; width: 100%; }
+    .widget-tasks table.cards-on-phone tr { padding: 0.55em 0; border-bottom: 1px solid var(--border); }
+    .widget-tasks table.cards-on-phone td { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75em; padding: 0.15em 0; border: none; text-align: right; }
+    .widget-tasks table.cards-on-phone td::before { content: attr(data-label); flex-shrink: 0; font-size: 0.8em; font-weight: 600; color: var(--fg-muted); text-align: left; }
+    .widget-tasks table.cards-on-phone td .nowrap { white-space: normal; }
+}
 .widget-header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75em;
+    flex-wrap: wrap; /* узкий виджет: ссылка «Все … →» уходит на вторую строку, а не за край */
+    gap: 0.25em 0.75em;
     margin-bottom: 0.7em;
 }
 .widget-header h2 { margin: 0; font-size: 1.05em; }
