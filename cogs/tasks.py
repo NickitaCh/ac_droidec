@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import database
 import guild_resolver
-from services import feature_flags
+from services import feature_flags, fun_features
 from services.units_sync import sync_units
 from services import journey_guide
 from services.equipment_sync import sync_equipment
@@ -204,7 +204,10 @@ class TasksCog(commands.Cog):
             return
         unit_name = database.get_game_unit_name(base_id) or base_id
         target_label = self._format_target_label(target_type, target_value)
-        if status == "COMPLETED":
+        if status == "COMPLETED" and fun_features.should_trigger("personal_task_praise", discord_id):
+            praise = fun_features.FUN_ACTIONS["personal_task_praise"]["praise"]
+            text = f"💋 {praise}!\n🎉 Личная задача выполнена: **{unit_name}** ({target_label}) — {player_name}."
+        elif status == "COMPLETED":
             text = f"🎉 Личная задача выполнена: **{unit_name}** ({target_label}) — {player_name}."
         else:
             text = f"⏰ Личная задача просрочена: **{unit_name}** ({target_label}) — {player_name}, срок истёк."
