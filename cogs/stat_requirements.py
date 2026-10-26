@@ -1594,6 +1594,14 @@ class StatRequirementsCog(commands.Cog):
                 print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
             await asyncio.sleep(0.1)
         print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}, событий активности: {total_events}")
+        # Срез гильдии за сегодня для виджета на главной (services/guild_snapshot.py) — из
+        # только что обновлённых кэшей, без запросов в игру.
+        from services import guild_snapshot
+        for guild_id in list(self.bot.guild_roster_caches):
+            try:
+                await asyncio.to_thread(guild_snapshot.take, guild_id)
+            except Exception as e:
+                print(f"⚠️ [Срез] Гильдия {guild_id}: {e!r}")
 
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):

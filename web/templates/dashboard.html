@@ -386,6 +386,56 @@
 
                 <div class="widget wc-wide">
                     <div class="widget-header">
+                        <h2>Срез гильдии</h2>
+                        {% if widgets.guild_snapshot %}
+                            <span class="muted">{{ widgets.guild_snapshot.day }}{% if widgets.guild_snapshot.base_day %} · изменение с {{ widgets.guild_snapshot.base_day }}{% endif %}</span>
+                        {% endif %}
+                    </div>
+                    {% if not widgets.guild_snapshot %}
+                        <p class="widget-empty">Первый срез появится после ближайшего ежечасного обновления ростеров.</p>
+                    {% else %}
+                        <div class="snapshot-grid">
+                            {% for row in widgets.guild_snapshot.rows %}
+                                <div class="snapshot-cell">
+                                    <span class="snapshot-value">{{ row.text }}{% if row.delta_text %} <span class="snapshot-delta {{ row.delta_class }}">{{ row.delta_text }}</span>{% endif %}</span>
+                                    <span class="snapshot-label">{{ row.label }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        {% if not widgets.guild_snapshot.base_day %}
+                            <p class="muted snapshot-note">Изменения появятся со следующего дня: срез обновляется несколько раз в день, на день остаётся последний.</p>
+                        {% elif not widgets.guild_snapshot.full_week %}
+                            <p class="muted snapshot-note">Истории пока меньше недели — изменение с самого раннего среза.</p>
+                        {% endif %}
+                    {% endif %}
+                </div>
+
+                <div class="widget wc-wide">
+                    <div class="widget-header">
+                        <h2>Прогресс модинга</h2>
+                        <a class="widget-link" href="/mod-progress">Все трекеры →</a>
+                    </div>
+                    {% if not widgets.mod_progress %}
+                        <p class="widget-empty">Трекеров пока нет — создайте их на странице <a href="/mod-progress">«Прогресс модинга»</a>.</p>
+                    {% else %}
+                        <div class="mp-widget">
+                            {% for t in widgets.mod_progress %}
+                                <a class="mp-widget-row" href="/mod-progress/{{ t.id }}">
+                                    <span class="mp-widget-name">{{ t.plate }} <span class="muted">· срез {{ t.date }}</span></span>
+                                    <span class="mp-widget-bar"><span style="width: {{ t.pct }}%;"></span></span>
+                                    <span class="mp-widget-nums">
+                                        <strong>{{ t.pct }}%</strong> · {{ ui.num(t.done) }} из {{ ui.num(t.total) }}
+                                        · всё закрыли {{ t.full }} из {{ t.players }}
+                                        {% if t.delta %} · <span class="snapshot-delta {{ 'up' if t.delta > 0 else 'down' }}">{{ '+' if t.delta > 0 else '−' }}{{ t.delta|abs }}</span> с {{ t.prev_date }}{% endif %}
+                                    </span>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="widget wc-wide">
+                    <div class="widget-header">
                         <h2>Очки территории — ТБ</h2>
                         <a class="widget-link" href="/tb">Подробный отчёт →</a>
                     </div>

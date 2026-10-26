@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from cogs.birthday import next_birthday
-from services import activity_diff, dashboard_data, datacron_catalog, discord_invite
+from services import activity_diff, dashboard_data, datacron_catalog, discord_invite, guild_snapshot
 from services.config_status import missing_summary
 from web.deps import get_current_user_optional, require_guild_access
 # Переиспользуем форматирование "когда был последний синк" из /activity вместо
@@ -69,6 +69,29 @@ def _next_birthdays(guild_id: int, limit: int = 10):
         })
     rows.sort(key=lambda r: r["next_birthday"])
     return rows[:limit]
+
+
+def _mod_progress_widget(guild_id: int) -> list[dict]:
+    """Последний снимок каждого трекера «Прогресса модинга» (как есть, с отрядом) — для
+    виджета на главной. Блокирующая, звать через to_thread."""
+    from services import mod_progress
+    rows = []
+    for tracker in mod_progress.list_trackers(guild_id):
+        summary = mod_progress.guild_summary(guild_id, tracker["id"])
+        if not summary or not summary["snapshots"]:
+            continue
+        snaps = summary["snapshots"]
+        deltas = [p["delta_prev"] for p in summary["players"] if "delta_prev" in p]
+        total = summary["total_reqs"]
+        rows.append({
+            "id": tracker["id"], "plate": tracker["plate_name"],
+            "date": snaps[-1]["date"], "prev_date": snaps[-2]["date"] if len(snaps) > 1 else None,
+            "done": summary["total_done"], "total": total,
+            "pct": round(100 * summary["total_done"] / total) if total else 0,
+            "full": summary["full"], "players": len(summary["players"]),
+            "delta": sum(deltas) if deltas else None,
+        })
+    return rows
 
 
 def _tasks_summary(guild_id: int, limit: int = 8):
@@ -166,6 +189,8 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
             "datacron_seasons": await _active_datacron_seasons(guild_id),
             "birthdays": _next_birthdays(guild_id, limit=10),
             "tasks_summary": _tasks_summary(guild_id),
+            "guild_snapshot": guild_snapshot.widget(guild_id),
+            "mod_progress": await asyncio.to_thread(_mod_progress_widget, guild_id),
             "sync_status": _sync_status_text(dashboard_data.get_activity_sync_status(guild_id)),
         }
 

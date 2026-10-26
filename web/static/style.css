@@ -2796,3 +2796,35 @@ form.mc-form { max-width: none; display: block; }
 .mc-stats li { margin: 0.1em 0; }
 .mc-stats { text-align: left; }
 .mc-progress { margin: 0.4em 0 0; padding-left: 1.2em; }
+
+/* ---- Главная: «Срез гильдии» и «Прогресс модинга» (2026-10-26) ---- */
+.snapshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr));
+    gap: 0.9em 1.2em;
+}
+.snapshot-cell { display: flex; flex-direction: column; min-width: 0; }
+.snapshot-value { font-size: 1.1em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.snapshot-label { color: var(--fg-muted); font-size: 0.78em; margin-top: 0.1em; }
+.snapshot-delta { font-size: 0.8em; font-weight: 700; white-space: nowrap; }
+.snapshot-delta.up { color: var(--status-good); }
+.snapshot-delta.down { color: var(--status-critical); }
+.snapshot-note { margin: 0.8em 0 0; font-size: 0.85em; }
+.mp-widget { display: flex; flex-direction: column; gap: 0.7em; }
+.mp-widget-row {
+    display: grid;
+    grid-template-columns: minmax(0, 14em) minmax(4em, 1fr);
+    grid-template-areas: "name bar" "nums nums";
+    gap: 0.25em 1em;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
+}
+.mp-widget-row:hover .mp-widget-name { text-decoration: underline; }
+.mp-widget-name { grid-area: name; font-weight: 600; overflow-wrap: anywhere; }
+.mp-widget-bar { grid-area: bar; height: 10px; border-radius: 5px; background: var(--series-1-track); overflow: hidden; }
+.mp-widget-bar > span { display: block; height: 100%; background: var(--series-1); border-radius: 5px; }
+.mp-widget-nums { grid-area: nums; color: var(--fg-secondary); font-size: 0.88em; }
+@media (max-width: 640px) {
+    .mp-widget-row { grid-template-columns: 1fr; grid-template-areas: "name" "bar" "nums"; }
+}
