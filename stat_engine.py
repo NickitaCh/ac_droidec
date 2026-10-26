@@ -6,6 +6,20 @@ from swgoh_comlink.StatCalc.data_builder import GameDataBuilder
 from swgoh_comlink.helpers import MOD_SET_IDS
 
 
+# swgoh_comlink StatCalc._normalize_char не переносит purchasedAbilityId из сырого юнита,
+# и _calc_char_gp никогда не добавляет ГМ абсолютной способности ГЛ (4978 × 1,5 = 7467 на
+# каждого ГЛ). Найдено 2026-10-26 при сверке /профиль с HotBot: «Лучшие 80» были ниже ровно
+# на 7 × 7467. Если библиотека это починит, setdefault ничего не изменит.
+_orig_normalize_char = getattr(StatCalc, "_normalize_char", None)
+if _orig_normalize_char is not None:
+    def _normalize_char_with_ultimate(self, char):
+        normalized = _orig_normalize_char(self, char)
+        if char.get("purchasedAbilityId"):
+            normalized.setdefault("purchasedAbilityId", char["purchasedAbilityId"])
+        return normalized
+    StatCalc._normalize_char = _normalize_char_with_ultimate
+
+
 async def build_stat_calc(comlink) -> StatCalc:
     """Тянет statProgression/relicTierDefinition/equipment/... из Comlink и строит
     локальный калькулятор статов — тяжёлый блокирующий сетевой вызов, всегда через to_thread."""

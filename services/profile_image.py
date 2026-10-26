@@ -292,6 +292,10 @@ def _mod_cells(mods: dict) -> list:
             ("Нападение 4%+", _int(mods["off4"])), ("Защита 14%+", _int(mods["def14"])), ("Защита 9%+", _int(mods["def9"]))]
 
 
+def _modku(value: float | None) -> str:
+    return f"{value:.2f}".replace(".", ",") if value is not None else "—"
+
+
 def _datacron_cells(dc: dict) -> list:
     return [("Перебросов", _int(dc["rerolls"])), ("Уровень 9", _int(dc["l9"])),
             ("Уровень 6–8", _int(dc["l6_8"])), ("Уровень 3–5", _int(dc["l3_5"]))]
@@ -332,8 +336,10 @@ def render_player(s: dict, guild_gp: int | None = None) -> bytes:
         ("Зеты", _int(s["zetas"])), ("Омикроны", _int(s["omicrons"])),
         ("Омик. ВГ / ТБ / ВА", f"{s['omicrons_tw']} / {s['omicrons_tb']} / {s['omicrons_gac']}"),
         ("G13", _int(s["g13"])), ("G12", _int(s["g12"])), ("G11", _int(s["g11"])),
-        ("Скор. модулей G11+", f"+{_int(s['speed_g11'])}" if s["speed_g11"] is not None else "—"),
-        ("Скор. модулей (лучшие 80)", f"+{_int(s['speed_top80'])}" if s["speed_top80"] is not None else "—"),
+        # Целая часть, без округления — как у HotBot (139,7 → 139).
+        ("Скорость G11+", f"+{int(s['speed_g11'])}" if s["speed_g11"] is not None else "—"),
+        ("Скорость топ-80", f"+{int(s['speed_top80'])}" if s["speed_top80"] is not None else "—"),
+        ("МодКу", _modku(s.get("modku"))),
     ])
 
     cv.section("Модули")
@@ -373,7 +379,8 @@ def render_guild(g: dict) -> bytes:
         ("ГМ", compact(a["gp"])), ("Лучшие 80", compact(a["top80"])), ("Уровней релик", _int(a["relics"])),
         ("6 точек", _int(a["six_dot"])), ("Зеты", _int(a["zetas"])), ("G13", _int(a["g13"])),
         ("G12", _int(a["g12"])), ("Арена", _int(a["arena_rank"])), ("Флот", _int(a["fleet_rank"])),
-        ("Скор. модулей G11+", f"+{_int(a['speed_g11'])}" if a["speed_g11"] is not None else "—"),
+        ("Скорость G11+", f"+{int(a['speed_g11'])}" if a["speed_g11"] is not None else "—"),
+        ("МодКу", _modku(a.get("modku"))),
     ])
     for title, key in (("Галактические легенды", "gls"), ("Мета", "meta_units"), ("Мета флота", "fleet")):
         if g[key]:

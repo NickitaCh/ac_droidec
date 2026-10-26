@@ -53,8 +53,9 @@ SECTIONS = [
     ("Средний игрок", [
         ("ГМ", ("avg", "gp"), "compact", True), ("Лучшие 80", ("avg", "top80"), "compact", True),
         ("Реликвий", ("avg", "relics"), "int", True), ("6 точек", ("avg", "six_dot"), "int", True),
-        ("Скор. модулей G11+", ("avg", "speed_g11"), "plus", True), ("Зеты", ("avg", "zetas"), "int", True),
+        ("Скорость G11+", ("avg", "speed_g11"), "plus", True), ("Зеты", ("avg", "zetas"), "int", True),
         ("G13", ("avg", "g13"), "int", True), ("G12", ("avg", "g12"), "int", None),
+        ("МодКу", ("avg", "modku"), "float2", True),
         ("Место на арене", ("avg", "arena_rank"), "int", False), ("Место на флоте", ("avg", "fleet_rank"), "int", False),
     ]),
 ]
@@ -78,6 +79,8 @@ def _fmt(value, kind: str) -> str:
         return compact(value)
     if kind == "plus":
         return f"+{_int(value)}"
+    if kind == "float2":
+        return f"{value:.2f}".replace(".", ",")
     return _int(value)
 
 

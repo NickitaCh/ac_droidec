@@ -133,6 +133,7 @@ def _unit_row(unit: dict, names: dict, skills: dict, is_ship: bool) -> dict:
         "is_ship": is_ship,
         "speed": _stat(final, "Speed", is_ship),
         "speed_mods": float(speed_mods) if speed_mods is not None else None,
+        "mods_count": len(unit.get("equippedStatMod") or []),
         "health": _stat(final, "Health", is_ship),
         "protection": None if is_ship else _stat(final, "Protection", False),
         "potency": _stat(final, "Potency", is_ship),
@@ -184,6 +185,14 @@ def _datacron_summary(datacrons: list[dict]) -> dict:
     return out
 
 
+def _modku(roster: list[dict]) -> float | None:
+    """МодКу (services/mod_ku.py) в обычном режиме: вес плейтов зависит от гильдии, а профиль —
+    любой код союзника."""
+    from services import mod_ku
+    result = mod_ku.compute({_base_id(u): u for u in roster if _base_id(u)})
+    return result["modku"] if result else None
+
+
 def _avg(values):
     values = [v for v in values if v is not None]
     return statistics.fmean(values) if values else None
@@ -229,8 +238,12 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
         "g13": sum(r["gear"] == 13 for r in chars),
         "g12": sum(r["gear"] == 12 for r in chars),
         "g11": sum(r["gear"] == 11 for r in chars),
-        "speed_g11": _avg(r["speed_mods"] for r in chars if r["gear"] >= 11),
-        "speed_top80": _avg(r["speed_mods"] for r in top80),
+        # Как у HotBot (сверено 2026-10-26 на 175-716-277: 97 и 139): «G11 +Spd Avg» — средняя
+        # скорость от модулей у G11+ с полным комплектом из 6 модулей, «+T80» — у 80 персонажей
+        # с наибольшей скоростью от модулей (не у лучших 80 по ГМ).
+        "speed_g11": _avg(r["speed_mods"] for r in chars if r["gear"] >= 11 and r["mods_count"] == 6),
+        "speed_top80": _avg(sorted((r["speed_mods"] for r in chars if r["speed_mods"] is not None), reverse=True)[:80]),
+        "modku": _modku(roster),
         "relics": {
             "total": sum(relic_levels),
             **{f"r{n}": relic_levels.count(n) for n in range(5, 11)},
@@ -342,6 +355,7 @@ def summarize_guild(guild_name: str, guild_gp: int | None, players: list[dict], 
             "g13": _sum(players, "g13") / n,
             "g12": _sum(players, "g12") / n,
             "speed_g11": _avg(p["speed_g11"] for p in players),
+            "modku": _avg(p.get("modku") for p in players),
             "arena_rank": _avg(m.get("arena_rank") for m in metas),
             "fleet_rank": _avg(m.get("fleet_rank") for m in metas),
         },
