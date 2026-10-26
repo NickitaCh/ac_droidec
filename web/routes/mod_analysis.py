@@ -132,6 +132,16 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
 
     context["result"] = report
     context["view_urls"] = _view_urls(character, relic_raw, guild_ref)
+    # Все три вида Δ/%/Итог сразу — переключатель на странице показывает нужный без запроса
+    # (жалоба 2026-10-26 «страница обновляется при переключении»). Дорогая часть уже в
+    # _REPORT_CACHE, повторные вызовы — только агрегация.
+    views = {view: report}
+    for v in mod_analysis.VIEWS:
+        if v != view:
+            views[v] = (await mod_analysis.build_report_live(comlink, stat_calc, character, relic, lookup, view=v)
+                        if guild_ref else
+                        await mod_analysis.build_report(stat_calc, character, relic, guild_id=guild_id, view=v))
+    context["views"] = [views[v] for v in mod_analysis.VIEWS]
 
     # Не плодить дубли в "Истории" при простом переключении Δ/%/Итог (тот же GET той же
     # страницы, что и обычный пересчёт, см. _view_urls) — сравниваем с последней записью по

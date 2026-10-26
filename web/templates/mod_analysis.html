@@ -102,18 +102,22 @@
                     </table>
                 </div>
 
+                {# Все три вида считаются сразу (route: context["views"]), переключатель показывает
+                   нужный без перезагрузки; без JS ссылки работают как раньше. #}
+                {% for r in views %}
+                <div class="ma-view" data-view="{{ r.view }}"{% if r.view != result.view %} hidden{% endif %}>
                 <div class="panel-title" style="margin-top: 1em;">
                     <span>Характеристики</span>
-                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модулей на релике {{ result.target_relic }}</span>
+                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модулей на релике {{ r.target_relic }}</span>
                 </div>
                 <div class="segmented-toggle" style="margin-bottom: .5em;">
                     <span class="muted">Показывать:</span>
                     <span class="segmented-toggle-options">
                         {% for v, vlabel in (("delta", "Дельта"), ("pct", "% от базы"), ("final", "Итоговый стат")) %}
-                            {% if v == result.view %}
+                            {% if v == r.view %}
                                 <strong>{{ vlabel }}</strong>
                             {% else %}
-                                <a href="{{ view_urls[v] }}">{{ vlabel }}</a>
+                                <a href="{{ view_urls[v] }}" data-show-view="{{ v }}">{{ vlabel }}</a>
                             {% endif %}
                         {% endfor %}
                     </span>
@@ -124,9 +128,9 @@
                         <thead>
                             <tr>
                                 <th>Ранг</th><th>Характеристика</th><th>SF</th>
-                                <th><span class="th-help" tabindex="0">p50({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p50 (медиана)</strong>Ориентир среднего модинга (~50% игроков)</span></span></th>
-                                <th><span class="th-help" tabindex="0">p70({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p70</strong>Ориентир хорошего модинга (лучше, чем у 70% игроков)</span></span></th>
-                                <th><span class="th-help" tabindex="0">p90({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p90</strong>Ориентир топ-модинга (лучше, чем у 90% игроков)</span></span></th>
+                                <th><span class="th-help" tabindex="0">p50({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p50 (медиана)</strong>Ориентир среднего модинга (~50% игроков)</span></span></th>
+                                <th><span class="th-help" tabindex="0">p70({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p70</strong>Ориентир хорошего модинга (лучше, чем у 70% игроков)</span></span></th>
+                                <th><span class="th-help" tabindex="0">p90({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p90</strong>Ориентир топ-модинга (лучше, чем у 90% игроков)</span></span></th>
                                 <th><span class="th-help" tabindex="0">Разброс<span class="th-help-bubble"><strong>Разброс</strong>Разница между топовым (p90) и средним (p50) модингом</span></span></th>
                                 <th><span class="th-help" tabindex="0">CV<span class="th-help-bubble"><strong>Коэффициент вариации</strong>Чем ниже значение, тем более согласованно делается упор на эту характеристику</span></span></th>
                                 <th><span class="th-help" tabindex="0">NM<span class="th-help-bubble"><strong>Нормализованная медиана</strong>Чем выше значение, тем меньше разница между средним и топовым игроком</span></span></th>
@@ -134,7 +138,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for row in result.stat_rows %}
+                            {% for row in r.stat_rows %}
                                 <tr class="{{ 'muted' if row.n == 0 }}">
                                     <td>{{ row.rank or "—" }}</td>
                                     <td>{{ row.label }}</td>
@@ -158,19 +162,19 @@
 
                 <div class="panel-title" style="margin-top: 1em;"><span>Три главные характеристики по вкладу гильдии</span></div>
                 <ul>
-                    {% for row in result.top3_stats %}
+                    {% for row in r.top3_stats %}
                         <li><strong>{{ row.label }}</strong> — GF {{ row.gf_fmt }} ({{ row.gf_level }})</li>
                     {% endfor %}
                 </ul>
 
                 <p>
-                    Консенсус гильдии: <strong>{{ result.consensus_fmt }}</strong> — {{ result.consensus_level }}.
-                    Направлений модинга (конфигурации с долей &gt;10%): <strong>{{ result.directions_count }}</strong>.
+                    Консенсус гильдии: <strong>{{ r.consensus_fmt }}</strong> — {{ r.consensus_level }}.
+                    Направлений модинга (конфигурации с долей &gt;10%): <strong>{{ r.directions_count }}</strong>.
                 </p>
 
-                {% if result.directions %}
+                {% if r.directions %}
                     <div class="panel-title" style="margin-top: 1em;"><span>Направления модинга</span></div>
-                    {% for d in result.directions %}
+                    {% for d in r.directions %}
                         <div class="panel" style="margin-top: .5em;">
                             <div class="panel-title">
                                 <span>
@@ -184,9 +188,9 @@
                                     <thead>
                                         <tr>
                                             <th>Характеристика</th>
-                                            <th><span class="th-help" tabindex="0">p50({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p50 (медиана)</strong>Ориентир среднего модинга (~50% игроков)</span></span></th>
-                                            <th><span class="th-help" tabindex="0">p70({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p70</strong>Ориентир хорошего модинга (лучше, чем у 70% игроков)</span></span></th>
-                                            <th><span class="th-help" tabindex="0">p90({{ result.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p90</strong>Ориентир топ-модинга (лучше, чем у 90% игроков)</span></span></th>
+                                            <th><span class="th-help" tabindex="0">p50({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p50 (медиана)</strong>Ориентир среднего модинга (~50% игроков)</span></span></th>
+                                            <th><span class="th-help" tabindex="0">p70({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p70</strong>Ориентир хорошего модинга (лучше, чем у 70% игроков)</span></span></th>
+                                            <th><span class="th-help" tabindex="0">p90({{ r.view_suffix }})<span class="th-help-bubble"><strong>Перцентиль p90</strong>Ориентир топ-модинга (лучше, чем у 90% игроков)</span></span></th>
                                             <th><span class="th-help th-help--right" tabindex="0">CV<span class="th-help-bubble"><strong>Коэффициент вариации</strong>Чем ниже значение, тем более согласованно делается упор на эту характеристику</span></span></th>
                                         </tr>
                                     </thead>
@@ -200,6 +204,8 @@
                         </div>
                     {% endfor %}
                 {% endif %}
+                </div>
+                {% endfor %}
             {% endif %}
         </div>
     {% endif %}
@@ -227,4 +233,12 @@
             </div>
         {% endif %}
     </div>
+    <script>
+    document.querySelectorAll("[data-show-view]").forEach((a) => a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const v = a.dataset.showView;
+        document.querySelectorAll(".ma-view").forEach((pane) => { pane.hidden = pane.dataset.view !== v; });
+        history.replaceState(null, "", a.getAttribute("href"));
+    }));
+    </script>
 {% endblock %}
