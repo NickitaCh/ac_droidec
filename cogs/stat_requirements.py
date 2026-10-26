@@ -1380,21 +1380,39 @@ class StatsRevealView(disnake.ui.View):
 # (его Discord по /регистрация, Ricardo 2026-10-16).
 STATS_PAGE_TEXT_BUDGET = 3300
 STATS_PICKS_PER_SELECT = 25
+# Второй лимит — размер компонентов сообщения в байтах UTF-8 (~10 КБ; замерено 2026-10-26:
+# 413 «message.components=10167»), а кириллица — 2 байта на символ. Текст страницы делит
+# этот объём со списками персонажей (75 подписей ≈ 3,3 КБ), поэтому бюджет в байтах — то,
+# что осталось после списков. Без этого длинный итог Юсина по AC_ALL падал с 500 от Discord.
+STATS_MESSAGE_BYTES_BUDGET = 9000
+STATS_PAGE_BYTES_MIN = 2500
 STATS_PAGER_TTL = 1800
 _stats_pagers: dict[str, dict] = {}
 
 
-def _chunk_lines(lines: list, budget: int) -> list[str]:
-    chunks, current, size = [], [], 0
+def _chunk_lines(lines: list, budget: int, byte_budget: int | None = None) -> list[str]:
+    byte_budget = byte_budget or budget * 4
+    chunks, current, size, size_bytes = [], [], 0, 0
     for line in lines:
-        if current and size + len(line) + 1 > budget:
+        line = line[:budget]
+        while len(line.encode()) > byte_budget:
+            line = line[:len(line) * 3 // 4]
+        n_bytes = len(line.encode()) + 1
+        if current and (size + len(line) + 1 > budget or size_bytes + n_bytes > byte_budget):
             chunks.append("\n".join(current))
-            current, size = [], 0
-        current.append(line[:budget])
+            current, size, size_bytes = [], 0, 0
+        current.append(line)
         size += len(line) + 1
+        size_bytes += n_bytes
     if current:
         chunks.append("\n".join(current))
     return chunks
+
+
+def _picks_bytes(picks: list) -> int:
+    """Байты, которые займут выпадающие списки (_render_stats_page показывает первые 75)."""
+    shown = picks[:3 * STATS_PICKS_PER_SELECT]
+    return sum(len(label[:100].encode()) + len(emoji.encode()) + 12 for label, emoji, _ in shown) + 300
 
 
 def _build_stats_pages(title: str, summary_lines: list, picks: list, char_pages: list) -> tuple[list[dict], list]:
@@ -1402,14 +1420,15 @@ def _build_stats_pages(title: str, summary_lines: list, picks: list, char_pages:
     [(подпись, эмодзи, char_name)] для выпадающего списка, char_pages — [(char_name, block)].
     Страницы: итог (обычно одна, при длинном тексте — продолжение), затем персонажи.
     Возвращает (pages, [(подпись, эмодзи, индекс страницы)]) — без персонажей без страницы."""
-    summary_chunks = _chunk_lines(summary_lines, STATS_PAGE_TEXT_BUDGET) or [""]
+    byte_budget = max(STATS_PAGE_BYTES_MIN, STATS_MESSAGE_BYTES_BUDGET - _picks_bytes(picks) - len(title.encode()) - 600)
+    summary_chunks = _chunk_lines(summary_lines, STATS_PAGE_TEXT_BUDGET, byte_budget) or [""]
     pages = []
     for k, chunk in enumerate(summary_chunks):
         suffix = f" ({k + 1}/{len(summary_chunks)})" if len(summary_chunks) > 1 else ""
         pages.append({"head": f"### {title} — итог{suffix}", "text": chunk})
     char_start = {}
     for name, block in char_pages:
-        for k, chunk in enumerate(_chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET)):
+        for k, chunk in enumerate(_chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET, byte_budget)):
             char_start.setdefault(name, len(pages))
             pages.append({"head": f"### {title} — {name}" + (" (продолжение)" if k else ""), "text": chunk,
                           "back": 0, "char": char_start[name]})
