@@ -4,7 +4,7 @@
 {% block title %}ВИ: цель по звёздам — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {% call tbui.tb_hero("Цель по звёздам", "goal", True) %}
+    {% call tbui.tb_hero("Цель по звёздам", "plan") %}
         <div class="hero-kpis">
             {% if fc %}<div class="hero-kpi"><span class="hero-kpi-value">≈ {{ fc.total }}★</span><span class="hero-kpi-label">прогноз сейчас</span></div>{% endif %}
             {% if goal %}<div class="hero-kpi hero-kpi-good"><span class="hero-kpi-value">{{ goal.target }}★</span><span class="hero-kpi-label">цель</span></div>{% endif %}
@@ -16,7 +16,7 @@
     {% else %}
     <div class="panel">
         <div class="panel-title">
-            <span>Сколько звёзд нужно{% call ui.help() %}<p>Считаем несколько вариантов, как набрать нужное число звёзд, — каждый тем же прогнозом, что на вкладке «Проекция», но с изменёнными условиями: весь ГМ залит, больше очков в боях, взводы планеты закрыты целиком, ГМ гильдии больше. У каждого варианта свой план по этапам.</p><p>«Добрать взводы»: планеты, взводы которых надо закрыть целиком, и каких юнитов на нужном уровне не хватает — «не хватает N» значит столько слотов нынешние склады не закрывают (с учётом того, что планету, которую копим, можно добивать на нескольких этапах).</p><p>Очки боёв за этап — среднее за последние {{ fc.history.events }} ВИ, поэтому добавки — оценка порядка величины. Расчёт занимает 10–20 секунд.</p>{% endcall %}</span>
+            <span>Сколько звёзд нужно{% call ui.help() %}<p>Считаем несколько вариантов, как набрать нужное число звёзд, — каждый тем же расчётом, что подбирает звёзды во вкладке «План», но с изменёнными условиями: весь ГМ залит, больше очков в боях, взводы планеты закрыты целиком, ГМ гильдии больше. У каждого варианта свой план по этапам.</p><p>«Добрать взводы»: планеты, взводы которых надо закрыть целиком, и каких юнитов на нужном уровне не хватает — «не хватает N» значит столько слотов нынешние склады не закрывают (с учётом того, что планету, которую копим, можно добивать на нескольких этапах).</p><p>Очки боёв за этап — среднее за последние {{ fc.history.events }} ВИ, поэтому добавки — оценка порядка величины. Расчёт занимает 10–20 секунд.</p>{% endcall %}</span>
         </div>
         <form method="get" action="/tb/goal" class="inline-form" id="goal-form">
             <label for="goal-stars">Звёзд</label>
@@ -26,6 +26,7 @@
             <span class="muted" id="goal-wait" hidden>Считаю, до 20 секунд…</span>
         </form>
         <nav class="hero-links" style="margin-top: 0.75em;">
+            <a class="hero-link" href="/tb/plan">← К плану</a>
             {% if bonus %}<a class="hero-link" href="/tb/goal?bonus=0{% if goal %}&stars={{ goal.target }}{% endif %}">Без Зеффо и Мандалора</a>{% else %}<a class="hero-link" href="/tb/goal{% if goal %}?stars={{ goal.target }}{% endif %}">С Зеффо и Мандалором</a>{% endif %}
         </nav>
     </div>

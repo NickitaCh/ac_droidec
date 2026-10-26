@@ -23,10 +23,11 @@ def _mln(x: float, digits: int = 0) -> str:
     return f"{x / 1e6:.{digits}f}".replace(".", ",")
 
 
-def _run(inp: dict, hist: dict = None, gp: int = None, full=()) -> dict:
+def _run(inp: dict, hist: dict = None, gp: int = None, full=(), deploy_share: float = None) -> dict:
     platoons = {**inp["platoons"], "full": frozenset(full)} if full else inp["platoons"]
     return tb_forecast.forecast(inp["zone_data"], platoons, inp["covert_ready"], hist or inp["hist"],
-                                inp["gp"] if gp is None else gp)
+                                inp["gp"] if gp is None else gp, members=inp.get("players") or 50,
+                                deploy_share=deploy_share)
 
 
 def _min_extra(reach, limit: int):
@@ -51,7 +52,7 @@ def _battles(hist: dict, first: int, extra: float) -> dict:
     h = copy.deepcopy(hist)
     for ph in range(first, 7):
         row = h.setdefault("phases", {}).setdefault(ph, {"battle": 0, "share": 0.9})
-        row["battle"] += extra
+        row["extra"] = row.get("extra", 0) + extra
     return h
 
 
@@ -96,15 +97,12 @@ def variants(inp: dict, target: int, base: dict) -> dict:
     phases = hist.get("phases") or {}
 
     # 1. Полный залив ГМ
-    low = {ph: v["share"] for ph, v in phases.items() if v["share"] < 0.98}
-    if low:
-        h = copy.deepcopy(hist)
-        for ph in low:
-            h["phases"][ph]["share"] = 1.0
-        r = _run(inp, hist=h)
+    share = tb_forecast.history_deploy_share(hist)
+    if share < 0.98:
+        r = _run(inp, deploy_share=1.0)
         out.append({"key": "deploy", "title": "Залить весь ГМ", "ok": r["total"] >= target, "result": r,
-                    "conditions": [f"{ph} этап: заливать весь ГМ — в прошлых ВИ {share:.0%}, это +{_mln((1 - share) * inp['gp'])} млн"
-                                   for ph, share in sorted(low.items())]})
+                    "conditions": [f"заливать весь ГМ на каждом этапе — в прошлых ВИ не больше {share:.0%}, "
+                                   f"это +{_mln((1 - share) * inp['gp'])} млн за этап"]})
 
     # 2. Больше очков в боях
     found = _cheapest_battles(inp, target)
@@ -112,7 +110,7 @@ def variants(inp: dict, target: int, base: dict) -> dict:
         first, extra, r = found
         span = f"{first}–6 этапы" if first < 6 else "6 этап"
         conds = [f"{span}: +{_mln(extra)} млн очков в боях за этап (≈ {_mln(extra / players, 1)} млн на игрока)"]
-        conds += [f"{ph} этап: сейчас в среднем {_mln(phases[ph]['battle'])} млн" for ph in range(first, 7) if ph in phases]
+        conds += [f"{ph} этап: в прошлых ВИ в среднем {_mln(phases[ph]['battle'])} млн" for ph in range(first, 7) if ph in phases]
         out.append({"key": "battles", "title": "Больше бить БЗ", "ok": True, "result": r, "conditions": conds})
     else:
         out.append({"key": "battles", "title": "Больше бить БЗ", "ok": False, "result": None,

@@ -6,12 +6,13 @@
 {% block content %}
 
     {% if not report %}
-        {{ tbui.tb_hero("Отчёт по ТБ", "report") }}
+        {{ tbui.tb_hero("Итоги ТБ", "results") }}
+        {{ tbui.results_nav("report") }}
         <p class="empty-state">Ещё нет ни одной сохранённой ТБ — данные появятся здесь после первого завершённого события.</p>
     {% else %}
         {% set latest_event = report.events[-1] %}
         {% set regressed = report.history|rejectattr("departed")|selectattr("regressed")|list|length %}
-        {% call tbui.tb_hero("Отчёт по ТБ", "report") %}
+        {% call tbui.tb_hero("Итоги ТБ", "results") %}
             <div class="hero-kpis">
                 <div class="hero-kpi"><span class="hero-kpi-value nowrap">{{ latest_event[1][:10] }}</span><span class="hero-kpi-label">последняя ТБ</span></div>
                 <div class="hero-kpi"><span class="hero-kpi-value">{{ report.latest_participant_count }}</span><span class="hero-kpi-label">участников</span></div>

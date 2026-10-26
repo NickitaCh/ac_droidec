@@ -1,5 +1,7 @@
 {# Шапка раздела ТБ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
-{% macro tb_hero(title, active, goal=False) -%}
+{# Раздел ТБ (2026-10-26): «План» (калькулятор + готовность) → «Взводы» → «Ордер» (ветки
+   Discord) → «Итоги» (отчёт, бои и ОЗ). active — ключ вкладки. #}
+{% macro tb_hero(title, active) -%}
 <section class="page-hero page-hero-dark">
     <div class="page-hero-top">
         <div>
@@ -8,7 +10,7 @@
         </div>
     </div>
     <nav class="hero-tabs">
-        {% for href, key, label in [("/tb", "report", "Отчёт"), ("/tb/missions", "missions", "Бои и ОЗ"), ("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/projection", "projection", "Проекция")] + ([("/tb/goal", "goal", "Цель")] if goal else []) %}
+        {% for href, key, label in [("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/order", "order", "Ордер"), ("/tb", "results", "Итоги")] %}
             {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
         {% endfor %}
     </nav>
@@ -16,7 +18,16 @@
 </section>
 {%- endmacro %}
 
-{# План звёзд по этапам (services/tb_forecast.py) — /tb/projection и /tb/goal. #}
+{# Подвкладки «Итогов»: очки по игрокам и бои/спецмиссии. #}
+{% macro results_nav(active) -%}
+<nav class="hero-links tb-subnav">
+    {% for href, key, label in [("/tb", "report", "Очки и игроки"), ("/tb/missions", "missions", "Бои и спецмиссии")] %}
+        <a class="hero-link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+</nav>
+{%- endmacro %}
+
+{# План звёзд по этапам (services/tb_forecast.py) — /tb/goal. #}
 {% macro forecast_table(fc, planet_ru, compact) -%}
 <table class="data cards-on-phone">
     <thead><tr><th>Этап</th><th>Планеты</th><th>Очки этапа</th><th class="num">Звёзд</th></tr></thead>

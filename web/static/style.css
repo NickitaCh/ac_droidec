@@ -2828,3 +2828,58 @@ form.mc-form { max-width: none; display: block; }
 @media (max-width: 640px) {
     .mp-widget-row { grid-template-columns: 1fr; grid-template-areas: "name" "bar" "nums"; }
 }
+
+/* ===== ТБ: «План» — калькулятор по этапам (web/templates/tb_plan.html, 2026-10-26) ===== */
+.tb-subnav { margin: 0 0 1em; }
+.tb-subnav [aria-current] { font-weight: 700; border-color: var(--accent); }
+.tbplan-flash { margin: 0 0 1em; padding: 0.6em 0.9em; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--status-good) 45%, var(--border)); background: color-mix(in srgb, var(--status-good) 8%, var(--surface)); }
+.tbplan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em 1em; }
+.tbplan-bar form, .tbplan-tools form, .tbplan-card form, .tbplan-publish, .tbplan-menu-body form { max-width: none; }
+.tbplan-pick { flex: 1 1 16em; min-width: 0; }
+.tbplan-pick select { width: 100%; max-width: 28em; }
+.tbplan-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; }
+.tbplan-actions form { margin: 0; }
+.tbplan-menu { position: relative; }
+.tbplan-menu summary { list-style: none; cursor: pointer; padding: 0.45em 0.9em; border-radius: 8px; }
+.tbplan-menu summary::-webkit-details-marker { display: none; }
+.tbplan-menu-body { position: absolute; right: 0; top: calc(100% + 0.3em); z-index: 5; display: flex; flex-direction: column; gap: 0.6em; padding: 0.8em; min-width: min(20em, 86vw); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.tbplan-inline { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.4em 0.6em; }
+.tbplan-inline label:not(.checkbox) { flex-direction: row; align-items: center; gap: 0.4em; }
+.tbplan-inline input[type="text"] { min-width: 0; }
+.tbplan-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8em 1.6em; margin-top: 1em; padding-top: 0.8em; border-top: 1px solid var(--border); }
+.tbplan-dot { color: var(--status-critical); font-size: 0.8em; }
+.tbplan-daysum-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 1.4em; }
+.tbplan-warn { margin: 0.5em 0 0; }
+.tbplan-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19em), 1fr)); gap: 0.9em; margin-bottom: 1em; }
+.tbplan-card { display: flex; flex-direction: column; gap: 0.6em; min-width: 0; padding: 0.8em 0.95em; border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px; background: var(--surface); }
+.tbplan-side-dark { border-left-color: #c0392b; }
+.tbplan-side-mixed { border-left-color: #d4a017; }
+.tbplan-side-light { border-left-color: #3b82f6; }
+.tbplan-side-bonus { border-left-color: #9ca3af; }
+.tbplan-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.6em; }
+.tbplan-card-head h3 { margin: 0; font-size: 1.1em; }
+.tbplan-stars { flex-direction: row; flex-wrap: wrap; gap: 0; }
+.tbplan-stars button { flex: 1 1 0; min-width: 3.2em; margin: 0; padding: 0.4em 0.3em; border-radius: 0; border: 1px solid var(--border-strong); background: var(--surface); color: var(--fg); font-weight: 500; white-space: nowrap; }
+.tbplan-stars button + button { border-left: none; }
+.tbplan-stars button:first-of-type { border-radius: 8px 0 0 8px; }
+.tbplan-stars button:last-of-type { border-radius: 0 8px 8px 0; }
+.tbplan-stars button:hover { background: var(--surface-2); }
+.tbplan-stars button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tbplan-progress { display: flex; flex-direction: column; gap: 0.25em; }
+.tbplan-progress-track { position: relative; display: flex; height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.tbplan-progress-start { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.tbplan-progress-end { background: var(--accent); }
+.tbplan-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fg); opacity: 0.45; }
+.tbplan-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35em 0.8em; margin: 0; }
+.tbplan-dl dt { color: var(--fg-secondary); }
+.tbplan-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tbplan-expect { margin-top: 0.2em; font-size: 0.9em; }
+.tbplan-expect input { width: 3.5em; }
+.tbplan-ready summary { cursor: pointer; color: var(--accent); }
+.tbplan-ready-row { padding: 0.45em 0; border-bottom: 1px solid var(--border); font-size: 0.92em; overflow-wrap: anywhere; }
+.tbplan-ready-row:last-child { border-bottom: none; }
+.tbplan-who-row { display: flex; flex-wrap: wrap; gap: 0.2em 0.9em; margin-top: 0.25em; }
+.tbplan-who summary { cursor: pointer; }
+.tbplan-publish { display: flex; flex-direction: column; gap: 0.7em; }
+.tbplan-publish label:not(.checkbox) { max-width: 36em; }
+.tbplan-summary td a { text-decoration: none; }

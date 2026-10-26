@@ -4,7 +4,8 @@
 {% block title %}Бои и спецмиссии ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {% call tbui.tb_hero("Бои и спецмиссии", "missions") %}{% endcall %}
+    {% call tbui.tb_hero("Итоги ТБ", "results") %}{% endcall %}
+    {{ tbui.results_nav("missions") }}
 
     {% set ev_q = "&event_id=" ~ selected_event_id if selected_event_id and events and selected_event_id != events[-1][0] else "" %}
     <nav class="hero-links" style="margin: 0 0 1em;" id="tbm-tabs">

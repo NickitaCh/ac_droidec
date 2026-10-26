@@ -1,244 +1,280 @@
 {% extends "base.html" %}
 {% import "_tb.html" as tbui %}
+{% import "_game.html" as game %}
 {% import "_ui.html" as ui %}
 {% block title %}План ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
+{% macro names_list(items, pairs=False) -%}
+{% if pairs %}{% for n, t in items %}<span class="nowrap">{{ n }}</span> <span class="muted">— {{ t }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+{% else %}<span class="muted">{{ items|join(", ") }}</span>{% endif %}
+{%- endmacro %}
+{% macro count_details(items, badge="", pairs=False, label="") -%}
+{% if items %}<details class="tbplan-who"><summary>{% if label %}{{ label }} {% endif %}<span class="badge {{ badge }}">{{ items|length }}</span></summary>{{ names_list(items, pairs) }}</details>{% else %}<span class="muted">{% if label %}{{ label }} {% endif %}0</span>{% endif %}
+{%- endmacro %}
+{% macro mln(x) -%}{{ compact(x) }}{%- endmacro %}
+{% macro stars_label(row) -%}
+{% if row.stars %}<span class="tbp-stars">{{ "★" * row.stars }}</span>{% if not row.bonus %}<span class="muted">{{ "☆" * (row.max - row.stars) }}</span>{% endif %}{% elif row.carry %}<span class="muted nowrap">копим {{ mln(row.points) }}</span>{% else %}<span class="muted nowrap">не берём</span>{% endif %}
+{%- endmacro %}
 {% block content %}
-    {{ tbui.tb_hero("План ТБ", "plan") }}
-
-    {% if config_warning %}
-        <p class="config-warning">{{ config_warning|safe }}</p>
-    {% endif %}
-    {% if error %}
-        <p class="error">{{ error }}</p>
-    {% endif %}
-    {% if saved %}
-        <p><span class="badge badge-ok">Сохранено</span></p>
-    {% endif %}
-
-    {% set branches = conflict_options if has_bonus else conflict_options|rejectattr("value", "equalto", "bonus")|list %}
-    <div class="panel">
-        <div class="panel-title">
-            <span>Текущий план по этапам</span>
-            <span class="panel-actions">
-                <button type="button" class="button-secondary" data-modal-open="tb-planet-modal">✏️ Поправить планету</button>
-            </span>
-        </div>
-        <p class="muted tb-plan-hint">Нажмите на этап — откроется сообщение, которое бот опубликует на этот этап{% if active_plan %} (план «{{ active_plan.name }}»){% endif %}.</p>
-        <div class="table-scroll">
-            <table class="data tb-plan-grid">
-                <thead>
-                    <tr>
-                        <th>Этап</th>
-                        {% for opt in branches %}<th class="tb-branch-{{ opt.value }}">{{ opt.label }}</th>{% endfor %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in grid %}
-                        <tr class="tb-plan-row{% if row.empty %} is-empty{% endif %}" data-phase="{{ row.phase }}" tabindex="0" role="button" aria-label="Этап {{ row.phase }}: сообщение бота">
-                            <td class="tb-plan-phase">{{ row.phase }}</td>
-                            {% for opt in branches %}
-                                <td class="tb-branch-{{ opt.value }}">{% if row.cells[opt.value] %}{{ row.cells[opt.value] }}{% else %}<span class="muted">—</span>{% endif %}</td>
-                            {% endfor %}
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <dialog class="edit-modal" id="tb-stage-modal">
-        <div class="edit-modal-header">
-            <h3 id="tb-stage-title">Этап</h3>
-            <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
-        </div>
-        <div class="edit-modal-body">
-            <p class="muted" id="tb-stage-plan" style="margin:0;"></p>
-            <pre class="tb-stage-text" id="tb-stage-text">Загружаю…</pre>
-        </div>
-    </dialog>
-
-    <dialog class="edit-modal" id="tb-planet-modal" style="width: min(30em, 94vw);">
-        <form method="post" action="/tb/plan">
-            <div class="edit-modal-header">
-                <h3>Поправить планету</h3>
-                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
-            </div>
-            <div class="edit-modal-body">
-                <label>
-                    Этап
-                    <input type="number" name="phase" min="1" max="6" required>
-                </label>
-                <label>
-                    Ветка
-                    <select name="conflict_key" required>
-                        {% for opt in conflict_options %}
-                            <option value="{{ opt.value }}">{{ opt.label }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    Название планеты
-                    <input type="text" name="planet_name" required>
-                </label>
-            </div>
-            <div class="edit-modal-footer">
-                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
-                <button type="submit">Сохранить</button>
-            </div>
-        </form>
-    </dialog>
-
-    <div class="panel">
-        <div class="panel-title">
-            <span>Планы ордера{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного плана бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p>{% endcall %}</span>
-        </div>
-        {% if not plans %}
-            <p class="empty-state">Планов пока нет — соберите ордер из картинки или зарегистрируйте готовую ветку формами ниже.</p>
-        {% else %}
-            <div class="table-scroll">
-            <table class="data">
-                <thead><tr><th>Название</th><th class="num">★</th><th>Ветка</th><th></th></tr></thead>
-                <tbody>
-                    {% for row in plans %}
-                        <tr>
-                            <td>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</td>
-                            <td class="num">{{ row.total_stars }}</td>
-                            <td>
-                                {% if row.thread_link %}
-                                    <a href="{{ row.thread_link }}" target="_blank" rel="noopener">Открыть тред ↗</a>
-                                {% else %}
-                                    <span class="muted">{{ row.thread_id }}</span>
-                                {% endif %}
-                            </td>
-                            <td class="row-actions">
-                                <a class="link-btn" href="/tb/plan?preview_plan_id={{ row.id }}#preview">Предпросмотр</a>
-                                <a class="link-btn" href="/tb/platoons?plan_id={{ row.id }}">Взводы</a>
-                                {% if not row.active %}
-                                    <form method="post" action="/tb/order-plans/select">
-                                        <input type="hidden" name="plan_id" value="{{ row.id }}">
-                                        <button type="submit">Сделать активным</button>
-                                    </form>
-                                {% endif %}
-                                <form method="post" action="/tb/order-plans/delete"
-                                      onsubmit="return confirm('Удалить план «{{ row.name }}»?');">
-                                    <input type="hidden" name="name" value="{{ row.name }}">
-                                    <button type="submit" class="button-danger">Удалить</button>
-                                </form>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        {% endif %}
-    </div>
-
-    {% if preview_plan or preview_error %}
-        <div class="panel" id="preview">
-            <div class="panel-title"><span>Предпросмотр{% if preview_plan %}: «{{ preview_plan.name }}»{% endif %}</span></div>
-            {% if preview_error %}
-                <p class="error">{{ preview_error }}</p>
-            {% elif preview %}
-                {% set missing = preview|selectattr("block", "none")|list %}
-                {% if missing %}
-                    <p class="config-warning">⚠️ Не хватает этапов: {{ missing|map(attribute="phase")|join(", ") }}</p>
-                {% else %}
-                    <p><span class="badge badge-ok">Все 6 этапов найдены</span></p>
-                {% endif %}
-                <div class="tb-preview-grid">
-                    {% for p in preview %}
-                        <div class="tb-preview-stage">
-                            <div class="panel-title"><span>Этап {{ p.phase }}</span></div>
-                            {% if p.block %}
-                                <pre class="tb-stage-text">{{ p.block }}</pre>
-                            {% else %}
-                                <p class="empty-state">⚠️ не нашёл в ветке</p>
-                            {% endif %}
-                        </div>
-                    {% endfor %}
-                </div>
+    {% call tbui.tb_hero("План ТБ", "plan") %}
+        <div class="hero-kpis">
+            {% if result %}
+                <div class="hero-kpi {{ 'hero-kpi-good' if result.ok else 'hero-kpi-danger' }}"><span class="hero-kpi-value">{{ result.total }}★</span><span class="hero-kpi-label">{{ "план из " ~ result.max if result.ok else "в плане, но не на всё хватает" }}</span></div>
             {% endif %}
+            {% if fc and fc.history and fc.history.last_stars %}<div class="hero-kpi"><span class="hero-kpi-value">{{ fc.history.last_stars }}★</span><span class="hero-kpi-label">прошлая ВИ</span></div>{% endif %}
+            {% if fc %}<div class="hero-kpi"><span class="hero-kpi-value">{{ compact(fc.gp) }}</span><span class="hero-kpi-label">ГМ гильдии</span></div>{% endif %}
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ r.players }} из {{ r.members }}</span><span class="hero-kpi-label">игроков в расчёте</span></div>
         </div>
-    {% endif %}
+    {% endcall %}
 
-    <div class="tb-plan-forms">
-        <div class="panel" id="from-image">
-            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Ссылка на тред, где в первом сообщении — картинка Strategy Summary из планировщика ТБ. Бот распознает её, опубликует в тред 6 сообщений по этапам, сохранит план и расставит взводы.") }}</span></div>
-            {% if image_job %}
-                {% if image_job.state == "running" %}
-                    <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>
-                    <script>setTimeout(() => location.reload(), 8000);</script>
-                {% elif image_job.state == "done" %}
-                    <p class="badge badge-ok" style="white-space: pre-line;">{{ image_job.message }}</p>
-                {% elif image_job.state == "error" %}
-                    <p class="badge badge-danger" style="white-space: pre-line;">❌ «{{ image_job.plan_name }}»: {{ image_job.message }}</p>
-                {% endif %}
-            {% endif %}
-            <form method="post" action="/tb/order-plans/from-image">
-                <label>
-                    Название плана
-                    <input type="text" name="name" required>
-                </label>
-                <label>
-                    Ссылка на тред с картинкой
-                    <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
-                </label>
-                <label>
-                    Total Stars с картинки
-                    <input type="number" name="stars" min="0" required>
-                </label>
-                <label class="checkbox">
-                    <input type="checkbox" name="force" value="1"> Опубликовать заново, даже если ордер уже есть (будут дубли)
-                </label>
-                <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и опубликовать</button>
+    {% if msg %}<p class="tbplan-flash">{{ msg }}</p>{% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    {% if not fc %}
+        <div class="panel"><p class="empty-state">Расчёта пока нет: нужны склады игроков (обновляются раз в час) и игровые данные ТБ.</p></div>
+    {% else %}
+
+    <div class="panel tbplan-bar">
+        {% if plans %}
+            <form method="get" action="/tb/plan" class="tbplan-pick">
+                <select id="tbplan-select" name="id" onchange="this.form.submit()" aria-label="План">
+                    {% for p in plans %}<option value="{{ p.id }}"{% if plan and p.id == plan.id %} selected{% endif %}>{{ p.name }}{% if p.stars is not none %} · {{ p.stars }}★{% endif %}</option>{% endfor %}
+                </select>
+                <noscript><button type="submit">Открыть</button></noscript>
             </form>
+        {% endif %}
+        <div class="tbplan-actions">
+            <form method="post" action="/tb/plan/new"><button type="submit">＋ Новый план</button></form>
+            {% if plan %}
+                <form method="post" action="/tb/plan/new"><input type="hidden" name="copy_id" value="{{ plan.id }}"><button type="submit" class="button-secondary">Копия</button></form>
+                <details class="tbplan-menu">
+                    <summary class="button-secondary">Ещё ▾</summary>
+                    <div class="tbplan-menu-body">
+                        <form method="post" action="/tb/plan/{{ plan.id }}/rename" class="tbplan-inline">
+                            <input type="text" name="name" value="{{ plan.name }}" maxlength="80" aria-label="Название плана">
+                            <button type="submit" class="button-secondary">Переименовать</button>
+                        </form>
+                        <form method="post" action="/tb/plan/{{ plan.id }}/delete" onsubmit="return confirm('Удалить план «{{ plan.name }}»?');">
+                            <button type="submit" class="button-danger">Удалить план</button>
+                        </form>
+                    </div>
+                </details>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not plan %}
+        <div class="panel">
+            <p class="empty-state">Планов ещё нет. «Новый план» подберёт звёзды по этапам с нынешними складами (сейчас это ≈ {{ fc.total }}★) — дальше правьте планеты по этапам, расчёт покажет, хватает ли залива, боёв и взводов.</p>
+        </div>
+    {% else %}
+
+    <div class="panel">
+        <div class="panel-title">
+            <span>План по этапам{% call ui.help() %}<p>Как HotUtils Strategy: на каждом этапе выбираете, сколько звёзд брать на каждой открытой планете, или «копим» — набираем очки и закрываем планету на следующем этапе. Маршрут строится сам: планета со звездой закрывается и открывает следующую в ветке; Зеффо и Мандалор — после звезды на Бракке / Татуине и нужного числа побед в спецмиссии.</p><p><b>Как считаем.</b> Залив ГМ идёт в любую планету: {{ (result.deploy_share * 100)|round|int }}% ГМ гильдии на этап (столько гильдия заливала в прошлых ВИ, можно поменять ниже). Бои — только в свою планету: максимум (все игроки проходят все боевые миссии планеты) × доля, которую гильдия отбивала на этой планете в последних ВИ; долю можно поменять в карточке планеты. Взводы — по нынешним складам; операции платят, когда планета берёт звезду (на копящей планете их можно закрыть заранее).</p><p>«Не хватает» — даже весь залив и ожидаемые бои не набирают выбранные звёзды. «Бои: нужно N%» — какую долю максимума боёв этапа пришлось бы отбить, если залить весь доступный ГМ; рядом — сколько ждём по истории.</p><p>Меняете звёзды на этапе — этапы после него подбираются заново под ваш выбор, этапы до него не трогаются.</p>{% endcall %}</span>
+            <span class="panel-hint">{{ plan.name }}{% if order %} · ордер «{{ order.name }}»{% if order_active %} (активный){% endif %}{% endif %}</span>
+        </div>
+        <table class="data cards-on-phone tbplan-summary">
+            <thead><tr><th>Этап</th><th>Планеты</th><th>Хватает?</th><th class="num">★</th></tr></thead>
+            <tbody>
+                {% for ph in result.phases %}
+                    <tr>
+                        <td data-label="Этап"><a href="#day-{{ ph.phase }}" data-day-link="{{ ph.phase }}"><strong>{{ ph.phase }}</strong></a></td>
+                        <td data-label="Планеты"><div>{% for row in ph.planets %}<span class="nowrap">{{ planet_ru(row.planet) }} {{ stars_label(row) }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</div></td>
+                        <td data-label="Хватает?"><div>
+                            {% if ph.ok %}<span class="badge badge-ok">хватает</span> <span class="muted nowrap">запас {{ mln(ph.deploy_left) }}</span>{% else %}<span class="badge badge-danger">не хватает {{ mln(ph.short) }}</span>{% endif %}
+                            <br><span class="muted nowrap">бои: нужно {{ (ph.battle_need_pct * 100)|round|int }}%, обычно {{ (ph.battle_expected_pct * 100)|round|int }}%</span>
+                            {% if ph.warnings %}<br><span class="tbm-label-warn">⚠ {{ ph.warnings|length }}</span>{% endif %}
+                        </div></td>
+                        <td data-label="★" class="num"><strong>{{ ph.stars }}</strong></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="tbplan-tools">
+            <form method="post" action="/tb/plan/{{ plan.id }}/settings" class="tbplan-inline">
+                <label>Залив ГМ, %
+                    <input type="text" inputmode="decimal" name="deploy_pct" value="{{ plan.data.deploy_pct if plan.data.deploy_pct is not none else '' }}" placeholder="{{ (result.deploy_share * 100)|round|int }}" style="width: 4.5em;">
+                </label>
+                {% for b in bonus_planets %}
+                    <label class="checkbox"><input type="checkbox" name="bonus" value="{{ b }}"{% if b in result.bonus_on %} checked{% endif %}> {{ planet_ru(b) }}</label>
+                {% endfor %}
+                <button type="submit" class="button-secondary">Сохранить</button>
+            </form>
+            <form method="post" action="/tb/plan/{{ plan.id }}/resuggest" class="tbplan-inline">
+                <label>Подобрать заново с этапа
+                    <select name="from_day">{% for d in range(1, 7) %}<option value="{{ d }}">{{ d }}</option>{% endfor %}</select>
+                </label>
+                <button type="submit" class="button-secondary">Подобрать</button>
+            </form>
+            {% if goal_enabled %}<a class="hero-link" href="/tb/goal?stars={{ result.total + 1 }}">Что нужно для {{ result.total + 1 }}★?</a>{% endif %}
+        </div>
+    </div>
+
+    <nav class="hero-links tbp-tabs" id="tbplan-tabs">
+        {% for ph in result.phases %}<a class="hero-link" href="#day-{{ ph.phase }}" data-tab="{{ ph.phase }}"{% if loop.first %} aria-current="page"{% endif %}>Этап {{ ph.phase }} · {{ ph.stars }}★{% if not ph.ok %} <span class="tbplan-dot" title="не хватает">●</span>{% endif %}</a>{% endfor %}
+    </nav>
+
+    {% for ph in result.phases %}
+    <section class="tbp-pane" data-pane="{{ ph.phase }}" id="day-{{ ph.phase }}"{% if not loop.first %} hidden{% endif %}>
+        <div class="panel tbplan-daysum">
+            <div class="tbplan-daysum-row">
+                <span><b>Залив:</b> нужно {{ mln(ph.deploy_need) }} из {{ mln(ph.deploy) }}</span>
+                <span><b>Взводы:</b> +{{ mln(ph.ops) }}</span>
+                <span><b>Бои:</b> ждём {{ mln(ph.battle_expected) }} из максимума {{ mln(ph.battle_max) }}</span>
+                {% if ph.ok %}<span class="badge badge-ok">хватает, запас {{ mln(ph.deploy_left) }}</span>{% else %}<span class="badge badge-danger">не хватает {{ mln(ph.short) }}</span>{% endif %}
+            </div>
+            {% for w in ph.warnings %}<p class="tbm-label-warn tbplan-warn">⚠ {{ w }}</p>{% endfor %}
+        </div>
+
+        <div class="tbplan-cards">
+            {% for row in ph.planets %}
+                {% set ready = readiness.get(row.planet) or {} %}
+                <article class="tbplan-card tbplan-side-{{ row.side }}">
+                    <header class="tbplan-card-head">
+                        <h3>{{ planet_ru(row.planet) }}</h3>
+                        <span class="badge badge-neutral">{{ {"dark": "тёмная", "mixed": "нейтральная", "light": "светлая", "bonus": "бонус"}[row.side] }}</span>
+                        {% if row.phase != ph.phase %}<span class="muted tbm-small">планета {{ row.phase }} этапа</span>{% endif %}
+                    </header>
+                    <form method="post" action="/tb/plan/{{ plan.id }}/stars" class="tbplan-stars" aria-label="Звёзды на {{ planet_ru(row.planet) }}">
+                        <input type="hidden" name="phase" value="{{ ph.phase }}">
+                        <input type="hidden" name="planet" value="{{ row.planet }}">
+                        <button type="submit" name="stars" value="0"{% if row.stars == 0 %} aria-pressed="true"{% endif %}>копим</button>
+                        {% for k in range(1, row.max + 1) %}
+                            <button type="submit" name="stars" value="{{ k }}"{% if row.stars == k %} aria-pressed="true"{% endif %}>{% if row.bonus %}★ полное{% else %}{{ "★" * k }}{% endif %}</button>
+                        {% endfor %}
+                    </form>
+                    {% set top = row.thresholds[-1] %}
+                    <div class="tbplan-progress" title="набрано к началу этапа → к концу этапа">
+                        <div class="tbplan-progress-track">
+                            <div class="tbplan-progress-start" style="width: {{ [row.start / top * 100, 100]|min }}%"></div>
+                            <div class="tbplan-progress-end" style="width: {{ [((row.points or 0) - row.start) / top * 100, 100]|min }}%"></div>
+                            {% for t in row.thresholds %}<i class="tbplan-tick" style="left: {{ t / top * 100 }}%"></i>{% endfor %}
+                        </div>
+                        <span class="tbm-small muted">{{ mln(row.start) }} → {{ mln(row.points or 0) }} из {{ mln(top) }}{% if row.bonus %} (★ только за полное){% endif %}</span>
+                    </div>
+                    <dl class="tbplan-dl">
+                        <dt>Нужно</dt><dd>{{ mln(row.need) }}</dd>
+                        <dt>Взводы</dt><dd>
+                            {% if row.no_platoons %}<span class="muted">не ставим</span>
+                            {% else %}<span class="badge {{ 'badge-ok' if row.ops_closed == 6 else ('badge-danger' if row.ops_closed == 0 else 'badge-warn') }}">{{ row.ops_closed }} из 6</span>
+                                {% if row.stars %}+{{ mln(row.ops_points) }}{% elif row.ops_pending %}<span class="muted">+{{ mln(row.ops_pending) }} при закрытии</span>{% endif %}
+                            {% endif %}
+                        </dd>
+                        <dt>Бои</dt><dd>
+                            {{ mln(row.battle_used) }} <span class="muted">из {{ mln(row.battle.expected) }} ждём · макс. {{ mln(row.battle.max) }}{% if row.battle.estimated %} (оценка){% endif %}</span>
+                            <form method="post" action="/tb/plan/{{ plan.id }}/expect" class="tbplan-inline tbplan-expect">
+                                <input type="hidden" name="planet" value="{{ row.planet }}">
+                                <input type="hidden" name="phase" value="{{ ph.phase }}">
+                                <label>доля боёв <input type="text" inputmode="decimal" name="pct" value="{{ row.expect_pct if row.expect_pct is not none else '' }}" placeholder="{{ (row.battle.share * 100)|round|int }}" aria-label="Доля боёв, %">%</label>
+                                <button type="submit" class="link-btn">ок</button>
+                                <span class="muted tbm-small">{% if row.battle.history is not none %}в прошлых ВИ {{ (row.battle.history * 100)|round|int }}%{% else %}истории нет{% endif %}</span>
+                            </form>
+                        </dd>
+                        <dt>Залив</dt><dd>{{ mln(row.deploy_need) }}</dd>
+                    </dl>
+                    {% if not row.stars %}
+                        <form method="post" action="/tb/plan/{{ plan.id }}/preload" class="tbplan-inline">
+                            <input type="hidden" name="phase" value="{{ ph.phase }}">
+                            <input type="hidden" name="planet" value="{{ row.planet }}">
+                            <label>копить до <input type="text" inputmode="decimal" name="amount" value="{{ (row.target / 1e6)|round|int if row.target else '' }}" placeholder="{{ ((row.points or 0) / 1e6)|round|int }}" style="width: 5em;" aria-label="Копить до, млн"> млн</label>
+                            <button type="submit" class="link-btn">ок</button>
+                            <span class="muted tbm-small">до первого порога {{ mln(row.cap) }}</span>
+                        </form>
+                    {% endif %}
+                    {% if ready.covert or ready.strikes %}
+                        <details class="tbplan-ready">
+                            <summary>Готовность: спецмиссии и бои</summary>
+                            {% for c in ready.covert or [] %}
+                                <div class="tbplan-ready-row">
+                                    <div><b>ОЗ</b> {% if c.base_id %}{{ game.unit(c.base_id, c.name) }}{% else %}<span class="muted">{{ c.name }}</span>{% endif %}
+                                        {% if c.unlocks %}<br><span class="tbp-unlock {{ 'tbp-unlock-ok' if c.ready|length >= (c.unlock_wins or 0) else 'tbp-unlock-bad' }}">{{ "✓" if c.ready|length >= (c.unlock_wins or 0) else "✗" }} открывает {{ planet_ru(c.unlocks) }}{% if c.unlock_wins %}: нужно {{ c.unlock_wins }}, проходят {{ c.ready|length }}{% endif %}</span>{% endif %}</div>
+                                    <div class="tbplan-who-row">{{ count_details(c.ready, "badge-ok", label="проходят") }} {{ count_details(c.step, "badge-warn", pairs=True, label="в шаге") }} {{ count_details(c.short, "", pairs=True, label="не дотягивают") }}</div>
+                                </div>
+                            {% endfor %}
+                            {% for st in ready.strikes or [] %}
+                                <div class="tbplan-ready-row">
+                                    <div><b>Бой {{ st.n }}</b>{% if st.fleet %} <span class="badge badge-neutral">флот</span>{% endif %} <span class="muted">{{ st.requirement }}</span></div>
+                                    <div class="tbplan-who-row">{{ count_details(st.ready, "badge-ok" if st.ready|length >= r.players * 0.8 else "badge-warn", label="могут зайти") }} {{ count_details(st.step, "badge-warn", pairs=True, label="в шаге") }} {{ count_details(st.short, "", pairs=True, label="не дотягивают") }}</div>
+                                </div>
+                            {% endfor %}
+                        </details>
+                    {% endif %}
+                </article>
+            {% endfor %}
         </div>
 
         <div class="panel">
-            <div class="panel-title"><span>Зарегистрировать готовую ветку{{ ui.help("Для ветки, где ордер на все 6 этапов уже написан. Здесь наличие всех этапов не проверяется — проверка есть в Discord: /тб_план → «Сохранить ветку».") }}</span></div>
-            <form method="post" action="/tb/order-plans/save">
-                <label>
-                    Название плана
-                    <input type="text" name="name" required>
-                </label>
-                <label>
-                    Ссылка на тред
-                    <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
-                </label>
-                <label>
-                    Total Stars
-                    <input type="number" name="stars" min="0" required>
-                </label>
-                <button type="submit">Сохранить</button>
-            </form>
+            <div class="panel-title">
+                <span>Этап {{ ph.phase }}: кого не хватает во взводах{% call ui.help() %}<p>Слоты взводов на планетах этого этапа, которые нынешние склады не закрывают (юнит игрока встаёт один раз за этап; на копящей планете дефицитные юниты можно добирать на следующих этапах). «В шаге» — у кого юнит в одной-двух реликвиях от порога (корабль — в одной звезде).</p><p>Расставить игроков по слотам — вкладка «Взводы».</p>{% endcall %}</span>
+                <span class="panel-hint">{% if ph.shortages %}{{ ph.shortages|sum(attribute="short") }} слотов не закрыть{% else %}все слоты закрываются{% endif %}</span>
+            </div>
+            {% if ph.shortages %}
+                <table class="data cards-on-phone">
+                    <thead><tr><th>Юнит</th><th class="num">Не хватает</th><th>Где</th><th>В шаге</th></tr></thead>
+                    <tbody>
+                        {% for s in ph.shortages %}
+                            <tr>
+                                <td data-label="Юнит"><div>{{ game.unit(s.base_id, s.name) }} <span class="muted">{{ "7★" if s.is_ship else "R" ~ s.need }}</span></div></td>
+                                <td data-label="Не хватает" class="num"><span class="badge badge-danger">{{ s.short }}</span></td>
+                                <td data-label="Где"><div>{% for pl in s.planets %}{{ planet_ru(pl) }}{% if not loop.last %}, {% endif %}{% endfor %}</div></td>
+                                <td data-label="В шаге">{{ count_details(s.step, "badge-warn") }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
         </div>
+    </section>
+    {% endfor %}
+
+    <div class="panel" id="publish">
+        <div class="panel-title">
+            <span>Опубликовать ордер{% call ui.help() %}<p>Бот выложит в ветку Discord 6 сообщений — по одному на этап: планеты, цель в звёздах, «копим до …», взводы. Ордер сохранится на вкладке «Ордер» и, если отметить, станет активным: бот будет публиковать нужный этап в канал плана ТБ и расставит взводы.</p><p>Ветку создайте заранее (например, в форуме планов ТБ) и вставьте ссылку на неё.</p>{% endcall %}</span>
+            {% if order %}<span class="panel-hint">уже опубликован как «{{ order.name }}»</span>{% endif %}
+        </div>
+        <form method="post" action="/tb/plan/{{ plan.id }}/publish" class="tbplan-publish">
+            <label>Ссылка на ветку <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required></label>
+            <label>Название ордера <input type="text" name="name" value="{{ plan.name }}" maxlength="80"></label>
+            <label class="checkbox"><input type="checkbox" name="make_active" value="1" checked> Сделать активным</label>
+            <label class="checkbox"><input type="checkbox" name="force" value="1"> Опубликовать заново, если в ветке уже есть ордер (будут дубли)</label>
+            <button type="submit">Опубликовать в Discord</button>
+        </form>
     </div>
 
+    {% endif %}
+    {% if r.unresolved %}
+        <p class="muted">Не распознаны в справочнике юнитов (во взводы не вошли): {{ r.unresolved|join(", ") }}</p>
+    {% endif %}
+    {% endif %}
     <script>
-document.addEventListener("DOMContentLoaded", () => {
-    const dialog = document.getElementById("tb-stage-modal");
-    const title = document.getElementById("tb-stage-title");
-    const planLine = document.getElementById("tb-stage-plan");
-    const text = document.getElementById("tb-stage-text");
-    let cache = null;
-    const load = () => cache || (cache = fetch("/tb/plan/api/stage-messages", { credentials: "same-origin" })
-        .then((r) => r.json())
-        .catch(() => ({ error: "Не удалось загрузить сообщения этапов." })));
-    const open = async (phase) => {
-        title.textContent = `Этап ${phase}`;
-        planLine.textContent = "";
-        text.textContent = "Загружаю…";
-        dialog.showModal();
-        const data = await load();
-        if (data.error) { cache = null; text.textContent = data.error; return; }
-        planLine.textContent = `План «${data.plan}» — так бот опубликует этот этап:`;
-        text.textContent = data.stages[String(phase)] || "⚠️ Этот этап не найден в ветке плана.";
-    };
-    document.querySelectorAll(".tb-plan-row").forEach((row) => {
-        row.addEventListener("click", () => open(row.dataset.phase));
-        row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(row.dataset.phase); } });
-    });
-});
+    (function () {
+        const tabs = document.querySelectorAll("#tbplan-tabs [data-tab]");
+        if (!tabs.length) return;
+        function show(key) {
+            tabs.forEach(t => {
+                if (t.dataset.tab === key) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+            });
+            document.querySelectorAll(".tbp-pane").forEach(p => { p.hidden = p.dataset.pane !== key; });
+        }
+        function go(key, scroll) {
+            show(key);
+            history.replaceState(null, "", location.pathname + location.search + "#day-" + key);
+            if (scroll) document.getElementById("tbplan-tabs").scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        tabs.forEach(a => a.addEventListener("click", e => { e.preventDefault(); go(a.dataset.tab, false); }));
+        document.querySelectorAll("[data-day-link]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); go(a.dataset.dayLink, true); }));
+        const m = location.hash.match(/^#day-(\d)$/);
+        if (m) show(m[1]);
+        // после правки страница перезагружается — возвращаем прокрутку туда, где нажали
+        const KEY = "tbplan-scroll";
+        try {
+            const y = sessionStorage.getItem(KEY);
+            if (y !== null) { sessionStorage.removeItem(KEY); window.scrollTo(0, +y); }
+        } catch (e) {}
+        document.querySelectorAll(".tbp-pane form, .tbplan-tools form").forEach(f => f.addEventListener("submit", () => {
+            try { sessionStorage.setItem(KEY, String(window.scrollY)); } catch (e) {}
+        }));
+    })();
     </script>
 {% endblock %}

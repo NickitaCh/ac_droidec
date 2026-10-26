@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% import "_tb.html" as tbui %}
+{% import "_ui.html" as ui %}
+{% block title %}Ордер ТБ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ tbui.tb_hero("Ордер ТБ", "order") }}
+
+    {% if config_warning %}
+        <p class="config-warning">{{ config_warning|safe }}</p>
+    {% endif %}
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if saved %}
+        <p><span class="badge badge-ok">Сохранено</span></p>
+    {% endif %}
+
+    <div class="panel">
+        <div class="panel-title">
+            <span>Ордеры в Discord{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
+        </div>
+        {% if not plans %}
+            <p class="empty-state">Ордеров пока нет — опубликуйте его из <a href="/tb/plan">плана</a>, соберите из картинки или зарегистрируйте готовую ветку формами ниже.</p>
+        {% else %}
+            <div class="table-scroll">
+            <table class="data">
+                <thead><tr><th>Название</th><th class="num">★</th><th>Ветка</th><th></th></tr></thead>
+                <tbody>
+                    {% for row in plans %}
+                        <tr>
+                            <td>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</td>
+                            <td class="num">{{ row.total_stars }}</td>
+                            <td>
+                                {% if row.thread_link %}
+                                    <a href="{{ row.thread_link }}" target="_blank" rel="noopener">Открыть тред ↗</a>
+                                {% else %}
+                                    <span class="muted">{{ row.thread_id }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="row-actions">
+                                <a class="link-btn" href="/tb/order?preview_plan_id={{ row.id }}#preview">Предпросмотр</a>
+                                <a class="link-btn" href="/tb/platoons?plan_id={{ row.id }}">Взводы</a>
+                                {% if not row.active %}
+                                    <form method="post" action="/tb/order-plans/select">
+                                        <input type="hidden" name="plan_id" value="{{ row.id }}">
+                                        <button type="submit">Сделать активным</button>
+                                    </form>
+                                {% endif %}
+                                <form method="post" action="/tb/order-plans/delete"
+                                      onsubmit="return confirm('Удалить ордер «{{ row.name }}»?');">
+                                    <input type="hidden" name="name" value="{{ row.name }}">
+                                    <button type="submit" class="button-danger">Удалить</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if preview_plan or preview_error %}
+        <div class="panel" id="preview">
+            <div class="panel-title"><span>Предпросмотр{% if preview_plan %}: «{{ preview_plan.name }}»{% endif %}</span></div>
+            {% if preview_error %}
+                <p class="error">{{ preview_error }}</p>
+            {% elif preview %}
+                {% set missing = preview|selectattr("block", "none")|list %}
+                {% if missing %}
+                    <p class="config-warning">⚠️ Не хватает этапов: {{ missing|map(attribute="phase")|join(", ") }}</p>
+                {% else %}
+                    <p><span class="badge badge-ok">Все 6 этапов найдены</span></p>
+                {% endif %}
+                <div class="tb-preview-grid">
+                    {% for p in preview %}
+                        <div class="tb-preview-stage">
+                            <div class="panel-title"><span>Этап {{ p.phase }}</span></div>
+                            {% if p.block %}
+                                <pre class="tb-stage-text">{{ p.block }}</pre>
+                            {% else %}
+                                <p class="empty-state">⚠️ не нашёл в ветке</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
+    {% set branches = conflict_options if has_bonus else conflict_options|rejectattr("value", "equalto", "bonus")|list %}
+    <div class="panel">
+        <div class="panel-title">
+            <span>Планеты по этапам{% call ui.help() %}<p>Какая планета на каком этапе — по объявлениям офицеров в канале плана ТБ и по активному ордеру. По этой сетке отчёт по ТБ подписывает планеты.</p><p>Нажмите на этап — откроется сообщение, которое бот опубликует на этот этап.</p>{% endcall %}</span>
+            <span class="panel-actions">
+                <button type="button" class="button-secondary" data-modal-open="tb-planet-modal">✏️ Поправить планету</button>
+            </span>
+        </div>
+        <div class="table-scroll">
+            <table class="data tb-plan-grid">
+                <thead>
+                    <tr>
+                        <th>Этап</th>
+                        {% for opt in branches %}<th class="tb-branch-{{ opt.value }}">{{ opt.label }}</th>{% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in grid %}
+                        <tr class="tb-plan-row{% if row.empty %} is-empty{% endif %}" data-phase="{{ row.phase }}" tabindex="0" role="button" aria-label="Этап {{ row.phase }}: сообщение бота">
+                            <td class="tb-plan-phase">{{ row.phase }}</td>
+                            {% for opt in branches %}
+                                <td class="tb-branch-{{ opt.value }}">{% if row.cells[opt.value] %}{{ row.cells[opt.value] }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <dialog class="edit-modal" id="tb-stage-modal">
+        <div class="edit-modal-header">
+            <h3 id="tb-stage-title">Этап</h3>
+            <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+        </div>
+        <div class="edit-modal-body">
+            <p class="muted" id="tb-stage-plan" style="margin:0;"></p>
+            <pre class="tb-stage-text" id="tb-stage-text">Загружаю…</pre>
+        </div>
+    </dialog>
+
+    <dialog class="edit-modal" id="tb-planet-modal" style="width: min(30em, 94vw);">
+        <form method="post" action="/tb/order/planet">
+            <div class="edit-modal-header">
+                <h3>Поправить планету</h3>
+                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+            </div>
+            <div class="edit-modal-body">
+                <label>
+                    Этап
+                    <input type="number" name="phase" min="1" max="6" required>
+                </label>
+                <label>
+                    Ветка
+                    <select name="conflict_key" required>
+                        {% for opt in conflict_options %}
+                            <option value="{{ opt.value }}">{{ opt.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Название планеты
+                    <input type="text" name="planet_name" required>
+                </label>
+            </div>
+            <div class="edit-modal-footer">
+                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                <button type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <div class="tb-plan-forms">
+        <div class="panel" id="from-image">
+            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Запасной путь, если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её, опубликует в ветку 6 сообщений по этапам, сохранит ордер и расставит взводы.") }}</span></div>
+            {% if image_job %}
+                {% if image_job.state == "running" %}
+                    <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>
+                    <script>setTimeout(() => location.reload(), 8000);</script>
+                {% elif image_job.state == "done" %}
+                    <p class="badge badge-ok" style="white-space: pre-line;">{{ image_job.message }}</p>
+                {% elif image_job.state == "error" %}
+                    <p class="badge badge-danger" style="white-space: pre-line;">❌ «{{ image_job.plan_name }}»: {{ image_job.message }}</p>
+                {% endif %}
+            {% endif %}
+            <form method="post" action="/tb/order-plans/from-image">
+                <label>
+                    Название ордера
+                    <input type="text" name="name" required>
+                </label>
+                <label>
+                    Ссылка на ветку с картинкой
+                    <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
+                </label>
+                <label>
+                    Total Stars с картинки
+                    <input type="number" name="stars" min="0" required>
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" name="force" value="1"> Опубликовать заново, даже если ордер уже есть (будут дубли)
+                </label>
+                <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и опубликовать</button>
+            </form>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Зарегистрировать готовую ветку{{ ui.help("Для ветки, где ордер на все 6 этапов уже написан. Здесь наличие всех этапов не проверяется — проверка есть в Discord: /тб_план → «Сохранить ветку».") }}</span></div>
+            <form method="post" action="/tb/order-plans/save">
+                <label>
+                    Название ордера
+                    <input type="text" name="name" required>
+                </label>
+                <label>
+                    Ссылка на ветку
+                    <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
+                </label>
+                <label>
+                    Total Stars
+                    <input type="number" name="stars" min="0" required>
+                </label>
+                <button type="submit">Сохранить</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+document.addEventListener("DOMContentLoaded", () => {
+    const dialog = document.getElementById("tb-stage-modal");
+    const title = document.getElementById("tb-stage-title");
+    const planLine = document.getElementById("tb-stage-plan");
+    const text = document.getElementById("tb-stage-text");
+    let cache = null;
+    const load = () => cache || (cache = fetch("/tb/order/api/stage-messages", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .catch(() => ({ error: "Не удалось загрузить сообщения этапов." })));
+    const open = async (phase) => {
+        title.textContent = `Этап ${phase}`;
+        planLine.textContent = "";
+        text.textContent = "Загружаю…";
+        dialog.showModal();
+        const data = await load();
+        if (data.error) { cache = null; text.textContent = data.error; return; }
+        planLine.textContent = `Ордер «${data.plan}» — так бот опубликует этот этап:`;
+        text.textContent = data.stages[String(phase)] || "⚠️ Этот этап не найден в ветке плана.";
+    };
+    document.querySelectorAll(".tb-plan-row").forEach((row) => {
+        row.addEventListener("click", () => open(row.dataset.phase));
+        row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(row.dataset.phase); } });
+    });
+});
+    </script>
+{% endblock %}

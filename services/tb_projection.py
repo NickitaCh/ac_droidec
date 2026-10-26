@@ -1,4 +1,4 @@
-"""ВИ-проекция гильдии (веб /tb/projection): что гильдия закроет во взводах «Восхода
+"""ВИ-проекция гильдии (веб /tb/plan — готовность в карточках плана): что гильдия закроет во взводах «Восхода
 Империи» с нынешними складами — покрытие слотов по этапам и планетам, сколько операций
 закрывается 15/15, и узкие места: каких юнитов не хватает, у кого юнит уже проходит и
 кто «в шаге» (не хватает одной-двух реликвий или звезды у корабля).
@@ -161,7 +161,8 @@ def build(guild_id: int, with_bonus: bool = True) -> dict:
         hist = tb_forecast.history(guild_id)
         if not with_bonus:
             zone_data = {**zone_data, "bonus": {}}
-        forecast = tb_forecast.forecast(zone_data, platoons, covert_ready, hist, gp)
+        forecast = tb_forecast.forecast(zone_data, platoons, covert_ready, hist, gp,
+                                        members=len(players_with_roster) or len(members))
         forecast["history"] = hist
         # для вкладки «Цель» (services/tb_goal.py) — те же входы, без повторного чтения складов
         forecast["inputs"] = {"zone_data": zone_data, "platoons": platoons, "covert_ready": covert_ready,

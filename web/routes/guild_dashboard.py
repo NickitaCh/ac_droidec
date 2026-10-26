@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import tb_missions, tb_order_image, tb_projection
+from services import tb_forecast, tb_missions, tb_order_image, tb_plan, tb_projection
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -231,10 +231,10 @@ def _tb_plan_grid(guild_id: int) -> tuple[list, bool]:
     return grid, has_bonus
 
 
-@router.get("/tb/plan", response_class=HTMLResponse)
-async def tb_plan(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    """Единая страница «План» (2026-10-15): текущий план планет по этапам + планы ордера
-    (раньше — отдельные /tb/plan и /tb/order-plans)."""
+@router.get("/tb/order", response_class=HTMLResponse)
+async def tb_order(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Вкладка «Ордер» (2026-10-26, раньше — «План»): ветки ордера в Discord, активный ордер,
+    ордер из картинки и сетка «какая планета на каком этапе» для разбора объявлений."""
     guild_id = user["guild_id"]
     guild_cfg = database.get_guild_config(guild_id) or {}
     grid, has_bonus = _tb_plan_grid(guild_id)
@@ -263,7 +263,7 @@ async def tb_plan(request: Request, user: dict = Depends(feature_flags.require_f
         else:
             preview, preview_error = await tb_plan_reader.fetch_order_preview(preview_plan)
 
-    return templates.TemplateResponse(request, "tb_plan.html", {
+    return templates.TemplateResponse(request, "tb_order.html", {
         "user": user,
         "grid": grid,
         "has_bonus": has_bonus,
@@ -280,7 +280,7 @@ async def tb_plan(request: Request, user: dict = Depends(feature_flags.require_f
     })
 
 
-@router.get("/tb/plan/api/stage-messages")
+@router.get("/tb/order/api/stage-messages")
 async def tb_plan_stage_messages(user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Тексты этапов из активного плана ордера — то, что бот опубликует на этап
     (попап по клику на строку плана)."""
@@ -295,8 +295,8 @@ async def tb_plan_stage_messages(user: dict = Depends(feature_flags.require_feat
     return JSONResponse({"plan": plan["name"], "stages": {str(p["phase"]): p["block"] for p in preview}})
 
 
-@router.post("/tb/plan", response_class=HTMLResponse)
-async def tb_plan_save(
+@router.post("/tb/order/planet", response_class=HTMLResponse)
+async def tb_order_planet_save(
     phase: int = Form(...),
     conflict_key: str = Form(...),
     planet_name: str = Form(...),
@@ -305,35 +305,35 @@ async def tb_plan_save(
     planet_name = planet_name.strip()
     valid_conflicts = {opt["value"] for opt in TB_PLAN_CONFLICT_OPTIONS}
     if not planet_name:
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Название планеты не может быть пустым'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Название планеты не может быть пустым'})}", status_code=303)
     if not (1 <= phase <= 6):
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Некорректный номер этапа (1-6)'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Некорректный номер этапа (1-6)'})}", status_code=303)
     if conflict_key not in valid_conflicts:
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Некорректная ветка'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Некорректная ветка'})}", status_code=303)
     database.set_tb_planet_name(str(phase), conflict_key, planet_name, source="manual", guild_id=user["guild_id"])
-    return RedirectResponse("/tb/plan?saved=1", status_code=303)
+    return RedirectResponse("/tb/order?saved=1", status_code=303)
 
 
 @router.get("/tb/order-plans", response_class=HTMLResponse)
 async def tb_order_plans(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    # Объединено с «Планом» (/tb/plan) — старые ссылки/закладки ведут туда же.
+    # Старые ссылки/закладки на «Планы ордера» ведут на вкладку «Ордер».
     query = f"?{request.url.query}" if request.url.query else ""
-    return RedirectResponse(f"/tb/plan{query}", status_code=307)
+    return RedirectResponse(f"/tb/order{query}", status_code=307)
 
 
 @router.post("/tb/order-plans/select", response_class=HTMLResponse)
 async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     plan = database.get_tb_saved_plan(plan_id)
     if plan is None or plan["guild_id"] != user["guild_id"]:
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'План не найден'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'План не найден'})}", status_code=303)
     database.update_guild_config(user["guild_id"], tb_active_plan_id=plan_id)
-    return RedirectResponse("/tb/plan?saved=1", status_code=303)
+    return RedirectResponse("/tb/order?saved=1", status_code=303)
 
 
 @router.post("/tb/order-plans/delete", response_class=HTMLResponse)
 async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     database.delete_tb_saved_plan(user["guild_id"], name)
-    return RedirectResponse("/tb/plan?saved=1", status_code=303)
+    return RedirectResponse("/tb/order?saved=1", status_code=303)
 
 
 # Фоновые задачи «ордер из картинки» — держим ссылки, чтобы asyncio не собрал их сборщиком мусора.
@@ -353,14 +353,14 @@ async def tb_order_plans_from_image(
     guild_id = user["guild_id"]
     name = name.strip()
     if not name:
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
     if not tb_order_image.start_job(guild_id, name):
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
     task = asyncio.create_task(tb_order_image.run_web_job(
         guild_id, thread_link, name, stars, bool(force), f"web:{user['discord_id']}"))
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
-    return RedirectResponse("/tb/plan#from-image", status_code=303)
+    return RedirectResponse("/tb/order#from-image", status_code=303)
 
 
 @router.post("/tb/order-plans/save", response_class=HTMLResponse)
@@ -376,14 +376,14 @@ async def tb_order_plans_save_manual(
     # синтаксическая валидация ссылки. Шаблон явно предупреждает об этом.
     name = name.strip()
     if not name:
-        return RedirectResponse(f"/tb/plan?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
     thread_id = _extract_thread_id(thread_link)
     if thread_id is None:
         return RedirectResponse(
-            f"/tb/plan?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
+            f"/tb/order?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
         )
     database.save_tb_plan(user["guild_id"], name, thread_id, stars, created_by=f"web:{user['discord_id']}")
-    return RedirectResponse("/tb/plan?saved=1", status_code=303)
+    return RedirectResponse("/tb/order?saved=1", status_code=303)
 
 
 # =====================================================================
@@ -514,17 +514,9 @@ PROJECTION_CACHE_SECONDS = 900
 
 
 @router.get("/tb/projection", response_class=HTMLResponse)
-async def tb_projection_page(request: Request, bonus: int = 1,
-                             user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    _built_at, r = await _projection(user["guild_id"], bool(bonus))
-    return templates.TemplateResponse(request, "tb_projection.html", {
-        "user": user,
-        "r": r,
-        "bonus": bool(bonus),
-        "goal_tab": feature_flags.is_enabled(user["guild_id"], "tb_star_goal"),
-        "planet_ru": _planet_ru,
-        "compact": dashboard_data._compact_number,
-    })
+async def tb_projection_page(user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    # Проекция (готовность взводов, ОЗ, БЗ и прогноз звёзд) переехала в карточки «Плана».
+    return RedirectResponse("/tb/plan", status_code=307)
 
 
 async def _projection(guild_id: int, bonus: bool) -> tuple:
@@ -540,6 +532,252 @@ async def _projection(guild_id: int, bonus: bool) -> tuple:
 
 def _planet_ru(planet: str) -> str:
     return (_PLANET_NAME_TO_RU.get(planet) or planet).capitalize()
+
+
+# =====================================================================
+# ПЛАН ТБ — калькулятор (services/tb_plan.py): планы по этапам, расчёт «хватит ли залива,
+# боёв и взводов», готовность (взводы, ОЗ, БЗ) по планетам дня, публикация ордера в Discord.
+# Входы расчёта — та же 15-минутная проекция (_projection), поэтому правка плана — доли секунды.
+# =====================================================================
+
+def _plan_readiness(r: dict) -> tuple[dict, dict]:
+    """({планета: {"covert": [...], "strikes": [...]}}, {base_id: узкое место из проекции})."""
+    by_planet: dict = {}
+    bottlenecks: dict = {}
+    for ph in r.get("phases") or []:
+        for c in ph.get("covert") or []:
+            by_planet.setdefault(c["planet"], {"covert": [], "strikes": []})["covert"].append(c)
+        for st in ph.get("strikes") or []:
+            by_planet.setdefault(st["planet"], {"covert": [], "strikes": []})["strikes"].append(st)
+        for b in ph.get("bottlenecks") or []:
+            bottlenecks.setdefault(b["base_id"], b)
+    return by_planet, bottlenecks
+
+
+def _plan_shortages(result: dict, inp: dict, bottlenecks: dict) -> None:
+    """В каждый этап плана — каких юнитов не хватает во взводах его планет (после раздачи
+    tb_forecast._fill_platoons), с теми, кто «в шаге», из проекции."""
+    ships = set(inp["platoons"].get("ships") or ())
+    all_ids = {bid for ph in result["phases"] for row in ph["planets"] for bid, _n in row["short_slots"] if bid}
+    names = database.get_game_unit_names(sorted(all_ids))
+    for ph in result["phases"]:
+        agg: dict = {}
+        for row in ph["planets"]:
+            for bid, need in row["short_slots"]:
+                if not bid:
+                    continue
+                a = agg.setdefault((bid, need), {"base_id": bid, "need": need, "short": 0, "planets": [],
+                                                 "is_ship": bid in ships, "name": names.get(bid, bid),
+                                                 "step": (bottlenecks.get(bid) or {}).get("step") or []})
+                a["short"] += 1
+                if row["planet"] not in a["planets"]:
+                    a["planets"].append(row["planet"])
+        ph["shortages"] = sorted(agg.values(), key=lambda a: (-a["short"], a["name"].lower()))
+
+
+async def _plan_inputs(guild_id: int) -> dict:
+    _built_at, r = await _projection(guild_id, True)
+    fc = r.get("forecast")
+    if not fc:
+        raise HTTPException(status_code=409, detail="Нет данных для расчёта: нужны склады игроков и игровые данные ТБ.")
+    return fc["inputs"]
+
+
+def _plan_or_404(guild_id: int, plan_id: int) -> dict:
+    plan = tb_plan.get_plan(guild_id, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="План не найден")
+    return plan
+
+
+def _plan_back(plan_id: int, day: int | None = None, **query) -> RedirectResponse:
+    qs = urlencode({"id": plan_id, **{k: v for k, v in query.items() if v}})
+    return RedirectResponse(f"/tb/plan?{qs}" + (f"#day-{day}" if day else ""), status_code=303)
+
+
+def _plan_save(guild_id: int, plan_id: int, inp: dict, data: dict) -> None:
+    total = tb_plan.evaluate(inp, data)["total"]
+    tb_plan.update_plan(guild_id, plan_id, data=data, stars=total)
+
+
+def _parse_number(raw: str) -> float | None:
+    raw = (raw or "").strip().replace(" ", "").replace(",", ".")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+@router.get("/tb/plan", response_class=HTMLResponse)
+async def tb_plan_page(request: Request, id: int = 0,
+                       user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    guild_id = user["guild_id"]
+    plans = tb_plan.list_plans(guild_id)
+    plan = next((p for p in plans if p["id"] == id), None) if id else (plans[0] if plans else None)
+    _built_at, r = await _projection(guild_id, True)
+    fc = r.get("forecast")
+    result = None
+    readiness, bottlenecks = _plan_readiness(r)
+    if plan and fc:
+        result = await asyncio.to_thread(tb_plan.evaluate, fc["inputs"], plan["data"])
+        _plan_shortages(result, fc["inputs"], bottlenecks)
+    guild_cfg = database.get_guild_config(guild_id) or {}
+    active_order_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
+    order = database.get_tb_saved_plan(plan["order_plan_id"]) if plan and plan.get("order_plan_id") else None
+    return templates.TemplateResponse(request, "tb_plan.html", {
+        "user": user,
+        "plans": plans,
+        "plan": plan,
+        "result": result,
+        "r": r,
+        "fc": fc,
+        "readiness": readiness,
+        "bonus_planets": sorted(((fc or {}).get("inputs") or {}).get("zone_data", {}).get("bonus") or {}),
+        "order": order if order and order["guild_id"] == guild_id else None,
+        "order_active": bool(order and order["id"] == active_order_id),
+        "goal_enabled": feature_flags.is_enabled(guild_id, "tb_star_goal"),
+        "msg": request.query_params.get("msg"),
+        "error": request.query_params.get("error"),
+        "today": datetime.now(MSK).strftime("%d.%m"),
+        "planet_ru": _planet_ru,
+        "compact": dashboard_data._compact_number,
+    })
+
+
+@router.post("/tb/plan/new", response_class=HTMLResponse)
+async def tb_plan_new(name: str = Form(default=""), copy_id: int = Form(default=0),
+                      user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    guild_id = user["guild_id"]
+    inp = await _plan_inputs(guild_id)
+    if copy_id:
+        src = _plan_or_404(guild_id, copy_id)
+        data, name = src["data"], name.strip() or f"{src['name']} (копия)"
+    else:
+        data = await asyncio.to_thread(tb_plan.suggest, inp, {})
+        name = name.strip() or f"План {datetime.now(MSK).strftime('%d.%m')}"
+    total = tb_plan.evaluate(inp, data)["total"]
+    plan_id = tb_plan.create_plan(guild_id, name[:80], data, total, f"web:{user['discord_id']}")
+    return _plan_back(plan_id)
+
+
+@router.post("/tb/plan/{plan_id}/stars", response_class=HTMLResponse)
+async def tb_plan_stars(plan_id: int, phase: int = Form(...), planet: str = Form(...), stars: int = Form(...),
+                        user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    if planet not in (inp["zone_data"].get("planets") or {}) or not 1 <= phase <= 6:
+        return _plan_back(plan_id, phase, error="Нет такой планеты или этапа")
+    data = await asyncio.to_thread(tb_plan.set_stars, inp, plan["data"], phase, planet, stars)
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, phase)
+
+
+@router.post("/tb/plan/{plan_id}/preload", response_class=HTMLResponse)
+async def tb_plan_preload(plan_id: int, phase: int = Form(...), planet: str = Form(...), amount: str = Form(default=""),
+                          user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """До скольких млн копить планету на этапе (пусто — «сколько останется»); этапы после
+    него подбираются заново."""
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    value = _parse_number(amount)
+    data = dict(plan["data"])
+    pre = {k: dict(v) for k, v in (data.get("preload") or {}).items()}
+    if value is None or value <= 0:
+        pre.get(str(phase), {}).pop(planet, None)
+    else:
+        pre.setdefault(str(phase), {})[planet] = value * 1e6
+    data["preload"] = {k: v for k, v in pre.items() if v}
+    data = await asyncio.to_thread(tb_plan.suggest, inp, data, phase)
+    data["preload"] = {k: v for k, v in pre.items() if v and int(k) <= phase}
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, phase)
+
+
+@router.post("/tb/plan/{plan_id}/expect", response_class=HTMLResponse)
+async def tb_plan_expect(plan_id: int, planet: str = Form(...), pct: str = Form(default=""), phase: int = Form(default=0),
+                         user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Сколько % боёв планеты ждём (пусто — по истории). План не меняется, меняется расчёт."""
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    value = _parse_number(pct)
+    data = dict(plan["data"])
+    expect = dict(data.get("expect") or {})
+    if value is None:
+        expect.pop(planet, None)
+    else:
+        expect[planet] = max(0.0, min(100.0, value))
+    data["expect"] = expect
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, phase or None)
+
+
+@router.post("/tb/plan/{plan_id}/settings", response_class=HTMLResponse)
+async def tb_plan_settings(plan_id: int, deploy_pct: str = Form(default=""), bonus: list[str] = Form(default=[]),
+                           user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    data = dict(plan["data"])
+    value = _parse_number(deploy_pct)
+    data["deploy_pct"] = None if value is None else max(10.0, min(100.0, value))
+    data["bonus"] = [b for b in bonus if b in (inp["zone_data"].get("bonus") or {})]
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, msg="Настройки сохранены. Чтобы подобрать звёзды под них — «Подобрать заново».")
+
+
+@router.post("/tb/plan/{plan_id}/resuggest", response_class=HTMLResponse)
+async def tb_plan_resuggest(plan_id: int, from_day: int = Form(default=1),
+                            user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    from_day = max(1, min(6, from_day))
+    data = await asyncio.to_thread(tb_plan.suggest, inp, plan["data"], from_day - 1)
+    _plan_save(guild_id, plan_id, inp, data)
+    return _plan_back(plan_id, from_day, msg=f"Этапы {from_day}–6 подобраны заново.")
+
+
+@router.post("/tb/plan/{plan_id}/rename", response_class=HTMLResponse)
+async def tb_plan_rename(plan_id: int, name: str = Form(...),
+                         user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    _plan_or_404(user["guild_id"], plan_id)
+    if name.strip():
+        tb_plan.update_plan(user["guild_id"], plan_id, name=name.strip()[:80])
+    return _plan_back(plan_id)
+
+
+@router.post("/tb/plan/{plan_id}/delete", response_class=HTMLResponse)
+async def tb_plan_delete(plan_id: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    _plan_or_404(user["guild_id"], plan_id)
+    tb_plan.delete_plan(user["guild_id"], plan_id)
+    return RedirectResponse("/tb/plan", status_code=303)
+
+
+@router.post("/tb/plan/{plan_id}/publish", response_class=HTMLResponse)
+async def tb_plan_publish(plan_id: int, thread_link: str = Form(...), name: str = Form(default=""),
+                          force: str = Form(default=""), make_active: str = Form(default=""),
+                          user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Ордер из плана → ветка Discord (6 этапов, как у «ордера из картинки») → план ордера
+    (database.tb_saved_plans), по желанию — активный."""
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    inp = await _plan_inputs(guild_id)
+    result = tb_plan.evaluate(inp, plan["data"])
+    try:
+        order_id, message = await tb_plan.publish(guild_id, result, thread_link, (name.strip() or plan["name"])[:80],
+                                                  bool(force), f"web:{user['discord_id']}")
+    except (tb_plan.PublishError, httpx.HTTPError) as e:
+        return _plan_back(plan_id, error=str(e))
+    tb_plan.update_plan(guild_id, plan_id, order_plan_id=order_id)
+    if make_active:
+        database.update_guild_config(guild_id, tb_active_plan_id=order_id)
+        message += " Ордер выбран активным — бот будет публиковать его по этапам."
+    return _plan_back(plan_id, msg=message)
 
 
 _GOAL_CACHE: dict = {}

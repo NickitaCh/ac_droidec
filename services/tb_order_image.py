@@ -118,22 +118,22 @@ def build_order_blocks(data: dict):
         for zone in ("dark", "mixed", "light"):
             cell = round_data.get(zone)
             if cell and cell.get("planet"):
-                entries.append((zone, cell.get("planet"), int(cell.get("stars") or 0)))
+                entries.append((zone, cell.get("planet"), int(cell.get("stars") or 0), cell.get("preload")))
         for cell in round_data.get("bonus") or []:
             if cell and cell.get("planet"):
-                entries.append(("bonus", cell.get("planet"), int(cell.get("stars") or 0)))
+                entries.append(("bonus", cell.get("planet"), int(cell.get("stars") or 0), cell.get("preload")))
 
         active = []
-        for zone, planet, stars in entries:
+        for zone, planet, stars, preload in entries:
             total += _overall_contribution(zone, stars)
             if phase == 6 and stars <= 0:
                 continue
-            active.append((zone, planet, stars))
+            active.append((zone, planet, stars, preload))
 
         lines = [f"## Восход Империи — {phase} этап"]
         if not active:
             lines.append("> (нет активных планет на этом этапе)")
-        for i, (zone, planet, stars) in enumerate(active):
+        for i, (zone, planet, stars, preload) in enumerate(active):
             if stars > 0:
                 vzvod = "все"
             elif zone == "bonus":
@@ -142,6 +142,8 @@ def build_order_blocks(data: dict):
                 vzvod = "по боту"
             lines.append(f"> {ZONE_EMOJI[zone]} **{_translate_planet(planet)}**")
             lines.append(f"> **Цель:** {_stars_word(stars)}")
+            if stars <= 0 and preload:  # план с сайта (services/tb_plan.py): до скольких копим
+                lines.append(f"> **Копим:** до {preload / 1e6:.0f} млн")
             lines.append(f"> **Взводы:** {vzvod}")
             lines.append("> **БЗ:** обязательно")
             if i != len(active) - 1:
