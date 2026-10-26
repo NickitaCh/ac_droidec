@@ -37,9 +37,11 @@ def _discord_conflict_error(existing_owner: str) -> str:
 
 
 async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool = False, allow_reassign: bool = False,
-                          conflict_error=_discord_conflict_error) -> RegistrationResult:
+                          conflict_error=_discord_conflict_error, officer_guild_id: int | None = None) -> RegistrationResult:
     """conflict_error(owner_id) -> текст отказа, когда код уже у другого владельца —
-    у Telegram-бота свой текст (tg_bot/handlers.py), там <@id> не работает."""
+    у Telegram-бота свой текст (tg_bot/handlers.py), там <@id> не работает.
+    officer_guild_id — офицер регистрирует другого человека: код должен быть из гильдии
+    офицера (раньше проверялось только «офицер хоть какой-то гильдии»)."""
     discord_id = str(discord_id)
     clean_code = "".join(filter(str.isdigit, ally_code))
     if len(clean_code) != 9:
@@ -60,6 +62,8 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
     if not guild_cfg:
         return RegistrationResult(ok=False, error="Эта SWGOH-гильдия не входит в число обслуживаемых ботом. Обратитесь к супер-админу за ручным доступом.")
     guild_id = guild_cfg["id"]
+    if officer_guild_id is not None and guild_id != officer_guild_id:
+        return RegistrationResult(ok=False, error="Этот код союзника из другой гильдии — офицер регистрирует только игроков своей гильдии.")
 
     # Один и тот же ally_code нельзя привязать сразу к нескольким Discord-аккаунтам
     # в пределах гильдии — иначе статы/задания одного игрока будет видеть и

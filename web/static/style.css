@@ -2757,6 +2757,8 @@ form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; mar
 .mp-plus { color: var(--status-good); font-weight: 600; }
 .mp-minus { color: var(--status-critical); font-weight: 600; }
 .mp-scen .segmented-toggle-options { flex-wrap: wrap; }
+.mp-switches { display: flex; flex-wrap: wrap; gap: 0.6em 1.2em; align-items: center; margin-bottom: 0.9em; }
+.mp-switches .segmented-toggle { margin: 0; }
 .mp-miss { display: flex; flex-direction: column; gap: 0.35em; align-items: flex-start; text-align: left; }
 .mp-miss-char ul { margin: 0.1em 0 0; padding-left: 1.1em; font-size: 0.9em; }
 .mp-miss-char li { margin: 0.1em 0; }
@@ -2781,3 +2783,16 @@ form.mp-inline { display: inline-flex; flex-direction: row; max-width: none; mar
 @media (max-width: 40em) {
     .mp-table td:first-child { min-width: 0; text-align: left; }
 }
+
+/* Сравнение гильдий (/mod-analysis/compare). */
+form.mc-form { max-width: none; display: block; }
+.mc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14em, 1fr)); gap: 0.6em 1em; margin-bottom: 0.8em; }
+.mc-grid .mc-field, .mc-grid label.mc-field { max-width: none; display: flex; flex-direction: column; gap: 0.2em; }
+.mc-grid input[type="text"] { width: 100%; }
+.mc-actions { display: flex; flex-wrap: wrap; gap: 0.8em 1.2em; align-items: flex-end; }
+.mc-actions label { max-width: none; }
+.mc-note { font-size: 0.85em; }
+.mc-stats ul { margin: 0; padding-left: 1.1em; font-size: 0.92em; }
+.mc-stats li { margin: 0.1em 0; }
+.mc-stats { text-align: left; }
+.mc-progress { margin: 0.4em 0 0; padding-left: 1.2em; }

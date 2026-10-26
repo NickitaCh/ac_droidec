@@ -1,8 +1,15 @@
-{# Переключатель сценария «Прогресса модинга» (те же сценарии, что в /статы). extra — прочие параметры ссылки. #}
-{% macro switch(scenarios, scenario, extra="") %}
-<div class="segmented-toggle mp-scen">
-    <div class="segmented-toggle-options">
-        {% for key, label in scenarios.items() %}<a href="?scenario={{ key }}{{ extra }}" data-ajax-swap="mp-module"{% if key == scenario %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+{# Переключатели «Прогресса модинга»: сценарий (те же, что в /статы) и «С отрядом / Все» (как с_отрядом в /статы). extra — прочие параметры ссылки. #}
+{% macro switch(scenarios, scenario, extra="", squad_only=True) %}
+<div class="mp-switches">
+    <div class="segmented-toggle mp-scen">
+        <div class="segmented-toggle-options">
+            {% for key, label in scenarios.items() %}<a href="?scenario={{ key }}{{ extra }}{{ '' if squad_only else '&squad=0' }}" data-ajax-swap="mp-module"{% if key == scenario %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+        </div>
+    </div>
+    <div class="segmented-toggle mp-scen">
+        <div class="segmented-toggle-options">
+            <a href="?scenario={{ scenario }}{{ extra }}" data-ajax-swap="mp-module" title="Только у кого есть отряд плейта (состав задаётся на странице плейтов)"{% if squad_only %} class="active"{% endif %}>С отрядом</a><a href="?scenario={{ scenario }}{{ extra }}&squad=0" data-ajax-swap="mp-module"{% if not squad_only %} class="active"{% endif %}>Все игроки</a>
+        </div>
     </div>
 </div>
 {% endmacro %}

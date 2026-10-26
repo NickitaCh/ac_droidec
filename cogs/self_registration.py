@@ -30,8 +30,9 @@ class SelfRegistrationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def _do_registration(self, inter, target_user, ally_code, альт, allow_reassign=False):
-        result = await register_player(self.bot.comlink, str(target_user.id), ally_code, is_alt=альт, allow_reassign=allow_reassign)
+    async def _do_registration(self, inter, target_user, ally_code, альт, allow_reassign=False, officer_guild_id=None):
+        result = await register_player(self.bot.comlink, str(target_user.id), ally_code, is_alt=альт,
+                                       allow_reassign=allow_reassign, officer_guild_id=officer_guild_id)
         if not result.ok:
             await inter.edit_original_response(content=f"❌ **Ошибка:** {result.error}")
             return
@@ -84,19 +85,24 @@ class SelfRegistrationCog(commands.Cog):
         # команда открыта вообще всем (main.py::ALWAYS_ALLOWED_COMMANDS), в том
         # числе тем, у кого пока нет вообще никакого резолвящегося доступа.
         is_officer_action = участник is not None and участник.id != inter.author.id
+        officer_guild_id = None
         if is_officer_action:
-            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+            access = guild_resolver.resolve_access(inter.author)
+            if access["tier"] != "officer":
                 await inter.edit_original_response(
                     content="❌ Регистрировать других участников могут только офицеры."
                 )
                 return
+            # Офицер — только игроков своей гильдии (супер-админ — любых).
+            officer_guild_id = None if access["is_super_admin"] else access["guild_id"]
             target_user = участник
         else:
             target_user = inter.author
 
         # Офицер, явно указавший участника, может перевесить код союзника с чужого
         # Discord-аккаунта на нужный — самостоятельная регистрация так не может.
-        await self._do_registration(inter, target_user, ally_code, альт, allow_reassign=is_officer_action)
+        await self._do_registration(inter, target_user, ally_code, альт, allow_reassign=is_officer_action,
+                                    officer_guild_id=officer_guild_id)
 
     @commands.slash_command(
         name="регистрация_отмена",

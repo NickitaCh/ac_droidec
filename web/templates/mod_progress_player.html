@@ -12,11 +12,11 @@
                 <h1>{{ name }}{% call ui.help(side="left") %}<p>Строки — требования плейта, столбцы — снимки. Норма — по текущей версии плейта; если в снимке она была другой, это написано в ячейке.</p><p>«Убрано из плейта» — требования, которых в плейте больше нет.</p>{% endcall %}</h1>
             </div>
         </div>
-        <div class="hero-links"><a class="hero-link" href="/mod-progress/{{ tracker.id }}?scenario={{ scenario }}">Вся гильдия</a><a class="hero-link" href="/player/{{ ally_code }}">Карточка игрока</a>
-            {% if hidden %}<a class="hero-link" href="?scenario={{ scenario }}&all=1">Все снимки ({{ columns|length + hidden }})</a>{% elif show_all %}<a class="hero-link" href="?scenario={{ scenario }}">Последние 6</a>{% endif %}</div>
+        <div class="hero-links"><a class="hero-link" href="/mod-progress/{{ tracker.id }}?scenario={{ scenario }}{{ '' if squad_only else '&squad=0' }}">Вся гильдия</a><a class="hero-link" href="/player/{{ ally_code }}">Карточка игрока</a>
+            {% if hidden %}<a class="hero-link" href="?scenario={{ scenario }}&all=1{{ '' if squad_only else '&squad=0' }}">Все снимки ({{ columns|length + hidden }})</a>{% elif show_all %}<a class="hero-link" href="?scenario={{ scenario }}{{ '' if squad_only else '&squad=0' }}">Последние 6</a>{% endif %}</div>
     </section>
 
-    {{ scen.switch(scenarios, scenario, "&all=1" if show_all else "") }}
+    {{ scen.switch(scenarios, scenario, "&all=1" if show_all else "", squad_only) }}
 
     <p class="mp-legend"><span class="mp-cell mp-ok">выполнено</span> <span class="mp-cell mp-up">ближе к норме</span> <span class="mp-cell mp-stall">без сдвига</span> <span class="mp-cell mp-down">хуже, чем было</span></p>
 

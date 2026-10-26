@@ -10,6 +10,7 @@ import asyncio
 
 import database
 from cogs.datacron_requirements import build_player_check
+from cogs.stat_requirements import SCENARIO_FULL, SCENARIO_RAW, SCENARIO_UP
 from services import datacron_catalog, feature_flags, stat_forecast
 from tg_bot import markup
 from tg_bot.core import Ctx, callback, command, esc, new_session, session_for_callback
@@ -18,6 +19,12 @@ from tg_bot.handlers import _resolve_target, _stat_calc
 GUILD_WORDS = {"гильдия", "guild"}
 FAILED_WORDS = {"кресты", "крест", "x", "❌"}
 REFRESH_WORDS = {"обновить", "refresh"}
+UP_WORDS = {"вверх", "up"}
+FULL_WORDS = {"подгон", "full"}
+SQUAD_WORDS = {"отряд", "squad"}
+# Сценарии — как в Discord /статы (SCENARIO_CHOICES), короткие подписи для кнопок.
+SCENARIO_BUTTONS = ((SCENARIO_RAW, "Как есть"), (SCENARIO_UP, "Релик вверх"), (SCENARIO_FULL, "Полный подгон"))
+SCENARIO_TITLES = {SCENARIO_RAW: "как есть", SCENARIO_UP: "релик вверх", SCENARIO_FULL: "полный подгон релика"}
 SELF_ONLY = (
     "🔒 Участники проверяют только себя (и свои альты). Чужих игроков и всю гильдию проверяют офицеры.\n"
     "Чтобы проверить себя — не указывайте игрока."
@@ -91,7 +98,8 @@ async def cmd_stats(ctx: Ctx):
     if off:
         await ctx.reply(off)
         return
-    text, (guild_mode, only_failed, refresh) = _split_flags(ctx.args, GUILD_WORDS, FAILED_WORDS, REFRESH_WORDS)
+    text, (guild_mode, only_failed, refresh, up, full, squad_only) = _split_flags(
+        ctx.args, GUILD_WORDS, FAILED_WORDS, REFRESH_WORDS, UP_WORDS, FULL_WORDS, SQUAD_WORDS)
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     if not plates:
         await ctx.reply("У гильдии нет плейтов — их заводят офицеры на сайте.")
@@ -100,11 +108,12 @@ async def cmd_stats(ctx: Ctx):
     state = {
         "user_id": ctx.user["id"], "guild_id": guild_id, "plates": plates, "target_text": target_text,
         "guild_mode": guild_mode, "only_failed": only_failed, "refresh": refresh,
+        "scenario": SCENARIO_FULL if full else SCENARIO_UP if up else SCENARIO_RAW, "squad_only": squad_only,
     }
     if plate is None:
         token = new_session(state)
         head = f"Плейт «{esc(text)}» не найден — выберите:" if text else "Выберите плейт:"
-        hint = "\n<i>Можно сразу: /stats Имя плейта [игрок] [кресты] [обновить]</i>"
+        hint = "\n<i>Можно сразу: /stats Имя плейта [игрок] [кресты] [вверх | подгон] [обновить]</i>"
         await ctx.reply(head + hint, keyboard=_plate_keyboard(token, plates, candidates))
         return
     await _stats_run(ctx, state, plate)
@@ -152,11 +161,12 @@ async def _stats_guild(ctx: Ctx, state: dict, plate: str):
     if stat_calc is None:
         return
     char_keys = database.get_stat_requirement_characters(plate, guild_id=state["guild_id"])
-    report = await stat_forecast.build_guild_report(ctx.app.comlink, stat_calc, plate, char_keys, guild_id=state["guild_id"])
+    report = await stat_forecast.build_guild_report(ctx.app.comlink, stat_calc, plate, char_keys, guild_id=state["guild_id"],
+                                                    scenario=state["scenario"], squad_only=state["squad_only"])
     if report["error"]:
         await ctx.reply(f"❌ {esc(report['error'])}")
         return
-    lines = [f"📋 <b>{esc(plate)}</b> — гильдия", f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
+    lines = [f"📋 <b>{esc(plate)}</b> — гильдия · {SCENARIO_TITLES[state['scenario']]}", f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
     if report["no_data"]:
         lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
     if report["skipped"]:
@@ -168,8 +178,7 @@ async def _stats_guild(ctx: Ctx, state: dict, plate: str):
         lines += [f"❌ {esc(r['name'])} — {r['matched']}/{r['total']}" for r in report["problem"]]
     else:
         lines += ["", "Все закрыли все требования! 🎉"]
-    for chunk in markup.chunk_md(lines):
-        await ctx.reply(chunk)
+    await _reply_with_options(ctx, state, lines)
 
 
 async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
@@ -188,6 +197,7 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
     for base_id in char_keys:
         result = await stat_forecast.evaluate_character_player(
             ctx.app.comlink, stat_calc, plate, base_id, ally_code, state["refresh"], player, guild_id=guild_id,
+            scenario=state["scenario"],
         )
         state["refresh"] = False  # обновляем ростер один раз, а не на каждого персонажа
         if result is None:
@@ -208,7 +218,7 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
     rows.sort(key=lambda r: not r[3])  # сперва с ❌ по обязательным, дальше — порядок плейта
     order = {r[0]: i for i, r in enumerate(rows)}
     pages.sort(key=lambda p: order.get(p[0], len(order)))
-    summary = [f"📋 <b>{esc(plate)}</b> — {esc(player)}", "", "<b>Обязательные статы</b>"]
+    summary = [f"📋 <b>{esc(plate)}</b> — {esc(player)} · {SCENARIO_TITLES[state['scenario']]}", "", "<b>Обязательные статы</b>"]
     if failed_by_char:
         for char_name, items in sorted(failed_by_char, key=lambda f: order.get(f[0], 0)):
             parts = "; ".join(f"{esc(i['stat'])}: {esc(i['current'])} (нужно {esc(i['requirement'])})" for i in items)
@@ -219,8 +229,8 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
     summary += [f"{'❌' if failed else '✅'} {esc(name)} — {m}/{t}" for name, m, t, failed in rows]
     if updated_ats:
         summary += ["", f"<i>Данные игрока: {esc(updated_ats[0])}. Свежие из игры — добавьте «обновить».</i>"]
-    for chunk in markup.chunk_md(summary):
-        await ctx.reply(chunk)
+    state["ally_code"] = ally_code
+    await _reply_with_options(ctx, state, summary)
     if not pages:
         return
     # Персонажи — отдельным сообщением с кнопками: итог большого плейта (AC_ALL, ~100
@@ -233,6 +243,45 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
 
 
 PICKER_MAX = 99  # Telegram: до 100 кнопок на сообщение
+
+
+async def _reply_with_options(ctx: Ctx, state: dict, lines: list):
+    """Итог + кнопки под последним сообщением: сценарий (как в Discord /статы) и «только ❌»
+    (игрок) / «только с отрядом» (гильдия) — пересчитать, не набирая команду заново."""
+    chunks = markup.chunk_md(lines)
+    for chunk in chunks[:-1]:
+        await ctx.reply(chunk)
+    token = new_session(state)
+    row = [{"text": ("✓ " if key == state["scenario"] else "") + label, "callback_data": f"so|{token}|{key}"}
+           for key, label in SCENARIO_BUTTONS]
+    if state["guild_mode"]:
+        toggle = {"text": ("✓ " if state["squad_only"] else "") + "Только с отрядом", "callback_data": f"so|{token}|squad"}
+    else:
+        toggle = {"text": ("✓ " if state["only_failed"] else "") + "Только ❌", "callback_data": f"so|{token}|failed"}
+    await ctx.reply(chunks[-1], keyboard=[row, [toggle]])
+
+
+@callback("so")
+async def cb_stats_option(ctx: Ctx, payload: str):
+    token, _, option = payload.partition("|")
+    state = await session_for_callback(ctx, token)
+    if state is None:
+        return
+    state = dict(state)
+    if option in SCENARIO_TITLES:
+        state["scenario"] = option
+    elif option == "squad":
+        state["squad_only"] = not state["squad_only"]
+    elif option == "failed":
+        state["only_failed"] = not state["only_failed"]
+    else:
+        return
+    state["refresh"] = False
+    await ctx.api.answer_callback(ctx.callback_query["id"], "Пересчитываю…")
+    if state["guild_mode"]:
+        await _stats_guild(ctx, state, state["plate"])
+    else:
+        await _stats_player(ctx, state, state["plate"], state["ally_code"])
 
 
 def _picker_keyboard(token: str, pages: list) -> list:

@@ -230,17 +230,16 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
             if badge is not None:
                 if not a[kind]:
                     badge = badge.copy()
-                    badge.putalpha(badge.getchannel("A").point(lambda v: v // 4))
+                    badge.putalpha(badge.getchannel("A").point(lambda v: v // 3))
                 img.paste(badge, (ix, ry + 1), badge)
+            if not a[kind]:  # не выдано — значок перечёркнут
+                draw.line((ix + 2, ry + 21, ix + 20, ry + 3), fill=CROSS, width=3)
             ix += 24
-        name = a["name"] + (f" ({a['mode']})" if a["omicron_tier"] is not None and a["mode"] else "")
+        # Режим омикрона — в начале: длинное название обрезается с конца.
+        name = (f"({a['mode']}) " if a["omicron_tier"] is not None and a["mode"] else "") + a["name"]
         font = _font(14, True, condensed=True)
-        missing = (a["zeta_tier"] is not None and not a["zeta"]) or (a["omicron_tier"] is not None and not a["omicron"])
-        text_w = rw - (ix - rx) - (30 if missing else 6)  # место под ✗ — только когда он есть
-        draw.text((ix + 4, ry + ABIL_H // 2 - 1), _fit(draw, name, font, text_w), font=font,
+        draw.text((ix + 4, ry + ABIL_H // 2 - 1), _fit(draw, name, font, rw - (ix - rx) - 6), font=font,
                   fill=TEXT if applied else MISSING_FG, anchor="lm")
-        if missing:
-            draw.text((rx + rw - 14, ry + ABIL_H // 2 - 1), "✗", font=_font(18, True), fill=CROSS, anchor="mm")
 
 
 def freshness_note(age_seconds) -> str:

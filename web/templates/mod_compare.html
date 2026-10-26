@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Сравнение гильдий — анализ модинга — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+    <section class="page-hero">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Модули и статы</p>
+                <h1>Сравнение гильдий{% call ui.help(side="left") %}<p>Как одних и тех же персонажей модят в разных гильдиях: по каждому персонажу — строка на гильдию с медианами (у половины игроков больше, у половины меньше).</p><p>Считаются игроки, у которых персонаж R6+ и все 6 модулей 15 уровня. В скобках у скорости — сколько дают модули; у урона, здоровья и защиты — на сколько процентов модули поднимают базу; у крит. урона, эффективности и стойкости — сколько процентов добавляют модули. «Упор» — куда гильдия вкладывается больше всего (как на странице анализа). Основы — самая частая основа слота и доля игроков с ней.</p><p>Чужие гильдии опрашиваются целиком (код союзника любого участника или ID гильдии), собранные данные хранятся сутки — потом можно сравнивать с другими персонажами без нового опроса.</p>{% endcall %}</h1>
+            </div>
+        </div>
+        <div class="hero-links"><a class="hero-link" href="/mod-analysis">Анализ по одной гильдии</a></div>
+    </section>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    <form method="get" action="/mod-analysis/compare" class="mc-form">
+        <div class="panel">
+            <div class="panel-title"><span>Гильдии</span><span class="panel-hint">код союзника любого участника или ID гильдии</span></div>
+            <div class="mc-grid">
+                {% for i in range(max_guilds) %}
+                    {% set ref = params.guilds[i] if i < params.guilds|length else "" %}
+                    <label class="mc-field">
+                        <input type="text" name="guild" value="{{ ref }}" placeholder="Гильдия {{ i + 1 }}" aria-label="Гильдия {{ i + 1 }}">
+                        {% if ref and guild_errors.get(ref) %}<span class="error mc-note">{{ guild_errors[ref] }}</span>
+                        {% elif ref and guild_names.get(ref) %}<span class="muted mc-note">{{ guild_names[ref] }}</span>{% endif %}
+                    </label>
+                {% endfor %}
+            </div>
+            <label class="checkbox"><input type="checkbox" name="own" value="1"{% if params.own %} checked{% endif %}> своя гильдия (первой строкой)</label>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Персонажи</span><span class="panel-hint">до {{ max_chars }}</span></div>
+            <div class="mc-grid">
+                {% for i in range(max_chars) %}
+                    {% set c = params.chars[i] if i < params.chars|length else "" %}
+                    <div class="unit-search mc-field" data-unit-search>
+                        <input type="text" class="unit-search-input" placeholder="Персонаж {{ i + 1 }}" aria-label="Персонаж {{ i + 1 }}" autocomplete="off" value="{{ char_labels.get(c, '') }}">
+                        <input type="hidden" name="char" class="unit-search-value" value="{{ c }}">
+                        <div class="unit-search-results"></div>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="mc-actions">
+                <label>Реликвия
+                    <select name="relic">
+                        <option value=""{% if params.relic is none %} selected{% endif %}>как есть у игроков</option>
+                        {% for r in range(5, 11) %}<option value="{{ r }}"{% if params.relic == r %} selected{% endif %}>все на R{{ r }}</option>{% endfor %}
+                    </select>
+                </label>
+                <button type="submit">Сравнить</button>
+            </div>
+        </div>
+    </form>
+
+    {% if pending %}
+        <div class="panel">
+            <p class="config-warning">Собираю данные гильдий — страница обновится сама.</p>
+            <ul class="mc-progress">
+                {% for p in pending %}{% if p %}<li>{{ p.name }} — {{ p.done }} из {{ p.total }} игроков{% if p.errors %} <span class="muted">(не ответили: {{ p.errors }})</span>{% endif %}{% if p.error %} <span class="error">ошибка: {{ p.error }}</span>{% endif %}</li>{% endif %}{% endfor %}
+            </ul>
+        </div>
+        <script>setTimeout(function () { location.reload(); }, 5000);</script>
+    {% elif loading %}
+        <p class="empty-state">Калькулятор статов ещё загружается — обновите страницу через минуту.</p>
+    {% elif result %}
+        {% for ch in result %}
+            <div class="panel">
+                <div class="panel-title"><span>{{ ch.char_name }}</span><span class="panel-hint">{% if params.relic %}все на R{{ params.relic }}{% else %}реликвия как есть{% endif %}</span></div>
+                <table class="data cards-on-phone mc-table">
+                    <thead><tr><th>Гильдия</th><th>Скорость</th><th>Статы</th><th>Модули</th></tr></thead>
+                    <tbody>
+                        {% for row in ch.rows %}
+                            {% set s = row.summary %}
+                            <tr>
+                                <td data-label="Гильдия"><div>
+                                    <strong>{{ row.guild.name }}</strong>
+                                    <div class="muted mc-note">{% if s.n %}{{ s.n }} из {{ s.players }} игроков · ср. R{{ "%.1f"|format(s.avg_relic)|replace(".", ",") }}{% else %}{{ s.players }} игроков{% endif %}</div>
+                                    {% if row.guild.info %}<div class="muted mc-note">данные {{ row.guild.info.fetched_msk }}{% if row.guild.info.errors %}, не ответили {{ row.guild.info.errors }}{% endif %} · <a href="{{ request.url.include_query_params(refresh=row.guild.id) }}">обновить</a></div>{% endif %}
+                                </div></td>
+                                {% if not s.n %}
+                                    <td data-label="Скорость" colspan="3"><div class="muted">нет игроков с этим персонажем R6+ и модулями 15 ур.</div></td>
+                                {% else %}
+                                    <td data-label="Скорость" class="nowrap"><div><strong>{{ s.speed }}</strong> <span class="muted">({{ s.speed_delta }})</span></div></td>
+                                    <td data-label="Статы"><div class="mc-stats">
+                                        <ul>{% for st in s.stats %}<li>{{ st.label }} <strong>{{ st.value }}</strong>{% if st.extra %} <span class="muted">({{ st.extra }})</span>{% endif %}</li>{% endfor %}</ul>
+                                        {% if s.focus %}<div class="mc-note">Упор: {{ s.focus|join(", ") }}</div>{% endif %}
+                                    </div></td>
+                                    <td data-label="Модули"><div class="mc-stats">
+                                        <ul>
+                                            {% for st in s.sets %}<li>{{ st.label }} <span class="muted">{{ st.pct }}%</span></li>{% endfor %}
+                                            {% for p in s.primaries %}<li>{{ p.slot }}: {{ p.stat }} <span class="muted">{{ p.pct }}%</span></li>{% endfor %}
+                                        </ul>
+                                    </div></td>
+                                {% endif %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock %}

@@ -83,7 +83,8 @@ async def mod_progress_create(request: Request, plate: str = Form(...), period_d
 @router.get("/{tracker_id}", response_class=HTMLResponse)
 async def mod_progress_tracker(request: Request, tracker_id: int, user: dict = Depends(require_officer_access)):
     scenario = mod_progress.scenario_or_default(request.query_params.get("scenario"))
-    summary = mod_progress.guild_summary(user["guild_id"], tracker_id, scenario)
+    squad_only = request.query_params.get("squad") != "0"
+    summary = mod_progress.guild_summary(user["guild_id"], tracker_id, scenario, squad_only)
     if summary is None:
         raise HTTPException(status_code=404, detail="Трекер не найден")
     current = mod_progress.plate_requirements(summary["tracker"]["plate_name"], user["guild_id"])
@@ -125,8 +126,9 @@ async def mod_progress_snapshot_delete(tracker_id: int, snapshot_id: int, user: 
 async def mod_progress_player(request: Request, tracker_id: int, ally_code: str, user: dict = Depends(require_officer_access)):
     show_all = request.query_params.get("all") == "1"
     scenario = mod_progress.scenario_or_default(request.query_params.get("scenario"))
+    squad_only = request.query_params.get("squad") != "0"
     table = mod_progress.player_table(user["guild_id"], tracker_id, ally_code, limit=None if show_all else 6,
-                                      scenario=scenario)
+                                      scenario=scenario, squad_only=squad_only)
     if table is None:
         raise HTTPException(status_code=404, detail="Трекер не найден")
     return templates.TemplateResponse(request, "mod_progress_player.html", {"user": user, **table, "show_all": show_all,

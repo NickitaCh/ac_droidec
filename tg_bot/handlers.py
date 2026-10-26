@@ -118,7 +118,7 @@ async def cmd_reg(ctx: Ctx):
         await ctx.reply("Укажите код союзника из 9 цифр: <code>/reg 123456789</code> (для второго аккаунта — <code>/reg 123456789 альт</code>).")
         return
 
-    owner_id, allow_reassign, whose = ctx.owner_id, False, "Ваш аккаунт"
+    owner_id, allow_reassign, whose, officer_guild_id = ctx.owner_id, False, "Ваш аккаунт", None
     target = ctx.reply_user
     if target is not None:
         # Офицер регистрирует другого игрока — ответом на его сообщение (как «участник:» в Discord).
@@ -126,12 +126,13 @@ async def cmd_reg(ctx: Ctx):
             await ctx.reply("🔒 Регистрировать других игроков могут только офицеры. Свой аккаунт — без ответа на сообщение.")
             return
         owner_id, allow_reassign = store.touch_user(target), True
+        officer_guild_id = None if ctx.access.get("is_super_admin") else ctx.access["guild_id"]
         whose = f"Аккаунт для {esc(target.get('first_name') or target.get('username') or 'игрока')}"
 
     await ctx.action()
     result = await registration.register_player(
         ctx.app.comlink, owner_id, code, is_alt=is_alt, allow_reassign=allow_reassign,
-        conflict_error=lambda owner: _tg_conflict_error(owner, _link_html(ctx)),
+        conflict_error=lambda owner: _tg_conflict_error(owner, _link_html(ctx)), officer_guild_id=officer_guild_id,
     )
     if not result.ok:
         await ctx.reply(f"❌ {result.error}")

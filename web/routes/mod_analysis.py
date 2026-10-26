@@ -9,15 +9,19 @@ GET с query-параметрами (как /mod-search, /steal-build) — ре�
 2026-09-16, по прямому запросу пользователя) переиспользует services.steal_build.resolve_guild
 и бьёт по Comlink живьём, как /steal-build."""
 
+import asyncio
+import json
+import time
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
 import services.mod_analysis as mod_analysis
+import services.mod_compare as mod_compare
 import services.stat_forecast as stat_forecast
 import services.steal_build as steal_build
 from services import feature_flags
@@ -144,3 +148,100 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
     context["history"] = _history_rows(guild_id)
 
     return templates.TemplateResponse(request, "mod_analysis.html", context)
+
+
+# ---------------- Сравнение гильдий (/mod-analysis/compare) ----------------
+# services/mod_compare.py: те же персонажи в нескольких гильдиях сразу. Чужие ростеры
+# собираются фоном (страница перезагружается, пока идёт сбор) и лежат в кэше сутки.
+
+_COMPARE_STATE_KEY = "mod_compare_last"
+_compare_cache: dict = {}  # ключ запроса -> (time, результат)
+
+
+def _compare_params(qp) -> dict:
+    guilds = [g.strip() for g in qp.getlist("guild") if g.strip()][:mod_compare.MAX_GUILDS]
+    chars = list(dict.fromkeys(c for c in qp.getlist("char") if c))[:mod_compare.MAX_CHARS]
+    relic_raw = qp.get("relic", "")
+    relic = int(relic_raw) if relic_raw.isdigit() and 5 <= int(relic_raw) <= 10 else None
+    return {"guilds": guilds, "chars": chars, "relic": relic, "own": qp.get("own") == "1"}
+
+
+@router.get("/compare", response_class=HTMLResponse)
+async def mod_compare_page(request: Request, user: dict = Depends(feature_flags.require_feature("mod_analysis"))):
+    qp = request.query_params
+    guild_id = user["guild_id"]
+    params = _compare_params(qp)
+    submitted = bool(params["chars"])
+    if not submitted:
+        # Пустая форма — подставить прошлое сравнение этой гильдии.
+        try:
+            saved = json.loads(database.get_bot_state(_COMPARE_STATE_KEY, guild_id=guild_id) or "{}")
+        except ValueError:
+            saved = {}
+        params = {"guilds": saved.get("guilds", []), "chars": saved.get("chars", []),
+                  "relic": saved.get("relic"), "own": saved.get("own", True)}
+    context = {
+        "user": user, "params": params, "max_guilds": mod_compare.MAX_GUILDS, "max_chars": mod_compare.MAX_CHARS,
+        "char_labels": {c: _char_label(c) for c in params["chars"]},
+        "guild_errors": {}, "guild_names": {}, "pending": [], "result": None, "loading": False,
+    }
+    if not submitted:
+        return templates.TemplateResponse(request, "mod_compare.html", context)
+    if not params["guilds"] and not params["own"]:
+        context["error"] = "Укажите хотя бы одну гильдию или отметьте свою."
+        return templates.TemplateResponse(request, "mod_compare.html", context)
+    database.set_bot_state(_COMPARE_STATE_KEY, json.dumps(params, ensure_ascii=False), guild_id=guild_id)
+
+    comlink = _get_comlink()
+    refresh = qp.get("refresh", "")
+    lookups = []
+    for ref in params["guilds"]:
+        lookup = await mod_compare.resolve(comlink, ref)
+        if not lookup.ok:
+            context["guild_errors"][ref] = lookup.error
+            continue
+        context["guild_names"][ref] = lookup.guild_name
+        gid = lookup.swgoh_guild_id
+        if mod_compare.is_fetching(gid) or not mod_compare.is_fresh(gid) or refresh == gid:
+            if not mod_compare.is_fetching(gid) and (refresh == gid or not mod_compare.is_fresh(gid)):
+                mod_compare.start_fetch(comlink, lookup)
+            context["pending"].append(mod_compare.progress(gid))
+        lookups.append(lookup)
+    if refresh:
+        # Не перезапускать сбор при каждой авто-перезагрузке.
+        return RedirectResponse(str(request.url.remove_query_params("refresh")), status_code=303)
+    if context["pending"]:
+        return templates.TemplateResponse(request, "mod_compare.html", context)
+
+    try:
+        stat_calc = await stat_forecast.get_stat_calc(comlink)
+    except Exception:
+        context["loading"] = True
+        return templates.TemplateResponse(request, "mod_compare.html", context)
+
+    guilds = []
+    if params["own"]:
+        guilds.append({"name": (database.get_guild_config(guild_id) or {}).get("name") or "Своя гильдия", "own": True,
+                       "roster": mod_compare.own_roster(guild_id), "info": None})
+    seen = set()
+    for lookup in lookups:
+        if lookup.swgoh_guild_id in seen:
+            continue
+        seen.add(lookup.swgoh_guild_id)
+        info = mod_compare.roster_info(lookup.swgoh_guild_id)
+        guilds.append({"name": lookup.guild_name, "own": False, "id": lookup.swgoh_guild_id,
+                       "roster": mod_compare.load_roster(lookup.swgoh_guild_id), "info": info})
+
+    key = (guild_id, tuple(params["chars"]), params["relic"], params["own"],
+           tuple((g.get("id"), (g["info"] or {}).get("fetched_at")) for g in guilds))
+    cached = _compare_cache.get(key)
+    if cached and time.time() - cached[0] < 15 * 60:
+        result = cached[1]
+    else:
+        result = await asyncio.to_thread(mod_compare.compare, stat_calc, params["chars"], guilds, params["relic"])
+        if len(_compare_cache) > 50:
+            _compare_cache.clear()
+        _compare_cache[key] = (time.time(), result)
+    context["result"] = result
+    context["guilds"] = guilds
+    return templates.TemplateResponse(request, "mod_compare.html", context)

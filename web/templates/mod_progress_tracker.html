@@ -11,7 +11,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Прогресс модинга</p>
-                <h1>{{ tracker.plate_name }}{% call ui.help(side="left") %}<p>Считаются только обязательные требования плейта. Сценарий — как в /статы: «как есть» (как в ХБ), «релик вверх» тем, кто ниже цели плейта, или полный подгон релика вверх и вниз. Каждый снимок считается сразу во всех трёх. «Сдвиг» — сколько требований игрок закрыл с прошлого и с первого снимка (минус — стало меньше).</p><p>Игроки без отряда плейта не проверяются. Нажмите на игрока — откроется его таблица по датам.</p>{% endcall %}</h1>
+                <h1>{{ tracker.plate_name }}{% call ui.help(side="left") %}<p>Считаются только обязательные требования плейта. Сценарий — как в /статы: «как есть» (как в ХБ), «релик вверх» тем, кто ниже цели плейта, или полный подгон релика вверх и вниз. Каждый снимок считается сразу во всех трёх. «Сдвиг» — сколько требований игрок закрыл с прошлого и с первого снимка (минус — стало меньше).</p><p>«С отрядом» — как с_отрядом в /статы: игроки без отряда плейта (состав задаётся на странице плейтов) не проверяются, в сборном плейте — без строк тех частей, чьего отряда нет. «Все игроки» — проверяются все. Нажмите на игрока — откроется его таблица по датам.</p>{% endcall %}</h1>
                 <p class="page-hero-lead">Автоснимки: {{ tracker.period_label }}. Создан {{ tracker.created_msk }}.</p>
             </div>
         </div>
@@ -25,7 +25,8 @@
         <div class="hero-links"><a class="hero-link" href="/mod-progress">Все трекеры</a><a class="hero-link" href="/plates">Плейты</a></div>
     </section>
 
-    {{ scen.switch(scenarios, scenario) }}
+    {{ scen.switch(scenarios, scenario, squad_only=squad_only) }}
+    {% if not squad_only and snapshots and not snapshots[-1].all_players %}<p class="config-warning">Последний снимок снят до переключателя — игроки без отряда в нём не посчитаны. Нажмите «Снять сейчас».</p>{% endif %}
 
     {% if plate_missing %}<p class="config-warning">Плейта «{{ tracker.plate_name }}» больше нет или в нём нет требований — новые снимки идут по последней сохранённой версии.</p>{% endif %}
     {% if changes %}
@@ -62,7 +63,7 @@
                 <tbody>
                     {% for p in players %}
                         <tr>
-                            <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}?scenario={{ scenario }}">{{ p.name }}</a></div></td>
+                            <td data-label="Игрок"><div><a href="/mod-progress/{{ tracker.id }}/player/{{ p.ally_code }}?scenario={{ scenario }}{{ '' if squad_only else '&squad=0' }}">{{ p.name }}</a></div></td>
                             <td data-label="Выполнено" class="nowrap"><div>{% if p.total and p.done == p.total %}<span class="mp-plus">{{ p.done }} из {{ p.total }}</span>{% else %}{{ p.done }} из {{ p.total }}{% endif %}</div></td>
                             <td data-label="Сдвиг"><div class="mp-sdvig">
                                 <div class="nowrap">{{ delta(p.get("delta_prev")) }} с прошлого{% if prev_snap %} <span class="mp-note muted">({{ prev_snap.datetime }} → {{ latest_snap.datetime }})</span>{% endif %}</div>
@@ -89,7 +90,7 @@
                 </tbody>
             </table>
             {% if skipped %}
-                <p class="muted">Без отряда плейта (не проверялись): {% for s in skipped %}{{ s.name }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+                <p class="muted">Не проверялись: {% for s in skipped %}{{ s.name }} <span class="mp-note">({{ s.reason }})</span>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
             {% endif %}
         </div>
 

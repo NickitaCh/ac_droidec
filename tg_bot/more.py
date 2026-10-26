@@ -233,6 +233,48 @@ async def _unit_card(ctx: Ctx, state: dict, base_id: str, codes: list[str]):
         await ctx.reply("❌ Не удалось собрать карточку.")
         return
     await ctx.reply_photo(png, "toon.png", caption="\n".join(note_lines))
+    await _unit_compare_offer(ctx, state, base_id, codes)
+
+
+UNIT_COMPARE_MAX = 4  # как панель сравнения /юнит в Discord
+
+
+def _own_ally_code(ctx: Ctx) -> str | None:
+    rows = database.get_all_registrations_for_discord_id(ctx.owner_id)
+    main = [r for r in rows if r[0] == ctx.access["guild_id"]] or rows
+    return main[0][1] if main else None
+
+
+async def _unit_compare_offer(ctx: Ctx, state: dict, base_id: str, codes: list[str]):
+    """Кнопки под карточкой — добавить к сравнению игрока гильдии или себя, не набирая
+    «/unit Рей | Ник, код» (NicolozZ 2026-10-24: «подсказку не нашёл»)."""
+    if len(codes) >= UNIT_COMPARE_MAX or database.get_unit_types([base_id]).get(base_id) == "ship":
+        return
+    state = {**state, "base_id": base_id, "codes": list(codes)}
+    token = new_session(state)
+    row = [{"text": "➕ Игрок гильдии", "callback_data": f"ua|{token}|g"}]
+    own = _own_ally_code(ctx)
+    if own and own not in codes:
+        row.append({"text": "➕ Я", "callback_data": f"ua|{token}|{own}"})
+    await ctx.reply("Сравнить с кем-то ещё? Или сразу: <code>/unit Рей | Ник, 123456789</code>", keyboard=[row])
+
+
+@callback("ua")
+async def cb_unit_add(ctx: Ctx, payload: str):
+    token, _, target = payload.partition("|")
+    state = await session_for_callback(ctx, token)
+    if state is None:
+        return
+    if target == "g":
+        roster = sorted(((name, ac) for _d, ac, name in database.get_all_user_mappings(state["guild_id"])
+                         if ac not in state["codes"]), key=lambda x: (x[0] or "").casefold())
+        buttons = [{"text": (name or ac)[:30], "callback_data": f"ua|{token}|{ac}"} for name, ac in roster[:99]]
+        await ctx.edit("Кого добавить к сравнению?", keyboard=[buttons[i:i + 3] for i in range(0, len(buttons), 3)])
+        return
+    if not target.isdigit() or target in state["codes"]:
+        return
+    await ctx.edit("Добавляю к сравнению…")
+    await _unit_card(ctx, state, state["base_id"], state["codes"] + [target])
 
 
 async def _ship_forecast(ctx: Ctx, stat_calc, ally_code: str, base_id: str, stars):
