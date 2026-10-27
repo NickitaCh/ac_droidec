@@ -2940,3 +2940,36 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
     .tbr-tiles .stat-tile { padding: 0.7em 0.8em; }
     .tbr-tiles .stat-value { font-size: 1.2em; }
 }
+
+/* Переключатель-«таблетки» внутри виджета (этапы «Моего ВИ» в карточке игрока). */
+.pill-tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0 0.7rem; }
+.pill-tab { padding: 0.25rem 0.8rem; border-radius: 999px; border: 1px solid var(--border, rgba(127,127,127,.35)); background: transparent; color: inherit; font-size: 0.85rem; cursor: pointer; }
+.pill-tab.active { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }
+.my-tb-planet { margin-bottom: 0.6rem; }
+.my-tb-missions { list-style: none; margin: 0.3rem 0 0; padding: 0; }
+.my-tb-missions li { padding: 0.3rem 0; border-top: 1px solid var(--border, rgba(127,127,127,.2)); overflow-wrap: anywhere; }
+.my-tb-missions li:first-child { border-top: 0; }
+.my-tb-detail { font-size: 0.85rem; margin-top: 0.15rem; padding-left: 0.2rem; }
+
+/* Сравнение игроков (/player/<код>/compare). */
+.cmp-table .cmp-section th { text-align: left; padding-top: 0.9em; font-size: 0.95em; }
+.cmp-table .cmp-label { white-space: nowrap; }
+.cmp-table td.cmp-best { font-weight: 700; color: var(--status-good); }
+.cmp-form input[name=with] { min-width: 16em; }
+@media (max-width: 40em) {
+    .cmp-table .cmp-section th { display: block; padding: 0.8em 0 0.2em; }
+    .cmp-table .cmp-label { white-space: normal; font-weight: 600; text-align: left; justify-content: flex-start; }
+    .cmp-form input[name=with] { min-width: 0; width: 100%; }
+}
+
+/* Разведка ВГ (/tw/scout). */
+.scout-win { color: var(--status-good); font-weight: 600; }
+.scout-lose { color: var(--status-critical); }
+.scout-table .scout-label { white-space: nowrap; }
+.scout-plates { display: flex; flex-wrap: wrap; gap: 0.3em 1.2em; margin: 0.5em 0; }
+.scout-plate { padding: 0.45em 0; border-top: 1px solid var(--border); }
+.scout-plate > summary { cursor: pointer; }
+.scout-pick select { max-width: 100%; }
+@media (max-width: 40em) {
+    .scout-table .scout-label { white-space: normal; font-weight: 600; justify-content: flex-start; text-align: left; }
+}

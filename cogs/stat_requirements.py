@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import math
 import re
 from datetime import datetime
@@ -321,8 +322,20 @@ def _build_synthetic_unit(base_id: str, relic_level: int) -> dict:
     }
 
 
+# Ростеры не из player_unit_cache — {ally_code: {base_id: rosterUnit}}: разведка ВГ
+# (services/tw_scout.py) прогоняет плейты по чужой гильдии без записи её в кэш.
+FOREIGN_ROSTERS: contextvars.ContextVar = contextvars.ContextVar("stat_foreign_rosters", default=None)
+# Требования плейта на время одного большого прогона (там же): {ключ _load_char_rows: результат} —
+# без него 60 % времени уходит на одинаковые запросы к БД для каждого игрока.
+ROWS_CACHE: contextvars.ContextVar = contextvars.ContextVar("stat_rows_cache", default=None)
+
+
 async def _get_unit_for_player(bot, ally_code: str, base_id: str, force_refresh: bool):
     """Возвращает (unit_dict, updated_at) либо (None, None)."""
+    foreign = FOREIGN_ROSTERS.get()
+    if foreign is not None and ally_code in foreign:
+        unit = foreign[ally_code].get(base_id)
+        return (unit, None) if unit else (None, None)
     if force_refresh:
         # Один запрос на весь плейт: следующие персонажи попадают в кулдаун и читают кэш.
         await activity_diff.refresh_player_units(bot.comlink, ally_code)
@@ -622,6 +635,17 @@ def _load_char_rows(plate_name: str, base_id: str, guild_id: int = 1, skip_plate
     его отображаемое имя, требуемый по плейту релик, комментарии и лёгенда "опционально".
     skip_plates — плейты-источники, чьих отрядов у игрока нет (их строки отбрасываются).
     Возвращает None, если для этого персонажа нет сохранённых требований."""
+    cache = ROWS_CACHE.get()
+    key = (plate_name, base_id, guild_id, frozenset(skip_plates or ()))
+    if cache is not None and key in cache:
+        return cache[key]
+    result = _load_char_rows_db(plate_name, base_id, guild_id, skip_plates)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _load_char_rows_db(plate_name: str, base_id: str, guild_id: int, skip_plates):
     rows = database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
     if skip_plates:
         rows = [r for r in rows if r[1] not in skip_plates]

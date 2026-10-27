@@ -13,6 +13,7 @@
     <nav class="hero-tabs">
         {% if active == "history" %}<strong>История</strong>{% else %}<a href="/tw">История</a>{% endif %}
         {% if in_def %}<strong>Деф</strong>{% else %}<a href="/tw/def/plans">Деф</a>{% endif %}
+        {% if active == "scout" %}<strong>Разведка</strong>{% else %}<a href="/tw/scout">Разведка</a>{% endif %}
     </nav>
     {% if in_def %}
         <nav class="hero-subtabs">

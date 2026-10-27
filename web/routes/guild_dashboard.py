@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import tb_forecast, tb_missions, tb_order_image, tb_plan, tb_projection, tb_results
+from services import player_compare, tb_forecast, tb_missions, tb_my, tb_order_image, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -2469,6 +2469,53 @@ async def player_unit_forecast(request: Request, ally_code: str, user: dict = De
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/player/{ally_code}/compare", response_class=HTMLResponse)
+async def player_compare_page(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    """Сравнение игрока карточки с другими (до 8 в столбик, services/player_compare.py). Чужих
+    сравнивать можно всем: те же открытые данные, что /профиль по любому коду."""
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    raw = request.query_params.get("with") or ""
+    codes = list(dict.fromkeys([ally_code] + player_compare.parse_codes(raw)))[:player_compare.MAX_PLAYERS]
+    ctx = {"user": user, "ally_code": ally_code, "raw": raw, "players": [], "sections": [], "missed": [],
+           "error": None, "max_players": player_compare.MAX_PLAYERS,
+           "members": _compare_members(user["guild_id"], ally_code)}
+    stat_calc = stat_forecast.cached_stat_calc()
+    if len(codes) < 2:
+        ctx["error"] = "Добавьте хотя бы одного игрока: код союзника или выберите из гильдии."
+    elif stat_calc is None:
+        stat_forecast.start_background_build(_get_comlink())
+        ctx["error"] = "Калькулятор статов ещё загружается — обновите страницу через минуту."
+        ctx["loading"] = True
+    else:
+        players, missed = await player_compare.load(_get_comlink(), codes, stat_calc)
+        ctx.update(players=players, missed=missed, sections=player_compare.table(players) if len(players) > 1 else [])
+        if len(players) < 2:
+            ctx["error"] = "Сравнивать не с кем: остальные коды не найдены в игре."
+    return templates.TemplateResponse(request, "player_compare.html", ctx)
+
+
+def _compare_members(guild_id: int, ally_code: str) -> list[tuple[str, str]]:
+    """[(ник, код)] состава гильдии для подсказки в поле сравнения, без самого игрока."""
+    names = database.get_player_names(guild_id)
+    roster = [code for code, _name in database.get_roster_by_player_id(guild_id).values() if code and code != ally_code]
+    return sorted(((names.get(c, c), c) for c in roster), key=lambda x: x[0].lower())
+
+
+@router.get("/player/{ally_code}/tb", response_class=HTMLResponse)
+async def player_my_tb(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    """«Мой ВИ» — фрагмент карточки (взводы и бои по этапам активного ордера, services/tb_my.py).
+    Отдельным запросом: ордер читается из треда в Discord, карточка его не ждёт."""
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    guild_id = user["guild_id"]
+    order, entries, error = await tb_my.load_order(guild_id)
+    data = {"error": error} if error else await asyncio.to_thread(tb_my.build, guild_id, ally_code, order, entries)
+    if not data.get("error") and not data.get("rounds"):
+        data = {"error": "В активном ордере не нашлось планет по этапам."}
+    return templates.TemplateResponse(request, "_player_tb.html", {"data": data})
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
 async def player_card(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
     guild_id = user["guild_id"]
@@ -2565,6 +2612,8 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "task_error": request.query_params.get("task_error"),
         "task_notice": request.query_params.get("task_notice"),
         "forecast_units": _forecast_units(ally_code) if not card.departed_at else [],
+        "compare_members": _compare_members(guild_id, ally_code) if not card.departed_at else [],
+        "show_my_tb": not card.departed_at and feature_flags.is_enabled(guild_id, "tb_plan_order"),
     })
 
 

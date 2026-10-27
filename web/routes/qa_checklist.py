@@ -65,6 +65,7 @@ PAGES = [
     ("tw", "ВГ — отчёт", "/tw", "officers"),
     ("tw_def_squads", "ВГ — деф-паки (библиотека, «кто может», редактор)", "/tw/def/squads", "officers"),
     ("tw_def_plans", "ВГ — расстановка дефа (карта, авто/ручной подбор, текст для Discord)", "/tw/def/plans", "officers"),
+    ("tw_scout", "ВГ — разведка соперника (сводка, ранги, плейты на обеих сторонах)", "/tw/scout", "officers"),
     ("tasks", "Задачи", "/tasks", "officers"),
     ("datacrons", "Датакроны", "/datacrons", "officers"),
     ("datacrons_check", "Датакроны — проверить игрока", "/datacrons/check", "officers"),
@@ -85,6 +86,7 @@ PAGES = [
     ("guild_access", "Админ меню — Ручной доступ", "/access", "officers"),
     ("settings", "Админ меню — Настройки", "/settings", "officers"),
     ("player_card", "Карточка игрока (клик из ростера/отчётов)", "/player/{ally_code}", "officers"),
+    ("player_compare", "Сравнение игроков (до 8 в столбик, из карточки)", "/player/{ally_code}/compare", "officers"),
     # ---- Доступно игрокам (get_current_user — любой залогиненный, не только офицер) ----
     ("subscribe", "Подписка", "/subscribe", "players"),
     ("mod_builder", "Модули — Калькулятор (участникам: своя история, пресеты только применить)", "/mod-builder", "players"),

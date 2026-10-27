@@ -1,0 +1,29 @@
+{# Форма «Сравнить с…» — в карточке игрока и на странице сравнения. Нужны ally_code, members, raw. #}
+<form method="get" action="/player/{{ ally_code }}/compare" class="cmp-form filter-row">
+    <label>Коды союзника
+        <input type="text" name="with" value="{{ raw or '' }}" autocomplete="off" placeholder="через запятую">
+    </label>
+    {% if members %}
+    <label>Добавить из гильдии
+        <select class="cmp-add">
+            <option value="">— игрок —</option>
+            {% for name, code in members %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+        </select>
+    </label>
+    {% endif %}
+    <button type="submit">Сравнить</button>
+</form>
+<script>
+(function () {
+    const form = document.currentScript.previousElementSibling;
+    const input = form.querySelector("input[name=with]");
+    const add = form.querySelector(".cmp-add");
+    if (!add) return;
+    add.addEventListener("change", () => {
+        const code = add.value;
+        add.value = "";
+        if (!code || input.value.replace(/-/g, "").includes(code)) return;
+        input.value = (input.value.trim() ? input.value.trim().replace(/,$/, "") + ", " : "") + code;
+    });
+})();
+</script>

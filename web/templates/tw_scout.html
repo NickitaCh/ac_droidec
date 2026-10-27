@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% import "_game.html" as game %}
+{% import "_ui.html" as ui %}
+{% block title %}Разведка ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+
+{% macro val(v) -%}
+{%- if v is none -%}—{%- elif v is float -%}{{ ("%.1f"|format(v)).replace(".", ",") if v < 1000 else ui.num(v|round|int) }}{%- else -%}{{ ui.num(v) }}{%- endif -%}
+{%- endmacro %}
+{% macro diff(a, b) -%}
+{%- if a is none or b is none -%}—{%- else -%}{% set d = a - b %}{{ "+" if d > 0 else "" }}{{ val(d) }}{%- endif -%}
+{%- endmacro %}
+{% macro side_class(a, b, higher=True) -%}
+{%- if a is not none and b is not none and a != b -%}{{ "scout-win" if (a > b) == higher else "scout-lose" }}{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+    {{ twui.tw_hero("Разведка", "scout", "Своя гильдия против соперника: сводка, участники по рангу и плейты гильдии на обеих сторонах. Текущего соперника игра без входа в аккаунт не показывает — выберите из прошлых ВГ или введите код союзника любого его участника.") }}
+
+    <form method="get" action="/tw/scout" class="filter-row panel scout-pick">
+        {% if recent %}
+        <label>Из прошлых ВГ
+            <select name="opp" onchange="this.form.querySelector('[name=opp_code]').value=''; this.form.submit()">
+                <option value="">— выберите —</option>
+                {% for o in recent %}<option value="{{ o.id }}" {% if lookup and lookup.swgoh_guild_id == o.id %}selected{% endif %}>{{ label(o) }}</option>{% endfor %}
+            </select>
+        </label>
+        {% endif %}
+        <label>или код союзника
+            <input type="text" name="opp_code" inputmode="numeric" maxlength="11" placeholder="123-456-789"
+                   value="{{ opp if opp and opp[0].isdigit() else '' }}">
+        </label>
+        <button type="submit">Показать</button>
+    </form>
+    <script>
+    (function () {
+        // Код союзника, если введён, важнее выбора из списка — отправляем его как opp.
+        const form = document.querySelector(".scout-pick");
+        form.addEventListener("submit", () => {
+            const code = form.querySelector("[name=opp_code]");
+            if (code.value.trim()) {
+                const sel = form.querySelector("select[name=opp]");
+                if (sel) sel.disabled = true;
+                code.name = "opp";
+            }
+        });
+    })();
+    </script>
+
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    {% if progress and progress.running %}
+        <p class="config-warning">⏳ {{ progress.stage }}{% if progress.total %}: {{ progress.done }} из {{ progress.total }}{% endif %}… Страница обновится сама.</p>
+        <script>setTimeout(() => location.reload(), 5000);</script>
+    {% elif progress and progress.error %}
+        <p class="error">Не удалось собрать разведку: {{ progress.error }}</p>
+    {% endif %}
+
+    {% if lookup and report %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ report.own_name }} против {{ report.opp_name }}</span>
+                <span class="panel-hint">ростеры соперника: {{ report.fetched_msk }} МСК{% if report.errors %} · не загрузились {{ report.errors }}{% endif %}</span></div>
+            <form method="post" action="/tw/scout/run" class="scout-run">
+                <input type="hidden" name="opp" value="{{ opp }}">
+                <details>
+                    <summary class="link-btn">Плейты для сравнения ({{ selected_plates|length }})</summary>
+                    {% if plates %}
+                        <p class="muted">Справа — число персонажей. Плейт на 100+ персонажей считается несколько минут.</p>
+                        <div class="scout-plates">
+                            {% for p in plates %}
+                                <label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}> {{ p }} <span class="muted">{{ plate_sizes.get(p, 0) }}</span></label>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="muted">Плейтов ещё нет — заведите их в разделе «Плейты».</p>
+                    {% endif %}
+                </details>
+                <div class="filter-row">
+                    <button type="submit">Пересчитать</button>
+                    <button type="submit" name="refetch" value="1" class="button-secondary">Собрать ростеры соперника заново</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Сводка</span></div>
+            <table class="data cards-on-phone scout-table">
+                <thead><tr><th>Показатель</th><th class="num">{{ report.own_name }}</th><th class="num">{{ report.opp_name }}</th><th class="num">Разница</th></tr></thead>
+                <tbody>
+                    {% for r in report.overview %}
+                        <tr>
+                            <td class="scout-label">{{ r.label }}</td>
+                            <td class="num {{ side_class(r.own, r.opp, r.higher) }}" data-label="{{ report.own_name }}">{{ val(r.own) }}</td>
+                            <td class="num {{ side_class(r.opp, r.own, r.higher) }}" data-label="{{ report.opp_name }}">{{ val(r.opp) }}</td>
+                            <td class="num" data-label="Разница">{{ diff(r.own, r.opp) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% set ranks = report.ranks %}
+        <div class="panel">
+            <div class="panel-title"><span>Участники по рангу ГМ</span>
+                {{ ui.help("Игроки обеих гильдий выстроены по ГМ; сравниваем первого с первым, второго со вторым и т. д. Средний ГМ лучших 10/25/50 показывает, где у соперника сила — наверху или ровно по составу.") }}</div>
+            <div class="stats-grid">
+                {% for b in ranks.brackets %}
+                    <div class="stat-tile {{ 'status-ok' if b.own >= b.opp else 'status-danger' }}">
+                        <div class="stat-value">{{ diff(b.own, b.opp) }}</div>
+                        <div class="stat-label">Средний ГМ топ-{{ b.n }}: {{ val(b.own) }} против {{ val(b.opp) }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+            <p>Мы сильнее на <strong>{{ ranks.ahead }} из {{ ranks.compared }}</strong> мест.</p>
+            <details>
+                <summary class="link-btn">Место к месту</summary>
+                <table class="data cards-on-phone scout-table">
+                    <thead><tr><th>№</th><th>{{ report.own_name }}</th><th>{{ report.opp_name }}</th><th class="num">Разница</th></tr></thead>
+                    <tbody>
+                        {% for r in ranks.rows %}
+                            <tr>
+                                <td class="scout-label">{{ r.rank }}</td>
+                                <td data-label="{{ report.own_name }}">{% if r.own %}{{ r.own[0] }} <span class="muted nowrap">{{ val(r.own[1]) }}</span>{% else %}—{% endif %}</td>
+                                <td data-label="{{ report.opp_name }}">{% if r.opp %}{{ r.opp[0] }} <span class="muted nowrap">{{ val(r.opp[1]) }}</span>{% else %}—{% endif %}</td>
+                                <td class="num {{ 'scout-win' if r.diff and r.diff > 0 else ('scout-lose' if r.diff and r.diff < 0 else '') }}" data-label="Разница">{{ diff(r.own[1] if r.own else none, r.opp[1] if r.opp else none) }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </details>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title"><span>Плейты</span>
+                {{ ui.help("Сколько игроков каждой гильдии полностью проходят плейт: есть все его персонажи и выполнены обязательные статы — как /статы «как есть». Внутри — по каждому персонажу: сколько проходят из тех, у кого он есть.") }}</div>
+            {% if not report.plates %}
+                <p class="widget-empty">{% if report.plates_selected %}У выбранных плейтов нет требований.{% else %}Выберите плейты выше и нажмите «Пересчитать».{% endif %}</p>
+            {% endif %}
+            {% for p in report.plates %}
+                <details class="scout-plate">
+                    <summary>
+                        <strong>{{ p.plate }}</strong> —
+                        <span class="{{ side_class(p.own, p.opp) }}">мы {{ p.own }} из {{ p.own_total }}</span> ·
+                        <span class="{{ side_class(p.opp, p.own) }}">они {{ p.opp }} из {{ p.opp_total }}</span>
+                    </summary>
+                    <table class="data cards-on-phone scout-table">
+                        <thead><tr><th>Персонаж</th><th class="num">{{ report.own_name }}</th><th class="num">{{ report.opp_name }}</th></tr></thead>
+                        <tbody>
+                            {% for c in p.chars %}
+                                <tr>
+                                    <td class="scout-label">{{ game.portrait(c.base_id, "xs") }} {{ c.name }}</td>
+                                    <td class="num {{ side_class(c.own, c.opp) }}" data-label="{{ report.own_name }}">{{ c.own }} из {{ c.own_has }}</td>
+                                    <td class="num {{ side_class(c.opp, c.own) }}" data-label="{{ report.opp_name }}">{{ c.opp }} из {{ c.opp_has }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </details>
+            {% endfor %}
+        </div>
+
+        {% for title, rows in [("Галактические легенды", report.gls), ("Мета", report.meta), ("Флот", report.fleet), ("Персональные", report.personal)] %}
+            {% if rows %}
+            <div class="panel">
+                <div class="panel-title"><span>{{ title }}</span><span class="panel-hint">сколько у кого{% if title != "Флот" %} · в скобках R8+{% endif %}</span></div>
+                <table class="data cards-on-phone scout-table">
+                    <thead><tr><th>Юнит</th><th class="num">{{ report.own_name }}</th><th class="num">{{ report.opp_name }}</th></tr></thead>
+                    <tbody>
+                        {% for u in rows %}
+                            <tr>
+                                <td class="scout-label">{{ game.portrait(u.base_id, "xs") }} {{ u.name }}</td>
+                                <td class="num {{ side_class(u.own, u.opp) }}" data-label="{{ report.own_name }}">{{ u.own }}{% if not u.is_ship %} <span class="muted">({{ u.own_r8 }})</span>{% endif %}{% if u.own_ult %} · ⚡{{ u.own_ult }}{% endif %}</td>
+                                <td class="num {{ side_class(u.opp, u.own) }}" data-label="{{ report.opp_name }}">{{ u.opp }}{% if not u.is_ship %} <span class="muted">({{ u.opp_r8 }})</span>{% endif %}{% if u.opp_ult %} · ⚡{{ u.opp_ult }}{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+{% endblock %}

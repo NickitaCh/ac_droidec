@@ -1,0 +1,46 @@
+{# «Мой ВИ» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
+{% set status_text = {"ready": "проходит", "blocked": "мешают взводы", "step": "в шаге", "short": "не хватает", "missing": "нет юнитов"} %}
+{% set status_badge = {"ready": "badge-ok", "blocked": "badge-danger", "step": "badge-warn", "short": "badge-neutral", "missing": "badge-neutral"} %}
+{% if data.error %}
+    <p class="widget-empty">{{ data.error }}</p>
+{% else %}
+    <p class="muted">Ордер «{{ data.order_name }}»</p>
+    <nav class="pill-tabs" role="tablist">
+        {% for r in data.rounds %}
+            <button type="button" class="pill-tab{% if loop.first %} active{% endif %}" data-round="{{ r.round }}">
+                Этап {{ r.round }}{% if r.blocked %} ⚠️{% endif %}
+            </button>
+        {% endfor %}
+    </nav>
+    {% for r in data.rounds %}
+        <div class="my-tb-round" data-round="{{ r.round }}" {% if not loop.first %}hidden{% endif %}>
+            <p>Взводы: <strong>{{ r.platoons_total }}</strong> юн. · боёв и спецмиссий проходит: <strong>{{ r.ready }} из {{ r.missions }}</strong>
+                {% if r.blocked %} · <span class="badge badge-danger">{{ r.blocked }} ломают взводы</span>{% endif %}</p>
+            {% for p in r.planets %}
+                <div class="panel my-tb-planet">
+                    <div class="panel-title"><span>{{ p.ru }}</span>{% if p.no_platoons %}<span class="panel-hint">взводы не ставим</span>{% endif %}</div>
+                    {% if p.platoons %}
+                        <p><span class="muted">Во взводы:</span>
+                            {% for x in p.platoons %}{{ x.name }} <span class="muted">(оп. {{ x.operation }})</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+                    {% endif %}
+                    {% if p.missions %}
+                        <ul class="my-tb-missions">
+                            {% for m in p.missions %}
+                                <li>
+                                    <span class="badge {{ status_badge[m.status] }}">{{ status_text[m.status] }}</span>
+                                    <strong>{{ "Спецмиссия" if m.kind == "covert" else ("Флот" if m.fleet else "Бой") }} {{ m.n }}</strong>
+                                    <span class="muted">{{ m.label }}</span>
+                                    {% if m.kind == "covert" and m.reward %}<span class="muted">· {{ m.reward }}</span>{% endif %}
+                                    {% if m.status == "ready" and m.units %}<div class="my-tb-detail">Кем: {{ m.units|join(", ") }}{% if m.more %} <span class="muted">и ещё {{ m.more }} подходящих</span>{% endif %}</div>{% endif %}
+                                    {% if m.status == "blocked" and m.blocked %}<div class="my-tb-detail">Во взводы уходят: {{ m.blocked|join(", ") }}</div>{% endif %}
+                                    {% if m.gap %}<div class="my-tb-detail">Докачать: {{ m.gap }}</div>{% endif %}
+                                    {% if m.kind == "covert" and m.status in ("short", "missing") and m.text not in ("—", "✓") %}<div class="my-tb-detail">Сейчас: {{ m.text }}</div>{% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endfor %}
+{% endif %}
