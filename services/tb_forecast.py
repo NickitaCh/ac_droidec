@@ -218,9 +218,31 @@ def strike_gap(m: dict, levels: dict, ships: set) -> tuple[list, bool]:
     return [(b, _level_label(levels[b], m["fleet"])) for b in to_level], all(close(b) for b in to_level)
 
 
+def qualifying_units(m: dict, levels: dict, ships: set) -> list:
+    """Юниты игрока, которые годятся для боя (на пороге) — только у боёв с конкретным
+    списком юнитов или обязательными: «любой персонаж R5» взводами не сломать."""
+    if m["units"] is None and not m["mandatory"]:
+        return []
+    pool = set(m["units"] or ()) | set(m["mandatory"])
+    return sorted(b for b in pool if b in levels and _ok(levels[b], m))
+
+
+def platoon_conflict(st: dict, code: str, donated: set) -> list | None:
+    """Если игрок из «могут зайти» отдаёт во взводы этого этапа юниты, без которых бой ему уже
+    не пройти, — эти юниты, иначе None. st — строка strikes_by_phase."""
+    ok = (st.get("qualifying") or {}).get(code)
+    if not ok or not donated & set(ok):
+        return None
+    left = set(ok) - donated
+    if all(b in left for b in st["mandatory"]) and len(left) >= st["count"]:
+        return None
+    return sorted(donated & set(ok))
+
+
 def strikes_by_phase(rosters: dict, names: dict, with_bonus: bool) -> dict:
     """{этап: [{planet, n, fleet, label, requirement, ready: [ники], step/short: [(ник, что
-    докачать)], missing: сколько без нужных юнитов}]}."""
+    докачать)], missing: сколько без нужных юнитов, qualifying: {код: [годные юниты]} для
+    проверки взводов (platoon_conflict)}]}."""
     ms = strike_missions()
     all_ids = {b for r in rosters.values() for b in r}
     ships = {b for b, t in database.get_unit_types(list(all_ids)).items() if t == "ship"}
@@ -231,10 +253,14 @@ def strikes_by_phase(rosters: dict, names: dict, with_bonus: bool) -> dict:
         if m["planet"] in _BONUS_PLANET.values() and not with_bonus:
             continue
         ready, step, short, missing = [], [], [], 0
+        qualifying = {}
         for code, lv in levels.items():
             st = strike_status(m, lv, ships)
             if st == "ready":
                 ready.append(names.get(code, code))
+                q = qualifying_units(m, lv, ships)
+                if q:
+                    qualifying[code] = q
             elif st == "short":
                 gap, is_close = strike_gap(m, lv, ships)
                 text = ", ".join(f"{unit_names.get(b, b)} {label}" for b, label in gap)
@@ -252,6 +278,7 @@ def strikes_by_phase(rosters: dict, names: dict, with_bonus: bool) -> dict:
             "ready": sorted(ready, key=str.lower),
             "step": sorted(step, key=lambda x: x[0].lower()), "short": sorted(short, key=lambda x: x[0].lower()),
             "missing": missing,
+            "phase": m["phase"], "mandatory": m["mandatory"], "count": m["count"], "qualifying": qualifying,
         })
     return out
 

@@ -14,6 +14,13 @@
 #   exclude player [Имя игрока] unit [Имя юнита] stage [1, 3]
 #   bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...
 #   priority player [Имя игрока]
+#   exclude inactive [N]
+#
+# "exclude inactive [N]" (2026-10-27, как правило HotUtils «skip inactive N days») — не
+# предлагать игроков, которые не заходили в игру дольше N дней (последний вход — из часового
+# синка состава, database.get_member_activity). Список считается при каждом разборе правил,
+# поэтому зашедший игрок сам возвращается в автозаполнение. Игроки без данных о входе не
+# исключаются.
 #
 # "exclude category" (добавлено 2026-09-01 по прямому запросу пользователя "исключать...
 # всех, кроме [флот|пешка]") — категорий всего две (is_ship — см. database.get_unit_types),
@@ -49,6 +56,7 @@
 # tb_platoon_autofill.py::AutofillResult.blocked_by_exclude_rule и
 # tb_platoon_engine.would_be_eligible_without_player_unit_rule.
 import re
+import time
 from dataclasses import dataclass, field
 
 import database
@@ -61,6 +69,7 @@ _EXCLUDE_PLAYER_UNIT_RE = re.compile(
 )
 _BUNDLE_RE = re.compile(r"^bundle\s+\[([^\]]+)\]\s*->\s*(.+)$", re.IGNORECASE)
 _PRIORITY_PLAYER_RE = re.compile(r"^priority\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
+_EXCLUDE_INACTIVE_RE = re.compile(r"^exclude\s+inactive\s+\[\s*(\d+)\s*\]$", re.IGNORECASE)
 _BRACKET_ITEM_RE = re.compile(r"\[([^\]]+)\]")
 
 # Сентинел для ParsedRules.exclude_player_unit_rules: пустой frozenset() = правило действует
@@ -87,6 +96,8 @@ class ParsedRules:
     # у "exclude player [...] unit [...] [stage [...]]" выше.
     exclude_player_unit_rules: dict = field(default_factory=dict)
     player_display_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя (для exclude_player_unit_rules, независимо от exclude_player_names)
+    inactive_days: int | None = None  # exclude inactive [N]
+    inactive_codes: set = field(default_factory=set)  # кого это правило исключило сейчас (они же в exclude_player_codes)
 
     def is_player_excluded(self, ally_code: str) -> bool:
         return ally_code in self.exclude_player_codes
@@ -192,6 +203,15 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             parsed_lines.append((line_num, "priority_player", m.group(1).strip()))
             continue
 
+        m = _EXCLUDE_INACTIVE_RE.match(stripped)
+        if m:
+            days = int(m.group(1))
+            if days < 1:
+                errors.append((line_num, "exclude inactive: число дней должно быть от 1"))
+                continue
+            parsed_lines.append((line_num, "exclude_inactive", days))
+            continue
+
         errors.append((line_num, f"не распознана строка правила: {stripped!r}"))
 
     # Один batch-запрос на все имена юнитов сразу, а не один на строку — тот же приём, что
@@ -277,6 +297,18 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             result.priority_player_codes.add(ally_code)
             result.priority_player_names[ally_code] = real_name
 
+        elif kind == "exclude_inactive":
+            result.inactive_days = payload if result.inactive_days is None else min(result.inactive_days, payload)
+
+    if result.inactive_days:
+        cutoff = time.time() - result.inactive_days * 86400
+        names = {ally_code: name for _discord_id, ally_code, name in mappings}
+        for ally_code, (last, _joined) in database.get_member_activity(guild_id).items():
+            if last and last < cutoff and ally_code in names:
+                result.inactive_codes.add(ally_code)
+                result.exclude_player_codes.add(ally_code)
+                result.exclude_player_names.setdefault(ally_code, names[ally_code])
+
     return result, errors
 
 
@@ -284,8 +316,12 @@ def describe_rules(parsed: ParsedRules) -> list:
     """Список строк на русском для отображения на /tb/platoons/filters — что реально
     применится, без сырых base_id/ally_code."""
     lines = []
-    for ally_code in sorted(parsed.exclude_player_codes):
+    for ally_code in sorted(parsed.exclude_player_codes - parsed.inactive_codes):
         lines.append(f"Исключён игрок: {parsed.exclude_player_names.get(ally_code, ally_code)}")
+    if parsed.inactive_days:
+        names = sorted((parsed.exclude_player_names.get(c, c) for c in parsed.inactive_codes), key=str.lower)
+        lines.append(f"Не заходили больше {parsed.inactive_days} дн. — не предлагаются: "
+                     + (", ".join(names) if names else "сейчас таких нет"))
     for base_id in sorted(parsed.exclude_unit_ids):
         lines.append(f"Юнит не предлагается: {parsed.exclude_unit_names.get(base_id, base_id)}")
     for category in sorted(parsed.exclude_categories):

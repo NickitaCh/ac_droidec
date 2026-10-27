@@ -213,7 +213,7 @@
                             {% for st in ready.strikes or [] %}
                                 <div class="tbplan-ready-row">
                                     <div><b>Бой {{ st.n }}</b>{% if st.fleet %} <span class="badge badge-neutral">флот</span>{% endif %} <span class="muted">{{ st.requirement }}</span></div>
-                                    <div class="tbplan-who-row">{{ count_details(st.ready, "badge-ok" if st.ready|length >= r.players * 0.8 else "badge-warn", label="могут зайти") }} {{ count_details(st.step, "badge-warn", pairs=True, label="в шаге") }} {{ count_details(st.short, "", pairs=True, label="не дотягивают") }}</div>
+                                    <div class="tbplan-who-row">{{ count_details(st.ready, "badge-ok" if st.ready|length >= r.players * 0.8 else "badge-warn", label="могут зайти") }} {{ count_details(st.step, "badge-warn", pairs=True, label="в шаге") }} {{ count_details(st.short, "", pairs=True, label="не дотягивают") }}{% if st.platoon_conflict %} {{ count_details(st.platoon_conflict, "badge-danger", pairs=True, label="нужные юниты во взводах") }}{% endif %}</div>
                                 </div>
                             {% endfor %}
                         </details>

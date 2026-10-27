@@ -145,6 +145,7 @@ class ViolationsCog(commands.Cog):
                 # подставляем последнее известное значение вместо мусора (сырого playerId).
                 previous_by_pid = database.get_roster_by_player_id(gid)
                 temp_roster_data = []
+                activity_rows = []
                 new_cache = {}
 
                 for member in members:
@@ -177,12 +178,15 @@ class ViolationsCog(commands.Cog):
 
                     new_cache[p_name] = a_code
                     temp_roster_data.append((a_code, a_code, p_name, member.get("memberLevel"), p_id))
+                    activity_rows.append((a_code, int(member.get("lastActivityTime") or 0) or None,
+                                          int(member.get("guildJoinTime") or 0) or None))
                     await asyncio.sleep(0.1)
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
                 # В потоке: архивация выбывших + запись в SQLite, которую параллельно пишет
                 # веб — ожидание блокировки БД (до 5с) не должно вешать весь event loop.
                 await asyncio.to_thread(database.sync_guild_roster, gid, temp_roster_data)
+                await asyncio.to_thread(database.save_member_activity, gid, activity_rows)
                 await self._resolve_departed_names(gid, gname)
 
                 hybrid_cache = HybridCache(new_cache)

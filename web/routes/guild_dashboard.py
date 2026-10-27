@@ -591,6 +591,45 @@ def _plan_shortages(result: dict, inp: dict, bottlenecks: dict) -> None:
         ph["shortages"] = sorted(agg.values(), key=lambda a: (-a["short"], a["name"].lower()))
 
 
+def _plan_platoon_conflicts(guild_id: int, readiness: dict, order_id: int | None) -> dict:
+    """Готовность к боям с учётом взводов опубликованного ордера плана: кто из «могут зайти»
+    отдаёт во взводы того же этапа юниты, без которых бой ему не пройти (в HotUtils «Suggest
+    CM teams» подбирает отряды, сохраняя юниты взводов). Юниты во взводах обновляются каждый
+    этап, поэтому сравниваем с донатами этапа, на котором открывается планета боя. Строки
+    проекции в кэше не трогаем — возвращаем копию readiness."""
+    if not order_id:
+        return readiness
+    assignments = database.get_tb_platoon_assignments(guild_id, order_id)
+    if not assignments:
+        return readiness
+    unit_names = {n for planet, op, _i in assignments for n in tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, op)) or []}
+    name_to_base_id = database.resolve_unit_display_names(sorted(unit_names)) if unit_names else {}
+    donated: dict = {}  # этап -> {ally_code: {base_id}}
+    for (planet, op, idx), a in assignments.items():
+        units = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((planet, op)) or []
+        base_id = name_to_base_id.get(units[idx]) if idx < len(units) else None
+        if base_id and a.get("round_num"):
+            donated.setdefault(a["round_num"], {}).setdefault(a["ally_code"], set()).add(base_id)
+    if not donated:
+        return readiness
+    names = database.get_player_names(guild_id)
+    all_ids = {b for per in donated.values() for s in per.values() for b in s}
+    unit_ru = database.get_game_unit_names(sorted(all_ids))
+    out = {}
+    for planet, rows in readiness.items():
+        strikes = []
+        for st in rows.get("strikes") or []:
+            per = donated.get(st.get("phase")) or {}
+            conflicts = []
+            for code, units in per.items():
+                hit = tb_forecast.platoon_conflict(st, code, units)
+                if hit:
+                    conflicts.append((names.get(code, code), ", ".join(unit_ru.get(b, b) for b in hit)))
+            strikes.append({**st, "platoon_conflict": sorted(conflicts, key=lambda x: x[0].lower())})
+        out[planet] = {**rows, "strikes": strikes}
+    return out
+
+
 async def _plan_inputs(guild_id: int) -> dict:
     _built_at, r = await _projection(guild_id, True)
     fc = r.get("forecast")
@@ -647,6 +686,8 @@ async def tb_plan_page(request: Request, id: int = 0,
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_order_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
     order = database.get_tb_saved_plan(plan["order_plan_id"]) if plan and plan.get("order_plan_id") else None
+    if order and order["guild_id"] == guild_id:
+        readiness = await asyncio.to_thread(_plan_platoon_conflicts, guild_id, readiness, order["id"])
     return templates.TemplateResponse(request, "tb_plan.html", {
         "user": user,
         "plans": plans,
@@ -1414,7 +1455,13 @@ async def tb_platoons_slot_candidates_api(request: Request, user: dict = Depends
     assignment = tb_platoon_engine.visible_assignment(assignments.get((planet, operation, slot_index)), round_num)
     assigned_ally_code = assignment["ally_code"] if assignment else None
 
+    # Последний вход (часовой синк состава): в попапе «не заходил N дн.», как в HotUtils.
+    activity = database.get_member_activity(guild_id)
+    now = time.time()
     for c in candidates:
+        last = (activity.get(c["ally_code"]) or (None, None))[0]
+        c["idle_hours"] = int((now - last) // 3600) if last else None
+        c["inactive_rule"] = c["ally_code"] in filter_rules.inactive_codes
         if c["ally_code"] == assigned_ally_code:
             c["status"] = "assigned"
         elif tb_platoon_engine.is_eligible(c):

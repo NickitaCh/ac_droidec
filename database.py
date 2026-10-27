@@ -2382,6 +2382,45 @@ def sync_guild_roster(guild_id: int, roster_rows):
         move_registrations_to_guild(guild_id, new_codes)
 
 
+def _ensure_member_activity_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS member_activity (
+            guild_id INTEGER NOT NULL,
+            ally_code TEXT NOT NULL,
+            last_activity INTEGER,
+            joined_at INTEGER,
+            PRIMARY KEY (guild_id, ally_code)
+        )
+    """)
+
+
+def save_member_activity(guild_id: int, rows) -> None:
+    """rows — [(ally_code, lastActivityTime мс, guildJoinTime мс)] из get_guild (часовой синк
+    состава, ViolationsCog.update_roster_cache). Полная замена по гильдии — как user_mapping."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_member_activity_table(cursor)
+    cursor.execute("DELETE FROM member_activity WHERE guild_id = ?", (guild_id,))
+    cursor.executemany(
+        "INSERT OR REPLACE INTO member_activity (guild_id, ally_code, last_activity, joined_at) VALUES (?, ?, ?, ?)",
+        [(guild_id, code, last, joined) for code, last, joined in rows],
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_member_activity(guild_id: int) -> dict:
+    """{ally_code: (последний вход, вступил в гильдию)} — секунды epoch или None."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_member_activity_table(cursor)
+    conn.commit()
+    cursor.execute("SELECT ally_code, last_activity, joined_at FROM member_activity WHERE guild_id = ?", (guild_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {code: (last // 1000 if last else None, joined // 1000 if joined else None) for code, last, joined in rows}
+
+
 def move_registrations_to_guild(guild_id: int, roster_codes: set) -> None:
     """Регистрация (/регистрация, альты) следует за игроком в другую подключённую гильдию: если
     ally_code из свежего состава guild_id зарегистрирован в другой гильдии, в чьём составе его

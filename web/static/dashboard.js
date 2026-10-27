@@ -764,7 +764,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!c.owns_unit) reasons.push("не владеет юнитом");
             else if (!c.meets_min) reasons.push(c.is_ship ? "не хватает ★" : "не хватает релика");
             if (c.used_elsewhere) reasons.push(`уже занят на этом этапе${c.used_at_label ? ": " + c.used_at_label : ""}`);
-            if (c.excluded_by_filter) reasons.push("исключён фильтром");
+            if (c.excluded_by_filter) reasons.push(c.inactive_rule ? "исключён: давно не заходил" : "исключён фильтром");
+            if (c.idle_hours !== null && c.idle_hours !== undefined && c.idle_hours >= 24) {
+                reasons.push(`не заходил ${Math.floor(c.idle_hours / 24)} дн.`);
+            }
             if (c.at_cap) reasons.push("лимит 10/этап на планету исчерпан");
             return reasons.join(", ");
         }
