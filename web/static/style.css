@@ -2978,3 +2978,8 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 @media (max-width: 40em) {
     .scout-table .scout-label { white-space: normal; font-weight: 600; justify-content: flex-start; text-align: left; }
 }
+
+/* Карточка игрока: фильтр виджетов в шапке (те же «таблетки», что .hero-tabs; активная — ссылкой). */
+.card-tabs a { cursor: pointer; }
+.card-tabs a.active { color: #0b0f1c; background: var(--hero-fg); border-color: var(--hero-fg); font-weight: 600; }
+.dashboard-grid > [hidden] { display: none !important; }

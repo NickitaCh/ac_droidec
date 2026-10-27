@@ -36,6 +36,21 @@
                 </p>
             </div>
         </div>
+        {% if kpis %}
+            <div class="hero-kpis">
+                {% for k in kpis %}
+                    {% if k.href %}<a href="{{ k.href }}"{% else %}<div{% endif %} class="hero-kpi{% if k.tone %} hero-kpi-{{ k.tone }}{% endif %}">
+                        <span class="hero-kpi-value">{{ k.value }}</span>
+                        <span class="hero-kpi-label">{{ k.label }}</span>
+                    {% if k.href %}</a>{% else %}</div>{% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
+        <nav class="hero-tabs card-tabs" hidden>
+            {% for key, label in [("all", "Всё"), ("overview", "Обзор"), ("tb", "ВИ"), ("checks", "Проверки"), ("tools", "Инструменты")] %}
+                <a href="#{{ key }}" data-filter="{{ key }}">{{ label }}</a>
+            {% endfor %}
+        </nav>
     </section>
     {% if card.departed_at %}
         <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ card.departed_at }}. Данные больше не обновляются.</p>
@@ -72,7 +87,7 @@
     {% endif %}
 
     <div class="dashboard-grid">
-        <div class="widget" id="my-tasks">
+        <div class="widget" id="my-tasks" data-tab="overview">
             <div class="widget-header">
                 <h2>📋 Задачи</h2>
                 {% if card.departed_at %}
@@ -223,29 +238,7 @@
             {% endif %}
         </div>
 
-        {% if show_my_tb %}
-        <div class="widget wc-wide" id="my-tb">
-            <div class="widget-header">
-                <h2>⚔️ Мой ВИ</h2>
-                {{ ui.help("По каждому этапу активного ордера: каких юнитов ставить во взводы и какие боевые миссии и спецмиссии планет этапа игрок проходит. Юниты из взводов до конца этапа заняты, поэтому готовность считается без них: «мешают взводы» — бой прошёл бы, но нужные юниты уходят во взводы. «Кем» — подходящие юниты игрока из списка боя (у боёв «любой персонаж» список не показываем). Состав — из ежечасного обновления.") }}
-            </div>
-            <div id="my-tb-body"><p class="widget-empty">Загружаю…</p></div>
-            <script>
-            (function () {
-                const body = document.getElementById("my-tb-body");
-                fetch("/player/{{ card.ally_code }}/tb").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
-                    body.innerHTML = html;
-                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
-                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
-                        body.querySelectorAll(".my-tb-round").forEach(d => { d.hidden = d.dataset.round !== btn.dataset.round; });
-                    }));
-                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить данные ВИ.</p>'; });
-            })();
-            </script>
-        </div>
-        {% endif %}
-
-        <div class="widget">
+        <div class="widget" data-tab="overview">
             <div class="widget-header">
                 <h2>📈 Активность за 30 дней</h2>
                 <span class="muted">{{ card.activity_total_30d }} событий</span>
@@ -263,7 +256,7 @@
         </div>
 
         {% if resources %}
-        <div class="widget">
+        <div class="widget" data-tab="overview">
             <div class="widget-header">
                 <h2>💰 Потрачено ресурсов</h2>
             </div>
@@ -310,7 +303,7 @@
         {% endif %}
 
         {% if is_officer %}
-        <div class="widget">
+        <div class="widget" data-tab="overview">
             <div class="widget-header">
                 <h2>⚠️ Нарушения</h2>
             </div>
@@ -329,7 +322,7 @@
         {% endif %}
 
         {% if is_officer %}
-        <div class="widget">
+        <div class="widget" data-tab="tb">
             <div class="widget-header">
                 <h2>⚔️ Территориальная битва</h2>
             </div>
@@ -375,7 +368,7 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="widget">
+        <div class="widget" data-tab="checks">
             <div class="widget-header">
                 <h2>🧬 Омикроны</h2>
             </div>
@@ -395,7 +388,7 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="widget" id="player-compare">
+        <div class="widget" id="player-compare" data-tab="tools">
             <div class="widget-header">
                 <h2>⚖️ Сравнение игроков</h2>
                 {{ ui.help("Этот игрок и ещё до 7 в столбик: ГМ, прокачка, модули, датакроны, ГЛ, мета и флот. Можно любые коды союзника, не только из гильдии.") }}
@@ -405,7 +398,7 @@
         {% endif %}
 
         {% if forecast_units %}
-        <div class="widget" id="unit-forecast">
+        <div class="widget" id="unit-forecast" data-tab="tools">
             <div class="widget-header">
                 <h2>🔭 Прогноз юнита</h2>
                 {{ ui.help("Статы юнита в текущих модулях сейчас и на других звёздах, гире или релике — как /юнит в Discord. Для корабля — только звёзды: его статы зависят от звёзд и прокачки экипажа. Состав — из ежечасного обновления.") }}
@@ -456,8 +449,30 @@
         </div>
         {% endif %}
 
+        {% if show_my_tb %}
+        <div class="widget wc-wide" id="my-tb" data-tab="tb">
+            <div class="widget-header">
+                <h2>⚔️ Мой ВИ</h2>
+                {{ ui.help("По каждому этапу активного ордера: каких юнитов ставить во взводы и какие боевые миссии и спецмиссии планет этапа игрок проходит. Юниты из взводов до конца этапа заняты, поэтому готовность считается без них: «мешают взводы» — бой прошёл бы, но нужные юниты уходят во взводы. «Кем» — подходящие юниты игрока из списка боя (у боёв «любой персонаж» список не показываем). Состав — из ежечасного обновления.") }}
+            </div>
+            <div id="my-tb-body"><p class="widget-empty">Загружаю…</p></div>
+            <script>
+            (function () {
+                const body = document.getElementById("my-tb-body");
+                fetch("/player/{{ card.ally_code }}/tb").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
+                    body.innerHTML = html;
+                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
+                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
+                        body.querySelectorAll(".my-tb-round").forEach(d => { d.hidden = d.dataset.round !== btn.dataset.round; });
+                    }));
+                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить данные ВИ.</p>'; });
+            })();
+            </script>
+        </div>
+        {% endif %}
+
         {% if not card.departed_at %}
-        <div class="wc-wide widget-cols-even">
+        <div class="wc-wide widget-cols-even" data-tab="checks">
         <div class="widget">
             <div class="widget-header">
                 <h2>📐 Проверка статов</h2>
@@ -560,4 +575,41 @@
         </div>
         {% endif %}
     </div>
+    <script>
+    (function () {
+        // Фильтр виджетов по группам: выбор живёт в адресе (#tb) и запоминается для следующих карточек.
+        const nav = document.querySelector(".card-tabs");
+        const widgets = Array.from(document.querySelectorAll(".dashboard-grid > [data-tab]"));
+        const links = Array.from(nav.querySelectorAll("[data-filter]"));
+        links.forEach(a => {
+            if (a.dataset.filter !== "all" && !widgets.some(w => w.dataset.tab === a.dataset.filter)) a.remove();
+        });
+        nav.hidden = false;
+        function apply(key) {
+            if (!nav.querySelector(`[data-filter="${key}"]`)) key = "all";
+            nav.querySelectorAll("[data-filter]").forEach(a => a.classList.toggle("active", a.dataset.filter === key));
+            widgets.forEach(w => { w.hidden = key !== "all" && w.dataset.tab !== key; });
+            try { localStorage.setItem("playerCardTab", key); } catch (_) {}
+        }
+        nav.addEventListener("click", e => {
+            const a = e.target.closest("[data-filter]");
+            if (!a) return;
+            e.preventDefault();
+            history.replaceState(null, "", "#" + a.dataset.filter);
+            apply(a.dataset.filter);
+        });
+        let start = location.hash.slice(1);
+        if (!links.some(a => a.dataset.filter === start)) {
+            // якорь на виджет (#my-tasks) — показываем всё, чтобы он был виден
+            if (start && document.getElementById(start)) start = "all";
+            else { try { start = localStorage.getItem("playerCardTab") || "all"; } catch (_) { start = "all"; } }
+        }
+        apply(start);
+        // Ссылки из шапки на виджет (#my-tasks): если он скрыт фильтром — показываем всё.
+        window.addEventListener("hashchange", () => {
+            const el = document.getElementById(location.hash.slice(1));
+            if (el && el.closest("[data-tab]") && el.closest("[data-tab]").hidden) { apply("all"); el.scrollIntoView(); }
+        });
+    })();
+    </script>
 {% endblock %}

@@ -2613,8 +2613,37 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "task_notice": request.query_params.get("task_notice"),
         "forecast_units": _forecast_units(ally_code) if not card.departed_at else [],
         "compare_members": _compare_members(guild_id, ally_code) if not card.departed_at else [],
+        "kpis": _card_kpis(guild_id, ally_code, card, is_officer),
         "show_my_tb": not card.departed_at and feature_flags.is_enabled(guild_id, "tb_plan_order"),
     })
+
+
+def _card_kpis(guild_id: int, ally_code: str, card, is_officer: bool) -> list[dict]:
+    """Цифры в шапке карточки: [{value, label, tone}] — из кэшей синка, без запросов в игру."""
+    from services import player_profile
+    kpis = []
+    stats = (database.get_player_profiles_bulk([ally_code]).get(ally_code) or {}).get("stats") or {}
+    gp = stats.get("STAT_GALACTIC_POWER_ACQUIRED_NAME")
+    if gp:
+        kpis.append({"value": dashboard_data._compact_number(gp), "label": "галактическая мощь"})
+    units = database.get_player_units(ally_code)
+    if units:
+        gls = [u for b, u in units.items() if b in set(player_profile.galactic_legends())]
+        ults = sum(bool(u.get("purchasedAbilityId")) for u in gls)
+        kpis.append({"value": str(len(gls)), "label": f"ГЛ, с ультой {ults}" if gls else "ГЛ"})
+    active = sum(t.status_badge in ("badge-task-progress", "badge-task-assigned") for t in card.current_tasks)
+    overdue = sum(t.status_badge == "badge-task-overdue" for t in card.current_tasks)
+    kpis.append({"value": str(active), "label": f"задач в работе, провалено {overdue}" if overdue else "задач в работе",
+                 "tone": "danger" if overdue else "", "href": "#my-tasks"})
+    if is_officer:
+        kpis.append({"value": str(card.violations_recent_count), "label": "нарушений за 90 дн.",
+                     "tone": "danger" if card.violations_recent_count >= 3 else "", "href": card.violations_url})
+    last, _joined = database.get_member_activity(guild_id).get(ally_code) or (None, None)
+    if last and not card.departed_at:
+        days = int((time.time() - last) // 86400)
+        kpis.append({"value": "сегодня" if days == 0 else f"{days} дн.", "label": "последний вход",
+                     "tone": "danger" if days >= 3 else ("good" if days == 0 else "")})
+    return kpis
 
 
 def _player_resources(guild_id: int, ally_code: str, period: str) -> dict:
