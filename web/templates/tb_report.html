@@ -46,13 +46,14 @@
             </div>
         {% endif %}
 
+        {% set sel_date = (report.events|selectattr(0, "equalto", report.selected_event_id)|first)[1][:10] %}
         <div class="panel">
             <div class="panel-title">
-                <span>{{ "Последняя ТБ" if report.is_latest_selected else "ТБ" }} по очкам территории</span>
+                <span>Битва {{ sel_date }}{% call ui.help() %}<p>Всё — из итогов битвы, которые игра отдаёт после её окончания: по каждому игроку за каждый день и за каждую планету. Во время битвы этих данных нет.</p><p>Звёзды планеты игра не отдаёт, считаем сами: очки игроков на планете + очки закрытых операций взводов (15 юнитов — одна операция) против порогов звёзд. На прошлых битвах сумма сходится с итогом до звезды.</p><p>«Залили полностью» — игрок залил в этот день не меньше 85 % своего самого большого залива за битву (как в HotUtils). «Своевольные» — действия против приказа, игра считает их сама.</p>{% endcall %}</span>
                 <span class="panel-hint">
                     {% if report.events|length > 1 %}
                         <form method="get" class="tb-event-picker">
-                            <select name="event_id" onchange="this.form.submit()">
+                            <select name="event_id" onchange="this.form.submit()" aria-label="Битва">
                                 {% for event_id, completed_at in report.events|reverse %}
                                     <option value="{{ event_id }}" {% if event_id == report.selected_event_id %}selected{% endif %}>
                                         {{ completed_at[:10] }}{% if event_id == report.events[-1][0] %} · последняя{% endif %}
@@ -61,10 +62,80 @@
                             </select>
                             <noscript><button type="submit">Показать</button></noscript>
                         </form>
-                    {% else %}
-                        {{ latest_event[1][:10] }}
                     {% endif %}
                 </span>
+            </div>
+            {% if breakdown %}
+                {% set t = breakdown.totals %}
+                <div class="stats-grid tbr-tiles">
+                    <div class="stat-tile"><div class="stat-value">{{ event_stars if event_stars is not none else t.stars }}★</div><div class="stat-label">звёзд</div></div>
+                    <div class="stat-tile"><div class="stat-value nowrap">{{ compact(t.points) }}</div><div class="stat-label">очков: залив {{ compact(t.deploy) }}, бои {{ compact(t.battle) }}</div></div>
+                    <div class="stat-tile"><div class="stat-value">{{ ui.num(t.waves) }}</div><div class="stat-label">волн боёв за {{ ui.num(t.attempts) }} боёв</div></div>
+                    <div class="stat-tile"><div class="stat-value nowrap">{{ t.covert_wins }} из {{ t.covert }}</div><div class="stat-label">спецмиссий пройдено</div></div>
+                    <div class="stat-tile"><div class="stat-value">{{ ui.num(t.units) }}</div><div class="stat-label">юнитов во взводах</div></div>
+                    <div class="stat-tile{% if t.disobey %} status-danger{% endif %}"><div class="stat-value">{{ t.disobey }}</div><div class="stat-label">своевольных действий</div></div>
+                </div>
+
+                <h3 class="tbr-h">По дням</h3>
+                <table class="data cards-on-phone tbr-days">
+                    <thead><tr><th>День</th><th class="num">Очки</th><th class="num">Залив</th><th class="num">Бои: волн / боёв</th><th class="num">ОЗ</th><th class="num">Во взводы</th><th class="num">Залили полностью</th><th class="num">Своевольные</th></tr></thead>
+                    <tbody>
+                        {% for d in breakdown.days %}
+                            <tr>
+                                <td data-label="День"><div><b>{{ d.day }}</b>{% if d.planets %} <span class="muted tbm-small">{% for p in d.planets %}{{ planet_ru(p.planet) }} {{ p.stars }}★{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</div></td>
+                                <td data-label="Очки" class="num nowrap">{{ compact(d.points) }}</td>
+                                <td data-label="Залив" class="num nowrap">{{ compact(d.deploy) }}</td>
+                                <td data-label="Бои: волн / боёв" class="num nowrap">{{ d.waves }} / {{ d.attempts }}</td>
+                                <td data-label="ОЗ" class="num">{{ d.covert }}</td>
+                                <td data-label="Во взводы" class="num">{{ d.units }}</td>
+                                <td data-label="Залили полностью" class="num nowrap"><span class="badge {{ 'badge-ok' if d.full >= d.members * 0.9 else 'badge-warn' }}">{{ d.full }} из {{ d.members }}</span></td>
+                                <td data-label="Своевольные" class="num">{% if d.disobey %}<span class="badge badge-danger">{{ d.disobey }}</span>{% else %}0{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        </div>
+
+        {% if breakdown and breakdown.planets %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>Планеты{% call ui.help() %}<p>Планеты сгруппированы по дню, в который они открылись; очки — за всё время, что планета была открыта. «Бои» — сколько волн отбито из всех волн боёв планеты, если бы каждый игрок прошёл каждый бой.</p>{% endcall %}</span>
+                    <span class="panel-hint">{{ breakdown.totals.stars }}★ по расчёту</span>
+                </div>
+                {% for d in breakdown.days if d.planets %}
+                    <h3 class="tbr-h">День {{ d.day }}</h3>
+                    <div class="tbm-cards">
+                        {% for p in d.planets %}
+                            <div class="tbm-card">
+                                <div class="tbr-card-head">
+                                    <span><b>{{ planet_ru(p.planet) }}</b>{% if p.bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}</span>
+                                    <span class="nowrap">{% if p.stars %}<span class="tbp-stars">{{ "★" * p.stars }}</span>{% endif %}<span class="muted">{{ "☆" * (p.max_stars - p.stars) }}</span></span>
+                                </div>
+                                <div class="tbm-small"><b>{{ compact(p.points) }}</b> <span class="muted">= игроки {{ compact(p.player_points) }} + взводы {{ compact(p.platoon_points) }}</span></div>
+                                {% if p.to_next is not none and p.player_points %}<div class="tbm-small muted">до {{ p.stars + 1 }}★ не хватило {{ compact(p.to_next) }}</div>{% endif %}
+                                <div class="tbm-small">Взводы: {{ p.operations }} из 6 операций{% if p.battles and p.waves_max %} · бои: {{ ui.num(p.waves) }} из {{ ui.num(p.waves_max) }} волн ({{ (p.waves / p.waves_max * 100)|round|int }}%){% endif %}{% if p.covert_wins %} · ОЗ пройдено {{ p.covert_wins }}{% endif %}</div>
+                                {% if p.players %}
+                                    <details class="tbr-who">
+                                        <summary class="link-btn">Игроки ({{ p.players|length }})</summary>
+                                        <ol class="tbr-who-list">
+                                            {% for pl in p.players %}
+                                                <li><span class="tbr-who-name">{{ pl.name }}</span> <span class="nowrap">{{ compact(pl.points) }}</span>{% if pl.attempts %} <span class="muted nowrap">· волн {{ pl.waves }}</span>{% endif %}{% if pl.units %} <span class="muted nowrap">· взводы {{ pl.units }}</span>{% endif %}</li>
+                                            {% endfor %}
+                                        </ol>
+                                    </details>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>Игроки{% call ui.help() %}<p>«Залил полностью» — сколько дней игрок залил не меньше 85 % своего самого большого залива за битву. «Бои» — отбито волн / начато боёв. «ОЗ» — пройдено / начато спецмиссий.</p>{% endcall %}</span>
+                <span class="panel-hint">{{ sel_date }}</span>
             </div>
             <div class="bar-chart">
                 {% for p in report.latest %}
@@ -80,32 +151,34 @@
             <div class="table-toolbar">
                 <input type="search" placeholder="Поиск по игроку…" data-table-search="latest-tb-table">
             </div>
-            <div class="table-scroll">
-                <table class="data" id="latest-tb-table">
-                    <thead>
-                        <tr>
-                            <th data-sort="text">Игрок</th>
-                            <th class="num" data-sort="num">Очки территории</th>
-                            <th class="num" data-sort="num">Юниты во взвод</th>
-                            <th class="num" data-sort="num">ОЗ попытки</th>
-                            <th class="num" data-sort="num">БЗ волн пройдено</th>
-                            <th class="num" data-sort="num">БЗ попыток</th>
+            {% set extra = breakdown.players if breakdown else {} %}
+            <table class="data cards-on-phone" id="latest-tb-table">
+                <thead>
+                    <tr>
+                        <th data-sort="text">Игрок</th>
+                        <th class="num" data-sort="num">Очки</th>
+                        <th class="num" data-sort="num">Залил полностью</th>
+                        <th class="num" data-sort="num">Бои: волн / боёв</th>
+                        <th class="num" data-sort="num">ОЗ</th>
+                        <th class="num" data-sort="num">Во взводы</th>
+                        <th class="num" data-sort="num">Своевольные</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in report.latest %}
+                        {% set x = extra.get(p.member_id) %}
+                        <tr data-search="{{ p.name|lower }}">
+                            <td data-label="Игрок"><a href="/tb/player/{{ p.name | urlencode }}{% if not report.is_latest_selected %}?event_id={{ report.selected_event_id }}{% endif %}">{{ p.name }}</a></td>
+                            <td data-label="Очки" class="num nowrap" data-value="{{ p.summary }}">{{ ui.num(p.summary) }}</td>
+                            <td data-label="Залил полностью" class="num nowrap" data-value="{{ x.full_days if x else -1 }}">{% if x %}<span class="badge {{ 'badge-ok' if x.full_days >= x.days else ('badge-warn' if x.full_days >= x.days - 1 else 'badge-danger') }}">{{ x.full_days }} из {{ x.days }} дн.</span>{% else %}—{% endif %}</td>
+                            <td data-label="Бои: волн / боёв" class="num nowrap" data-value="{{ p.strike_encounter }}">{{ p.strike_encounter }} / {{ p.strike_attempt }}</td>
+                            <td data-label="ОЗ" class="num nowrap" data-value="{{ p.covert_attempt }}">{% if x %}{{ x.covert_wins }} из {% endif %}{{ p.covert_attempt }}</td>
+                            <td data-label="Во взводы" class="num">{{ p.unit_donated }}</td>
+                            <td data-label="Своевольные" class="num" data-value="{{ x.disobey if x else 0 }}">{% if x and x.disobey %}<span class="badge badge-danger">{{ x.disobey }}</span>{% else %}0{% endif %}</td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for p in report.latest %}
-                            <tr data-search="{{ p.name|lower }}">
-                                <td><a href="/tb/player/{{ p.name | urlencode }}{% if not report.is_latest_selected %}?event_id={{ report.selected_event_id }}{% endif %}">{{ p.name }}</a></td>
-                                <td class="num nowrap">{{ ui.num(p.summary) }}</td>
-                                <td class="num">{{ ui.num(p.unit_donated) }}</td>
-                                <td class="num">{{ p.covert_attempt }}</td>
-                                <td class="num">{{ p.strike_encounter }}</td>
-                                <td class="num">{{ p.strike_attempt }}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
         {% if report.events|length > 1 %}

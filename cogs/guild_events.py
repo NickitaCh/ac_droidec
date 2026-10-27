@@ -30,7 +30,7 @@ TB_ACTION_LABELS = {
     "covert_complete": "ОЗ: миссий выполнено",
     "covert_round_attempted": "ОЗ: волны",
     "covert_attempt": "ОЗ: попытки",
-    "disobey": "Rogue-действия",
+    "disobey": "Своевольные действия",
 }
 
 TB_CONFLICT_LABELS = {"01": "Dark", "02": "Mixed", "03": "Light"}

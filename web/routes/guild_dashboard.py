@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import tb_forecast, tb_missions, tb_order_image, tb_plan, tb_projection
+from services import tb_forecast, tb_missions, tb_order_image, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -196,7 +196,12 @@ async def tb_report(request: Request, user: dict = Depends(feature_flags.require
     show_departed = request.query_params.get("departed") == "1"
     history_rows = [r for r in report.history if r.departed == show_departed] if report else []
     departed_count = sum(1 for r in report.history if r.departed) if report else 0
+    breakdown = tb_results.event_breakdown(report.selected_event_id) if report else None
     return templates.TemplateResponse(request, "tb_report.html", {
+        "breakdown": breakdown,
+        "event_stars": database.get_tb_event_stars([report.selected_event_id]).get(report.selected_event_id) if report else None,
+        "planet_ru": _planet_ru,
+        "compact": dashboard_data._compact_number,
         "user": user,
         "report": report,
         "show_departed": show_departed,

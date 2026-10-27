@@ -8239,3 +8239,17 @@ def get_recent_web_errors(discord_id: str, hours: int = 24, limit: int = 20) -> 
     rows = [{"id": r[0], "created_at_msk": r[1], "method": r[2], "path": r[3], "error": r[4]} for r in cursor.fetchall()]
     conn.close()
     return rows
+
+def get_tb_details_for_event(event_id: int) -> list:
+    """[(member_id, player_name, zone_data_json, round_totals_json, global_totals_json)] всех
+    игроков одной ВИ — для разреза «по дням / по планетам» на /tb (services/tb_results.py)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_history_tables(cursor)
+    cursor.execute("""
+        SELECT member_id, player_name, zone_data_json, round_totals_json, global_totals_json
+        FROM tb_player_detail WHERE event_id = ?
+    """, (event_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
