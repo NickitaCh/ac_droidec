@@ -2842,8 +2842,21 @@ form.mc-form { max-width: none; display: block; }
 }
 .mp-widget-row:hover .mp-widget-name { text-decoration: underline; }
 .mp-widget-name { grid-area: name; font-weight: 600; overflow-wrap: anywhere; }
-.mp-widget-bar { grid-area: bar; height: 10px; border-radius: 5px; background: var(--series-1-track); overflow: hidden; }
-.mp-widget-bar > span { display: block; height: 100%; background: var(--series-1); border-radius: 5px; }
+.mp-widget-bar { grid-area: bar; display: flex; flex-direction: column; gap: 2px; }
+/* Шкала (Рикардо 2026-10-27: «на прогресс-баре шкалы не хватает»): деления через 10%, подписи через 25%. */
+.mp-widget-track { position: relative; height: 10px; border-radius: 5px; background: var(--series-1-track); overflow: hidden; }
+.mp-widget-track > span { display: block; height: 100%; background: var(--series-1); border-radius: 5px; }
+.mp-widget-track::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(to right, transparent 0 calc(10% - 1px), color-mix(in srgb, var(--fg) 30%, transparent) calc(10% - 1px) 10%);
+}
+.mp-widget-scale { position: relative; height: 1em; font-size: 0.72em; color: var(--fg-secondary); font-variant-numeric: tabular-nums; line-height: 1; }
+.mp-widget-scale > span { position: absolute; top: 0; transform: translateX(-50%); }
+.mp-widget-scale > span:nth-child(1) { left: 0; transform: none; }
+.mp-widget-scale > span:nth-child(2) { left: 25%; }
+.mp-widget-scale > span:nth-child(3) { left: 50%; }
+.mp-widget-scale > span:nth-child(4) { left: 75%; }
+.mp-widget-scale > span:nth-child(5) { right: 0; transform: none; }
 .mp-widget-nums { grid-area: nums; color: var(--fg-secondary); font-size: 0.88em; }
 @media (max-width: 640px) {
     .mp-widget-row { grid-template-columns: 1fr; grid-template-areas: "name" "bar" "nums"; }

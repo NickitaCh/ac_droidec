@@ -34,7 +34,7 @@ class TBReadinessCog(commands.Cog):
     async def tb_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
-    @tb_group.sub_command(name="оз_готовность", description="Кто в гильдии проходит спецмиссии (ОЗ) по требованиям игры")
+    @tb_group.sub_command(name="оз_готовность", description="Какие спецмиссии ВИ (ОЗ) вы проходите (вся гильдия и чужие — 🔒 офицеры)")
     async def covert_readiness(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -62,7 +62,9 @@ class TBReadinessCog(commands.Cog):
                 f"❌ У планеты {tb_covert.planet_ru(planet)} нет спецмиссий на {этап} этапе." if planet
                 else f"На {этап} этапе спецмиссий нет.")
             return
-        if участник or аликод:
+        # Участник видит только себя (тред 2026-10-27, Madara/NicolozZ: «себя посмотреть»):
+        # без параметров — свой аккаунт; таблица по гильдии — офицерам.
+        if участник or аликод or not guild_resolver.is_officer_for_resolved_guild(inter.author):
             await self._player(inter, guild_id, ms, участник, аликод)
             return
 
@@ -101,6 +103,17 @@ class TBReadinessCog(commands.Cog):
         ally_code, игрок, error = guild_resolver.target_player(участник, аликод, guild_id)
         if error:
             await inter.edit_original_response(error)
+            return
+        if ally_code is None:
+            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
+            if not registration:
+                await guild_resolver.send_denied(
+                    inter, "❌ Вы не зарегистрированы — используйте `/регистрация`. Всю гильдию смотрят офицеры.")
+                return
+            ally_code = str(registration[0])
+        error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+        if error:
+            await guild_resolver.send_denied(inter, error)
             return
         roster = await asyncio.to_thread(database.get_player_units, ally_code)
         note = "данные ежечасного обновления"

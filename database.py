@@ -2379,6 +2379,40 @@ def sync_guild_roster(guild_id: int, roster_rows):
         ])
     if new_codes:
         restore_returned_players(guild_id, new_codes)
+        move_registrations_to_guild(guild_id, new_codes)
+
+
+def move_registrations_to_guild(guild_id: int, roster_codes: set) -> None:
+    """Регистрация (/регистрация, альты) следует за игроком в другую подключённую гильдию: если
+    ally_code из свежего состава guild_id зарегистрирован в другой гильдии, в чьём составе его
+    больше нет, — переносим запись сюда. Иначе альт, ушедший из АС в «Гримов», так и числился
+    «альт, AbsoluteChaos» (TG-привязка NicolozZ 2026-10-22) и «альт: True» проверял его по
+    плейтам АС. is_main не меняем; дубликат уже существующей здесь записи просто удаляется."""
+    if not roster_codes:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_user_registration_table(cursor)
+    placeholders = ",".join("?" for _ in roster_codes)
+    cursor.execute(
+        f"""SELECT r.guild_id, r.discord_id, r.ally_code FROM user_registration r
+            WHERE r.guild_id != ? AND r.ally_code IN ({placeholders})
+              AND NOT EXISTS (SELECT 1 FROM user_mapping m WHERE m.guild_id = r.guild_id AND m.ally_code = r.ally_code)""",
+        (guild_id, *roster_codes),
+    )
+    rows = cursor.fetchall()
+    for old_guild, discord_id, ally_code in rows:
+        cursor.execute(
+            "UPDATE OR IGNORE user_registration SET guild_id = ? WHERE guild_id = ? AND discord_id = ? AND ally_code = ?",
+            (guild_id, old_guild, discord_id, ally_code),
+        )
+        cursor.execute(
+            "DELETE FROM user_registration WHERE guild_id = ? AND discord_id = ? AND ally_code = ?",
+            (old_guild, discord_id, ally_code),
+        )
+        print(f"🔁 [Регистрация] {ally_code} ({discord_id}) перешёл из guild_id={old_guild} в guild_id={guild_id}")
+    conn.commit()
+    conn.close()
 
 
 def get_roster_by_player_id(guild_id: int) -> dict:

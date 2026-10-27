@@ -128,7 +128,6 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
 
 TILE_W, TILE_H, TILE_GAP, TILES_PER_ROW = 150, 196, 8, 5
 STATUS_COLORS = {"met": (60, 190, 80), "short": (235, 190, 40), "missing": (215, 60, 70)}
-STATUS_LABELS = {"met": "выполнено", "short": "не хватает реликвии или гира", "missing": "нет персонажа или не хватает звёзд"}
 
 
 def _level_badge(level: dict | None, is_ship: bool) -> str:
@@ -190,7 +189,11 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None) ->
             bx, by = x + TILE_W // 2, py + pic - 4
             relic = u["level"]["relic"] is not None
             draw.ellipse((bx - 15, by - 15, bx + 15, by + 15), fill=(120, 30, 30) if relic else (40, 70, 120), outline=(230, 230, 230), width=2)
-            draw.text((bx, by), badge, font=_font(14 if len(badge) > 2 else 16, True), fill=TEXT, anchor="mm")
+            # «G12» шрифтом 14 вылезал за кружок (тред 2026-10-27) — подбираем размер под 24 px.
+            size = 16
+            while size > 9 and draw.textlength(badge, font=_font(size, True, condensed=True)) > 24:
+                size -= 1
+            draw.text((bx, by), badge, font=_font(size, True, condensed=True), fill=TEXT, anchor="mm")
         stars = u["level"]["stars"] if u["level"] else 0
         sy = py + pic + 18
         for k in range(7):
@@ -209,8 +212,8 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None) ->
             draw.text((x + TILE_W // 2, sy + 18 + k * 17), line, font=nf, fill=TEXT, anchor="mm")
 
     y = y0 + rows * (TILE_H + TILE_GAP) + 6
-    notes = [f"Зелёная рамка — {STATUS_LABELS['met']}", f"Жёлтая — {STATUS_LABELS['short']}",
-             f"Красная — {STATUS_LABELS['missing']}"] + ([updated_note] if updated_note else [])
+    # Легенду цветов убрали (Рикардо 2026-10-27: «и так очевидно»), осталась только свежесть данных.
+    notes = [updated_note] if updated_note else []
     for line in notes:
         lf = _font(13)
         while draw.textlength(line, font=lf) > width - 2 * PAD and len(line) > 10:

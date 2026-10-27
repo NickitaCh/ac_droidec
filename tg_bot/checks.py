@@ -13,6 +13,7 @@ from cogs.datacron_requirements import build_player_check
 from cogs.stat_requirements import SCENARIO_FULL, SCENARIO_RAW, SCENARIO_UP
 from services import datacron_catalog, feature_flags, stat_forecast
 from tg_bot import markup
+from tg_bot.api import TelegramError
 from tg_bot.core import Ctx, callback, command, esc, new_session, session_for_callback
 from tg_bot.handlers import _resolve_target, _stat_calc
 
@@ -231,7 +232,10 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
         summary += ["", f"<i>Данные игрока: {esc(updated_ats[0])}. Свежие из игры — добавьте «обновить».</i>"]
     state["ally_code"] = ally_code
     await _reply_with_options(ctx, state, summary)
+    old_picker = [state["picker_id"]] if state.get("picker_id") else []
     if not pages:
+        state["picker_id"] = None
+        await _send_or_edit(ctx, old_picker, [])
         return
     # Персонажи — отдельным сообщением с кнопками: итог большого плейта (AC_ALL, ~100
     # персонажей) занимает несколько сообщений, а листать удобно в одном месте.
@@ -239,18 +243,40 @@ async def _stats_player(ctx: Ctx, state: dict, plate: str, ally_code: str):
         f"Открыть персонажа — первые {PICKER_MAX} из {len(pages)} (сначала с ❌):"
     page_state = {"user_id": ctx.user["id"], "picker": picker, "pages": pages}
     token = new_session(page_state)
-    await ctx.reply(picker, keyboard=_picker_keyboard(token, pages))
+    state["picker_id"] = (await _send_or_edit(ctx, old_picker, [(picker, _picker_keyboard(token, pages))]))[0]
 
 
 PICKER_MAX = 99  # Telegram: до 100 кнопок на сообщение
+
+
+async def _send_or_edit(ctx: Ctx, old_ids: list, messages: list) -> list:
+    """Показать messages [(текст, клавиатура)] правкой старых сообщений old_ids: лишние старые
+    удалить, недостающие дослать. Кнопки сценария и «только ❌» меняют те же сообщения, а не
+    шлют сводку заново (NicolozZ 2026-10-26). Возвращает id сообщений по порядку."""
+    ids = []
+    for i, (text, keyboard) in enumerate(messages):
+        if i < len(old_ids):
+            try:
+                await ctx.api.edit_message_text(ctx.chat_id, old_ids[i], text, keyboard=keyboard)
+                ids.append(old_ids[i])
+                continue
+            except TelegramError as e:
+                if "not modified" in e.description:
+                    ids.append(old_ids[i])
+                    continue
+        ids.append((await ctx.reply(text, keyboard=keyboard))["message_id"])
+    for message_id in old_ids[len(messages):]:
+        try:
+            await ctx.api.delete_message(ctx.chat_id, message_id)
+        except TelegramError:
+            pass
+    return ids
 
 
 async def _reply_with_options(ctx: Ctx, state: dict, lines: list):
     """Итог + кнопки под последним сообщением: сценарий (как в Discord /статы) и «только ❌»
     (игрок) / «только с отрядом» (гильдия) — пересчитать, не набирая команду заново."""
     chunks = markup.chunk_md(lines)
-    for chunk in chunks[:-1]:
-        await ctx.reply(chunk)
     token = new_session(state)
     row = [{"text": ("✓ " if key == state["scenario"] else "") + label, "callback_data": f"so|{token}|{key}"}
            for key, label in SCENARIO_BUTTONS]
@@ -258,7 +284,8 @@ async def _reply_with_options(ctx: Ctx, state: dict, lines: list):
         toggle = {"text": ("✓ " if state["squad_only"] else "") + "Только с отрядом", "callback_data": f"so|{token}|squad"}
     else:
         toggle = {"text": ("✓ " if state["only_failed"] else "") + "Только ❌", "callback_data": f"so|{token}|failed"}
-    await ctx.reply(chunks[-1], keyboard=[row, [toggle]])
+    messages = [(chunk, None) for chunk in chunks[:-1]] + [(chunks[-1], [row, [toggle]])]
+    state["summary_ids"] = await _send_or_edit(ctx, state.get("summary_ids") or [], messages)
 
 
 @callback("so")

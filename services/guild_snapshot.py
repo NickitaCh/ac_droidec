@@ -32,7 +32,9 @@ METRICS = [
     ("omicrons", "Омикронов", "int"),
     ("six_dot", "Модулей 6 точек", "int"),
     ("speed20", "Скорость 20+ в допах", "int"),
-    ("modku", "МодКу (среднее)", "float2"),
+    # «modq», а не «modku»: до 2026-10-27 тут была своя формула (services/mod_ku.py, ~14.5),
+    # новый ключ — чтобы старые срезы не давали ложную дельту.
+    ("modq", "МодКу (среднее)", "float2"),
     ("dc_l9", "Датакронов 9 ур.", "int"),
 ]
 
@@ -51,7 +53,6 @@ def _ensure_table(cursor):
 
 def compute(guild_id: int) -> dict | None:
     """Метрики текущего состава по кэшам. None, если кэша ростеров ещё нет."""
-    from services import mod_ku
     codes = [code for code, _name in database.get_roster_by_player_id(guild_id).values() if code]
     units = database.get_player_units_bulk(codes)
     if not units:
@@ -67,7 +68,8 @@ def compute(guild_id: int) -> dict | None:
         if not roster:
             continue
         m["members"] += 1
-        m["gp"] += ((profiles.get(code) or {}).get("stats") or {}).get("STAT_GALACTIC_POWER_ACQUIRED_NAME") or 0
+        stats = (profiles.get(code) or {}).get("stats") or {}
+        m["gp"] += stats.get("STAT_GALACTIC_POWER_ACQUIRED_NAME") or 0
         for base_id, unit in roster.items():
             gear = unit.get("currentTier") or 0
             relic_tier = (unit.get("relic") or {}).get("currentTier") or 0
@@ -85,10 +87,10 @@ def compute(guild_id: int) -> dict | None:
         m["six_dot"] += mods["six_dot"]
         m["speed20"] += mods["s20"]
         m["dc_l9"] += pp._datacron_summary(datacrons.get(code) or [])["l9"]
-        result = mod_ku.compute(roster)
-        if result:
-            modku.append(result["modku"])
-    m["modku"] = round(sum(modku) / len(modku), 2) if modku else None
+        modq = pp.hotbot_modq(mods, stats.get("STAT_CHARACTER_GALACTIC_POWER_ACQUIRED_NAME"))
+        if modq is not None:
+            modku.append(modq)
+    m["modq"] = round(sum(modku) / len(modku), 2) if modku else None
     return m
 
 

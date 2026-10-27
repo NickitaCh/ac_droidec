@@ -185,12 +185,13 @@ def _datacron_summary(datacrons: list[dict]) -> dict:
     return out
 
 
-def _modku(roster: list[dict]) -> float | None:
-    """МодКу (services/mod_ku.py) в обычном режиме: вес плейтов зависит от гильдии, а профиль —
-    любой код союзника."""
-    from services import mod_ku
-    result = mod_ku.compute({_base_id(u): u for u in roster if _base_id(u)})
-    return result["modku"] if result else None
+def hotbot_modq(mods: dict, char_gp) -> float | None:
+    """МодКу как у HotBot (решение пользователя 2026-10-27: «модку сделай как в хб», своя формула
+    из services/mod_ku.py пока не показывается): вторички скорости надетых модулей
+    (N15–19 × 0.8 + N20–24 + N25+ × 1.6) / (ГМ персонажей / 100 000). mods — _mod_summary."""
+    if not char_gp:
+        return None
+    return round((mods["s15_19"] * 0.8 + mods["s20_24"] + mods["s25"] * 1.6) / (char_gp / 100000), 2)
 
 
 def _avg(values):
@@ -218,6 +219,8 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
         omicron_modes += _skill_counts(unit, skills)[1]
     relic_levels = [r["relic"] for r in chars if r["relic"] is not None]
     stats = meta.get("stats") or {}
+    char_gp = stats.get("STAT_CHARACTER_GALACTIC_POWER_ACQUIRED_NAME") or sum(r["gp"] for r in chars)
+    mods = _mod_summary(roster)
 
     def with_missing(ids):
         """Все юниты списка: чего нет — заглушка {missing: True} (HotBot показывает их серыми)."""
@@ -227,7 +230,7 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
     return {
         "meta": meta,
         "gp": stats.get("STAT_GALACTIC_POWER_ACQUIRED_NAME") or sum(r["gp"] for r in rows.values()),
-        "char_gp": stats.get("STAT_CHARACTER_GALACTIC_POWER_ACQUIRED_NAME") or sum(r["gp"] for r in chars),
+        "char_gp": char_gp,
         "ship_gp": stats.get("STAT_SHIP_GALACTIC_POWER_ACQUIRED_NAME") or sum(r["gp"] for r in rows.values() if r["is_ship"]),
         "top80": sum(r["gp"] for r in top80),
         "zetas": zetas,
@@ -243,13 +246,13 @@ def summarize(roster: list[dict], datacrons: list[dict], meta: dict, stat_calc, 
         # с наибольшей скоростью от модулей (не у лучших 80 по ГМ).
         "speed_g11": _avg(r["speed_mods"] for r in chars if r["gear"] >= 11 and r["mods_count"] == 6),
         "speed_top80": _avg(sorted((r["speed_mods"] for r in chars if r["speed_mods"] is not None), reverse=True)[:80]),
-        "modku": _modku(roster),
+        "modku": hotbot_modq(mods, char_gp),
         "relics": {
             "total": sum(relic_levels),
             **{f"r{n}": relic_levels.count(n) for n in range(5, 11)},
             "r1_4": sum(1 <= lv <= 4 for lv in relic_levels),
         },
-        "mods": _mod_summary(roster),
+        "mods": mods,
         "datacrons": _datacron_summary(datacrons),
         "gls": with_missing(ordered_gls(gls)),
         "meta_units": with_missing(META_CHARACTERS),

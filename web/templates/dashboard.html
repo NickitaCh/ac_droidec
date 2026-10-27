@@ -484,7 +484,10 @@
                             {% for t in widgets.mod_progress %}
                                 <a class="mp-widget-row" href="/mod-progress/{{ t.id }}">
                                     <span class="mp-widget-name">{{ t.plate }} <span class="muted">· срез {{ t.date }}</span></span>
-                                    <span class="mp-widget-bar"><span style="width: {{ t.pct }}%;"></span></span>
+                                    <span class="mp-widget-bar">
+                                        <span class="mp-widget-track"><span style="width: {{ t.pct }}%;"></span></span>
+                                        <span class="mp-widget-scale" aria-hidden="true"><span>0</span><span>25</span><span>50</span><span>75</span><span>100%</span></span>
+                                    </span>
                                     <span class="mp-widget-nums">
                                         <strong>{{ t.pct }}%</strong> · {{ ui.num(t.done) }} из {{ ui.num(t.total) }}
                                         · всё закрыли {{ t.full }} из {{ t.players }}
