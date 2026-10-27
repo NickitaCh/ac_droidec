@@ -387,6 +387,28 @@
         </div>
         {% endif %}
 
+        {% if show_my_tb %}
+        <div class="widget wc-wide" id="my-tb" data-tab="tb">
+            <div class="widget-header">
+                <h2>⚔️ Мой ВИ</h2>
+                {{ ui.help("По каждому этапу активного ордера: каких юнитов ставить во взводы и какие боевые миссии и спецмиссии планет этапа игрок проходит. Юниты из взводов до конца этапа заняты, поэтому готовность считается без них: «мешают взводы» — бой прошёл бы, но нужные юниты уходят во взводы. «Кем» — подходящие юниты игрока из списка боя (у боёв «любой персонаж» список не показываем). Состав — из ежечасного обновления.") }}
+            </div>
+            <div id="my-tb-body"><p class="widget-empty">Загружаю…</p></div>
+            <script>
+            (function () {
+                const body = document.getElementById("my-tb-body");
+                fetch("/player/{{ card.ally_code }}/tb").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
+                    body.innerHTML = html;
+                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
+                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
+                        body.querySelectorAll(".my-tb-round").forEach(d => { d.hidden = d.dataset.round !== btn.dataset.round; });
+                    }));
+                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить данные ВИ.</p>'; });
+            })();
+            </script>
+        </div>
+        {% endif %}
+
         {% if not card.departed_at %}
         <div class="widget" id="player-compare" data-tab="tools">
             <div class="widget-header">
@@ -444,28 +466,6 @@
                     img.src = URL.createObjectURL(await resp.blob());
                     img.hidden = false; msg.hidden = true;
                 });
-            })();
-            </script>
-        </div>
-        {% endif %}
-
-        {% if show_my_tb %}
-        <div class="widget wc-wide" id="my-tb" data-tab="tb">
-            <div class="widget-header">
-                <h2>⚔️ Мой ВИ</h2>
-                {{ ui.help("По каждому этапу активного ордера: каких юнитов ставить во взводы и какие боевые миссии и спецмиссии планет этапа игрок проходит. Юниты из взводов до конца этапа заняты, поэтому готовность считается без них: «мешают взводы» — бой прошёл бы, но нужные юниты уходят во взводы. «Кем» — подходящие юниты игрока из списка боя (у боёв «любой персонаж» список не показываем). Состав — из ежечасного обновления.") }}
-            </div>
-            <div id="my-tb-body"><p class="widget-empty">Загружаю…</p></div>
-            <script>
-            (function () {
-                const body = document.getElementById("my-tb-body");
-                fetch("/player/{{ card.ally_code }}/tb").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
-                    body.innerHTML = html;
-                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
-                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
-                        body.querySelectorAll(".my-tb-round").forEach(d => { d.hidden = d.dataset.round !== btn.dataset.round; });
-                    }));
-                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить данные ВИ.</p>'; });
             })();
             </script>
         </div>
