@@ -2395,7 +2395,7 @@ def _ensure_member_activity_table(cursor):
 
 
 def save_member_activity(guild_id: int, rows) -> None:
-    """rows — [(ally_code, lastActivityTime мс, guildJoinTime мс)] из get_guild (часовой синк
+    """rows — [(ally_code, lastActivityTime мс, guildJoinTime с)] из get_guild (часовой синк
     состава, ViolationsCog.update_roster_cache). Полная замена по гильдии — как user_mapping."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -2418,7 +2418,8 @@ def get_member_activity(guild_id: int) -> dict:
     cursor.execute("SELECT ally_code, last_activity, joined_at FROM member_activity WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
-    return {code: (last // 1000 if last else None, joined // 1000 if joined else None) for code, last, joined in rows}
+    # lastActivityTime в Comlink — миллисекунды, guildJoinTime — секунды (сверено 2026-10-27)
+    return {code: (last // 1000 if last else None, joined or None) for code, last, joined in rows}
 
 
 def move_registrations_to_guild(guild_id: int, roster_codes: set) -> None:
