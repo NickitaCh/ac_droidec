@@ -6,7 +6,7 @@
 {% block main_class %}wide{% endblock %}
 
 {% macro val(v) -%}
-{%- if v is none -%}—{%- elif v is float -%}{{ ("%.1f"|format(v)).replace(".", ",") if v < 1000 else ui.num(v|round|int) }}{%- else -%}{{ ui.num(v) }}{%- endif -%}
+{%- if v is none -%}—{%- elif v is float -%}{{ ("%.1f"|format(v)).replace(".", ",") if v|abs < 1000 else ui.num(v|round|int) }}{%- else -%}{{ ui.num(v) }}{%- endif -%}
 {%- endmacro %}
 {% macro diff(a, b) -%}
 {%- if a is none or b is none -%}—{%- else -%}{% set d = a - b %}{{ "+" if d > 0 else "" }}{{ val(d) }}{%- endif -%}

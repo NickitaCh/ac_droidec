@@ -2953,10 +2953,15 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 
 /* Сравнение игроков (/player/<код>/compare). */
 .cmp-table .cmp-section th { text-align: left; padding-top: 0.9em; font-size: 0.95em; }
-.cmp-table .cmp-label { white-space: nowrap; }
+.cmp-table { width: 100%; table-layout: fixed; }
+.cmp-table th, .cmp-table td, .cmp-table th .muted { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+.cmp-table thead th:first-child { width: 11em; }
+.cmp-table th, .cmp-table td { padding-left: 0.35em; padding-right: 0.35em; }
 .cmp-table td.cmp-best { font-weight: 700; color: var(--status-good); }
 .cmp-form input[name=with] { min-width: 16em; }
 @media (max-width: 40em) {
+    .cmp-table { table-layout: auto; }
+    .cmp-table thead th:first-child { width: auto; }
     .cmp-table .cmp-section th { display: block; padding: 0.8em 0 0.2em; }
     .cmp-table .cmp-label { white-space: normal; font-weight: 600; text-align: left; justify-content: flex-start; }
     .cmp-form input[name=with] { min-width: 0; width: 100%; }
