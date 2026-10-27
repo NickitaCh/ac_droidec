@@ -2934,3 +2934,9 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 .tbr-who-list { margin: 0.4em 0 0; padding-left: 1.6em; font-size: 0.88em; }
 .tbr-who-list li { padding: 0.1em 0; overflow-wrap: anywhere; }
 .tbr-who-name { font-weight: 600; }
+.tbr-hist-list { list-style: none; padding-left: 0; }
+@media (max-width: 40em) {
+    .tbr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6em; }
+    .tbr-tiles .stat-tile { padding: 0.7em 0.8em; }
+    .tbr-tiles .stat-value { font-size: 1.2em; }
+}

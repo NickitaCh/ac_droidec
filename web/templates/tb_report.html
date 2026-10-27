@@ -39,7 +39,7 @@
                     </div>
                     <div class="trend-chart-labels">
                         {% for completed_at, value in report.event_totals %}
-                            <span class="nowrap">{{ completed_at[:10] }}</span>
+                            <span class="nowrap" title="{{ completed_at[:10] }}">{{ completed_at[8:10] }}.{{ completed_at[5:7] }}</span>
                         {% endfor %}
                     </div>
                 </div>
@@ -196,80 +196,58 @@
                 <div class="table-toolbar">
                     <input type="search" placeholder="Поиск по игроку…" data-table-search="tb-history-table">
                 </div>
-                <div class="table-scroll">
-                    <table class="data" id="tb-history-table">
-                        <thead>
-                            <tr>
-                                <th data-sort="text">Игрок</th>
-                                <th data-sort="text">Статус</th>
-                                <th class="num" data-sort="num">Динамика очков</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in history_rows %}
-                                <tr data-search="{{ row.name|lower }}">
-                                    <td><a href="/tb/player/{{ row.name | urlencode }}">{{ row.name }}</a></td>
-                                    <td>
-                                        {% if row.regressed %}
-                                            <span class="badge badge-danger">🚨 просадка</span>
-                                        {% else %}
-                                            <span class="badge badge-ok">стабильно</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="num" data-value="{{ row.last_value or 0 }}">
-                                        <div class="sparkline-cell">
-                                            <svg class="sparkline {% if row.regressed %}regressed{% endif %}" viewBox="0 0 68 22" preserveAspectRatio="none">
-                                                <polyline points="{{ row.sparkline_points }}"></polyline>
-                                                {% for x, y, completed_at, value in row.sparkline_hits %}
-                                                    <circle cx="{{ x }}" cy="{{ y }}" r="{{ '2.4' if loop.last else '5' }}" opacity="{{ '1' if loop.last else '0' }}">
-                                                        <title>{{ completed_at[:10] }}: {{ ui.num(value) }} очков</title>
-                                                    </circle>
-                                                {% endfor %}
-                                            </svg>
-                                            <span class="nowrap">{{ ui.num(row.last_value) if row.last_value is not none else "—" }}</span>
-                                        </div>
-                                    </td>
-                                    <td class="row-actions">
+                <table class="data cards-on-phone" id="tb-history-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Игрок</th>
+                            <th data-sort="text">Статус</th>
+                            <th class="num" data-sort="num">Динамика очков</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in history_rows %}
+                            <tr data-search="{{ row.name|lower }}">
+                                <td data-label="Игрок"><a href="/tb/player/{{ row.name | urlencode }}">{{ row.name }}</a></td>
+                                <td data-label="Статус">
+                                    {% if row.regressed %}
+                                        <span class="badge badge-danger">🚨 просадка</span>
+                                    {% else %}
+                                        <span class="badge badge-ok">стабильно</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Динамика очков" class="num" data-value="{{ row.last_value or 0 }}">
+                                    <div class="sparkline-cell">
+                                        <svg class="sparkline {% if row.regressed %}regressed{% endif %}" viewBox="0 0 68 22" preserveAspectRatio="none">
+                                            <polyline points="{{ row.sparkline_points }}"></polyline>
+                                            {% for x, y, completed_at, value in row.sparkline_hits %}
+                                                <circle cx="{{ x }}" cy="{{ y }}" r="{{ '2.4' if loop.last else '5' }}" opacity="{{ '1' if loop.last else '0' }}">
+                                                    <title>{{ completed_at[:10] }}: {{ ui.num(value) }} очков</title>
+                                                </circle>
+                                            {% endfor %}
+                                        </svg>
+                                        <span class="nowrap">{{ ui.num(row.last_value) if row.last_value is not none else "—" }}</span>
+                                    </div>
+                                </td>
+                                <td data-label="" class="row-actions">
+                                    <div>
                                         <a href="/tb/compare/{{ row.name | urlencode }}" class="link-btn">сравнение</a>
                                         <details>
-                                            <summary class="link-btn">по метрикам</summary>
-                                            <div class="table-scroll">
-                                                <table class="data">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>ТБ</th>
-                                                            <th class="num">Очки</th>
-                                                            <th class="num">Юн</th>
-                                                            <th class="num">ОЗ</th>
-                                                            <th class="num">Волн</th>
-                                                            <th class="num">Поп</th>
-                                                            <th></th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {% for event_id, completed_at in report.events %}
-                                                            {% set s = row.per_event.get(event_id) %}
-                                                            <tr>
-                                                                <td class="nowrap">{{ completed_at[:10] }}</td>
-                                                                <td class="num nowrap">{{ ui.num(s.summary) if s else "—" }}</td>
-                                                                <td class="num">{{ s.unit_donated if s else "—" }}</td>
-                                                                <td class="num">{{ s.covert_attempt if s else "—" }}</td>
-                                                                <td class="num">{{ s.strike_encounter if s else "—" }}</td>
-                                                                <td class="num">{{ s.strike_attempt if s else "—" }}</td>
-                                                                <td>{% if s %}<a href="/tb/player/{{ row.name | urlencode }}?event_id={{ event_id }}" class="link-btn">подробно</a>{% endif %}</td>
-                                                            </tr>
-                                                        {% endfor %}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                            <summary class="link-btn">по битвам</summary>
+                                            <ul class="tbr-who-list tbr-hist-list">
+                                                {% for event_id, completed_at in report.events|reverse %}
+                                                    {% set s = row.per_event.get(event_id) %}
+                                                    <li><b class="nowrap">{{ completed_at[:10] }}</b>
+                                                        {% if s %}<span class="nowrap">{{ ui.num(s.summary) }}</span> <span class="muted nowrap">· волн {{ s.strike_encounter }} / боёв {{ s.strike_attempt }}</span> <span class="muted nowrap">· ОЗ {{ s.covert_attempt }}</span> <span class="muted nowrap">· взводы {{ s.unit_donated }}</span> <a href="/tb/player/{{ row.name | urlencode }}?event_id={{ event_id }}" class="link-btn">подробно</a>{% else %}<span class="muted">не участвовал</span>{% endif %}</li>
+                                                {% endfor %}
+                                            </ul>
                                         </details>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         {% endif %}
     {% endif %}
