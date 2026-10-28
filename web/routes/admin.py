@@ -39,9 +39,14 @@ def _get_comlink():
 
 @router.get("/guilds", response_class=HTMLResponse)
 async def guilds_page(request: Request, user: dict = Depends(require_super_admin)):
+    from services import bot_presence
+    guilds = list_guilds(active_only=False)
+    presence, presence_error = await bot_presence.overview(guilds)
     return templates.TemplateResponse(request, "admin_guilds.html", {
         "user": user,
-        "guilds": list_guilds(active_only=False),
+        "guilds": guilds,
+        "presence": presence,
+        "presence_error": presence_error,
         "error": request.query_params.get("error"),
     })
 

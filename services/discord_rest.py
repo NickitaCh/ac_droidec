@@ -45,6 +45,24 @@ async def send_message(channel_id: str, content: str, mention_user_ids: list[str
     channel_health.report_success(channel_id)
 
 
+async def list_bot_guilds() -> dict:
+    """{discord_guild_id: имя} — все серверы, где сейчас состоит бот (/users/@me/guilds, по 200)."""
+    out, after = {}, None
+    async with httpx.AsyncClient(timeout=15) as client:
+        for _ in range(10):
+            params = {"limit": 200, **({"after": after} if after else {})}
+            resp = await client.get(f"{DISCORD_API}/users/@me/guilds", headers=_headers(), params=params)
+            if resp.status_code >= 400:
+                raise DiscordRestError(f"Discord ответил {resp.status_code}: {resp.text[:200]}")
+            page = resp.json()
+            for g in page:
+                out[str(g["id"])] = g.get("name") or g["id"]
+            if len(page) < 200:
+                break
+            after = page[-1]["id"]
+    return out
+
+
 async def list_guild_channels(discord_guild_id: str) -> list[dict]:
     """[{id, name, type, category}] — каналы сервера, куда бот может писать, в порядке
     как в Discord (категория, затем позиция)."""
