@@ -3212,3 +3212,9 @@ dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 .platoon-dm-ch b { font-size: 1.1em; }
 .platoon-dm-none b { color: var(--status-critical); }
 .platoon-dm-hint { font-size: 0.85em; margin: 0.2em 0 0.7em; }
+@media (max-width: 40em) {
+    /* /tb/platoons на телефоне: длинное название этапа не распирает страницу, операции — колонкой */
+    .platoon-plan-switch { display: flex; width: 100%; }
+    .platoon-plan-switch select { min-width: 0; max-width: 100%; flex: 1 1 auto; }
+    .platoon-ops-grid { grid-template-columns: 1fr; }
+}

@@ -26,7 +26,7 @@
     </nav>
     {% if in_plan %}
     <nav class="hero-links tb-subnav tb-steps" aria-label="Шаги плана">
-        {% for href, key, label in [("/tb/plan" ~ ("?id=" ~ plan_id if plan_id else ""), "plan", "1 · Звёзды и залив"), ("/tb/platoons" ~ ("?plan_id=" ~ order_id if order_id else ""), "platoons", "2 · Взводы"), ("/tb/order" ~ ("?plan=" ~ plan_id if plan_id else ""), "order", "3 · Ордер в Discord")] %}
+        {% for href, key, label in [("/tb/plan" ~ ("?id=" ~ plan_id if plan_id else ""), "plan", "1 · Звёзды и залив"), ("/tb/platoons" ~ ("?plan_id=" ~ order_id if order_id else ""), "platoons", "2 · Взводы"), ("/tb/order" ~ ("?plan=" ~ plan_id if plan_id else ""), "order", "3 · Ордер")] %}
             <a class="hero-link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>
         {% endfor %}
     </nav>
