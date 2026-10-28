@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Эффекты способностей — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-dark">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Завоевание</p>
+                <h1>Эффекты способностей{% call ui.help() %}<p>Какие персонажи и корабли накладывают эффект — для подвигов «наложите X» в Завоевании и не только. Список взят из игровых данных (эффекты способностей на последнем уровне), обновляется раз в сутки.</p><p>Ваши юниты — первыми, с уровнем; «только мои» прячет эффекты, которых у вас нет.</p>{% endcall %}</h1>
+            </div>
+            <div class="hero-links"><a class="hero-link" href="/conquest">Калькулятор Завоевания</a></div>
+        </div>
+    </section>
+
+    {% if not rows %}
+        <div class="panel"><p class="muted">Справочник эффектов ещё не собран — он обновляется раз в сутки вместе со справочником юнитов.</p></div>
+    {% else %}
+        <div class="cq-who-bar">
+            <input type="search" id="fx-search" placeholder="Поиск эффекта" aria-label="Поиск эффекта">
+            <nav class="hero-links" id="fx-kinds">
+                <a class="hero-link" href="#" data-kind="" aria-current="page">Все</a>
+                {% for k, label in kind_labels.items() %}<a class="hero-link" href="#" data-kind="{{ k }}">{{ label }}</a>{% endfor %}
+            </nav>
+            {% if has_roster %}<label class="checkbox"><input type="checkbox" id="fx-only-mine"> Только мои</label>{% endif %}
+            {% if accounts|length > 1 %}
+                <nav class="hero-links">
+                    {% for a in accounts %}{% if account and a[0] == account[0] %}<strong class="hero-link">{{ a[1] or a[0] }}</strong>{% else %}<a class="hero-link" href="/conquest/effects?acc={{ a[0] }}">{{ a[1] or a[0] }}</a>{% endif %}{% endfor %}
+                </nav>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <div class="fx-list">
+                {% for r in rows %}
+                    <details class="fx-item" data-kind="{{ r.kind }}" data-mine="{{ r.mine|length }}" data-name="{{ r.name|lower }}">
+                        <summary>
+                            <strong>{{ r.name }}</strong>
+                            <span class="badge {{ 'badge-ok' if r.kind == 'buff' else ('badge-danger' if r.kind == 'debuff' else 'badge-neutral') }}">{{ kind_labels[r.kind]|lower }}</span>
+                            <span class="muted">{{ r.total }} юн.{% if has_roster %} · у вас {{ r.mine|length }}{% endif %}</span>
+                        </summary>
+                        {% if r.mine %}
+                            <p class="fx-units">{% for n, lv in r.mine %}{{ n }} <span class="muted">{{ lv }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+                        {% endif %}
+                        {% if r.other %}
+                            <p class="fx-units muted">{% if has_roster %}Нет у вас: {% endif %}{{ r.other|join(" · ") }}</p>
+                        {% endif %}
+                    </details>
+                {% endfor %}
+            </div>
+            <p class="widget-empty" id="fx-empty" hidden>Ничего не найдено.</p>
+        </div>
+        <script>
+        (function () {
+            const items = Array.from(document.querySelectorAll(".fx-item"));
+            const search = document.getElementById("fx-search");
+            const mine = document.getElementById("fx-only-mine");
+            let kind = "";
+            function apply() {
+                const q = search.value.trim().toLowerCase().replace(/ё/g, "е");
+                let shown = 0;
+                items.forEach(el => {
+                    const ok = (!kind || el.dataset.kind === kind)
+                        && (!q || el.dataset.name.replace(/ё/g, "е").includes(q))
+                        && (!mine || !mine.checked || el.dataset.mine !== "0");
+                    el.hidden = !ok;
+                    if (ok) shown++;
+                });
+                document.getElementById("fx-empty").hidden = shown > 0;
+            }
+            search.addEventListener("input", apply);
+            if (mine) mine.addEventListener("change", apply);
+            document.querySelectorAll("#fx-kinds a").forEach(a => a.addEventListener("click", ev => {
+                ev.preventDefault();
+                kind = a.dataset.kind;
+                document.querySelectorAll("#fx-kinds a").forEach(b => b === a ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
+                apply();
+            }));
+        })();
+        </script>
+    {% endif %}
+{% endblock %}

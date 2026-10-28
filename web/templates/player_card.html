@@ -410,6 +410,39 @@
         {% endif %}
 
         {% if not card.departed_at %}
+        <div class="widget" id="tb-advisor" data-tab="tb">
+            <div class="widget-header">
+                <h2>🧱 Докачать для взводов</h2>
+                {{ ui.help("Какие юниты докачать и открыть, чтобы закрывать взводы «Восхода Империи» на всех этапах. Раскладка взводов — стандартная (как в плане ВИ), а не текущий ордер. Юнит ставится во взвод раз за этап, поэтому этап засчитан, если уровня хватает на самую лёгкую планету этапа, где он нужен (Э — этап, ✓ — уже хватает). Сверху — юниты, закрывающие больше этапов.") }}
+            </div>
+            <div id="tb-advisor-body"><p class="widget-empty">Загружаю…</p></div>
+            <script>
+            (function () {
+                const body = document.getElementById("tb-advisor-body");
+                fetch("/player/{{ card.ally_code }}/tb-advisor").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
+                    body.innerHTML = html;
+                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
+                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
+                        body.querySelectorAll(".tb-adv-list").forEach(d => { d.hidden = d.dataset.adv !== btn.dataset.adv; });
+                    }));
+                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить советник.</p>'; });
+            })();
+            </script>
+        </div>
+
+        <div class="widget" id="mod-grade" data-tab="checks">
+            <div class="widget-header">
+                <h2>🎯 Оценка модов</h2>
+                {{ ui.help("Оценка А–Е каждого персонажа: как его моды выглядят на фоне того, как этого персонажа модят игроки всех гильдий бота (персонажи R6+ с шестью модами 15 уровня). Из чего балл: основы на стреле, треугольнике, круге и кресте (30 %), набор (20 %), скорость с модов — вторички и стрела, место среди остальных (35 %), качество — 6 точек и 15 уровень (15 %). Сверху — самые слабые; под ними — что поменять. А — 85+, Б — 70+, В — 55+, Г — 40+, Д — 25+, Е — ниже. Эталон пересчитывается раз в сутки.") }}
+            </div>
+            <div id="mod-grade-body"><p class="widget-empty">Загружаю…</p></div>
+            <script>
+            fetch("/player/{{ card.ally_code }}/mod-grade").then(r => r.ok ? r.text() : Promise.reject(r.status))
+                .then(html => { document.getElementById("mod-grade-body").innerHTML = html; })
+                .catch(() => { document.getElementById("mod-grade-body").innerHTML = '<p class="widget-empty">Не удалось загрузить оценку.</p>'; });
+            </script>
+        </div>
+
         <div class="widget" id="player-compare" data-tab="tools">
             <div class="widget-header">
                 <h2>⚖️ Сравнение игроков</h2>

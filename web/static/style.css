@@ -3006,3 +3006,10 @@ table.data.gl-matrix td, table.data.gl-matrix th { padding-left: 0.25em; padding
     .gl-matrix td:not(:first-child) { text-align: right; }
     .gl-met { display: inline; margin-left: 0.4em; }
 }
+
+/* Эффекты способностей (/conquest/effects) */
+.fx-list { display: flex; flex-direction: column; }
+.fx-item { border-bottom: 1px solid var(--border); padding: 0.45em 0; }
+.fx-item > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.6em; }
+.fx-units { margin: 0.4em 0 0.2em; line-height: 1.6; overflow-wrap: anywhere; }
+#fx-search { max-width: 16em; }

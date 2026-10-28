@@ -1626,6 +1626,13 @@ class StatRequirementsCog(commands.Cog):
                 await asyncio.to_thread(guild_snapshot.take, guild_id)
             except Exception as e:
                 print(f"⚠️ [Срез] Гильдия {guild_id}: {e!r}")
+        # Эталон для «Оценки модов» в карточке игрока (services/mod_grade.py) — раз в сутки.
+        from services import mod_grade
+        try:
+            if await asyncio.to_thread(mod_grade.refresh_reference):
+                print("✅ [Оценка модов] Эталон обновлён")
+        except Exception as e:
+            print(f"⚠️ [Оценка модов] Эталон не обновлён: {e!r}")
 
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):

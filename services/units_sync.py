@@ -379,5 +379,12 @@ async def sync_units(comlink) -> int:
         database.set_skill_tier_thresholds(_skill_tier_thresholds(skills_list, ability_names))
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить данные об омикронах/зетах: {e}")
+    else:
+        try:
+            from services import unit_effects
+            await unit_effects.sync(comlink, abilities_list, skills_list,
+                                    [u for u in _canonical_units(units_list) if u.get("baseId") in units_to_db], loc_ru_kv)
+        except Exception as e:
+            print(f"⚠️ [Справочник] Не удалось обновить эффекты способностей: {e}")
 
     return len(units_to_db)

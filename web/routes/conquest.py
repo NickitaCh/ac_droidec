@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 import guild_resolver
-from services import conquest, guild_units
+from services import conquest, guild_units, unit_effects
 from web.deps import get_current_user, own_accounts
 
 router = APIRouter()
@@ -120,6 +120,39 @@ async def conquest_page(request: Request, diff: str = "", acc: str = "", user: d
             "started": state["start"] <= datetime.now(timezone.utc).timestamp() * 1000,
         })
     return templates.TemplateResponse(request, "conquest.html", ctx)
+
+
+@router.get("/effects", response_class=HTMLResponse)
+async def effects_page(request: Request, acc: str = "", user: dict = Depends(require_conquest_access)):
+    """Эффекты способностей: кто накладывает эффект X (services/unit_effects.py), свои юниты
+    с уровнями первыми — для подвигов «наложите X»."""
+    effects = unit_effects.load()
+    accounts = _accounts(user)
+    account = (next((a for a in accounts if a[0] == acc), None)
+               or next((a for a in accounts if a[2]), None) or (accounts[0] if accounts else None))
+    roster = (database.get_player_units_bulk([account[0]]).get(account[0]) if account else None) or {}
+    ids = sorted({b for e in effects.values() for b in e["units"]})
+    names = database.get_game_unit_names(ids)
+    types = database.get_unit_types(ids)
+    rows = []
+    for tag, e in effects.items():
+        mine, other = [], []
+        for b in e["units"]:
+            is_ship = types.get(b) == "ship"
+            if b in roster:
+                lv = guild_units.level_of(roster[b])
+                mine.append(((lv["stars"], lv["relic"] if lv["relic"] is not None else -1, lv["gear"]),
+                             names.get(b, b), guild_units.level_text(lv, is_ship)))
+            else:
+                other.append(names.get(b, b))
+        mine.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        rows.append({"tag": tag, "name": e["name"], "kind": e["kind"], "total": len(e["units"]),
+                     "mine": [(n, lv) for _k, n, lv in mine], "other": sorted(other, key=str.lower)})
+    rows.sort(key=lambda r: r["name"].lower())
+    return templates.TemplateResponse(request, "unit_effects.html", {
+        "user": user, "rows": rows, "kind_labels": unit_effects.KIND_LABELS,
+        "accounts": accounts, "account": account, "has_roster": bool(roster),
+    })
 
 
 @router.post("/save")

@@ -1,0 +1,26 @@
+{# «Оценка модов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
+{% set grade_badge = {"А": "badge-ok", "Б": "badge-ok", "В": "badge-neutral", "Г": "badge-warn", "Д": "badge-danger", "Е": "badge-danger"} %}
+{% macro unit_row(u) %}
+    <li>
+        <span class="badge {{ grade_badge[u.letter] }}">{{ u.letter }} {{ u.score }}</span>
+        <strong>{{ u.name }}</strong> <span class="muted">R{{ u.relic }} · скорость с модов +{{ u.speed }}</span>
+        <div class="my-tb-detail muted">{% for k, v in u.parts.items() %}{{ part_labels[k] }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        {% for h in u.hints %}<div class="my-tb-detail">{{ h }}</div>{% endfor %}
+    </li>
+{% endmacro %}
+{% if not data %}
+    <p class="widget-empty">Состав игрока ещё не загружен — появится после ежечасного обновления.</p>
+{% elif not data.built %}
+    <p class="widget-empty">Эталон ещё собирается — он обновляется раз в сутки после обновления ростеров.</p>
+{% elif not data.units %}
+    <p class="widget-empty">Нет персонажей с модами, для которых есть эталон.</p>
+{% else %}
+    <p>Средний балл <strong>{{ data.average }}</strong> · оценено персонажей: {{ data.units|length }}</p>
+    <p class="mod-grade-counts">{% for g, n in data.counts %}<span class="badge {{ grade_badge[g] }}">{{ g }}: {{ n }}</span> {% endfor %}</p>
+    <ul class="my-tb-missions">{% for u in data.units[:8] %}{{ unit_row(u) }}{% endfor %}</ul>
+    {% if data.units|length > 8 %}
+        <details><summary>Все персонажи ({{ data.units|length }})</summary>
+            <ul class="my-tb-missions">{% for u in data.units[8:] %}{{ unit_row(u) }}{% endfor %}</ul>
+        </details>
+    {% endif %}
+{% endif %}

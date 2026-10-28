@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import player_compare, tb_forecast, tb_missions, tb_my, tb_order_image, tb_plan, tb_projection, tb_results
+from services import mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_image, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -2514,6 +2514,27 @@ async def player_my_tb(request: Request, ally_code: str, user: dict = Depends(re
     if not data.get("error") and not data.get("rounds"):
         data = {"error": "В активном ордере не нашлось планет по этапам."}
     return templates.TemplateResponse(request, "_player_tb.html", {"data": data})
+
+
+@router.get("/player/{ally_code}/tb-advisor", response_class=HTMLResponse)
+async def player_tb_advisor(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    """«Докачать для взводов» — фрагмент карточки (services/tb_advisor.py, стандартная раскладка)."""
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    roster = await asyncio.to_thread(database.get_player_units, ally_code)
+    data = await asyncio.to_thread(tb_advisor.build, ally_code, roster) if roster else None
+    return templates.TemplateResponse(request, "_player_tb_advisor.html", {"data": data})
+
+
+@router.get("/player/{ally_code}/mod-grade", response_class=HTMLResponse)
+async def player_mod_grade(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    """«Оценка модов» — фрагмент карточки (services/mod_grade.py, эталон по всем гильдиям бота)."""
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    roster = await asyncio.to_thread(database.get_player_units, ally_code)
+    data = await asyncio.to_thread(mod_grade.player_grades, roster) if roster else None
+    return templates.TemplateResponse(request, "_player_mod_grade.html", {"data": data, "part_labels": {
+        "primary": "основы", "sets": "наборы", "speed": "скорость", "quality": "качество"}})
 
 
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
