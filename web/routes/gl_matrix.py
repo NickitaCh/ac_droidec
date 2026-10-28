@@ -32,5 +32,6 @@ async def gl_matrix_page(request: Request, kind: str = "gl", user: dict = Depend
         matrix = await asyncio.to_thread(guild_units.guide_matrix, user["guild_id"], kind)
         _cache[key] = (time.time(), matrix)
     return templates.TemplateResponse(request, "gl_matrix.html", {
-        "user": user, "kind": kind, "kinds": [(k, matrix["kinds"][k]) for k in KINDS], **matrix,
+        "user": user, "kind": kind, "kinds": [(k, matrix["kinds"][k]) for k in KINDS],
+        "guides": matrix["guides"], "players": matrix["players"],
     })
