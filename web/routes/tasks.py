@@ -179,8 +179,7 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
     return None
 
 
-async def _mention_new_tasks(guild_id: int, lines_by_code: dict,
-                             header: str = "📝 Новые задачи на прокачку:") -> None:
+async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
     """Тег игроков в канале задач о новых задачах — по флагу tasks_mention (включают
     гильдии сами, у AC выключен). Раньше это делала Discord-команда /задачи добавить;
     постановка теперь только на сайте (2026-10-14). Сбой отправки задачу не отменяет.
@@ -192,7 +191,7 @@ async def _mention_new_tasks(guild_id: int, lines_by_code: dict,
         for code, text in lines_by_code.items():
             owner = outbox.owner_for_ally(guild_id, code)
             tg_lines.append(f"{f'<@{owner}> ' if owner else ''}**{names.get(code, code)}** — {text}")
-        outbox.enqueue_guild(guild_id, "tasks", header + "\n" +"\n".join(tg_lines))
+        outbox.enqueue_guild(guild_id, "tasks", "📝 Новые задачи на прокачку:\n" + "\n".join(tg_lines))
     if not lines_by_code or not feature_flags.is_enabled(guild_id, "tasks_mention"):
         return
     channel_id = (database.get_guild_config(guild_id) or {}).get("tasks_log_channel_id")
@@ -205,7 +204,7 @@ async def _mention_new_tasks(guild_id: int, lines_by_code: dict,
             mention_ids.append(str(discord_id))
             lines.append(f"<@{discord_id}> — {text}")
     try:
-        for chunk in discord_rest.chunk_lines(header, lines):
+        for chunk in discord_rest.chunk_lines("📝 Новые задачи на прокачку:", lines):
             await discord_rest.send_message(str(channel_id), chunk, mention_ids)
     except Exception as e:
         print(f"⚠️ [web/tasks] Не удалось тегнуть игроков о новых задачах: {e}")
@@ -791,23 +790,17 @@ async def tasks_resume(
     departed = set(database.get_departed_players(guild_id))
     picked = []
     for row in database.get_all_tasks(guild_id):
-        task_id, ally_code, base_id, target_type, target_value, _dl, status, batch_id = row[:8]
+        task_id, ally_code, status, batch_id = row[0], row[1], row[6], row[7]
         resolved_at, archived_at, is_personal = row[12], row[13], row[14]
         if (status != "FAILED" or is_personal or ally_code in departed
                 or database.is_task_archived(resolved_at, status, archived_at)):
             continue
         if group == "all" or (group == "single" and not batch_id) or batch_id == group:
-            picked.append((task_id, ally_code, base_id, target_type, target_value))
-    resumed = database.resume_failed_tasks([p[0] for p in picked], guild_id, deadline)
+            picked.append(task_id)
+    resumed = database.resume_failed_tasks(picked, guild_id, deadline)
     if not resumed:
         return RedirectResponse(f"/tasks?{urlencode({'error': 'Просроченных задач в этой группе нет.'})}", status_code=303)
 
-    unit_names = database.get_game_unit_names([p[2] for p in picked])
-    by_code = {}
-    for _tid, code, base_id, target_type, target_value in picked:
-        by_code.setdefault(code, []).append(f"{unit_names.get(base_id) or base_id}: {_target_label(target_type, target_value)}")
-    await _mention_new_tasks(guild_id, {code: f"{', '.join(items)}, новый срок до {deadline}" for code, items in by_code.items()},
-                             header="🔁 Просроченные задачи возобновлены:")
     return RedirectResponse(f"/tasks?{urlencode({'notice': f'Возобновлено задач: {resumed}, срок до {deadline}'})}", status_code=303)
 
 
