@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Отряды для боёв ВИ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Восход Империи</p>
+                <h1>Отряды для боёв{% call ui.help(side="left") %}<p>Какими отрядами проходят каждую миссию. База — открытая карта ВИ {{ source }}, обновляется раз в сутки. Номера миссий (c1…c8) — как у источника, по месту на карте.</p><p>Под гильдию: базовый отряд можно скрыть, можно добавить свой. Правки видны только вашей гильдии и сохраняются при обновлении базы. Эти отряды подсказывает игрокам «Мой ВИ» в карточке.</p><p>«Могут выставить» — у скольких игроков гильдии все юниты отряда на реликвии планеты (корабли — 7★).</p>{% endcall %}</h1>
+            </div>
+            <div class="hero-links">
+                <a class="hero-link" href="/tb/plan">План ВИ</a>
+            </div>
+        </div>
+        <nav class="hero-tabs">
+            {% for ph in phases %}{% if ph == phase %}<strong>Этап {{ ph }}</strong>{% else %}<a href="/tb/squads?phase={{ ph }}">Этап {{ ph }}</a>{% endif %}{% endfor %}
+        </nav>
+    </section>
+
+    {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
+    {% if not planets %}
+        <div class="panel"><p class="muted">База отрядов ещё не загружена — бот забирает её раз в сутки.</p></div>
+    {% endif %}
+
+    {% for planet, p in planets.items() %}
+        <div class="panel" id="{{ planet|replace(' ', '_') }}">
+            <div class="panel-title"><span>{{ p.ru }}{% if p.bonus %} · бонусная{% endif %}</span><span class="panel-hint">персонажи R{{ p.min_relic }}+, корабли 7★ · в гильдии {{ members }} игроков</span></div>
+            {% for m in p.missions %}
+                <details class="tbsq-mission" {% if loop.first %}open{% endif %}>
+                    <summary>
+                        <strong>{{ m.label }} {{ m.id }}</strong>
+                        <span class="muted">{{ m.requirements|join("; ") }}</span>
+                        <span class="badge badge-neutral">{{ m.squads|rejectattr("hidden")|list|length }} отр.</span>
+                    </summary>
+                    {% if m.enemies %}<p class="muted tbsq-enemies">{{ m.enemies|join(" · ") }}</p>{% endif %}
+                    <ul class="tbsq-list">
+                        {% for s in m.squads %}
+                            <li class="{{ 'tbsq-hidden' if s.hidden }}">
+                                <div class="tbsq-units">
+                                    {% for u in s.units %}<img src="/unit-img/{{ u }}" alt="" title="{{ s.names[loop.index0] }}{{ ' (омикрон)' if u in s.omicron }}" width="34" height="34" loading="lazy" class="{{ 'tbsq-omi' if u in s.omicron }}">{% endfor %}
+                                </div>
+                                <div class="tbsq-info">
+                                    <strong>{{ s.name or s.names[0] }}</strong>
+                                    {% if s.source == "guild" %}<span class="badge badge-ok">наш</span>{% else %}<span class="badge badge-neutral">{{ source }}</span>{% endif %}
+                                    {% if s.hidden %}<span class="badge badge-warn">скрыт</span>{% endif %}
+                                    <div class="muted">{{ s.names|join(", ") }}{% if s.omicron %} · нужен омикрон: {% for u in s.omicron %}{{ s.names[s.units.index(u)] }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+                                    <div>Могут выставить: <strong>{{ s.can }}</strong> из {{ members }}{% if s.video %} · <a href="{{ s.video }}" target="_blank" rel="noopener">видео</a>{% endif %}</div>
+                                </div>
+                                <form method="post" action="/tb/squads/{{ 'delete' if s.source == 'guild' else 'hide' }}" class="tbsq-action">
+                                    <input type="hidden" name="planet" value="{{ planet }}">
+                                    <input type="hidden" name="mission" value="{{ m.id }}">
+                                    <input type="hidden" name="key" value="{{ s.key }}">
+                                    <input type="hidden" name="phase" value="{{ phase }}">
+                                    {% if s.source == "guild" %}
+                                        <button type="submit" class="button-secondary">Удалить</button>
+                                    {% else %}
+                                        <input type="hidden" name="hidden" value="{{ 0 if s.hidden else 1 }}">
+                                        <button type="submit" class="button-secondary">{{ "Вернуть" if s.hidden else "Скрыть" }}</button>
+                                    {% endif %}
+                                </form>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    <form method="post" action="/tb/squads/add" class="tbsq-add">
+                        <input type="hidden" name="planet" value="{{ planet }}">
+                        <input type="hidden" name="mission" value="{{ m.id }}">
+                        <input type="hidden" name="phase" value="{{ phase }}">
+                        <input type="text" name="name" placeholder="Название (необязательно)" maxlength="80">
+                        <input type="text" name="units" required placeholder="Юниты через запятую: лидер первым, напр. «Лорд Вейдер, Палпатин, Таркин…»">
+                        <button type="submit">Добавить отряд</button>
+                    </form>
+                </details>
+            {% endfor %}
+        </div>
+    {% endfor %}
+{% endblock %}

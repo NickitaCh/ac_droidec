@@ -3013,3 +3013,19 @@ table.data.gl-matrix td, table.data.gl-matrix th { padding-left: 0.25em; padding
 .fx-item > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.6em; }
 .fx-units { margin: 0.4em 0 0.2em; line-height: 1.6; overflow-wrap: anywhere; }
 #fx-search { max-width: 16em; }
+
+/* Отряды для боёв ВИ (/tb/squads) */
+.tbsq-mission { border-top: 1px solid var(--border); padding: 0.5em 0; }
+.tbsq-mission > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3em 0.6em; }
+.tbsq-enemies { font-size: 0.85em; margin: 0.3em 0; }
+.tbsq-list { list-style: none; padding: 0; margin: 0.4em 0; }
+.tbsq-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.8em; padding: 0.45em 0; border-bottom: 1px dashed var(--border); }
+.tbsq-list li.tbsq-hidden { opacity: 0.5; }
+.tbsq-units { display: flex; flex-wrap: wrap; gap: 2px; }
+.tbsq-units img { border-radius: 50%; }
+.tbsq-units img.tbsq-omi { box-shadow: 0 0 0 2px #a855f7; }
+.tbsq-info { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
+.tbsq-action { max-width: none; margin: 0; }
+.tbsq-add { max-width: none; display: flex; flex-wrap: wrap; gap: 0.4em; margin-top: 0.5em; }
+.tbsq-add input[name="name"] { flex: 1 1 12em; }
+.tbsq-add input[name="units"] { flex: 3 1 20em; }

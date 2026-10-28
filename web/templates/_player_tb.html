@@ -39,6 +39,21 @@
                             {% endfor %}
                         </ul>
                     {% endif %}
+                    {% if p.squads %}
+                        <details class="my-tb-squads">
+                            <summary>Отряды для боёв: готово {{ p.squads|selectattr("ready")|list|length }} из {{ p.squads|length }} миссий</summary>
+                            <ul class="my-tb-missions">
+                                {% for s in p.squads %}
+                                    <li>
+                                        {% if s.ready %}<span class="badge badge-ok">есть отряд</span>{% elif s.missing %}<span class="badge badge-neutral">не хватает</span>{% else %}<span class="badge badge-danger">мешают взводы</span>{% endif %}
+                                        <strong>{{ s.label }}</strong>
+                                        {% if s.ready %}<div class="my-tb-detail">{{ s.ready|join(" · ") }}{% if s.more %} <span class="muted">и ещё {{ s.more }}</span>{% endif %}</div>
+                                        {% else %}<div class="my-tb-detail">Ближе всего: {{ s.best }}{% if s.missing %} — не хватает: {{ s.missing|join(", ") }}{% endif %}{% if s.busy %} — во взводах: {{ s.busy|join(", ") }}{% endif %}</div>{% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                    {% endif %}
                 </div>
             {% endfor %}
         </div>

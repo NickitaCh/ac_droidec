@@ -11,7 +11,7 @@ tb_plan_reader.fetch_plan_planets; назначения — tb_platoon_assignmen
 import database
 import tb_plan_reader
 import tb_platoon_data
-from services import tb_covert, tb_forecast
+from services import tb_squads, tb_covert, tb_forecast
 
 
 async def load_order(guild_id: int) -> tuple[dict | None, list, str | None]:
@@ -85,6 +85,28 @@ def _strike_row(m: dict, levels: dict, free: dict, ships: set, donated: set, ru:
     return row
 
 
+def _squad_rows(planet: dict | None, roster: dict, ships: set, donated: set, ru: dict) -> list:
+    """Миссии планеты из библиотеки отрядов (services/tb_squads.py): готовые отряды игрока
+    без юнитов взводов, иначе ближайший — чего не хватает / что занято во взводах."""
+    if not planet:
+        return []
+    out = []
+    for m in planet["missions"]:
+        squads = tb_squads.player_squads(m, roster, planet["min_relic"], ships, donated)
+        if not squads:
+            continue
+        ready = [s for s in squads if s["ready"]]
+        row = {"label": f"{m['label']} {m['id']}", "total": len(squads),
+               "ready": [s["name"] or ru.get(s["units"][0], s["units"][0]) for s in ready][:3], "more": max(0, len(ready) - 3)}
+        if not ready:
+            best = min(squads, key=lambda s: (len(s["missing"]) + len(s["busy"]), len(s["missing"])))
+            row["best"] = best["name"] or ru.get(best["units"][0], best["units"][0])
+            row["missing"] = [ru.get(u, u) for u in best["missing"]]
+            row["busy"] = [ru.get(u, u) for u in best["busy"]]
+        out.append(row)
+    return out
+
+
 def build(guild_id: int, ally_code: str, order: dict, entries: list) -> dict:
     """{order_name, rounds: [{round, planets: [{planet, ru, no_platoons, platoons, missions}],
     donated_total}]} — блокирующая (sqlite), звать через to_thread."""
@@ -98,6 +120,8 @@ def build(guild_id: int, ally_code: str, order: dict, entries: list) -> dict:
     strikes = tb_forecast.strike_missions()
     ids = set(roster) | {p["base_id"] for rows in platoons.values() for p in rows if p["base_id"]}
     ids |= {b for m in strikes for b in m["mandatory"]}
+    library = tb_squads.library(guild_id)
+    ids |= {u for p in library.values() for m in p["missions"] for sq in m["squads"] for u in sq["units"]}
     ru = database.get_game_unit_names(sorted(ids))
     out = []
     for rnd, planets in rounds.items():
@@ -121,6 +145,7 @@ def build(guild_id: int, ally_code: str, order: dict, entries: list) -> dict:
                                  "reward": tb_covert.reward_compact(m)})
             rows.append({
                 "planet": planet, "ru": tb_covert.planet_ru(planet), "no_platoons": no_platoons,
+                "squads": _squad_rows(library.get(planet), roster, ships, donated, ru),
                 "platoons": [{"operation": p["operation"], "name": ru.get(p["base_id"], p["en"]) if p["base_id"] else p["en"]}
                              for p in mine if p["planet"] == planet],
                 "missions": missions,

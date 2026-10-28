@@ -63,6 +63,12 @@ class TasksCog(commands.Cog):
             print(f"✅ [Задачи] Требования «Руководства» обновлены: {rows}")
         except Exception as e:
             print(f"⚠️ [Задачи] Не удалось обновить требования «Руководства»: {e}")
+        try:
+            from services import tb_squads
+            squads = await asyncio.to_thread(tb_squads.sync)
+            print(f"✅ [ВИ] Отряды для боёв ({tb_squads.SOURCE_NAME}) обновлены: {squads}")
+        except Exception as e:
+            print(f"⚠️ [ВИ] Не удалось обновить отряды для боёв: {e!r}")
 
     @units_sync_loop.before_loop
     async def before_units_sync(self):
