@@ -3197,7 +3197,8 @@ dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 .notify-goes { margin-left: auto; font-weight: 600; }
 .notify-goes-none { color: var(--status-critical); }
 .notify-modes { display: flex; flex-direction: column; gap: 0.35em; }
-.notify-mode { display: flex; align-items: center; gap: 0.45em; cursor: pointer; }
+.notify-mode { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 0.5em; cursor: pointer; text-align: left; margin: 0; }
+.notify-mode input[type="radio"] { width: auto; flex: 0 0 auto; margin: 0; }
 .notify-totals { display: flex; flex-wrap: wrap; gap: 0.4em 1em; margin: 0.7em 0 0.3em; }
 .notify-dest b { font-size: 1.15em; }
 .notify-dest-none b { color: var(--status-critical); }
