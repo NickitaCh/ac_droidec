@@ -2852,11 +2852,9 @@ form.mc-form { max-width: none; display: block; }
 }
 .mp-widget-scale { position: relative; height: 1em; font-size: 0.72em; color: var(--fg-secondary); font-variant-numeric: tabular-nums; line-height: 1; }
 .mp-widget-scale > span { position: absolute; top: 0; transform: translateX(-50%); }
-.mp-widget-scale > span:nth-child(1) { left: 0; transform: none; }
-.mp-widget-scale > span:nth-child(2) { left: 25%; }
-.mp-widget-scale > span:nth-child(3) { left: 50%; }
-.mp-widget-scale > span:nth-child(4) { left: 75%; }
-.mp-widget-scale > span:nth-child(5) { right: 0; transform: none; }
+/* подписи — под каждой насечкой (через 10 %), позиция в style="left"; крайние — по краю, чтобы не вылезать */
+.mp-widget-scale > span:first-child { transform: none; }
+.mp-widget-scale > span:last-child { left: auto !important; right: 0; transform: none; }
 .mp-widget-nums { grid-area: nums; color: var(--fg-secondary); font-size: 0.88em; }
 @media (max-width: 640px) {
     .mp-widget-row { grid-template-columns: 1fr; grid-template-areas: "name" "bar" "nums"; }
