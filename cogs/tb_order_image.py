@@ -72,8 +72,6 @@ from cogs.guild_events import (
     TB_ORDER_STAGE_RE,
     _tb_order_stage_number,
     chunk_tb_order_message,
-    extract_tb_order_block,
-    fetch_tb_order_source_messages,
 )
 from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
@@ -285,28 +283,29 @@ class TBOrderImage(commands.Cog):
         await inter.edit_original_response(content=view.render(), view=view.build())
 
     async def plan_preview_chunks(self, plan: dict) -> list[str]:
-        thread_id = int(plan["thread_id"])
-        try:
-            thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
-        except disnake.NotFound:
-            return ["❌ Ветка плана не найдена — возможно, удалена."]
-        except disnake.Forbidden:
-            return ["❌ Нет доступа к ветке плана."]
-        messages = await fetch_tb_order_source_messages(self.bot, thread_id)
-        blocks, missing = [], []
+        """Что бот опубликует на каждый этап — тем же выбором, что автопост: тексты с сайта
+        (services/tb_order_store.py) главнее треда, ордер с сайта может быть без треда."""
+        from services import tb_order_store
+
+        blocks, error = await tb_order_store.resolve_blocks(plan)
+        parts, missing = [], []
         for phase in range(1, 7):
-            block = extract_tb_order_block(messages, str(phase))
+            block = blocks.get(phase)
             if block:
-                blocks.append(f"**— Этап {phase} —**\n{block}")
+                mark = "" if block["source"] == "thread" else f" ({tb_order_store.SOURCE_LABELS[block['source']]})"
+                parts.append(f"**— Этап {phase}{mark} —**\n{block['text']}")
             else:
                 missing.append(phase)
-                blocks.append(f"**— Этап {phase} —**\n⚠️ не нашёл в ветке")
+                parts.append(f"**— Этап {phase} —**\n⚠️ нет текста")
         status = f"⚠️ Не хватает этапов: {', '.join(map(str, missing))}" if missing else "✅ Все 6 этапов найдены."
+        if error:
+            status += f"\n⚠️ {error}"
+        where = f" (<#{plan['thread_id']}>)" if plan.get("thread_id") else " (ордер с сайта)"
         header = (
-            f"🔍 Предпросмотр плана «{plan['name']}» (<#{thread.id}>) — так уйдёт в канал ежедневным "
+            f"🔍 Предпросмотр плана «{plan['name']}»{where} — так уйдёт в канал ежедневным "
             f"автоордером, публикации в канал не было.\n{status}\n\n"
         )
-        return chunk_tb_order_message(header + "\n\n".join(blocks))
+        return chunk_tb_order_message(header + "\n\n".join(parts))
 
     async def save_thread_plan(self, guild_id: int, link: str, name: str, stars: int, author_id: int) -> str:
         """Регистрирует готовую ветку как план — с проверкой, что в ней есть все 6 этапов."""
@@ -365,7 +364,8 @@ class TBPlanPanel(disnake.ui.View):
         lines = ["🗺️ **Планы ордера ТБ** — активный план бот публикует по этапам в канал плана ТБ."]
         for p in self.plans[:25]:
             mark = " — 🟢 **активный**" if p["id"] == self.active_id else ""
-            lines.append(f"• **{p['name']}** — {p['total_stars']} ★, <#{p['thread_id']}>{mark}")
+            where = f"<#{p['thread_id']}>" if p["thread_id"] else "на сайте"
+            lines.append(f"• **{p['name']}** — {p['total_stars'] or '?'} ★, {where}{mark}")
         if len(self.plans) > 25:
             lines.append(f"…и ещё {len(self.plans) - 25} — удалите старые, в списке помещается 25.")
         return "\n".join(lines)
@@ -377,7 +377,7 @@ class TBPlanPanel(disnake.ui.View):
             plan_select = disnake.ui.Select(
                 placeholder="План", row=0,
                 options=[disnake.SelectOption(label=p["name"][:100], value=str(p["id"]),
-                                              description=f"{p['total_stars']} ★" + (" · активный" if p["id"] == self.active_id else ""),
+                                              description=f"{p['total_stars'] or '?'} ★" + (" · активный" if p["id"] == self.active_id else ""),
                                               default=p["id"] == self.plan_id)
                          for p in self.plans[:25]],
             )

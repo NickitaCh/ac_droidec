@@ -10,7 +10,7 @@ import json
 import re
 import database
 import guild_resolver
-from services import feature_flags, tb_schedule
+from services import feature_flags, tb_order_store, tb_schedule
 import tempfile
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -183,6 +183,20 @@ def extract_tb_order_block(messages: list, phase: str):
             continue
         result = content.strip()
     return result
+
+
+def _tb_order_to_telegram(guild_id: int, order_id: int, phase: int, block: str) -> None:
+    """Автопост этапа заодно в Telegram-чаты гильдии с оповещением «Ордер ВИ» (tg_bot/outbox.py);
+    свой текст для Telegram (tb_order_store) главнее. Ошибка не мешает посту в Discord."""
+    try:
+        from tg_bot import outbox
+
+        row = tb_order_store.get_phases(order_id).get(phase)
+        text = tb_order_store.tg_text(row) if row and row["source"] in tb_order_store.SOURCES_OVER_THREAD else block
+        if outbox.enqueue_guild(guild_id, "tb_order", text):
+            tb_order_store.mark_sent(order_id, phase, "tg")
+    except Exception as e:
+        print(f"⚠️ [TBOrder] Telegram: {e}")
 
 
 def chunk_tb_order_message(text: str, limit: int = 2000):
@@ -391,15 +405,25 @@ class GuildEvents(commands.Cog):
             # (/тб_план выбрать) — берём его ветку, иначе фолбэк на старый
             # статический guilds.tb_order_source_channel_id (ручная ветка-план).
             source_channel_id = None
+            active_plan = None
             if guild_cfg.get("tb_active_plan_id"):
                 active_plan = database.get_tb_saved_plan(int(guild_cfg["tb_active_plan_id"]))
-                if active_plan:
+                if active_plan and active_plan.get("thread_id"):
                     source_channel_id = int(active_plan["thread_id"])
-            if source_channel_id is None and guild_cfg.get("tb_order_source_channel_id"):
+            if source_channel_id is None and active_plan is None and guild_cfg.get("tb_order_source_channel_id"):
                 source_channel_id = int(guild_cfg["tb_order_source_channel_id"])
+            # Этапы ордера в базе (services/tb_order_store.py, 2026-10-28): правка/импорт/план с
+            # сайта главнее треда, а ордер, собранный на сайте, треда может вообще не иметь.
+            db_phase = tb_order_store.get_phases(active_plan["id"]).get(int(phase)) if active_plan else None
+            db_override = db_phase["text"] if db_phase and db_phase["source"] in tb_order_store.SOURCES_OVER_THREAD else None
 
-            if not guild_cfg.get("tb_plan_channel_id") or not source_channel_id \
+            if not guild_cfg.get("tb_plan_channel_id") or not (source_channel_id or db_phase) \
                     or not guild_cfg.get("tb_order_role_id"):
+                continue
+            if active_plan and tb_order_store.recently_sent(active_plan["id"], int(phase), "discord"):
+                # этап уже отправили вручную с сайта — не дублируем
+                self._tb_order_sent_key[gid] = current_key
+                print(f"ℹ️ [TBOrder] [{gname}] Этап {phase} уже отправлен с сайта — автопост пропущен")
                 continue
 
             if current_key == self._tb_order_sent_key.get(gid):
@@ -415,8 +439,17 @@ class GuildEvents(commands.Cog):
                 continue
 
             try:
-                messages = await fetch_tb_order_source_messages(self.bot, source_channel_id)
-                block = extract_tb_order_block(messages, phase)
+                block = db_override
+                if block is None and source_channel_id:
+                    try:
+                        messages = await fetch_tb_order_source_messages(self.bot, source_channel_id)
+                        block = extract_tb_order_block(messages, phase)
+                    except disnake.HTTPException as e:
+                        if not db_phase:
+                            raise
+                        print(f"⚠️ [TBOrder] [{gname}] Тред ордера не прочитался ({e}) — беру копию из базы")
+                if block is None and db_phase:
+                    block = db_phase["text"]
                 if not block:
                     print(f"❌ [TBOrder] [{gname}] Не нашёл блок {phase} этапа в ветке-плане")
                     continue
@@ -428,6 +461,10 @@ class GuildEvents(commands.Cog):
                 for chunk in chunk_tb_order_message(message_text):
                     await channel.send(chunk)
                 self._tb_order_sent_key[gid] = current_key
+                if active_plan and db_phase:
+                    tb_order_store.mark_sent(active_plan["id"], int(phase), "discord")
+                if active_plan:
+                    _tb_order_to_telegram(gid, active_plan["id"], int(phase), block)
                 print(f"✅ [TBOrder] [{gname}] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
             except Exception as e:
                 print(f"❌ [TBOrder] [{gname}] Ошибка отправки ордера: {e}")

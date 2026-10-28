@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_image, tb_plan, tb_projection, tb_results
+from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_image, tb_order_store, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -253,7 +253,7 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
         plans.append({
             **p,
             "active": p["id"] == active_id,
-            "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id else None,
+            "thread_link": f"https://discord.com/channels/{discord_guild_id}/{p['thread_id']}" if discord_guild_id and p["thread_id"] else None,
         })
 
     # Шаг «Ордер» плана (?plan=<id плана>): по умолчанию — активный план.
@@ -277,8 +277,11 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
         else:
             preview, preview_error = await tb_plan_reader.fetch_order_preview(preview_plan)
 
+    editor = await _order_editor(request, guild_id, guild_cfg, plans, step_plan)
+
     return templates.TemplateResponse(request, "tb_order.html", {
         "user": user,
+        "editor": editor,
         "grid": grid,
         "has_bonus": has_bonus,
         "conflict_options": TB_PLAN_CONFLICT_OPTIONS,
@@ -294,6 +297,176 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
         "preview_error": preview_error,
         "image_job": tb_order_image.get_job(guild_id),
     })
+
+
+async def _order_editor(request: Request, guild_id: int, guild_cfg: dict, plans: list, step_plan: dict | None) -> dict | None:
+    """Редактор ордера по этапам (services/tb_order_store.py): какой ордер (?order=, иначе ордер
+    шага плана, иначе активный, иначе последний), какой этап (?phase=, иначе идущий этап ВИ)."""
+    if not plans:
+        return None
+    raw = request.query_params.get("order", "")
+    order = next((p for p in plans if raw.isdigit() and p["id"] == int(raw)), None)
+    if order is None and step_plan and step_plan.get("order_plan_id"):
+        order = next((p for p in plans if p["id"] == step_plan["order_plan_id"]), None)
+    order = order or next((p for p in plans if p["active"]), None) or plans[0]
+    current = tb_order_store.current_phase()
+    raw_phase = request.query_params.get("phase", "")
+    phase = int(raw_phase) if raw_phase.isdigit() and 1 <= int(raw_phase) <= 6 else (current or 1)
+    blocks, error = await tb_order_store.resolve_blocks({**order, "guild_id": guild_id})
+    block = blocks.get(phase) or {}
+    row = block.get("row") or {}
+    from tg_bot import outbox
+    return {
+        "order": order, "phase": phase, "current": current, "error": error,
+        "phases": [{"phase": ph, "has": ph in blocks, "source": (blocks.get(ph) or {}).get("source")} for ph in range(1, 7)],
+        "text": block.get("text") or "", "source": block.get("source"), "link": block.get("link"),
+        "tg_text": row.get("tg_text") or "",
+        "sent_discord": row.get("sent_discord_at"), "sent_tg": row.get("sent_tg_at"),
+        "source_labels": tb_order_store.SOURCE_LABELS,
+        "channel_set": bool(guild_cfg.get("tb_plan_channel_id")),
+        "role_set": bool(guild_cfg.get("tb_order_role_id")),
+        "tg_chats": len(outbox.chats_for(guild_id, "tb_order")),
+        "notice": request.query_params.get("order_msg"), "order_error": request.query_params.get("order_err"),
+    }
+
+
+def _order_back(order_id: int, phase: int, msg: str = None, err: str = None) -> RedirectResponse:
+    q = {"order": order_id, "phase": phase, **({"order_msg": msg} if msg else {}), **({"order_err": err} if err else {})}
+    return RedirectResponse(f"/tb/order?{urlencode(q)}#order-editor", status_code=303)
+
+
+def _own_order(guild_id: int, order_id: int) -> dict:
+    order = database.get_tb_saved_plan(order_id)
+    if order is None or order["guild_id"] != guild_id:
+        raise HTTPException(status_code=404)
+    return order
+
+
+@router.post("/tb/order/{order_id}/phase/{phase}/save")
+async def tb_order_phase_save(order_id: int, phase: int, text: str = Form(default=""), tg_text: str = Form(default=""),
+                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Правка этапа на сайте: дальше бот берёт этот текст, а не тред."""
+    _own_order(user["guild_id"], order_id)
+    if not 1 <= phase <= 6:
+        raise HTTPException(status_code=404)
+    if not text.strip():
+        return _order_back(order_id, phase, err="Текст этапа пустой — нечего сохранять.")
+    tb_order_store.save_phase(order_id, phase, text, "edited", by=f"web:{user['discord_id']}",
+                              tg_text=tg_text, keep_tg=False)
+    return _order_back(order_id, phase, msg=f"Этап {phase} сохранён — бот опубликует этот текст.")
+
+
+@router.post("/tb/order/{order_id}/phase/{phase}/import")
+async def tb_order_phase_import(order_id: int, phase: int, link: str = Form(...),
+                                user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Перенос этапа из готового сообщения Discord по ссылке."""
+    _own_order(user["guild_id"], order_id)
+    if not 1 <= phase <= 6:
+        raise HTTPException(status_code=404)
+    try:
+        text = await tb_order_store.fetch_message(link)
+    except (RuntimeError, httpx.HTTPError) as e:
+        return _order_back(order_id, phase, err=str(e))
+    mismatch = tb_order_store.phase_mismatch(text, phase)
+    if mismatch:
+        return _order_back(order_id, phase, err=mismatch)
+    tb_order_store.save_phase(order_id, phase, text, "message", by=f"web:{user['discord_id']}", link=link.strip())
+    return _order_back(order_id, phase, msg=f"Этап {phase} перенесён из сообщения.")
+
+
+@router.post("/tb/order/{order_id}/phase/{phase}/reset")
+async def tb_order_phase_reset(order_id: int, phase: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Вернуть этап к треду: бот снова читает тред (правка сайта для этого этапа отменяется)."""
+    order = _own_order(user["guild_id"], order_id)
+    if not order.get("thread_id"):
+        return _order_back(order_id, phase, err="У ордера нет треда — возвращать не к чему.")
+    try:
+        blocks = await tb_order_store.thread_blocks(order["thread_id"])
+    except (RuntimeError, httpx.HTTPError) as e:
+        return _order_back(order_id, phase, err=f"Тред не прочитался: {e}")
+    if phase not in blocks:
+        return _order_back(order_id, phase, err=f"В треде нет этапа {phase}.")
+    tb_order_store.save_phase(order_id, phase, blocks[phase], "thread", by="thread", keep_tg=False)
+    return _order_back(order_id, phase, msg=f"Этап {phase} снова берётся из треда.")
+
+
+@router.post("/tb/order/{order_id}/phase/{phase}/send")
+async def tb_order_phase_send(order_id: int, phase: int, where: str = Form(...),
+                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Ручная отправка этапа в канал Discord (с упоминанием роли, как автопост) или в Telegram."""
+    order = _own_order(user["guild_id"], order_id)
+    blocks, _err = await tb_order_store.resolve_blocks(order)
+    if phase not in blocks:
+        return _order_back(order_id, phase, err=f"У этапа {phase} нет текста.")
+    if not tb_order_store.get_phases(order_id).get(phase):  # текст из треда без копии — сохранить копию
+        tb_order_store.save_phase(order_id, phase, blocks[phase]["text"], "thread", by="thread")
+    try:
+        if where == "discord":
+            msg = await tb_order_store.send_discord(user["guild_id"], order_id, phase)
+        elif where == "tg":
+            msg = tb_order_store.send_telegram(user["guild_id"], order_id, phase)
+        else:
+            raise HTTPException(status_code=400)
+    except (RuntimeError, httpx.HTTPError) as e:
+        return _order_back(order_id, phase, err=str(e))
+    return _order_back(order_id, phase, msg=msg)
+
+
+@router.post("/tb/order/preview")
+async def tb_order_preview_render(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Предпросмотр «как будет в мессенджере»: {kind: discord|tg, text} → сообщения в HTML.
+    Discord — та же нарезка, что у отправки (с упоминанием роли); Telegram — тот же рендер,
+    которым шлёт бот (tg_bot/notifier.py::render)."""
+    body = await request.json()
+    text = str(body.get("text") or "")[:20000]
+    if body.get("kind") == "tg":
+        from tg_bot import notifier
+        chunks = notifier.render(text) if text.strip() else []
+        return JSONResponse({"messages": chunks, "chars": len(text), "limit": 4096})
+    role_id = (database.get_guild_config(user["guild_id"]) or {}).get("tb_order_role_id")
+    chunks = tb_order_store.discord_chunks(text, role_id) if text.strip() else []
+    names = {str(role_id): "роль ордера"} if role_id else {}
+    return JSONResponse({"messages": [discord_preview.render(c, names) for c in chunks],
+                         "chars": len(text), "limit": tb_order_store.DISCORD_LIMIT})
+
+
+@router.post("/tb/order/import-new")
+async def tb_order_import_new(request: Request, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Новый ордер из готовых сообщений Discord: ссылка на сообщение на каждый этап (пустые —
+    можно добавить потом в редакторе). Треда не нужно."""
+    form = await request.form()
+    guild_id = user["guild_id"]
+    name = str(form.get("name") or "").strip()[:80]
+    if not name:
+        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Укажите название ордера'})}#import-new", status_code=303)
+    texts, errors = {}, []
+    for phase in range(1, 7):
+        link = str(form.get(f"link{phase}") or "").strip()
+        if not link:
+            continue
+        try:
+            text = await tb_order_store.fetch_message(link)
+        except (RuntimeError, httpx.HTTPError) as e:
+            errors.append(f"этап {phase}: {e}")
+            continue
+        mismatch = tb_order_store.phase_mismatch(text, phase)
+        if mismatch:
+            errors.append(f"этап {phase}: {mismatch}")
+        else:
+            texts[phase] = (text, link)
+    if errors or not texts:
+        msg = "; ".join(errors) if errors else "Не указано ни одной ссылки."
+        return RedirectResponse(f"/tb/order?{urlencode({'error': msg})}#import-new", status_code=303)
+    if database.get_tb_saved_plan_by_name(guild_id, name):
+        return RedirectResponse(f"/tb/order?{urlencode({'error': f'Ордер «{name}» уже есть — выберите другое название'})}#import-new", status_code=303)
+    stars = str(form.get("stars") or "").strip()
+    order_id = database.save_tb_plan(guild_id, name, "", int(stars) if stars.isdigit() else None,
+                                     created_by=f"web:{user['discord_id']}")
+    for phase, (text, link) in texts.items():
+        tb_order_store.save_phase(order_id, phase, text, "message", by=f"web:{user['discord_id']}", link=link)
+    if form.get("make_active"):
+        database.update_guild_config(guild_id, tb_active_plan_id=order_id)
+    return _order_back(order_id, min(texts), msg=f"Ордер «{name}» создан: перенесено этапов — {len(texts)} из 6.")
 
 
 @router.get("/tb/order/api/stage-messages")
@@ -851,7 +1024,7 @@ async def tb_plan_activate(plan_id: int, user: dict = Depends(feature_flags.requ
 
 
 @router.post("/tb/plan/{plan_id}/publish", response_class=HTMLResponse)
-async def tb_plan_publish(plan_id: int, thread_link: str = Form(...), name: str = Form(default=""),
+async def tb_plan_publish(plan_id: int, thread_link: str = Form(default=""), name: str = Form(default=""),
                           force: str = Form(default=""), make_active: str = Form(default=""),
                           user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Ордер из плана → ветка Discord (6 этапов, как у «ордера из картинки») → план ордера

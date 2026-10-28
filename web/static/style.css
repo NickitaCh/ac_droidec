@@ -3106,3 +3106,73 @@ dialog.stat-problem-dialog.mg-dialog { max-width: 56em; }
 .tasks-mini-main { flex: 1 1 10em; overflow-wrap: anywhere; }
 .tasks-mini-target { flex: 0 1 auto; font-size: 0.9em; }
 .tasks-mini .muted { font-size: 0.85em; }
+
+/* ---- Ордер ВИ по этапам (_tb_order_editor.html) ---- */
+#order-editor form, .tbo-import-new { max-width: none; }
+.tbo-pick select { max-width: 18em; }
+.tbo-status { margin: 0.2em 0 0.7em; }
+.tbo-phases { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.35em; margin-bottom: 0.7em; }
+.tbo-phase {
+    display: flex; flex-direction: column; align-items: center; gap: 0.1em; padding: 0.45em 0.3em;
+    border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: inherit; text-align: center; min-width: 0;
+}
+.tbo-phase small { color: var(--fg-secondary); font-size: 0.75em; overflow-wrap: anywhere; }
+.tbo-phase.empty { opacity: 0.6; }
+.tbo-phase.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tbo-source { margin: 0 0 0.6em; }
+.tbo-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1em; align-items: start; }
+.tbo-edit textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; resize: vertical; }
+.tbo-hint { font-size: 0.82em; margin: 0.3em 0; }
+.tbo-actions { margin-top: 0.5em; }
+.tbo-preview-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.4em; font-size: 0.85em; margin-bottom: 0.35em; }
+.tbo-preview { border-radius: 8px; padding: 0.8em; max-height: 34em; overflow-y: auto; }
+.tbo-preview-empty { opacity: 0.6; margin: 0; }
+.tbo-preview[hidden] { display: none; }
+.tbo-bottom { display: flex; flex-direction: column; gap: 0.6em; margin-top: 0.9em; }
+.tbo-send { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; }
+.tbo-send form, .tbo-bottom > form { margin: 0; }
+.tbo-import { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5em; }
+.tbo-import input { flex: 1 1 16em; min-width: 0; width: auto; }
+.tbo-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(17em, 1fr)); gap: 0.4em 0.8em; margin: 0.4em 0; }
+.tbo-import-new label { display: block; }
+.tbo-import-new input[type="text"] { width: 100%; box-sizing: border-box; }
+@media (max-width: 800px) {
+    .tbo-grid { grid-template-columns: 1fr; }
+    .tbo-phases { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Макет Discord (тёмная тема клиента) — цвета фиксированы, это картинка «как в Discord», не тема сайта. */
+.tbo-preview-discord { background: #313338; color: #dbdee1; font-family: "gg sans", "Noto Sans", "Helvetica Neue", Arial, sans-serif; font-size: 15px; line-height: 1.375; }
+.dc-msg { display: flex; gap: 0.8em; padding: 0.25em 0; }
+.dc-msg + .dc-msg { margin-top: 0.15em; }
+.dc-msg + .dc-msg .dc-avatar, .dc-msg + .dc-msg .dc-author { visibility: hidden; height: 0; }
+.dc-avatar { flex: 0 0 40px; height: 40px; border-radius: 50%; background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.dc-body { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.dc-author { color: #f2f3f5; font-weight: 500; margin-bottom: 0.1em; }
+.dc-bot { background: #5865f2; color: #fff; font-size: 10px; font-weight: 600; border-radius: 3px; padding: 0 4px; vertical-align: 2px; }
+.dc-content .dc-h1 { font-size: 1.5em; font-weight: 700; color: #f2f3f5; margin: 0.4em 0 0.2em; line-height: 1.3; }
+.dc-content .dc-h2 { font-size: 1.25em; font-weight: 700; color: #f2f3f5; margin: 0.4em 0 0.2em; line-height: 1.3; }
+.dc-content .dc-h3 { font-size: 1em; font-weight: 700; color: #f2f3f5; margin: 0.4em 0 0.2em; }
+.dc-content > :first-child { margin-top: 0; }
+.dc-sub { font-size: 0.8em; color: #949ba4; }
+.dc-empty { height: 1.375em; }
+.dc-quote { margin: 0.1em 0; padding: 0 0 0 0.75em; border-left: 4px solid #4e5058; }
+.dc-content strong { color: #f2f3f5; }
+.dc-content code { background: #2b2d31; border-radius: 4px; padding: 0 0.2em; font-size: 0.85em; }
+.dc-pre { background: #2b2d31; border: 1px solid #1e1f22; border-radius: 4px; padding: 0.5em; white-space: pre-wrap; font-size: 0.85em; margin: 0.3em 0; }
+.dc-mention { background: rgba(88, 101, 242, 0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+.dc-spoiler { background: #1e1f22; color: transparent; border-radius: 3px; }
+.dc-spoiler:hover { color: inherit; }
+.dc-emoji { width: 1.375em; height: 1.375em; vertical-align: -0.3em; object-fit: contain; }
+.tbo-preview-discord a { color: #00a8fc; }
+
+/* Макет Telegram (тёмная тема) */
+.tbo-preview-tg { background: #0e1621; display: flex; flex-direction: column; align-items: flex-start; gap: 0.4em; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-size: 15px; line-height: 1.35; }
+.tg-bubble { background: #182533; color: #f5f5f5; border-radius: 12px 12px 12px 4px; padding: 0.45em 0.7em; max-width: 92%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tg-bubble blockquote { margin: 0.2em 0; padding: 0.15em 0.5em; border-left: 3px solid #6ab3f3; background: rgba(106, 179, 243, 0.1); border-radius: 4px; }
+.tg-bubble pre, .tg-bubble code { background: rgba(0, 0, 0, 0.3); border-radius: 4px; font-size: 0.88em; }
+.tg-bubble pre { padding: 0.4em; margin: 0.2em 0; white-space: pre-wrap; }
+.tg-bubble a { color: #6ab3f3; }
+@media (max-width: 40em) {
+    table.cards-on-phone td.row-actions { flex-wrap: wrap; justify-content: flex-start; gap: 0.4em; }
+}

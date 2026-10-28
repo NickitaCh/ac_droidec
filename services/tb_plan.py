@@ -277,12 +277,24 @@ class PublishError(Exception):
 
 
 async def publish(guild_id: int, result: dict, link: str, name: str, force: bool, created_by: str) -> tuple[int, str]:
-    """Опубликовать ордер плана в ветку Discord и сохранить как план ордера.
-    → (id плана ордера, сообщение)."""
+    """Сохранить ордер плана (6 этапов) как план ордера; с ссылкой на ветку — ещё и выложить в неё.
+    Без ветки этапы живут только в базе (services/tb_order_store.py, 2026-10-28) и уходят в канал
+    автопостом или кнопкой на вкладке «Ордер». → (id плана ордера, сообщение)."""
     import os
     import tb_platoon_autofill
+    from services import tb_order_store
 
     blocks, total = tb_order_image.build_order_blocks(order_data(result))
+    if not (link or "").strip():
+        order_id = database.save_tb_plan(guild_id, name, "", total, created_by=created_by)
+        for phase, block in enumerate(blocks, start=1):
+            tb_order_store.save_phase(order_id, phase, block, "generated", by=created_by, keep_tg=False)
+        parts = [f"Ордер «{name}» ({total}★) сохранён на сайте — 6 этапов, без ветки Discord."]
+        try:
+            parts.append(tb_order_image.summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, order_id)))
+        except (ValueError, RuntimeError) as e:
+            parts.append(f"Взводы автоматически не расставлены: {e}.")
+        return order_id, " ".join(parts)
     thread_id = tb_order_image._thread_id_from_link(link)
     if thread_id is None:
         raise PublishError("Не удалось распознать ссылку на ветку.")

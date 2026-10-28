@@ -61,6 +61,37 @@ def _scan_field(lines: list, start_i: int, field_ru: str, max_lines: int = 6):
     return None
 
 
+async def _thread_rounds(plan: dict) -> tuple[dict, str | None]:
+    """{этап: текст} из треда ордера по заголовку «Восход Империи — N этап» (новейшее сообщение
+    на этап — при повторной публикации с "принудительно: True") + ошибка чтения."""
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        return {}, "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
+                headers={"Authorization": f"Bot {token}"},
+                params={"limit": 100},
+            )
+            resp.raise_for_status()
+            messages = resp.json()
+    except httpx.HTTPError as e:
+        return {}, f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
+
+    # Discord отдаёт сообщения от новых к старым — для дублей берём первое встреченное
+    # (самое новое) на каждый этап.
+    by_round: dict = {}
+    for msg in messages:
+        content = msg.get("content") or ""
+        header = _TB_PLAN_HEADER_RE.search(content)
+        if header:
+            by_round.setdefault(int(header.group(1)), content)
+    if not by_round:
+        return {}, f"В треде плана «{plan['name']}» не нашлось ни одного блока этапа."
+    return by_round, None
+
+
 async def fetch_plan_planets(plan: dict) -> tuple:
     """Возвращает (список {"planet": англ.название|None, "raw": как было в сообщении,
     "round": N, "no_platoons": bool}, текст_ошибки|None). Планета=None — распознали блок
@@ -76,35 +107,22 @@ async def fetch_plan_planets(plan: dict) -> tuple:
     текстом говорит, что взводы на ней не нужны (прямая жалоба пользователя). Потребители
     (web/routes/guild_dashboard.py::tb_platoons, tb_platoon_autofill.py) должны пропускать
     планету с no_platoons=True при построении слотов."""
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        return [], "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
+    from services import tb_order_store
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
-                headers={"Authorization": f"Bot {token}"},
-                params={"limit": 100},
-            )
-            resp.raise_for_status()
-            messages = resp.json()
-    except httpx.HTTPError as e:
-        return [], f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
-
-    # Discord отдаёт сообщения от новых к старым — для дублей (повторная публикация
-    # с "принудительно: True") берём первое встреченное (самое новое) на каждый этап.
+    # Этапы из базы (services/tb_order_store.py): правка/импорт/план с сайта главнее треда;
+    # копии треда — только если треда нет или он не читается. Ордер без треда — целиком из базы.
+    db_rows = tb_order_store.get_phases(plan["id"]) if plan.get("id") else {}
     by_round: dict = {}
-    for msg in messages:
-        content = msg.get("content") or ""
-        header = _TB_PLAN_HEADER_RE.search(content)
-        if not header:
-            continue
-        round_num = int(header.group(1))
-        by_round.setdefault(round_num, content)
-
+    thread_error = None
+    if plan.get("thread_id"):
+        by_round, thread_error = await _thread_rounds(plan)
+    if thread_error or not plan.get("thread_id"):
+        by_round = {ph: r["text"] for ph, r in db_rows.items()}
+    for ph, r in db_rows.items():
+        if r["source"] in tb_order_store.SOURCES_OVER_THREAD:
+            by_round[ph] = r["text"]
     if not by_round:
-        return [], f"В треде плана «{plan['name']}» не нашлось ни одного блока этапа."
+        return [], thread_error or f"В ордере «{plan['name']}» не нашлось ни одного этапа."
 
     entries = []
     for round_num in sorted(by_round):
@@ -170,26 +188,10 @@ async def fetch_order_preview(plan: dict) -> tuple:
     TB_ORDER_STAGE_RE), читая сообщения через тот же REST-путь, что и
     fetch_plan_planets выше, вместо живого бота. Возвращает (список из 6
     {"phase": N, "block": текст|None}, текст_ошибки|None)."""
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        return [], "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
+    from services import tb_order_store
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"https://discord.com/api/v10/channels/{plan['thread_id']}/messages",
-                headers={"Authorization": f"Bot {token}"},
-                params={"limit": 100},
-            )
-            resp.raise_for_status()
-            messages = resp.json()
-    except httpx.HTTPError as e:
-        return [], f"Не удалось прочитать тред плана «{plan['name']}» в Discord: {e}"
-
-    # Discord отдаёт сообщения от новых к старым — extract_tb_order_block ожидает
-    # порядок "от старых к новым" (как bot.history(oldest_first=True)) и сам берёт
-    # ПОСЛЕДНЕЕ совпадение при повторной публикации, поэтому список разворачиваем.
-    contents = [m.get("content") or "" for m in reversed(messages)]
-
-    result = [{"phase": phase, "block": extract_tb_order_block(contents, str(phase))} for phase in range(1, 7)]
-    return result, None
+    blocks, error = await tb_order_store.resolve_blocks(plan)
+    if error and not blocks:
+        return [], error
+    return [{"phase": phase, "block": (blocks.get(phase) or {}).get("text"),
+             "source": (blocks.get(phase) or {}).get("source")} for phase in range(1, 7)], None

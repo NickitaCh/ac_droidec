@@ -36,7 +36,24 @@ def _inline(text: str) -> str:
     text = _UNDERLINE_RE.sub(r"<u>\1</u>", text)
     text = _STRIKE_RE.sub(r"<s>\1</s>", text)
     text = _ITALIC_RE.sub(r"<i>\1</i>", text)
+    text = _quotes(text)
     return re.sub("\x00(\\d+)\x00", lambda m: codes[int(m.group(1))], text)
+
+
+def _quotes(text: str) -> str:
+    """Строки «> …» подряд (цитата Discord, ей оформлен ордер ВИ) → один <blockquote>."""
+    out, buf = [], []
+    for line in text.split("\n"):
+        if line.startswith("&gt; ") or line == "&gt;":
+            buf.append(line[5:])
+            continue
+        if buf:
+            out.append("<blockquote>" + "\n".join(buf) + "</blockquote>")
+            buf = []
+        out.append(line)
+    if buf:
+        out.append("<blockquote>" + "\n".join(buf) + "</blockquote>")
+    return "\n".join(out)
 
 
 def md_to_html(text: str) -> str:

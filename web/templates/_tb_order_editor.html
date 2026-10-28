@@ -1,0 +1,135 @@
+{# Редактор ордера по этапам (services/tb_order_store.py) — вкладка «Ордер». Контекст: editor
+   (web/routes/guild_dashboard.py::_order_editor), plans. Предпросмотр — POST /tb/order/preview. #}
+{% set e = editor %}
+{% set o = e.order %}
+<div class="panel" id="order-editor">
+    <div class="panel-title">
+        <span>Ордер по этапам{% call ui.help() %}<p>Текст каждого этапа хранится на сайте. Пока этап не правили, бот берёт его из треда, как раньше. После правки или импорта из сообщения бот берёт текст с сайта.</p><p>Активный ордер бот публикует сам в 20:00 МСК в канал плана ВИ. Этап, отправленный кнопкой, автопост в тот день не повторяет.</p>{% endcall %}</span>
+        <form method="get" action="/tb/order" class="tbo-pick">
+            <select name="order" onchange="this.form.submit()" aria-label="Ордер">
+                {% for p in plans %}<option value="{{ p.id }}"{{ " selected" if p.id == o.id }}>{{ p.name }}{{ " · активный" if p.active }}</option>{% endfor %}
+            </select>
+            <input type="hidden" name="phase" value="{{ e.phase }}">
+            <noscript><button type="submit">Открыть</button></noscript>
+        </form>
+    </div>
+
+    {% if e.notice %}<p><span class="badge badge-ok">{{ e.notice }}</span></p>{% endif %}
+    {% if e.order_error %}<p class="error">{{ e.order_error }}</p>{% endif %}
+    {% if e.error %}<p class="config-warning">{{ e.error }}</p>{% endif %}
+
+    <p class="muted tbo-status">
+        {% if e.current %}Идёт <strong>{{ e.current }} этап</strong> ВИ.{% else %}ВИ сейчас не идёт.{% endif %}
+        {% if o.active %}Ордер активный — бот публикует его в 20:00 МСК.{% else %}Ордер не активный — автопоста по нему нет, только отправка кнопкой.{% endif %}
+        {% if not e.channel_set %}<span class="error">Не задан канал плана ВИ — <a href="/settings">Настройки</a>.</span>{% elif not e.role_set %}Роль для упоминания не задана — ордер уйдёт без тега.{% endif %}
+    </p>
+
+    <nav class="tbo-phases" aria-label="Этап">
+        {% for p in e.phases %}
+            <a class="tbo-phase{{ ' active' if p.phase == e.phase }}{{ ' empty' if not p.has }}" href="/tb/order?order={{ o.id }}&phase={{ p.phase }}#order-editor">
+                <b>{{ p.phase }} этап</b>
+                <small>{% if p.phase == e.current %}сейчас{% elif not p.has %}нет текста{% else %}{{ e.source_labels[p.source] }}{% endif %}</small>
+            </a>
+        {% endfor %}
+    </nav>
+
+    <p class="tbo-source">
+        {% if e.source %}Источник: <strong>{{ e.source_labels[e.source] }}</strong>{% if e.link %} · <a href="{{ e.link }}" target="_blank" rel="noopener">сообщение ↗</a>{% endif %}{% else %}У этого этапа пока нет текста — напишите его или перенесите из сообщения.{% endif %}
+        {% if e.sent_discord %} · <span class="muted">в Discord: <span data-ts="{{ e.sent_discord }}"></span></span>{% endif %}
+        {% if e.sent_tg %} · <span class="muted">в Telegram: <span data-ts="{{ e.sent_tg }}"></span></span>{% endif %}
+    </p>
+
+    <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/save" class="tbo-form" id="tbo-form">
+        <nav class="pill-tabs" role="tablist">
+            <button type="button" class="pill-tab active" data-tbo-tab="discord">Discord</button>
+            <button type="button" class="pill-tab" data-tbo-tab="tg">Telegram</button>
+        </nav>
+        <div class="tbo-grid">
+            <div class="tbo-edit">
+                <div data-tbo-pane="discord">
+                    <textarea name="text" rows="18" data-tbo-kind="discord" spellcheck="false" placeholder="## Восход Империи — {{ e.phase }} этап&#10;> 🔴 **Мустафар**&#10;> **Цель:** 3 звезды&#10;> **Взводы:** все">{{ e.text }}</textarea>
+                    <p class="muted tbo-hint">Разметка Discord: **жирный**, *курсив*, ## заголовок, &gt; цитата, -# мелкий текст. Упоминание роли бот добавит сам.</p>
+                </div>
+                <div data-tbo-pane="tg" hidden>
+                    <textarea name="tg_text" rows="18" data-tbo-kind="tg" spellcheck="false" placeholder="Пусто — в Telegram уйдёт тот же текст, что в Discord">{{ e.tg_text }}</textarea>
+                    <p class="muted tbo-hint">Свой текст для Telegram — если нужен другой. Разметка та же, что в Discord; эмодзи сервера и упоминания в Telegram не показываются.</p>
+                </div>
+                <div class="tbo-actions">
+                    <button type="submit">Сохранить этап</button>
+                </div>
+            </div>
+            <div class="tbo-preview-wrap">
+                <div class="tbo-preview-head"><span data-tbo-title>Как будет в Discord</span><span class="muted" data-tbo-count></span></div>
+                <div class="tbo-preview tbo-preview-discord" data-tbo-preview="discord"></div>
+                <div class="tbo-preview tbo-preview-tg" data-tbo-preview="tg" hidden></div>
+            </div>
+        </div>
+    </form>
+
+    <div class="tbo-bottom">
+        <div class="tbo-send">
+            <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/send"
+                  {% if e.sent_discord %}onsubmit="return confirm('Этот этап уже отправляли в Discord. Отправить ещё раз?');"{% endif %}>
+                <input type="hidden" name="where" value="discord">
+                <button type="submit" {{ "disabled" if not e.text or not e.channel_set }}>Отправить {{ e.phase }} этап в Discord</button>
+            </form>
+            <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/send"
+                  {% if e.sent_tg %}onsubmit="return confirm('Этот этап уже отправляли в Telegram. Отправить ещё раз?');"{% endif %}>
+                <input type="hidden" name="where" value="tg">
+                <button type="submit" class="button-secondary" {{ "disabled" if not e.text or not e.tg_chats }}
+                        title="{{ 'Чатов: ' ~ e.tg_chats if e.tg_chats else 'Нет Telegram-чата с оповещением «Ордер ВИ» (в чате /bind, затем /notify)' }}">Отправить в Telegram</button>
+            </form>
+            <span class="muted tbo-hint">Перед отправкой сохраните правки — уходит сохранённый текст.</span>
+        </div>
+        <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/import" class="tbo-import">
+            <input type="text" name="link" placeholder="Ссылка на сообщение с ордером на {{ e.phase }} этап" required aria-label="Ссылка на сообщение">
+            <button type="submit" class="button-secondary">Перенести из сообщения</button>
+        </form>
+        {% if o.thread_id and e.source and e.source != "thread" %}
+            <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/reset" onsubmit="return confirm('Вернуть этап к тексту из треда? Правка на сайте пропадёт.');">
+                <button type="submit" class="button-secondary">Вернуть к треду</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+<script>
+(function () {
+    const root = document.getElementById("order-editor");
+    if (!root) return;
+    root.querySelectorAll("[data-ts]").forEach(el => {
+        el.textContent = new Date(el.dataset.ts * 1000).toLocaleString("ru-RU", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
+    });
+    const areas = {discord: root.querySelector('[data-tbo-kind="discord"]'), tg: root.querySelector('[data-tbo-kind="tg"]')};
+    const titles = {discord: "Как будет в Discord", tg: "Как будет в Telegram"};
+    let kind = "discord", timer = null, seq = 0;
+    const fmt = n => n.toLocaleString("ru-RU");
+    function render() {
+        const text = kind === "tg" ? (areas.tg.value.trim() ? areas.tg.value : areas.discord.value) : areas.discord.value;
+        const box = root.querySelector(`[data-tbo-preview="${kind}"]`), count = root.querySelector("[data-tbo-count]");
+        const my = ++seq;
+        fetch("/tb/order/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({kind, text})})
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(d => {
+                if (my !== seq) return;
+                const n = d.messages.length;
+                count.textContent = n ? `${fmt(d.chars)} симв. · ${n} ${n === 1 ? "сообщение" : n < 5 ? "сообщения" : "сообщений"} (лимит ${fmt(d.limit)})` : "";
+                if (!n) { box.innerHTML = '<p class="tbo-preview-empty">Пусто</p>'; return; }
+                box.innerHTML = d.messages.map(html => kind === "tg"
+                    ? `<div class="tg-bubble">${html}</div>`
+                    : `<div class="dc-msg"><span class="dc-avatar">AC</span><div class="dc-body"><div class="dc-author">AC Droidec <span class="dc-bot">БОТ</span></div><div class="dc-content">${html}</div></div></div>`).join("");
+            })
+            .catch(() => { if (my === seq) box.innerHTML = '<p class="tbo-preview-empty">Не удалось построить предпросмотр.</p>'; });
+    }
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(render, 350); };
+    Object.values(areas).forEach(a => a.addEventListener("input", schedule));
+    root.querySelectorAll("[data-tbo-tab]").forEach(btn => btn.addEventListener("click", () => {
+        kind = btn.dataset.tboTab;
+        root.querySelectorAll("[data-tbo-tab]").forEach(b => b.classList.toggle("active", b === btn));
+        root.querySelectorAll("[data-tbo-pane]").forEach(p => { p.hidden = p.dataset.tboPane !== kind; });
+        root.querySelectorAll("[data-tbo-preview]").forEach(p => { p.hidden = p.dataset.tboPreview !== kind; });
+        root.querySelector("[data-tbo-title]").textContent = titles[kind];
+        render();
+    }));
+    render();
+})();
+</script>

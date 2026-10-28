@@ -70,7 +70,7 @@
         <p class="muted tbplan-active-note">
             {% if order_active %}<span class="badge badge-ok">активный</span> бот публикует этапы по ордеру этого плана, взводы открываются по нему.
             {% elif order %}Ордер опубликован, но план не активный — бот публикует другой.
-            {% else %}Ордер ещё не опубликован — <a href="#publish">опубликовать</a>; после этого план можно сделать активным.{% endif %}
+            {% else %}Ордер ещё не собран — <a href="#publish">собрать</a>; после этого план можно сделать активным.{% endif %}
             {% if plan.data.imported %} Перенесён из ордера «{{ order.name if order else plan.name }}»: звёзды взяты из ветки Discord, правки здесь в ветку не уходят, пока не опубликуете заново.{% endif %}
         </p>
     {% endif %}
@@ -248,15 +248,15 @@
 
     <div class="panel" id="publish">
         <div class="panel-title">
-            <span>Опубликовать ордер{% call ui.help() %}<p>Бот выложит в ветку Discord 6 сообщений — по одному на этап: планеты, цель в звёздах, «копим до …», взводы. Ордер сохранится на вкладке «Ордер» и, если отметить, станет активным: бот будет публиковать нужный этап в канал плана ТБ и расставит взводы.</p><p>Ветку создайте заранее (например, в форуме планов ТБ) и вставьте ссылку на неё.</p>{% endcall %}</span>
+            <span>Собрать ордер{% call ui.help() %}<p>Из плана получится ордер на 6 этапов: планеты, цель в звёздах, «копим до …», взводы. Он сохранится на вкладке «Ордер» — там каждый этап можно поправить отдельно для Discord и Telegram, посмотреть, как он будет выглядеть, и отправить. Если отметить «активным», бот сам публикует нужный этап в 20:00 МСК в канал плана ВИ и расставит взводы.</p><p>Ветка Discord не нужна. Если хотите, чтобы этапы ещё и лежали в ветке, вставьте ссылку на неё.</p>{% endcall %}</span>
             {% if order %}<span class="panel-hint">уже опубликован как «{{ order.name }}»</span>{% endif %}
         </div>
         <form method="post" action="/tb/plan/{{ plan.id }}/publish" class="tbplan-publish">
-            <label>Ссылка на ветку <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required></label>
+            <label>Ветка Discord (необязательно) <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…"></label>
             <label>Название ордера <input type="text" name="name" value="{{ plan.name }}" maxlength="80"></label>
             <label class="checkbox"><input type="checkbox" name="make_active" value="1" checked> Сделать активным</label>
-            <label class="checkbox"><input type="checkbox" name="force" value="1"> Опубликовать заново, если в ветке уже есть ордер (будут дубли)</label>
-            <button type="submit">Опубликовать в Discord</button>
+            <label class="checkbox"><input type="checkbox" name="force" value="1"> С веткой: выложить заново, если в ней уже есть ордер (будут дубли)</label>
+            <button type="submit">Собрать ордер</button>
         </form>
     </div>
 

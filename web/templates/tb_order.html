@@ -22,7 +22,7 @@
         <div class="panel">
             <div class="panel-title"><span>Ордер плана «{{ step_plan.name }}»</span></div>
             {% if step_order %}
-                <p>Опубликован{% if step_order.thread_link %} в <a href="{{ step_order.thread_link }}" target="_blank" rel="noopener">ветку Discord ↗</a>{% endif %} · {{ step_order.total_stars }}★ ·
+                <p>{% if step_order.thread_link %}Опубликован в <a href="{{ step_order.thread_link }}" target="_blank" rel="noopener">ветку Discord ↗</a>{% else %}Собран на сайте{% endif %}{% if step_order.total_stars %} · {{ step_order.total_stars }}★{% endif %} ·
                     {% if step_order.active %}<span class="badge badge-ok">активный</span> — бот публикует по нему этапы{% else %}<span class="muted">не активный</span>{% endif %}</p>
                 <div class="hero-links tb-order-step">
                     <a class="hero-link" href="/tb/order?plan={{ step_plan.id }}&preview_plan_id={{ step_order.id }}#preview">Предпросмотр этапов</a>
@@ -30,35 +30,38 @@
                     <a class="hero-link" href="/tb/plan?id={{ step_plan.id }}#publish">Опубликовать заново</a>
                 </div>
             {% else %}
-                <p class="empty-state">Ордер этого плана ещё не опубликован. <a href="/tb/plan?id={{ step_plan.id }}#publish">Опубликовать из плана</a> — бот выложит 6 этапов в ветку Discord.</p>
+                <p class="empty-state">Ордер этого плана ещё не собран. <a href="/tb/plan?id={{ step_plan.id }}#publish">Собрать из плана</a> — 6 этапов появятся ниже, их можно поправить и отправить.</p>
             {% endif %}
         </div>
     {% endif %}
 
+    {% if editor %}{% include "_tb_order_editor.html" %}{% endif %}
+
     <div class="panel">
         <div class="panel-title">
-            <span>{{ "Ордеры в Discord" if classic else "Все ордера в Discord" }}{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
+            <span>{{ "Ордеры в Discord" if classic else "Все ордера" }}{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
         </div>
         {% if not plans %}
             <p class="empty-state">Ордеров пока нет — опубликуйте его из <a href="/tb/plan">плана</a>, соберите из картинки или зарегистрируйте готовую ветку формами ниже.</p>
         {% else %}
-            <div class="table-scroll">
-            <table class="data">
-                <thead><tr><th>Название</th><th class="num">★</th><th>Ветка</th><th></th></tr></thead>
+            <table class="data cards-on-phone">
+                <thead><tr><th>Название</th><th class="num">★</th><th>Где</th><th></th></tr></thead>
                 <tbody>
                     {% for row in plans %}
                         <tr{% if step_plan and row.id == step_plan.order_plan_id %} class="row-highlight"{% endif %}>
-                            <td>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</td>
-                            <td class="num">{{ row.total_stars }}</td>
-                            <td>
+                            <td data-label="Ордер"><div>{{ row.name }}{% if row.active %} <span class="badge badge-ok">активен</span>{% endif %}</div></td>
+                            <td class="num" data-label="★">{{ row.total_stars or "—" }}</td>
+                            <td data-label="Где"><div>
                                 {% if row.thread_link %}
                                     <a href="{{ row.thread_link }}" target="_blank" rel="noopener">Открыть тред ↗</a>
-                                {% else %}
+                                {% elif row.thread_id %}
                                     <span class="muted">{{ row.thread_id }}</span>
+                                {% else %}
+                                    <span class="muted">на сайте</span>
                                 {% endif %}
-                            </td>
+                            </div></td>
                             <td class="row-actions">
-                                <a class="link-btn" href="/tb/order?preview_plan_id={{ row.id }}#preview">Предпросмотр</a>
+                                <a class="link-btn" href="/tb/order?order={{ row.id }}#order-editor">Этапы</a>
                                 <a class="link-btn" href="/tb/platoons?plan_id={{ row.id }}">Взводы</a>
                                 {% if not row.active %}
                                     <form method="post" action="/tb/order-plans/select">
@@ -76,7 +79,6 @@
                     {% endfor %}
                 </tbody>
             </table>
-            </div>
         {% endif %}
     </div>
 
@@ -183,6 +185,19 @@
     </dialog>
 
     <div class="tb-plan-forms">
+        <div class="panel" id="import-new">
+            <div class="panel-title"><span>Перенести готовый ордер{{ ui.help("Ордер уже написан в Discord? Вставьте ссылки на сообщения с каждым этапом (ПКМ по сообщению → «Копировать ссылку на сообщение»). Бот сохранит тексты на сайте, тред не нужен. Пустые этапы можно добавить потом в редакторе выше.") }}</span></div>
+            <form method="post" action="/tb/order/import-new" class="tbo-import-new">
+                <label>Название <input type="text" name="name" maxlength="80" required></label>
+                <div class="tbo-links">
+                    {% for ph in range(1, 7) %}<label>{{ ph }} этап <input type="text" name="link{{ ph }}" placeholder="https://discord.com/channels/…/…/…"></label>{% endfor %}
+                </div>
+                <label>Звёзд всего (необязательно) <input type="number" name="stars" min="0" max="60"></label>
+                <label class="checkbox"><input type="checkbox" name="make_active" value="1"> Сделать активным — бот будет публиковать его по этапам</label>
+                <button type="submit">Перенести</button>
+            </form>
+        </div>
+
         <div class="panel" id="from-image">
             <div class="panel-title"><span>Ордер из картинки{{ ui.help("Запасной путь, если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её, опубликует в ветку 6 сообщений по этапам, сохранит ордер и расставит взводы. Ордер сам появится в списке планов («План») со звёздами из ветки.") }}</span></div>
             {% if image_job %}

@@ -3401,6 +3401,13 @@ def save_tb_plan(guild_id: int, name: str, thread_id: int, total_stars: int, cre
             VALUES (?, ?, ?, ?, ?, datetime('now'))
         """, (guild_id, name, str(thread_id), total_stars, created_by))
         plan_id = cursor.lastrowid
+    if thread_id:
+        # Ордер (пере)опубликован в тред — главный снова тред: тексты этапов с сайта
+        # (services/tb_order_store.py) под этим id больше не перекрывают его.
+        try:
+            cursor.execute("DELETE FROM tb_order_phases WHERE order_id = ?", (plan_id,))
+        except sqlite3.OperationalError:
+            pass  # таблицы ещё нет
     conn.commit()
     conn.close()
     return plan_id
@@ -3465,6 +3472,10 @@ def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
     plan_id = row[0]
     cursor.execute("DELETE FROM tb_saved_plans WHERE id = ?", (plan_id,))
     cursor.execute("UPDATE guilds SET tb_active_plan_id = NULL WHERE tb_active_plan_id = ?", (plan_id,))
+    try:
+        cursor.execute("DELETE FROM tb_order_phases WHERE order_id = ?", (plan_id,))  # services/tb_order_store.py
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
     return True
