@@ -263,6 +263,21 @@ async def autofill_plan(guild_id: int, plan_id: int, dry_run: bool = False) -> A
         # по возможности собирались в одной операции, а не размазывались по разным.
         co_located = {a2["ally_code"] for (p2, op2, _idx2), a2 in unified.items() if p2 == planet and op2 == operation}
 
+        # "limit gl [N]" / "limit capital [N]": сколько ГЛ/капшипов игрок уже отдаёт на этом
+        # этапе (по всем планетам этапа) — достигшие лимита для этого слота не кандидаты.
+        special = filter_rules.special_limit(base_id)
+        if special:
+            kind, limit = special
+            given: dict = {}
+            for (p2, op2, idx2), a2 in unified.items():
+                if a2.get("round_num") != round_num:
+                    continue
+                unit_list2 = tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((p2, op2)) or []
+                bid2 = name_to_base_id.get(unit_list2[idx2]) if idx2 < len(unit_list2) else None
+                if bid2 and (filter_rules.special_limit(bid2) or (None,))[0] == kind:
+                    given[a2["ally_code"]] = given.get(a2["ally_code"], 0) + 1
+            candidates = [{**c, "excluded_by_filter": True} if given.get(c["ally_code"], 0) >= limit else c for c in candidates]
+
         best = tb_platoon_engine.pick_best_candidate(candidates, frozenset(bundle_preferred), frozenset(co_located))
         if best is None:
             # Правило "exclude player [...] unit [...]" (2026-09-02) — если слот не заполнен

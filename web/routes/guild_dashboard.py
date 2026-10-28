@@ -25,7 +25,7 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
+from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
 from services import mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_image, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
@@ -2783,9 +2783,13 @@ GUILD_SETTINGS_GROUPS = [
     {
         "name": "ТБ — итоговый отчёт",
         "tab": "ТБ",
-        "hint": "Канал, куда бот публикует автоотчёт по итогам завершённой ТБ и уведомления офицерам.",
+        "hint": "Канал, куда бот публикует автоотчёт по итогам завершённой ТБ и уведомления офицерам. "
+                "«Кто что не сделал» — вместе с отчётом бот пишет, кто по дням не заливал или залил не "
+                "полностью, не ходил в бои, мог пройти ОЗ, но не пошёл, и не поставил ни одного юнита во "
+                "взводы. В нарушения это не записывается. По умолчанию выключено.",
         "fields": [
             ("officer_channel_id", "Канал для автоотчёта и уведомлений", "channel"),
+            ("tb_misses_report", "«Кто что не сделал» в отчёте", "flag"),
         ],
     },
     {
@@ -2833,10 +2837,13 @@ GUILD_SETTINGS_GROUPS = [
         "name": "Энка (рейдовые билеты)",
         "tab": "Энка",
         "hint": "За 2 часа и за 30 минут до сброса дня гильдии бот тегает в канале тех, кто не сдал 600 билетов, "
-                "после сброса пишет итог без тегов. Время сброса берётся из игры. История — на странице «Энка».",
+                "после сброса пишет итог без тегов. Время сброса берётся из игры. История — на странице «Энка». "
+                "«Личка недосдавшим» — в те же моменты бот дополнительно пишет каждому из них в личку "
+                "(по умолчанию выключено).",
         "fields": [
             ("raid_tickets_channel_id", "Канал напоминаний про энку", "channel"),
             ("raid_tickets", "Напоминания и итог дня", "flag"),
+            ("raid_tickets_dm", "Личка недосдавшим", "flag"),
         ],
     },
 ]
@@ -2998,6 +3005,13 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             options.append({"id": current_value, "label": label})
         return options
 
+    def _channel_error(guild_id: int, field: str, value: str) -> dict | None:
+        err = channel_health.get_error(guild_id, field) if value else None
+        if not err or err.get("channel_id") != str(value):
+            return None
+        err["since_text"] = time.strftime("%d.%m %H:%M", time.gmtime(err["since"] + 3 * 3600))
+        return err
+
     groups = []
     for group in GUILD_SETTINGS_GROUPS:
         rows = []
@@ -3009,6 +3023,7 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             rows.append({
                 "field": field, "label": label, "kind": kind, "value": value,
                 "channel_options": await _channel_options(value) if kind == "channel" else None,
+                "channel_error": _channel_error(user["guild_id"], field, value) if kind == "channel" else None,
                 "schedule_entries": _parse_schedule_rows(value) if kind == "schedule" else None,
                 "unit_entries": _unit_entries(value) if kind == "units" else None,
             })
@@ -3033,6 +3048,7 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
     # ввода ID канала (см. ниже и guild_settings.html), не объявляя их все тоже.
     form = await request.form()
     guild_id = user["guild_id"]
+    guild_cfg_before = database.get_guild_config(guild_id) or {}
     cleaned = {}
 
     for group in GUILD_SETTINGS_GROUPS:
@@ -3124,6 +3140,12 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
             )
         schedule_rows.append({"time": raw_time, "text": raw_text, "days": tb_schedule.STANDARD_ORDER_DAYS})
     cleaned["ping_schedule_json"] = json.dumps(schedule_rows) if schedule_rows else None
+
+    # Кто задал канал — ему личка, если бот потом не сможет туда писать (services/channel_health.py).
+    for field, value in cleaned.items():
+        if field.endswith("_channel_id") and value and value != (guild_cfg_before.get(field) or None):
+            channel_health.record_setter(guild_id, field, user["discord_id"])
+            database.set_bot_state(f"channel_error:{field}", "", guild_id=guild_id)  # новый канал — старая пометка не про него
 
     database.update_guild_config(guild_id, **cleaned)
     return RedirectResponse("/settings?saved=1", status_code=303)

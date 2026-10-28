@@ -117,6 +117,12 @@ def reminder_lines(guild_name: str, reset: int, now: int, debtors: list) -> list
     return lines
 
 
+def dm_text(guild_name: str, reset: int, now: int, name: str, tickets: int) -> str:
+    """Личка недосдавшему (опция гильдии raid_tickets_dm)."""
+    return (f"🎟️ {name}, в гильдии **{guild_name}** у тебя сдано **{tickets}**/{REQUIRED} энки. "
+            f"Срез в {reset_time_text(reset)} МСК (через {_left_text(reset - now)}) — не забудь досдать!")
+
+
 def all_done_lines(guild_name: str, reset: int, now: int) -> list[str]:
     return [f"✅ **{guild_name}**: проверка энки — все сдали {REQUIRED}/{REQUIRED}, "
             f"до среза в {reset_time_text(reset)} МСК ещё {_left_text(reset - now)}."]

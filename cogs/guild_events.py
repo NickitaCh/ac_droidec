@@ -521,9 +521,10 @@ class GuildEvents(commands.Cog):
             await self.notify_officers(guild_cfg, "Нет данных по очкам.")
             return
 
+        event_id = None
         if fingerprint:
             try:
-                self._store_tb_history(fingerprint, result, members, player_names, stats, guild_id=gid)
+                event_id = self._store_tb_history(fingerprint, result, members, player_names, stats, guild_id=gid)
             except Exception as e:
                 print(f"Ошибка сохранения истории ТБ: {e}")
 
@@ -537,6 +538,15 @@ class GuildEvents(commands.Cog):
                 print(f"Ошибка подсчёта наград за спецмиссии: {e}")
                 covert = ""
             await self.send_as_file(channel, report, "tb_report.txt", message=covert or None)
+            # «Кто что не сделал» — галочка в настройках ВИ (services/tb_misses.py), не нарушения.
+            if event_id and feature_flags.is_enabled(gid, "tb_misses_report"):
+                try:
+                    from services import raid_tickets, tb_misses
+                    lines = tb_misses.build(gid, event_id, player_names)
+                    for text in raid_tickets.chunk(lines):
+                        await channel.send(text, allowed_mentions=disnake.AllowedMentions.none())
+                except Exception as e:
+                    print(f"Ошибка списка «кто что не сделал» по ТБ: {e!r}")
 
     def generate_tw_report(self, guild_id: int, tw_results: list):
         """Сохраняет всю доступную историю ВГ (comlink отдаёт только последние ~8) в
@@ -723,6 +733,7 @@ class GuildEvents(commands.Cog):
         database.save_tb_player_detail(detail_rows)
 
         database.prune_tb_events(guild_id=guild_id)
+        return event_id
 
     async def send_as_file(self, channel, content, filename, message=None):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:

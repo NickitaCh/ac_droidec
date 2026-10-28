@@ -89,6 +89,25 @@ class RaidTicketsCog(commands.Cog):
             return
         await self._send(cfg, rt.reminder_lines(cfg["name"], reset, now, debtors), True,
                          tg_lines=rt.reminder_lines(cfg["name"], reset, now, tg_debtors))
+        if feature_flags.is_enabled(gid, "raid_tickets_dm"):
+            await self._dm_debtors(cfg, reset, now, tg_debtors)
+
+    async def _dm_debtors(self, cfg: dict, reset: int, now: int, debtors: list) -> None:
+        """Личка каждому недосдавшему (опция гильдии raid_tickets_dm, по умолчанию выкл.) —
+        вместе с напоминанием в канале. debtors: [(name, tickets, owner_id | None)], owner_id —
+        discord_id или "tg:<id>" (discord_rest.send_dm сам отправит такому через Telegram)."""
+        from services import discord_rest
+        sent = failed = 0
+        for name, tickets, owner_id in debtors:
+            if not owner_id:
+                continue
+            try:
+                await discord_rest.send_dm(owner_id, rt.dm_text(cfg["name"], reset, now, name, tickets))
+                sent += 1
+            except Exception as e:
+                failed += 1
+                print(f"⚠️ [Энка] [{cfg['name']}] личка {name} не ушла: {e!r}")
+        print(f"[Энка] [{cfg['name']}] лички недосдавшим: отправлено {sent}, не ушло {failed}")
 
     async def _final(self, cfg: dict, reset: int, members_after: list) -> bool:
         gid = cfg["id"]

@@ -34,6 +34,7 @@ FEATURES: dict[str, dict] = {
     "tb_ping": {"label": "ТБ — тег на подготовку", "category": "ТБ"},
     "tb_plan_order": {"label": "ТБ — план, автоордер, взвода", "category": "ТБ"},
     "tb_reports": {"label": "ТБ — итоговые отчёты", "category": "ТБ"},
+    "tb_misses_report": {"label": "ТБ — «кто что не сделал» в итоговом отчёте", "category": "ТБ"},
     "tb_star_goal": {"label": "ТБ — цель по звёздам (варианты, как взять больше)", "category": "ТБ"},
     "tb_classic_nav": {"label": "ТБ — старый вид раздела (4 вкладки: План · Взводы · Ордер · Итоги)", "category": "ТБ"},
     "tw_order": {"label": "Территориальная Война (ВГ)", "category": "Прочее"},
@@ -42,6 +43,7 @@ FEATURES: dict[str, dict] = {
     "tasks": {"label": "Задачи на прокачку", "category": "Прочее"},
     "tasks_mention": {"label": "Задачи — тег игрока при постановке", "category": "Прочее"},
     "raid_tickets": {"label": "Энка — напоминания и итог дня", "category": "Прочее"},
+    "raid_tickets_dm": {"label": "Энка — личка недосдавшим", "category": "Прочее"},
     "raids": {"label": "Рейды — история очков", "category": "Прочее"},
     "datacrons": {"label": "Датакроны", "category": "Прочее"},
     "omicron": {"label": "Омикрон-объявления", "category": "Прочее"},
@@ -61,7 +63,11 @@ FEATURES: dict[str, dict] = {
 # tb_star_goal — вкладка «Цель» ВИ-проекции, только АС (решение пользователя 2026-10-22).
 # tb_classic_nav — запасной путь на случай поломки нового «План · Итоги» (2026-10-26): включённый
 # возвращает прежние 4 вкладки; данные у обоих видов общие.
-OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav"}
+# raid_tickets_dm — личка каждому недосдавшему энку вместе с напоминанием в канале
+# (решение пользователя 2026-10-28: «опционально, по умолчанию выкл»).
+# tb_misses_report — список «кто что не сделал» вместе с автоотчётом ВИ (services/tb_misses.py),
+# галочка в настройках ВИ, по умолчанию выкл. (решение пользователя 2026-10-28).
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm", "tb_misses_report"}
 
 
 def label(key: str) -> str:

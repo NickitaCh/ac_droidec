@@ -38,8 +38,11 @@ async def send_message(channel_id: str, content: str, mention_user_ids: list[str
     payload = {"content": content, "allowed_mentions": {"parse": [], "users": list(mention_user_ids or [])[:100]}}
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(f"{DISCORD_API}/channels/{channel_id}/messages", headers=_headers(), json=payload)
+    from services import channel_health
     if resp.status_code >= 400:
+        await channel_health.report_failure(channel_id, resp.status_code)
         raise DiscordRestError(f"Discord ответил {resp.status_code}: {resp.text[:200]}")
+    channel_health.report_success(channel_id)
 
 
 async def list_guild_channels(discord_guild_id: str) -> list[dict]:

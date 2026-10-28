@@ -113,6 +113,9 @@
                                 pattern="[0-9]*"
                                 style="margin-top: 0.35em;"
                             >
+                            {% if row.channel_error %}
+                                <span class="error" style="display: block; margin-top: 0.35em;">⚠️ Бот не может писать в этот канал: {{ row.channel_error.reason }} (с {{ row.channel_error.since_text }} МСК). Выдайте боту права или выберите другой канал.</span>
+                            {% endif %}
                         {% else %}
                             <input
                                 type="text"

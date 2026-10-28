@@ -322,6 +322,10 @@ class GuildManagerBot(commands.Bot):
 
 bot = GuildManagerBot()
 
+# 403/404 при отправке в канал из настроек гильдии → личка офицеру + пометка на /settings.
+from services import channel_health  # noqa: E402
+channel_health.install_disnake_hook()
+
 @bot.event
 async def on_ready():
     loop_watchdog.start()

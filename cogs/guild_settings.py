@@ -248,6 +248,9 @@ class SettingsPanel(disnake.ui.View):
                 database.register_guild_channel(self.guild_id, value, getattr(channel, "name", None) or value,
                                                 channel_type=channel_type, registered_by=interaction.author.id)
             database.update_guild_config(self.guild_id, **{field: value})
+            if value and kind == "channel":
+                from services import channel_health
+                channel_health.record_setter(self.guild_id, field, interaction.author.id)
             await self._rerender(interaction)
         return callback
 

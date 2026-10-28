@@ -15,6 +15,13 @@
 #   bundle [Юнит-триггер] -> [Юнит 1], [Юнит 2], ...
 #   priority player [Имя игрока]
 #   exclude inactive [N]
+#   limit gl [N]
+#   limit capital [N]
+#
+# "limit gl [N]" / "limit capital [N]" (2026-10-28, как правило HotUtils «at most one Galactic
+# Legend and one capital ship per member per day») — автозаполнение отдаёт одному игроку не
+# больше N ГЛ (список ГЛ — bot_state "galactic_legends" из units_sync) / капшипов (base_id
+# CAPITAL*) за этап, по всем планетам этапа вместе. Ручную расстановку не ограничивает.
 #
 # "exclude inactive [N]" (2026-10-27, как правило HotUtils «skip inactive N days») — не
 # предлагать игроков, которые не заходили в игру дольше N дней (последний вход — из часового
@@ -55,6 +62,7 @@
 # если это единственный владелец юнита в гильдии, слот остаётся незаполненным — см. алерт
 # tb_platoon_autofill.py::AutofillResult.blocked_by_exclude_rule и
 # tb_platoon_engine.would_be_eligible_without_player_unit_rule.
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -70,6 +78,7 @@ _EXCLUDE_PLAYER_UNIT_RE = re.compile(
 _BUNDLE_RE = re.compile(r"^bundle\s+\[([^\]]+)\]\s*->\s*(.+)$", re.IGNORECASE)
 _PRIORITY_PLAYER_RE = re.compile(r"^priority\s+player\s+\[([^\]]+)\]$", re.IGNORECASE)
 _EXCLUDE_INACTIVE_RE = re.compile(r"^exclude\s+inactive\s+\[\s*(\d+)\s*\]$", re.IGNORECASE)
+_LIMIT_RE = re.compile(r"^limit\s+(gl|capital)\s+\[\s*(\d+)\s*\]$", re.IGNORECASE)
 _BRACKET_ITEM_RE = re.compile(r"\[([^\]]+)\]")
 
 # Сентинел для ParsedRules.exclude_player_unit_rules: пустой frozenset() = правило действует
@@ -98,6 +107,9 @@ class ParsedRules:
     player_display_names: dict = field(default_factory=dict)  # ally_code -> отображаемое имя (для exclude_player_unit_rules, независимо от exclude_player_names)
     inactive_days: int | None = None  # exclude inactive [N]
     inactive_codes: set = field(default_factory=set)  # кого это правило исключило сейчас (они же в exclude_player_codes)
+    gl_limit: int | None = None  # limit gl [N]
+    capital_limit: int | None = None  # limit capital [N]
+    gl_ids: frozenset = frozenset()  # base_id ГЛ, заполняется только при gl_limit
 
     def is_player_excluded(self, ally_code: str) -> bool:
         return ally_code in self.exclude_player_codes
@@ -121,6 +133,14 @@ class ParsedRules:
         if not stages:  # frozenset() пустой = все этапы
             return True
         return round_num in stages
+
+    def special_limit(self, base_id: str):
+        """("gl"|"capital", N), если на этот юнит действует limit gl/capital, иначе None."""
+        if self.gl_limit is not None and base_id in self.gl_ids:
+            return "gl", self.gl_limit
+        if self.capital_limit is not None and base_id.startswith("CAPITAL"):
+            return "capital", self.capital_limit
+        return None
 
 
 def parse_rules(rules_text: str, guild_id: int) -> tuple:
@@ -212,6 +232,15 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             parsed_lines.append((line_num, "exclude_inactive", days))
             continue
 
+        m = _LIMIT_RE.match(stripped)
+        if m:
+            kind, limit = m.group(1).lower(), int(m.group(2))
+            if limit < 1:
+                errors.append((line_num, f"limit {kind}: число должно быть от 1"))
+                continue
+            parsed_lines.append((line_num, "limit_" + kind, limit))
+            continue
+
         errors.append((line_num, f"не распознана строка правила: {stripped!r}"))
 
     # Один batch-запрос на все имена юнитов сразу, а не один на строку — тот же приём, что
@@ -300,6 +329,18 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
         elif kind == "exclude_inactive":
             result.inactive_days = payload if result.inactive_days is None else min(result.inactive_days, payload)
 
+        elif kind == "limit_gl":
+            result.gl_limit = payload if result.gl_limit is None else min(result.gl_limit, payload)
+
+        elif kind == "limit_capital":
+            result.capital_limit = payload if result.capital_limit is None else min(result.capital_limit, payload)
+
+    if result.gl_limit is not None:
+        try:
+            result.gl_ids = frozenset(json.loads(database.get_bot_state("galactic_legends", guild_id=0) or "[]"))
+        except (TypeError, ValueError):
+            result.gl_ids = frozenset()  # до первого синка юнитов правило просто ничего не ограничивает
+
     if result.inactive_days:
         cutoff = time.time() - result.inactive_days * 86400
         names = {ally_code: name for _discord_id, ally_code, name in mappings}
@@ -338,6 +379,10 @@ def describe_rules(parsed: ParsedRules) -> list:
         trigger_name = parsed.unit_display_names.get(trigger_base_id, trigger_base_id)
         pool_names = [parsed.unit_display_names.get(b, b) for b in pool]
         lines.append(f"При донате «{trigger_name}» — приоритет тому же игроку на: {', '.join(pool_names)}")
+    if parsed.gl_limit is not None:
+        lines.append(f"Не больше {parsed.gl_limit} ГЛ от одного игрока за этап (автозаполнение)")
+    if parsed.capital_limit is not None:
+        lines.append(f"Не больше {parsed.capital_limit} капшипа от одного игрока за этап (автозаполнение)")
     for ally_code in sorted(parsed.priority_player_codes):
         lines.append(f"Приоритет игроку: {parsed.priority_player_names.get(ally_code, ally_code)} (максимум взводов, где он подходит)")
     return lines
