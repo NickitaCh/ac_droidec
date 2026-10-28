@@ -113,7 +113,8 @@ def parse(effects: list, abilities: list, skills: list, units: list, loc: dict) 
 
 async def sync(comlink, abilities: list, skills: list, units: list, loc: dict) -> int:
     data = await asyncio.to_thread(comlink.get_game_data, items=str(EFFECT_DEFINITIONS_FLAG), include_pve_units=False)
-    result = parse(data.get("effect") or [], abilities, skills, units, loc)
+    # ~63 тыс. эффектов — разбор в потоке, иначе стоит цикл событий бота (сторож ловил 6 с).
+    result = await asyncio.to_thread(parse, data.get("effect") or [], abilities, skills, units, loc)
     if result:
         database.set_bot_state(STATE_KEY, json.dumps(result, ensure_ascii=False), guild_id=0)
     return len(result)
