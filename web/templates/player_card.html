@@ -473,25 +473,33 @@
                         "speed-desc": (a, b) => b.dataset.speed - a.dataset.speed,
                         "name-asc": (a, b) => a.dataset.name.localeCompare(b.dataset.name, "ru"),
                     };
+                    // Показываем первые PAGE подходящих, остальные — по «Показать ещё»; любой фильтр сбрасывает лимит.
+                    const PAGE = 24, more = body.querySelector(".mg-more");
+                    let limit = PAGE;
                     const apply = () => {
                         const q = search.value.trim().toLowerCase(), minRelic = +relic.value;
-                        let shown = 0;
+                        let matched = 0;
                         cards.sort(sorters[sort.value]).forEach(c => {
                             const ok = (!q || c.dataset.name.includes(q)) && +c.dataset.relic >= minRelic
                                 && (!letters.size || letters.has(c.dataset.letter));
-                            c.hidden = !ok; shown += ok;
+                            if (ok) matched++;
+                            c.hidden = !ok || matched > limit;
                             grid.appendChild(c);
                         });
-                        body.querySelector(".mg-none").hidden = shown > 0;
+                        more.hidden = matched <= limit;
+                        more.textContent = `Показать ещё ${matched - limit}`;
+                        body.querySelector(".mg-none").hidden = matched > 0;
                     };
-                    search.addEventListener("input", apply);
-                    sort.addEventListener("change", apply);
-                    relic.addEventListener("change", apply);
+                    const reset = () => { limit = PAGE; apply(); };
+                    search.addEventListener("input", reset);
+                    sort.addEventListener("change", reset);
+                    relic.addEventListener("change", reset);
+                    more.addEventListener("click", () => { limit += PAGE * 4; apply(); });
                     body.querySelectorAll("[data-mg-letter]").forEach(btn => btn.addEventListener("click", () => {
                         const g = btn.dataset.mgLetter, on = !letters.has(g);
                         on ? letters.add(g) : letters.delete(g);
                         btn.setAttribute("aria-pressed", on);
-                        apply();
+                        reset();
                     }));
                     const dialog = body.querySelector(".mg-dialog"), dBody = dialog.querySelector(".mg-dialog-body");
                     dialog.querySelector(".mg-dialog-close").addEventListener("click", () => dialog.close());
@@ -507,6 +515,7 @@
                             .then(html => { dBody.innerHTML = html; })
                             .catch(() => { dBody.innerHTML = '<p class="widget-empty">Не удалось загрузить подробности.</p>'; });
                     });
+                    apply();
                 }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить оценку.</p>'; });
             })();
             </script>
