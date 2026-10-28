@@ -65,9 +65,7 @@ FEATURES: dict[str, dict] = {
 # возвращает прежние 4 вкладки; данные у обоих видов общие.
 # raid_tickets_dm — личка каждому недосдавшему энку вместе с напоминанием в канале
 # (решение пользователя 2026-10-28: «опционально, по умолчанию выкл»).
-# tb_misses_report — список «кто что не сделал» вместе с автоотчётом ВИ (services/tb_misses.py),
-# галочка в настройках ВИ, по умолчанию выкл. (решение пользователя 2026-10-28).
-OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm", "tb_misses_report"}
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm"}
 
 
 def label(key: str) -> str:

@@ -160,7 +160,7 @@ Base = swgoh.ru open TB map (`https://swgoh.ru/api/tbmap`, no login; user decisi
 
 ### HotUtils V2 borrowings, 2026-10-28 — `services/channel_health.py`, `services/tb_misses.py`
 - **Bot can't post to a configured channel**: `channel_health.install_disnake_hook()` (main.py) wraps `Messageable.send`; `discord_rest.send_message` reports too. A 403/404 to any `guilds.*_channel_id` → bot_state `channel_error:<field>` + one DM per failure streak to whoever set that channel (`channel_set_by:<field>`, written by /settings and /настройки; fallback — guild leader, member_level 4); /settings shows the warning under the field; the next successful send clears it.
-- **«Кто что не сделал»** after a TB (opt-in flag `tb_misses_report`, TB settings): sent after the auto-report, from saved `tb_player_detail` — no/partial deploy per day (< `tb_results.FULL_DEPLOY` of own best day), days without battles, ОЗ «мог, но не пошёл», zero platoon units, members with no data. Never written to /нарушения (user decision).
+- **«Кто что не сделал»** after a TB (flag `tb_misses_report`, on by default, TB settings): sent after the auto-report, from saved `tb_player_detail` — no/partial deploy per day (< `tb_results.FULL_DEPLOY` of own best day), days without battles, ОЗ «мог, но не пошёл», zero platoon units, members with no data. Never written to /нарушения (user decision).
 - **Энка DM** to debtors at each reminder: opt-in flag `raid_tickets_dm`.
 - **Platoon rules** `limit gl [N]` / `limit capital [N]`: autofill gives a member at most N GLs / capital ships per round (all planets of the round); manual placement is not limited. «Units together» = existing `bundle`.
 
