@@ -191,12 +191,14 @@ class TBPlanPanel(disnake.ui.View):
         skipped = [r for r in rows if not r["discord_id"]]
         if not eligible:
             await interaction.followup.send(
-                f"На этапе {self.stage} назначено {len(rows)} игрок(ов), но ни у кого из них нет привязки Discord "
-                f"(`/регистрация`) — рассылка невозможна.", ephemeral=True)
+                f"На этапе {self.stage} назначено {len(rows)} игрок(ов), но никто из них не зарегистрирован "
+                f"(`/регистрация`) — писать некуда.", ephemeral=True)
             return
         summary = f"Этап {self.stage}, план «{plan['name']}» — получат сообщение: {len(eligible)} игрок(ов)."
         if skipped:
-            summary += f" Без привязки Discord (пропущены всегда): {len(skipped)}."
+            summary += f" Не зарегистрированы (пропущены всегда): {len(skipped)}."
+        summary += ("\nКуда: в личку Discord, а кому Discord недоступен — в Telegram (если привязан). "
+                    "Сначала Telegram или сразу в оба — на сайте: /tb/platoons → «Разослать взводы».")
         summary += "\nМожно исключить конкретных игроков из выпадающих списков ниже — например тех, кто уже задонатил."
         await interaction.followup.send(summary, view=PlatoonNotifyView(self.guild_id, plan, self.stage, rows), ephemeral=True)
 
@@ -303,11 +305,17 @@ class PlatoonNotifyView(disnake.ui.View):
         sent = sum(1 for r in report if r["status"] == "sent")
         failed = [r for r in report if r["status"] == "failed"]
 
-        lines = [f"✅ Отправлено: {sent} из {len(report)}."]
+        by_where = {}
+        for r in report:
+            if r["status"] == "sent":
+                where = "Telegram (Discord не принял)" if "→" in r["detail"] else r["detail"].split(" (")[0]
+                by_where[where] = by_where.get(where, 0) + 1
+        lines = [f"✅ Отправлено: {sent} из {len(report)}"
+                 + (" — " + ", ".join(f"{k}: {v}" for k, v in by_where.items()) if by_where else "") + "."]
         if excluded:
             lines.append(f"⏭ Исключено вручную: {len(excluded)}.")
         if self.skipped_no_discord:
-            lines.append(f"⚠️ Без привязки Discord (пропущены всегда): {len(self.skipped_no_discord)}.")
+            lines.append(f"⚠️ Не зарегистрированы (пропущены всегда): {len(self.skipped_no_discord)}.")
         if failed:
             lines.append("❌ Ошибки:\n" + "\n".join(f"— {r['name']}: {r['detail']}" for r in failed[:10]))
         await interaction.edit_original_response(content="\n".join(lines), view=None)

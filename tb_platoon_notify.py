@@ -1,4 +1,4 @@
-"""Рассылка взводов ТБ игрокам в личку Discord — общая точка правды для веб-страницы
+"""Рассылка взводов ТБ игрокам в личку (Discord и/или Telegram, см. MODES) — общая точка правды для веб-страницы
 (/tb/platoons/notify) и слэш-команды (/тб_план разослать_взводы). По прямому запросу
 пользователя 2026-09-14 ("подготовить на тест функционал рассылки взводов людям в личку").
 
@@ -24,6 +24,37 @@ import tb_plan_reader
 import tb_platoon_data
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
+
+# Куда слать личку (2026-10-28, жалоба: «непонятно, куда будет публиковать, в дс или в тг»).
+# Канал виден на странице рассылки для каждого игрока; при сбое Discord (закрыта личка)
+# discord_first/both всё равно доставляют в Telegram, если он привязан.
+MODES = {
+    "discord_first": "В Discord, а у кого нет Discord — в Telegram",
+    "tg_first": "В Telegram, а у кого его нет — в Discord",
+    "both": "И в Discord, и в Telegram",
+}
+DEFAULT_MODE = "discord_first"
+
+
+def channels(owner_id: str | None) -> dict:
+    """Куда можно написать владельцу регистрации: {"discord": bool, "tg": bool, "tg_name": str|None}.
+    owner_id — discord_id из user_registration или "tg:<id>" (игрок только в Telegram).
+    Telegram — только если игрок писал боту в личку (иначе бот не может начать диалог)."""
+    from tg_bot import outbox, store
+    if not owner_id:
+        return {"discord": False, "tg": False, "tg_name": None}
+    tg_users = [u for u in store.tg_users_for_owner(owner_id) if u["dm_open"]] if outbox.can_dm(owner_id) else []
+    name = tg_users[0]["username"] if tg_users else None
+    return {"discord": not outbox.is_tg_owner(owner_id), "tg": bool(tg_users),
+            "tg_name": f"@{name}" if name else ("Telegram" if tg_users else None)}
+
+
+def route(ch: dict, mode: str) -> list[str]:
+    """Каналы по порядку попытки: ["discord"], ["tg"], ["discord", "tg"]…"""
+    if mode == "both":
+        return [c for c in ("discord", "tg") if ch[c]]
+    order = ("tg", "discord") if mode == "tg_first" else ("discord", "tg")
+    return [c for c in order if ch[c]][:1]
 
 
 async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[dict]:
@@ -88,6 +119,7 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
                     "ally_code": ally_code,
                     "name": name_by_ally.get(ally_code, ally_code),
                     "discord_id": discord_id_by_ally.get(ally_code),
+                    "channels": channels(discord_id_by_ally.get(ally_code)),
                     "entries": [],
                 })
                 row["entries"].append({"planet": e["planet"], "operation": operation, "unit": unit_name})
@@ -114,30 +146,51 @@ def format_dm_text(guild_name: str, plan_name: str, round_num: int, player_rows:
     return "\n".join(lines)
 
 
-async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str) -> tuple[bool, str]:
-    from tg_bot import outbox
-    if outbox.is_tg_owner(discord_id):  # игрок только в Telegram (tg_bot/store.py)
-        if outbox.enqueue_dm(discord_id, text):
-            return True, "отправлено в Telegram"
-        return False, "только в Telegram и ещё не писал боту в личку"
+async def _discord_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str) -> tuple[bool, str]:
     headers = {"Authorization": f"Bot {token}"}
     resp = await client.post(
         f"{DISCORD_API_BASE}/users/@me/channels", headers=headers, json={"recipient_id": discord_id},
     )
     if resp.status_code != 200:
-        return False, f"не удалось открыть DM ({resp.status_code}: {resp.text[:200]})"
+        return False, f"Discord не открыл личку ({resp.status_code})"
     channel_id = resp.json()["id"]
-
     resp2 = await client.post(
         f"{DISCORD_API_BASE}/channels/{channel_id}/messages", headers=headers, json={"content": text},
     )
     if resp2.status_code not in (200, 201):
-        return False, f"не удалось отправить ({resp2.status_code}: {resp2.text[:200]})"
-    return True, "ok"
+        return False, f"Discord не принял сообщение ({resp2.status_code}) — возможно, закрыта личка"
+    return True, "Discord"
+
+
+async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: str,
+                  mode: str = DEFAULT_MODE) -> tuple[bool, str]:
+    """Личка владельцу регистрации по выбранному режиму (MODES). → (доставлено ли куда-то,
+    куда/почему нет — «Discord», «Telegram», «Discord и Telegram», «… → Telegram»)."""
+    from tg_bot import outbox
+    ch = channels(discord_id)
+    targets = route(ch, mode)
+    if not targets:
+        if outbox.is_tg_owner(discord_id):
+            return False, "только в Telegram и ещё не писал боту в личку"
+        return False, "нет ни Discord, ни Telegram"
+    sent, problems = [], []
+    for target in targets:
+        if target == "discord":
+            ok, detail = await _discord_dm(client, token, discord_id, text)
+        else:
+            ok = outbox.enqueue_dm(discord_id, text)
+            detail = "Telegram" if ok else "Telegram недоступен"
+        (sent if ok else problems).append(detail)
+    if not sent and "tg" not in targets and ch["tg"]:  # Discord не дошёл — запасной путь
+        if outbox.enqueue_dm(discord_id, text):
+            return True, f"{problems[0]} → отправлено в Telegram"
+    if sent:
+        return True, " и ".join(sent) + (f" ({'; '.join(problems)})" if problems else "")
+    return False, "; ".join(problems)
 
 
 async def send_broadcast(
-    token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str],
+    token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str], mode: str = DEFAULT_MODE,
 ) -> list[dict]:
     """Отправляет DM только тем ally_code из ally_codes, у кого есть назначение на этом
     этапе И привязанный discord_id. Мейн и альт(ы) одного Discord-аккаунта — ОДНО общее
@@ -156,7 +209,7 @@ async def send_broadcast(
         if not row["discord_id"]:
             report.append({
                 "ally_code": row["ally_code"], "name": row["name"],
-                "status": "skipped_no_discord", "detail": "нет привязки Discord",
+                "status": "skipped_no_discord", "detail": "не зарегистрирован (/регистрация) — писать некуда",
             })
             continue
         by_discord.setdefault(row["discord_id"], []).append(row)
@@ -164,7 +217,7 @@ async def send_broadcast(
     async with httpx.AsyncClient(timeout=15.0) as client:
         for discord_id, player_rows in by_discord.items():
             text = format_dm_text(guild_name, plan["name"], round_num, player_rows)
-            ok, detail = await send_dm(client, token, discord_id, text)
+            ok, detail = await send_dm(client, token, discord_id, text, mode)
             for row in player_rows:
                 report.append({
                     "ally_code": row["ally_code"], "name": row["name"],

@@ -1974,6 +1974,7 @@ async def tb_platoons_notify_page(request: Request, user: dict = Depends(feature
     rows = await tb_platoon_notify.build_player_rows(guild_id, plan, round_num) if plan and round_num else []
     return templates.TemplateResponse(request, "tb_platoon_notify.html", {
         "user": user, "plan": plan, "round_num": round_num, "rows": rows, "error": error, "report": None,
+        "modes": tb_platoon_notify.MODES, "mode": tb_platoon_notify.DEFAULT_MODE,
     })
 
 
@@ -1983,9 +1984,12 @@ async def tb_platoons_notify_send(
     plan_id: int = Form(...),
     round_num: int = Form(...),
     ally_codes: list[str] = Form([]),
+    mode: str = Form(default=tb_platoon_notify.DEFAULT_MODE),
     user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
+    if mode not in tb_platoon_notify.MODES:
+        mode = tb_platoon_notify.DEFAULT_MODE
     plan = database.get_tb_saved_plan(plan_id)
     if not plan or plan["guild_id"] != guild_id:
         return templates.TemplateResponse(request, "tb_platoon_notify.html", {
@@ -1999,9 +2003,10 @@ async def tb_platoons_notify_send(
             "error": "DISCORD_TOKEN не настроен на сервере — рассылка недоступна.", "report": None,
         })
 
-    report = await tb_platoon_notify.send_broadcast(token, guild_id, plan, round_num, set(ally_codes))
+    report = await tb_platoon_notify.send_broadcast(token, guild_id, plan, round_num, set(ally_codes), mode)
     return templates.TemplateResponse(request, "tb_platoon_notify.html", {
         "user": user, "plan": plan, "round_num": round_num, "rows": [], "error": None, "report": report,
+        "modes": tb_platoon_notify.MODES, "mode": mode,
     })
 
 

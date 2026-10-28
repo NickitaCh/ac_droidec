@@ -19,44 +19,62 @@
     {% if plan and not error %}
         <p>
             План: <strong>{{ plan.name }}</strong>, этап <strong>{{ round_num }}</strong>.
-            Каждому отмеченному игроку в личку Discord уйдёт текстовое сообщение со списком
-            его слотов (планета, взвод, юнит) на этом этапе.
+            Каждому отмеченному игроку в личку уйдёт сообщение со списком его слотов (планета, взвод, юнит) на этом этапе —
+            в Discord, в Telegram или в оба, как выберете ниже. Мейн и альты одного человека получают одно сообщение.
         </p>
 
         {% if report %}
+            {% set sent = report|selectattr("status", "equalto", "sent")|list %}
             <div class="panel">
                 <div class="panel-title">
                     <span>Результат рассылки</span>
-                    <span class="panel-hint">отправлено: {{ report|selectattr("status", "equalto", "sent")|list|length }} из {{ report|length }}</span>
+                    <span class="panel-hint">{{ modes[mode] }} · доставлено: {{ sent|length }} из {{ report|length }}</span>
                 </div>
-                <ul class="platoon-slot-list">
+                <ul class="notify-report">
                     {% for r in report %}
-                        <li class="platoon-slot">
+                        <li>
                             {% if r.status == "sent" %}
-                                <span class="badge badge-ok">✅ отправлено</span>
+                                <span class="badge badge-ok">✅ {{ r.detail }}</span>
                             {% elif r.status == "skipped_no_discord" %}
                                 <span class="badge badge-neutral">⏭ пропущен</span>
                             {% else %}
-                                <span class="badge badge-danger">❌ ошибка</span>
+                                <span class="badge badge-danger">❌ не доставлено</span>
                             {% endif %}
-                            {{ r.name }}
+                            <strong>{{ r.name }}</strong>
                             {% if r.status != "sent" %}<span class="muted">— {{ r.detail }}</span>{% endif %}
                         </li>
                     {% endfor %}
                 </ul>
+                <p class="muted">Telegram-сообщения уходят из очереди бота в течение нескольких секунд.</p>
             </div>
             <p><a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ round_num }}">↻ Отправить ещё раз (например, тем, кто не получил)</a></p>
         {% else %}
-            <form method="post" action="/tb/platoons/notify" class="platoon-notify-form">
+            <form method="post" action="/tb/platoons/notify" class="platoon-notify-form" id="notify-form">
                 <input type="hidden" name="plan_id" value="{{ plan.id }}">
                 <input type="hidden" name="round_num" value="{{ round_num }}">
 
                 {% if not rows %}
                     <p class="empty-state">На этом этапе никому не назначено ни одного слота.</p>
                 {% else %}
+                    <div class="panel notify-where">
+                        <div class="panel-title"><span>Куда отправлять</span></div>
+                        <div class="notify-modes" role="radiogroup">
+                            {% for key, label in modes.items() %}
+                                <label class="notify-mode"><input type="radio" name="mode" value="{{ key }}"{{ " checked" if key == mode }}> {{ label }}</label>
+                            {% endfor %}
+                        </div>
+                        <p class="notify-totals" aria-live="polite">
+                            <span class="notify-dest notify-dest-discord">Discord: <b data-total="discord">0</b></span>
+                            <span class="notify-dest notify-dest-tg">Telegram: <b data-total="tg">0</b></span>
+                            <span class="notify-dest notify-dest-none">не дойдёт: <b data-total="none">0</b></span>
+                            <span class="muted">— по отмеченным игрокам</span>
+                        </p>
+                        <p class="muted notify-hint">Telegram доступен тем, кто привязал его на сайте («Мой профиль» → «Привязать Telegram») или зарегистрировался через Telegram-бота и написал ему в личку. Если Discord не примет личку (закрыты сообщения), а Telegram привязан — бот отправит туда.</p>
+                    </div>
+
                     <p class="platoon-export-actions">
-                        <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = !c.disabled)">Отметить всех</button>
-                        <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = false)">Снять все отметки</button>
+                        <button type="button" class="button" data-check="all">Отметить всех</button>
+                        <button type="button" class="button" data-check="none">Снять все отметки</button>
                     </p>
                     <div class="panel platoon-planet-panel">
                         <div class="panel-title">
@@ -65,22 +83,64 @@
                         </div>
                         <div class="notify-recipients-grid">
                             {% for row in rows %}
-                                <label class="notify-recipient-card{% if not row.discord_id %} notify-recipient-card-disabled{% endif %}">
-                                    <input type="checkbox" class="checkbox notify-check" name="ally_codes"
-                                           value="{{ row.ally_code }}"
-                                           {% if row.discord_id %}checked{% else %}disabled{% endif %}>
-                                    <span class="notify-recipient-name">{{ row.name }}</span>
-                                    <span class="badge badge-neutral">{{ row.entries|length }} слот(ов)</span>
-                                    {% if not row.discord_id %}
-                                        <span class="badge badge-danger" title="Нет привязки Discord (/регистрация)">нет привязки Discord</span>
-                                    {% endif %}
+                                {% set ch = row.channels %}
+                                {% set reachable = ch.discord or ch.tg %}
+                                <label class="notify-recipient-card{% if not reachable %} notify-recipient-card-disabled{% endif %}"
+                                       data-discord="{{ 1 if ch.discord else 0 }}" data-tg="{{ 1 if ch.tg else 0 }}">
+                                    <span class="notify-recipient-top">
+                                        <input type="checkbox" class="checkbox notify-check" name="ally_codes"
+                                               value="{{ row.ally_code }}" {% if reachable %}checked{% else %}disabled{% endif %}>
+                                        <span class="notify-recipient-name">{{ row.name }}</span>
+                                        <span class="badge badge-neutral">{{ row.entries|length }} слот(ов)</span>
+                                    </span>
+                                    <span class="notify-recipient-channels">
+                                        {% if not row.discord_id %}
+                                            <span class="badge badge-danger" title="Игрок не прошёл /регистрацию — писать некуда">не зарегистрирован</span>
+                                        {% else %}
+                                            <span class="notify-ch {{ 'on' if ch.discord else 'off' }}">Discord</span>
+                                            <span class="notify-ch {{ 'on' if ch.tg else 'off' }}" title="{{ 'Telegram привязан' if ch.tg else 'Telegram не привязан или игрок не писал боту в личку' }}">{{ ch.tg_name if ch.tg else "Telegram" }}</span>
+                                        {% endif %}
+                                        <span class="notify-goes" data-goes></span>
+                                    </span>
                                 </label>
                             {% endfor %}
                         </div>
                     </div>
-                    <p><button type="submit" class="button">📨 Отправить в личку отмеченным</button></p>
+                    <p><button type="submit" class="button">📨 Отправить отмеченным</button></p>
                 {% endif %}
             </form>
+            <script>
+            (function () {
+                const form = document.getElementById("notify-form");
+                if (!form || !form.querySelector(".notify-recipient-card")) return;
+                const routes = {
+                    discord_first: (d, t) => d ? ["discord"] : t ? ["tg"] : [],
+                    tg_first: (d, t) => t ? ["tg"] : d ? ["discord"] : [],
+                    both: (d, t) => [d && "discord", t && "tg"].filter(Boolean),
+                };
+                const label = {discord: "Discord", tg: "Telegram"};
+                function update() {
+                    const mode = form.querySelector('input[name="mode"]:checked').value;
+                    const totals = {discord: 0, tg: 0, none: 0};
+                    form.querySelectorAll(".notify-recipient-card").forEach(card => {
+                        const r = routes[mode](card.dataset.discord === "1", card.dataset.tg === "1");
+                        const goes = card.querySelector("[data-goes]");
+                        goes.textContent = r.length ? "→ " + r.map(x => label[x]).join(" и ") : "→ не дойдёт";
+                        goes.classList.toggle("notify-goes-none", !r.length);
+                        if (!card.querySelector(".notify-check").checked) return;
+                        if (!r.length) totals.none++;
+                        r.forEach(x => totals[x]++);
+                    });
+                    Object.entries(totals).forEach(([k, v]) => { form.querySelector(`[data-total="${k}"]`).textContent = v; });
+                }
+                form.addEventListener("change", update);
+                form.querySelectorAll("[data-check]").forEach(btn => btn.addEventListener("click", () => {
+                    form.querySelectorAll(".notify-check").forEach(c => { c.checked = btn.dataset.check === "all" && !c.disabled; });
+                    update();
+                }));
+                update();
+            })();
+            </script>
         {% endif %}
     {% endif %}
 {% endblock %}

@@ -3186,3 +3186,20 @@ dialog.stat-problem-dialog.mg-dialog { max-width: 56em; }
 dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 #scout-dialog-body { overflow-y: auto; }
 .scout-detail td { vertical-align: top; }
+
+/* Рассылка взводов: куда уйдёт личка (tb_platoon_notify.html, 2026-10-28) */
+.notify-recipient-card { flex-direction: column; align-items: stretch; }
+.notify-recipient-top { display: flex; align-items: center; gap: 0.5em; min-width: 0; }
+.notify-recipient-channels { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em; font-size: 0.82em; }
+.notify-ch { padding: 0.05em 0.5em; border-radius: 999px; border: 1px solid var(--border); }
+.notify-ch.on { border-color: color-mix(in srgb, var(--status-good) 50%, transparent); color: var(--status-good); }
+.notify-ch.off { color: var(--fg-secondary); text-decoration: line-through; opacity: 0.7; }
+.notify-goes { margin-left: auto; font-weight: 600; }
+.notify-goes-none { color: var(--status-critical); }
+.notify-modes { display: flex; flex-direction: column; gap: 0.35em; }
+.notify-mode { display: flex; align-items: center; gap: 0.45em; cursor: pointer; }
+.notify-totals { display: flex; flex-wrap: wrap; gap: 0.4em 1em; margin: 0.7em 0 0.3em; }
+.notify-dest b { font-size: 1.15em; }
+.notify-dest-none b { color: var(--status-critical); }
+.notify-hint { font-size: 0.85em; margin: 0.3em 0 0; }
+.notify-report { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35em; }
