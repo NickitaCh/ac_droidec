@@ -198,35 +198,6 @@
             </form>
         </div>
 
-        <div class="panel" id="from-image">
-            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её и сохранит ордер на 6 этапов здесь, на сайте (в ветку ничего не пишет), и расставит взводы. Ордер сам появится в списке планов («План»).") }}</span></div>
-            {% if image_job %}
-                {% if image_job.state == "running" %}
-                    <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>
-                    <script>setTimeout(() => location.reload(), 8000);</script>
-                {% elif image_job.state == "done" %}
-                    <p class="badge badge-ok" style="white-space: pre-line;">{{ image_job.message }}</p>
-                {% elif image_job.state == "error" %}
-                    <p class="badge badge-danger" style="white-space: pre-line;">❌ «{{ image_job.plan_name }}»: {{ image_job.message }}</p>
-                {% endif %}
-            {% endif %}
-            <form method="post" action="/tb/order-plans/from-image">
-                <label>
-                    Название ордера
-                    <input type="text" name="name" required>
-                </label>
-                <label>
-                    Ссылка на ветку с картинкой
-                    <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
-                </label>
-                <label>
-                    Total Stars с картинки
-                    <input type="number" name="stars" min="0" required>
-                </label>
-                <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и сохранить</button>
-            </form>
-        </div>
-
         <div class="panel">
             <div class="panel-title"><span>Перенести из треда{{ ui.help("Ордер на 6 этапов уже лежит в треде Discord (по сообщению на этап)? Бот один раз скопирует тексты этапов на сайт — дальше тред не нужен, его можно удалить. Нужны все 6 этапов, в каждом сообщении — номер этапа («1 этап» или «этап 1»).") }}</span></div>
             <form method="post" action="/tb/order-plans/save">

@@ -1,17 +1,9 @@
-"""Ордер ТБ на 6 этапов из картинки «Strategy Summary» — общая часть бота
-(/тб_ордер_из_картинки, cogs/tb_order_image.py) и сайта (/tb/order-plans): промпт для
-vision-модели, русские названия планет, сборка текстов этапов. Плюс веб-версия всего
-процесса через Discord REST (у веба нет шлюза disnake) — run_web_job."""
+"""Тексты этапов ордера ТБ: сборка 6 сообщений «## Восход Империи — N этап» из таблицы раундов
+(services/tb_plan.py::order_data), русские названия планет, сводка автозаполнения взводов.
+«Ордер из картинки» (распознавание Strategy Summary моделью, /тб_ордер_из_картинки и форма на
+сайте) удалён 2026-10-28 по решению пользователя — неактуален."""
 
-import asyncio
-import json
-import os
 import re
-from datetime import datetime, timezone
-
-import httpx
-
-import database
 
 
 ZONE_EMOJI = {"dark": "🔴", "mixed": "🟡", "light": "🔵", "bonus": "⚪"}
@@ -40,39 +32,6 @@ PLANET_RU = {
     "malachor": "Малахор",
 }
 
-PROMPT = """На картинке — снимок экрана вкладки "Strategy Summary" планировщика ТБ (Star Wars:
-Galaxy of Heroes, "Восход Империи"). Таблица: строки Dark/Mixed/Light/Bonus,
-колонки Round 1..Round 6.
-
-В каждой заполненной ячейке — название планеты сверху (например "R5: Mustafar" —
-верни только "Mustafar", без префикса "R#:"), и под ним три строки чисел. Нужно
-только:
-1. Название планеты (английское, как написано, без префикса "R#:").
-2. Итоговый рейтинг ★ в правой нижней части ячейки (0-3 звезды). Если там пусто,
-   стоит только число без иконок звёзд, или ячейка пустая — это 0 звёзд.
-Всё остальное (проценты, "M"-значения, "Sandbagged"/"Mission Req" внизу) не нужно
-и должно игнорироваться.
-
-Для строки Bonus: если в колонке стоит "???" — зона ещё не открыта, верни для неё
-пустой список. Если в колонке одна или несколько планет (может быть до 2, одна
-под другой) — верни все, сверху вниз.
-
-Верни СТРОГО JSON без markdown-обрамления (без ```), ровно такой структуры:
-{
-  "total_stars_header": <число из заголовка "Total Stars: N">,
-  "rounds": [
-    {
-      "round": 1,
-      "dark": {"planet": "...", "stars": 0} или null,
-      "mixed": {"planet": "...", "stars": 0} или null,
-      "light": {"planet": "...", "stars": 0} или null,
-      "bonus": [{"planet": "...", "stars": 0}]
-    }
-  ]
-}
-Массив "rounds" должен содержать ровно 6 элементов (round: 1..6)."""
-
-
 def _translate_planet(name: str) -> str:
     key = (name or "").strip().lower()
     key = re.sub(r"^r\d+:\s*", "", key)
@@ -93,17 +52,6 @@ def _overall_contribution(zone: str, stars: int) -> int:
     if zone == "bonus":
         return 1 if stars >= 3 else 0
     return max(0, stars)
-
-
-def validate_response(data: dict):
-    """Для роутера (services/openrouter_router.py): ответ, из которого не собираются 6
-    этапов, отбраковывается — пробуем другую модель (не больше 2 отбракованных ответов,
-    чтобы не жечь суточный лимит, если картинка и правда не та)."""
-    try:
-        blocks, _total = build_order_blocks(data)
-    except Exception as e:
-        return f"не разобрать этапы: {e}"
-    return True if len(blocks) == 6 else f"этапов {len(blocks)} вместо 6"
 
 
 def build_order_blocks(data: dict):
@@ -176,133 +124,3 @@ def summarize_autofill(result) -> str:
     if reasons:
         note += " — не хватает (" + ", ".join(f"{AUTOFILL_REASON_LABELS.get(r, r)}: {c}" for r, c in reasons.items()) + ")"
     return note
-
-
-# ---------------------------------------------------------------------------
-# Веб-версия: тот же процесс через Discord REST, в фоне (распознавание идёт до
-# минуты и дольше — HTTP-запрос столько не ждёт). Статус — в bot_state.
-# ---------------------------------------------------------------------------
-
-DISCORD_API = "https://discord.com/api/v10"
-JOB_KEY = "tb_order_image_job"
-WARNING_RATIO = 0.9
-_LINK_RE = re.compile(r"discord(?:app)?\.com/channels/(\d+|@me)/(\d+)")
-_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
-
-
-class OrderImageError(Exception):
-    pass
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def get_job(guild_id: int) -> dict | None:
-    raw = database.get_bot_state(JOB_KEY, guild_id=guild_id)
-    try:
-        return json.loads(raw) if raw else None
-    except ValueError:
-        return None
-
-
-def _set_job(guild_id: int, **fields) -> None:
-    job = get_job(guild_id) or {}
-    job.update(fields, updated_at=_now())
-    database.set_bot_state(JOB_KEY, json.dumps(job, ensure_ascii=False), guild_id=guild_id)
-
-
-def start_job(guild_id: int, plan_name: str) -> bool:
-    """False — у гильдии уже идёт распознавание (второе параллельно не запускаем)."""
-    job = get_job(guild_id)
-    if job and job.get("state") == "running":
-        updated = datetime.strptime(job["updated_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        # Подвисшая задача (веб перезапустили посреди работы) не блокирует навсегда.
-        if (datetime.now(timezone.utc) - updated).total_seconds() < 600:
-            return False
-    database.set_bot_state(JOB_KEY, json.dumps({"state": "running", "plan_name": plan_name, "step": "Читаю тред…",
-                                                "updated_at": _now()}, ensure_ascii=False), guild_id=guild_id)
-    return True
-
-
-def _thread_id_from_link(link: str) -> int | None:
-    link = (link or "").strip()
-    m = _LINK_RE.search(link)
-    if m:
-        return int(m.group(2))
-    return int(link) if link.isdigit() else None
-
-
-async def run_web_job(guild_id: int, link: str, plan_name: str, stars: int, created_by: str) -> None:
-    try:
-        message = await _run(guild_id, link, plan_name, stars, created_by)
-        _set_job(guild_id, state="done", message=message)
-    except OrderImageError as e:
-        _set_job(guild_id, state="error", message=str(e))
-    except Exception as e:
-        _set_job(guild_id, state="error", message=f"Непредвиденная ошибка: {e}")
-        print(f"❌ [web/tb_order_image] guild {guild_id}: {e!r}")
-
-
-async def _run(guild_id: int, link: str, plan_name: str, stars: int, created_by: str) -> str:
-    from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
-    import tb_platoon_autofill
-
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise OrderImageError("OPENROUTER_API_KEY не настроен на сервере.")
-    if daily_used_ratio(OPENROUTER_DAILY_REQUEST_LIMIT) >= WARNING_RATIO:
-        raise OrderImageError("Почти исчерпан дневной лимит распознавания картинок (~90%). "
-                              "Лимит сбрасывается в начале следующих суток (UTC).")
-    thread_id = _thread_id_from_link(link)
-    if thread_id is None:
-        raise OrderImageError("Не удалось распознать ссылку на тред.")
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        raise OrderImageError("DISCORD_TOKEN не настроен на сервере.")
-    headers = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}
-
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-        resp = await client.get(f"{DISCORD_API}/channels/{thread_id}")
-        if resp.status_code in (403, 404):
-            raise OrderImageError("Тред не найден или у бота нет к нему доступа — проверьте ссылку.")
-        resp.raise_for_status()
-        thread_name = resp.json().get("name") or str(thread_id)
-
-        resp = await client.get(f"{DISCORD_API}/channels/{thread_id}/messages", params={"after": 0, "limit": 1})
-        resp.raise_for_status()
-        first = resp.json()
-        if not first:
-            raise OrderImageError("В треде нет сообщений.")
-        image = next((a for a in first[0].get("attachments") or []
-                      if (a.get("content_type") or "").startswith("image/")
-                      or (a.get("filename") or "").lower().endswith(_IMAGE_EXT)), None)
-        if image is None:
-            raise OrderImageError("В первом сообщении треда нет картинки.")
-
-        _set_job(guild_id, step="Распознаю картинку (до пары минут)…")
-        img = await client.get(image["url"])
-        img.raise_for_status()
-        mime = (image.get("content_type") or "image/png").split(";")[0].strip()
-        data = await asyncio.to_thread(call_vision_json, img.content, mime, api_key, PROMPT, validate_response)
-        try:
-            blocks, total = build_order_blocks(data)
-        except Exception as e:
-            raise OrderImageError(f"Не удалось разобрать ответ модели: {e}")
-        if len(blocks) != 6:
-            raise OrderImageError(f"Распознано {len(blocks)} этапов вместо 6 — проверьте картинку, ордер не сохранён.")
-
-    # Ордер — только на сайте (2026-10-28): в тред этапы больше не публикуются, тред — лишь
-    # место, откуда взяли картинку.
-    from services import tb_order_store
-    plan_id = tb_order_store.create_order(guild_id, plan_name, dict(enumerate(blocks, start=1)), total,
-                                          created_by, "image")
-    parts = []
-    if total != stars:
-        parts.append(f"⚠️ По распознанным данным сумма звёзд = {total}, а указано {stars}. Проверьте этапы на вкладке «Ордер».")
-    parts.append(f"✅ Ордер «{plan_name}» ({total} ★) собран из картинки треда «{thread_name}» — 6 этапов на вкладке «Ордер».")
-    try:
-        parts.append(summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, plan_id)) + " — /tb/platoons.")
-    except (ValueError, RuntimeError) as e:
-        parts.append(f"⚠️ Не удалось автоматически расставить взводы: {e}. Расставьте вручную на /tb/platoons.")
-    return "\n".join(parts)

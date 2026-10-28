@@ -26,7 +26,7 @@ import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
-from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_image, tb_order_store, tb_plan, tb_projection, tb_results
+from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_store, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
@@ -295,7 +295,6 @@ async def tb_order(request: Request, user: dict = Depends(feature_flags.require_
         "preview": preview,
         "preview_plan": preview_plan,
         "preview_error": preview_error,
-        "image_job": tb_order_image.get_job(guild_id),
     })
 
 
@@ -507,32 +506,6 @@ async def tb_order_plans_select(plan_id: int = Form(...), user: dict = Depends(f
 async def tb_order_plans_delete(name: str = Form(...), user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     database.delete_tb_saved_plan(user["guild_id"], name)
     return RedirectResponse("/tb/order?saved=1", status_code=303)
-
-
-# Фоновые задачи «ордер из картинки» — держим ссылки, чтобы asyncio не собрал их сборщиком мусора.
-_BACKGROUND_TASKS = set()
-
-
-@router.post("/tb/order-plans/from-image", response_class=HTMLResponse)
-async def tb_order_plans_from_image(
-    name: str = Form(...),
-    thread_link: str = Form(...),
-    stars: int = Form(...),
-    user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
-):
-    """Веб-версия /тб_ордер_из_картинки: распознавание идёт в фоне
-    (services/tb_order_image.py::run_web_job), статус — на этой же странице."""
-    guild_id = user["guild_id"]
-    name = name.strip()
-    if not name:
-        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
-    if not tb_order_image.start_job(guild_id, name):
-        return RedirectResponse(f"/tb/order?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
-    task = asyncio.create_task(tb_order_image.run_web_job(
-        guild_id, thread_link, name, stars, f"web:{user['discord_id']}"))
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
-    return RedirectResponse("/tb/order#from-image", status_code=303)
 
 
 @router.post("/tb/order-plans/save", response_class=HTMLResponse)

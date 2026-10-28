@@ -1,49 +1,9 @@
-"""/тб_ордер_из_картинки — по ссылке на тред достаёт первое сообщение с картинкой
-"Strategy Summary" (планировщик ТБ, вкладка со сводной таблицей Round 1..6 x
-Dark/Mixed/Light/Bonus), распознаёт её моделью (services/openrouter_vision.py) и
-сохраняет ордер на 6 этапов на сайте (services/tb_order_store.py, вкладка «Ордер»).
-С 2026-10-28 в тред ничего не публикуется и тред к ордеру не привязывается — решение
-пользователя «отказаться от обязательного дубликата в дискорде»; тред — только место,
-откуда взяли картинку. /тб_план — панель поверх database.tb_saved_plans: выбрать
-активный (guilds.tb_active_plan_id — его этапы tb_order_loop в cogs/guild_events.py
-публикует в 20:00), предпросмотр, взводы, удалить; «Сохранить ветку» — разовый перенос
-текстов этапов из треда на сайт (tb_order_store.import_thread).
+"""/тб_план — панель поверх database.tb_saved_plans: выбрать активный ордер
+(guilds.tb_active_plan_id — его этапы tb_order_loop в cogs/guild_events.py публикует в 20:00),
+предпросмотр, взводы, удалить; «Перенести из треда» — разовый перенос текстов этапов на сайт
+(services/tb_order_store.py::import_thread). Ордер хранится на сайте, тред к нему не привязан.
+Команда /тб_ордер_из_картинки удалена 2026-10-28 (неактуальна, решение пользователя)."""
 
-Изначально был реализован на Gemini (google-genai, GOOGLE_API_KEY), но бесплатный
-тариф Google блокирует запросы с датацентр-IP VPS (проверено 2026-08-21 — тот же
-ключ работает локально и падает изнутри контейнера на VPS с "location not
-supported"). Mistral с того же VPS работает (подтверждено live-пробником). Точность
-чуть ниже Gemini (у Mistral изредка промах на 1 звезду в одной ячейке из ~30 — см.
-sanity-check по сумме звёзд ниже), но приемлема.
-
-Правило перевода звёзд с картинки в текст ордера (подтверждено пользователем
-2026-08-21, на примере треда "44тест"):
-- Цель = количество ★ в правой нижней части ячейки (0-3).
-- Взводы = "все", если Цель > 0. Если Цель = 0: "по боту" для Dark/Mixed/Light,
-  но "только по боту" для бонусной зоны — это разные формулировки, не опечатка
-  (сверено с реальным ордером бота в #ac-тб-оповещения, сообщение про 4 этап,
-  2026-08-21: Кессель 0★ → "по боту", Мандалор 0★ → "только по боту"). Для
-  этапов 1-5 это верно, даже если планета получит звёзды позже — взвод всё
-  равно нужен для очков территории.
-- БЗ = "обязательно" всегда, кроме случая ниже.
-- Особый случай — 6 (последний) этап: если Цель = 0, блок планеты не выводится
-  вообще (дальше не будет этапа, куда переносить взвод/БЗ). На этапах 1-5 блок
-  выводится всегда, даже при Цель = 0.
-- Бонусная зона (⚪) в общий зачёт "Total Stars" даёт всего 1 звезду при Цель = 3
-  и 0 звёзд при Цель < 3 (за 1-2★ на бонусной планете — другие награды, не входит
-  в общий зачёт) — это объясняет, почему сумма видимых ★ на картинке обычно НЕ
-  равна числу в шапке "Total Stars: N". Используется только для сверки суммы,
-  параметр "звёзды" передаёт офицер, значение не меняет текст самого ордера.
-
-Markdown в точности как у офицеров (сверено 2026-08-22 с сообщением о 4 этапе
-в #ac-тб-оповещения и с файлом order.txt, который прислал пользователь):
-"## Восход Империи — N этап" (заголовок H2, без "> "), затем каждая планета —
-блок из 4 строк с префиксом "> " (цитата), название планеты жирным с эмодзи
-зоны перед ним, между планетами — две пустые строки "> ". Эмодзи зон:
-Dark=🔴, Mixed=🟡 (жёлтый, не оранжевый), Light=🔵, Bonus=⚪ (белый, не зелёный).
-"""
-
-import asyncio
 import os
 
 import disnake
@@ -51,153 +11,22 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
-import tb_platoon_autofill
 import tb_platoon_notify
 from services import feature_flags
 from cogs.guild_events import chunk_tb_order_message
 from services.config_status import config_warning_text
-from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
-from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
-# Промпт и сборка 6 этапов — общие с сайтом (/tb/order-plans, «Ордер из картинки»).
-from services.tb_order_image import (
-    PROMPT, summarize_autofill as _summarize_autofill,
-    build_order_blocks as _build_order_blocks, validate_response as _validate_response,
-)
+from services.message_image import extract_channel_id
+
 
 class TBOrderImage(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.slash_command(
-        name="тб_ордер_из_картинки",
-        description="Собрать ордер на 6 этапов ТБ из картинки Strategy Summary в треде (по ссылке)",
-    )
-    @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
-    async def tb_order_from_image(
-        self,
-        inter: disnake.ApplicationCommandInteraction,
-        ссылка: str = commands.Param(description="Ссылка на тред с картинкой Strategy Summary в первом сообщении"),
-        название: str = commands.Param(description="Название плана — под ним он сохранится для /тб_план"),
-        звёзды: int = commands.Param(description="Total Stars с картинки — для проверки, что распознано верно"),
-        принудительно: bool = commands.Param(
-            default=False,
-            description="Опубликовать заново, даже если ордер для этих этапов уже есть в треде (будут дубли)",
-        ),
-    ):
-        if not self.bot.openrouter_api_key:
-            await inter.response.send_message(
-                "❌ OPENROUTER_API_KEY не настроен на сервере — обратитесь к администратору бота.",
-                ephemeral=True,
-            )
-            return
-
-        # Общий с /фарм дневной лимит OpenRouter (см. services/openrouter_vision.py) —
-        # проверяем ДО вызова API, чтобы не тратить последний запрос из дневной квоты
-        # впустую, если лимит и так почти исчерпан.
-        if daily_used_ratio(OPENROUTER_DAILY_REQUEST_LIMIT) >= self.bot.openrouter_daily_warning_ratio:
-            await inter.response.send_message(
-                "⏳ Команда временно недоступна — почти исчерпан дневной лимит на распознавание "
-                "картинок (~90%). Лимит сбрасывается в начале следующих суток (UTC).",
-                ephemeral=True,
-            )
-            return
-
-        await inter.response.defer(ephemeral=True)
-
-        channel_id = extract_channel_id(ссылка)
-        if channel_id is None:
-            await inter.edit_original_response("❌ Не удалось распознать ссылку на тред.")
-            return
-
-        try:
-            thread = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-        except disnake.NotFound:
-            await inter.edit_original_response("❌ Тред не найден — проверьте ссылку.")
-            return
-        except disnake.Forbidden:
-            await inter.edit_original_response("❌ Нет доступа к этому треду.")
-            return
-
-        first_message = None
-        async for msg in thread.history(limit=1, oldest_first=True):
-            first_message = msg
-        if first_message is None:
-            await inter.edit_original_response("❌ В треде нет сообщений.")
-            return
-
-        image_attachment = next(
-            (a for a in first_message.attachments if is_image_attachment(a)), None
-        )
-        if image_attachment is None:
-            await inter.edit_original_response("❌ В первом сообщении треда нет картинки.")
-            return
-
-        image_bytes = await image_attachment.read()
-        mime_type = guess_mime_type(image_attachment)
-
-        try:
-            data = await asyncio.to_thread(
-                call_vision_json, image_bytes, mime_type, self.bot.openrouter_api_key, PROMPT, _validate_response
-            )
-        except Exception as e:
-            await inter.edit_original_response(f"❌ Ошибка распознавания картинки: {e}")
-            return
-
-        try:
-            blocks, total = _build_order_blocks(data)
-        except Exception as e:
-            await inter.edit_original_response(f"❌ Не удалось разобрать ответ модели: {e}")
-            return
-
-        if len(blocks) != 6:
-            await inter.edit_original_response(
-                f"⚠️ Распознано {len(blocks)} этапов вместо 6 — проверьте картинку вручную, не публикую."
-            )
-            return
-
-        warning = ""
-        if total != звёзды:
-            warning = (
-                f"⚠️ Внимание: по распознанным данным сумма звёзд в общий зачёт = {total}, "
-                f"а вы указали {звёзды}. Проверьте этапы на сайте перед тем, как тегать гильдию.\n\n"
-            )
-
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
-            guild_id = None
-        # Ордер — только на сайте (2026-10-28): в тред этапы больше не публикуются, тред — лишь
-        # место, откуда взяли картинку. Параметр «принудительно» больше ничего не делает
-        # (уйдёт из описания команды при следующей ручной синхронизации команд).
-        from services import tb_order_store
-        plan_id = tb_order_store.create_order(guild_id, название, dict(enumerate(blocks, start=1)), total,
-                                              str(inter.author.id), "image")
-
-        # Автозаполнение взводов сразу после сохранения плана — по прямому запросу
-        # пользователя (см. план "Автозаполнение взводов ТБ + фильтры" от 2026-08-29,
-        # пересказ разговора с Ильёй: "прописал команду и бот... подготовил взводы на 6
-        # этапов и сообщил, всего ли хватает"). Ошибка автозаполнения НЕ откатывает уже
-        # сохранённый план — он в любом случае корректно сохранён, просто взводы придётся
-        # расставить вручную на /tb/platoons.
-        autofill_note = ""
-        try:
-            result = await tb_platoon_autofill.autofill_plan(guild_id, plan_id)
-            autofill_note = "\n" + _summarize_autofill(result)
-            autofill_note += "\nПроверить/скорректировать: /tb/platoons на сайте."
-        except (ValueError, RuntimeError) as e:
-            autofill_note = f"\n⚠️ Не удалось автоматически расставить взводы: {e}. План сохранён, расставьте вручную на /tb/platoons."
-
-        await inter.edit_original_response(
-            f"{warning}✅ Ордер «{название}» ({total} ★) собран из картинки — 6 этапов на сайте, вкладка «Ордер» "
-            f"(там их можно поправить и отправить). Выбрать его активным: `/тб_план`."
-            f"{autofill_note}"
-        )
-
-
     # ------------------ /тб_план — панель (2026-10-14) ------------------
     # Одна команда без параметров вместо 6 подкоманд: в сообщении — список планов,
     # выпадашки «план» и «этап», кнопки действий. Ответы на действия — отдельными
     # скрытыми сообщениями, сама панель обновляется на месте.
-    @commands.slash_command(name="тб_план", description="Планы ордера ТБ: выбрать активный, предпросмотр, взводы, сохранить ветку")
+    @commands.slash_command(name="тб_план", description="Ордер ТБ: выбрать активный, предпросмотр, взводы, перенести ордер из треда")
     @commands.check(lambda inter: guild_resolver.is_officer_for_resolved_guild(inter.author))
     async def tb_plan_panel(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
@@ -276,7 +105,7 @@ class TBPlanPanel(disnake.ui.View):
     def render(self) -> str:
         if not self.plans:
             return ("🗺️ **Планы ордера ТБ** — сохранённых планов пока нет. Соберите ордер командой "
-                    "`/тб_ордер_из_картинки`, на сайте (вкладка ВИ → «Ордер») либо перенесите готовый ордер из треда кнопкой ниже.")
+                    "на сайте (вкладка ВИ → «План» → «Собрать ордер») либо перенесите готовый ордер из треда кнопкой ниже.")
         lines = ["🗺️ **Планы ордера ТБ** — активный план бот публикует по этапам в канал плана ТБ."]
         for p in self.plans[:25]:
             mark = " — 🟢 **активный**" if p["id"] == self.active_id else ""
