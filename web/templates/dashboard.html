@@ -295,38 +295,32 @@
                     {% if not widgets.tasks_summary.rows %}
                         <p class="widget-empty">Активных или просроченных задач нет — всё чисто. 🎉</p>
                     {% else %}
-                        <div class="table-scroll">
-                            <table class="data cards-on-phone">
-                                <thead>
+                        <table class="data cards-on-phone tasks-mini">
+                            <thead>
+                                <tr>
+                                    <th>Юнит · игрок</th>
+                                    <th>Цель · срок</th>
+                                    <th>Статус</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for r in widgets.tasks_summary.rows %}
                                     <tr>
-                                        <th>Игрок</th>
-                                        <th>Юнит</th>
-                                        <th>Цель</th>
-                                        <th>Дедлайн</th>
-                                        <th>Статус</th>
+                                        <td data-label="Юнит"><div class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ r.base_id }}" alt="" loading="lazy" width="128" height="128"></span><span>{{ r.unit_name }}<br><span class="muted">{{ r.player_name }}</span></span></div></td>
+                                        <td data-label="Цель"><div>{{ r.target_label }}{% if r.deadline %}<br><span class="muted num">до {{ r.deadline }}</span>{% endif %}</div></td>
+                                        <td data-label="Статус">
+                                            {% if r.status == "FAILED" %}
+                                                <span class="badge badge-task-overdue">Просрочено</span>
+                                            {% elif r.in_progress %}
+                                                <span class="badge badge-task-progress">В работе</span>
+                                            {% else %}
+                                                <span class="badge badge-task-assigned">Назначено</span>
+                                            {% endif %}
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    {% for r in widgets.tasks_summary.rows %}
-                                        <tr>
-                                            <td data-label="Игрок">{{ r.player_name }}</td>
-                                            <td data-label="Юнит"><span class="unit-cell"><span class="unit-portrait unit-portrait-xs"><img src="/unit-img/{{ r.base_id }}" alt="" loading="lazy" width="128" height="128"></span>{{ r.unit_name }}</span></td>
-                                            <td data-label="Цель" class="nowrap">{{ r.target_label }}</td>
-                                            <td data-label="Дедлайн" class="num nowrap">{{ r.deadline }}</td>
-                                            <td data-label="Статус">
-                                                {% if r.status == "FAILED" %}
-                                                    <span class="badge badge-task-overdue">Просрочено</span>
-                                                {% elif r.in_progress %}
-                                                    <span class="badge badge-task-progress">В работе</span>
-                                                {% else %}
-                                                    <span class="badge badge-task-assigned">Назначено</span>
-                                                {% endif %}
-                                            </td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                         {% if widgets.tasks_summary.open_total > widgets.tasks_summary.rows|length %}
                             <p class="muted">И ещё {{ widgets.tasks_summary.open_total - widgets.tasks_summary.rows|length }} — см. <a href="/tasks">все задачи</a>.</p>
                         {% endif %}

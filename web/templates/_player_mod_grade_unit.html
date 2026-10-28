@@ -1,0 +1,62 @@
+{# Попап «Оценки модов» — один персонаж (route player_mod_grade_unit, services/mod_grade.py::unit_detail). #}
+{% import "_game.html" as game %}
+{% set grade_class = {"А": "mg-a", "Б": "mg-b", "В": "mg-c", "Г": "mg-d", "Д": "mg-e", "Е": "mg-f"} %}
+{% set part_labels = {"primary": "Основы", "sets": "Наборы", "speed": "Скорость", "quality": "Качество"} %}
+{% macro stat(s) -%}
+{{ s.name }} +{% if s.is_percent %}{{ "%.2f"|format(s.value)|replace(".", ",") }}%{% else %}{{ s.value|round|int }}{% endif %}
+{%- endmacro %}
+<div class="mg-detail">
+    <div class="mg-detail-head">
+        {{ game.portrait(u.base_id) }}
+        <div>
+            <div class="mg-detail-name">R{{ u.relic }} · скорость с модов +{{ u.speed }}</div>
+            <div class="muted">сравнение с {{ u.n }} такими же персонажами (R6+, 6 модов 15 ур.) всех гильдий бота</div>
+        </div>
+        <span class="mg-grade mg-grade-lg {{ grade_class[u.letter] }}"><b>{{ u.letter }}</b>{{ u.score }}</span>
+    </div>
+
+    <div class="mg-parts">
+        {% for k, v in u.parts.items() %}
+            <div class="mg-part">
+                <span>{{ part_labels[k] }}</span>
+                <span class="mg-bar"><span style="width: {{ v }}%" class="{{ 'mg-bar-bad' if v < 40 else 'mg-bar-mid' if v < 70 else 'mg-bar-good' }}"></span></span>
+                <b>{{ v }}</b>
+            </div>
+        {% endfor %}
+    </div>
+
+    {% if u.hints %}
+        <ul class="mg-hints">{% for h in u.hints %}<li>{{ h }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <h4>Скорость с модов</h4>
+    <p>+{{ u.speed }} <span class="muted">— лучше, чем у {{ u.speed_pct }}% · у половины от +{{ u.speed_median }} · у лучших 20% от +{{ u.speed_top }}</span></p>
+
+    <h4>Наборы</h4>
+    <p>{{ u.sets_mine }} <span class="muted">— так у {{ u.sets_mine_pct }}%</span></p>
+    <p class="muted">Чаще всего: {% for t in u.sets_top %}{{ t.label }} ({{ t.pct }}%){% if not loop.last %} · {% endif %}{% endfor %}</p>
+
+    <h4>Моды</h4>
+    <div class="mg-mods">
+        {% for row in u.mods %}
+            {% set d = row.mod %}
+            <div class="mg-mod{{ ' mg-mod-off' if not row.mine_ok }}">
+                <div class="mg-mod-head">
+                    {% if d %}{{ game.mod_icon(d.slot_key, d.set_id, d.rarity, d.tier, "2.2rem") }}{% endif %}
+                    <div>
+                        <div class="mg-mod-slot">{{ row.label }}{% if d %} <span class="muted">· {{ d.rarity }}• {{ d.level }} ур.</span>{% endif %}</div>
+                        {% if d and d.primary %}<div class="mg-mod-primary">{{ stat(d.primary) }}</div>{% elif not d %}<div class="muted">нет мода</div>{% endif %}
+                    </div>
+                </div>
+                {% if d %}
+                    <ul class="mg-mod-secs">
+                        {% for s in d.secondaries %}<li class="{{ 'mg-sec-speed' if s.stat_id == 5 }}">{{ stat(s) }}</li>{% endfor %}
+                    </ul>
+                {% endif %}
+                {% if row.top %}
+                    <div class="mg-mod-top muted">У других: {% for t in row.top %}{{ t.label }} {{ t.pct }}%{% if not loop.last %}, {% endif %}{% endfor %}</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</div>

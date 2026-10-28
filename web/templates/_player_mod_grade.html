@@ -1,13 +1,8 @@
-{# «Оценка модов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
-{% set grade_badge = {"А": "badge-ok", "Б": "badge-ok", "В": "badge-neutral", "Г": "badge-warn", "Д": "badge-danger", "Е": "badge-danger"} %}
-{% macro unit_row(u) %}
-    <li>
-        <span class="badge {{ grade_badge[u.letter] }}">{{ u.letter }} {{ u.score }}</span>
-        <strong>{{ u.name }}</strong> <span class="muted">R{{ u.relic }} · скорость с модов +{{ u.speed }}</span>
-        <div class="my-tb-detail muted">{% for k, v in u.parts.items() %}{{ part_labels[k] }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
-        {% for h in u.hints %}<div class="my-tb-detail">{{ h }}</div>{% endfor %}
-    </li>
-{% endmacro %}
+{# «Оценка модов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html).
+   Фильтры/сортировка — на клиенте по data-атрибутам карточек; клик открывает попап
+   (/player/<code>/mod-grade/<base_id>, _player_mod_grade_unit.html). #}
+{% import "_game.html" as game %}
+{% set grade_class = {"А": "mg-a", "Б": "mg-b", "В": "mg-c", "Г": "mg-d", "Д": "mg-e", "Е": "mg-f"} %}
 {% if not data %}
     <p class="widget-empty">Состав игрока ещё не загружен — появится после ежечасного обновления.</p>
 {% elif not data.built %}
@@ -15,12 +10,44 @@
 {% elif not data.units %}
     <p class="widget-empty">Нет персонажей с модами, для которых есть эталон.</p>
 {% else %}
-    <p>Средний балл <strong>{{ data.average }}</strong> · оценено персонажей: {{ data.units|length }}</p>
-    <p class="mod-grade-counts">{% for g, n in data.counts %}<span class="badge {{ grade_badge[g] }}">{{ g }}: {{ n }}</span> {% endfor %}</p>
-    <ul class="my-tb-missions">{% for u in data.units[:8] %}{{ unit_row(u) }}{% endfor %}</ul>
-    {% if data.units|length > 8 %}
-        <details><summary>Все персонажи ({{ data.units|length }})</summary>
-            <ul class="my-tb-missions">{% for u in data.units[8:] %}{{ unit_row(u) }}{% endfor %}</ul>
-        </details>
-    {% endif %}
+    <div class="mg-summary">
+        <div class="mg-average"><span class="muted">Средний балл</span> <strong>{{ data.average }}</strong> <span class="muted">· {{ data.units|length }} перс.</span></div>
+        <div class="mg-letters" role="group" aria-label="Оценка">
+            {% for g, n in data.counts %}<button type="button" class="mg-letter {{ grade_class[g] }}" data-mg-letter="{{ g }}" aria-pressed="false"{% if not n %} disabled{% endif %}><b>{{ g }}</b> {{ n }}</button>{% endfor %}
+        </div>
+    </div>
+    <div class="mg-toolbar">
+        <input type="search" class="mg-search" placeholder="Поиск персонажа" aria-label="Поиск персонажа">
+        <select class="mg-sort" aria-label="Сортировка">
+            <option value="score-asc">Сначала слабые</option>
+            <option value="score-desc">Сначала сильные</option>
+            <option value="relic-desc">По реликвии</option>
+            <option value="speed-desc">По скорости с модов</option>
+            <option value="name-asc">По имени</option>
+        </select>
+        <select class="mg-relic" aria-label="Реликвия">
+            <option value="0">Любая реликвия</option>
+            {% for r in (5, 7, 8, 9) %}<option value="{{ r }}">R{{ r }}+</option>{% endfor %}
+        </select>
+    </div>
+    <div class="mg-grid">
+        {% for u in data.units %}
+            {% set weak = u.parts|dictsort(by="value")|first %}
+            <button type="button" class="mg-card" data-base-id="{{ u.base_id }}" data-name="{{ u.name|lower }}"
+                    data-letter="{{ u.letter }}" data-score="{{ u.score }}" data-relic="{{ u.relic }}" data-speed="{{ u.speed }}">
+                {{ game.portrait(u.base_id, "sm") }}
+                <span class="mg-card-body">
+                    <span class="mg-card-name">{{ u.name }}</span>
+                    <span class="mg-card-meta">R{{ u.relic }} · +{{ u.speed }} скор.</span>
+                    {% if weak[1] < 50 %}<span class="mg-card-weak">слабее всего: {{ part_labels[weak[0]] }} {{ weak[1] }}</span>{% endif %}
+                </span>
+                <span class="mg-grade {{ grade_class[u.letter] }}"><b>{{ u.letter }}</b>{{ u.score }}</span>
+            </button>
+        {% endfor %}
+    </div>
+    <p class="widget-empty mg-none" hidden>Под фильтр никто не подходит.</p>
+    <dialog class="stat-problem-dialog mg-dialog">
+        <div class="stat-problem-dialog-header"><h3 class="mg-dialog-title"></h3><button type="button" class="link-btn mg-dialog-close" aria-label="Закрыть">✕</button></div>
+        <div class="mg-dialog-body"></div>
+    </dialog>
 {% endif %}

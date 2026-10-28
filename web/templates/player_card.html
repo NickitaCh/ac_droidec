@@ -413,7 +413,7 @@
         <div class="widget" id="tb-advisor" data-tab="tb">
             <div class="widget-header">
                 <h2>🧱 Докачать для взводов</h2>
-                {{ ui.help("Какие юниты докачать и открыть, чтобы закрывать взводы «Восхода Империи» на всех этапах. Раскладка взводов — стандартная (как в плане ВИ), а не текущий ордер. Юнит ставится во взвод раз за этап, поэтому этап засчитан, если уровня хватает на самую лёгкую планету этапа, где он нужен (Э — этап, ✓ — уже хватает). Сверху — юниты, закрывающие больше этапов.") }}
+                {{ ui.help("Только юниты, которых гильдии не хватает во взводах «Восхода Империи» (стандартная раскладка, как в плане ВИ): по каждому этапу считаем, сколько копий нужно и сколько игроков гильдии уже могут их поставить. Юнит ставится во взвод раз за этап. «Впритык» — хватает, но свободных игроков сверх нужного не больше одного. Э — этап.") }}
             </div>
             <div id="tb-advisor-body"><p class="widget-empty">Загружаю…</p></div>
             <script>
@@ -421,25 +421,94 @@
                 const body = document.getElementById("tb-advisor-body");
                 fetch("/player/{{ card.ally_code }}/tb-advisor").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
                     body.innerHTML = html;
-                    body.querySelectorAll(".pill-tab").forEach(btn => btn.addEventListener("click", () => {
-                        body.querySelectorAll(".pill-tab").forEach(b => b.classList.toggle("active", b === btn));
+                    // Этап фильтрует строки (и подсвечивает его в деталях), во вкладке — первые 12 + «Показать ещё».
+                    let phase = "", limit = 12;
+                    const apply = () => body.querySelectorAll(".tb-adv-list").forEach(list => {
+                        let matched = 0;
+                        list.querySelectorAll("li[data-phases]").forEach(li => {
+                            const ok = !phase || li.dataset.phases.includes(" " + phase + " ");
+                            if (ok) matched++;
+                            li.hidden = !ok || matched > limit;
+                            li.querySelectorAll("[data-phase]").forEach(sp => sp.classList.toggle("muted", !!phase && sp.dataset.phase !== phase));
+                        });
+                        const more = list.querySelector("[data-adv-more]"), none = list.querySelector("[data-adv-none]");
+                        if (more) { more.hidden = matched <= limit; more.textContent = `Показать ещё ${matched - limit}`; }
+                        if (none) none.hidden = matched > 0;
+                    });
+                    body.querySelectorAll("[data-adv]").forEach(btn => btn.tagName === "BUTTON" && btn.addEventListener("click", () => {
+                        body.querySelectorAll("button[data-adv]").forEach(b => b.classList.toggle("active", b === btn));
                         body.querySelectorAll(".tb-adv-list").forEach(d => { d.hidden = d.dataset.adv !== btn.dataset.adv; });
                     }));
+                    body.querySelectorAll("[data-adv-phase]").forEach(btn => btn.addEventListener("click", () => {
+                        body.querySelectorAll("[data-adv-phase]").forEach(b => b.classList.toggle("active", b === btn));
+                        phase = btn.dataset.advPhase; limit = 12; apply();
+                    }));
+                    body.querySelectorAll("[data-adv-more]").forEach(btn => btn.addEventListener("click", () => { limit = 1e9; apply(); }));
+                    apply();
                 }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить советник.</p>'; });
             })();
             </script>
         </div>
 
-        <div class="widget" id="mod-grade" data-tab="checks">
+        <div class="widget wc-wide" id="mod-grade" data-tab="checks">
             <div class="widget-header">
                 <h2>🎯 Оценка модов</h2>
-                {{ ui.help("Оценка А–Е каждого персонажа: как его моды выглядят на фоне того, как этого персонажа модят игроки всех гильдий бота (персонажи R6+ с шестью модами 15 уровня). Из чего балл: основы на стреле, треугольнике, круге и кресте (30 %), набор (20 %), скорость с модов — вторички и стрела, место среди остальных (35 %), качество — 6 точек и 15 уровень (15 %). Сверху — самые слабые; под ними — что поменять. А — 85+, Б — 70+, В — 55+, Г — 40+, Д — 25+, Е — ниже. Эталон пересчитывается раз в сутки.") }}
+                {{ ui.help("Моды каждого персонажа на фоне того, как его модят игроки всех гильдий бота. Балл: основы 30 %, наборы 20 %, скорость с модов 35 %, качество 15 %. А — 85+, Б — 70+, В — 55+, Г — 40+, Д — 25+, Е — ниже. Нажми на персонажа — подробности по модам.") }}
             </div>
             <div id="mod-grade-body"><p class="widget-empty">Загружаю…</p></div>
             <script>
-            fetch("/player/{{ card.ally_code }}/mod-grade").then(r => r.ok ? r.text() : Promise.reject(r.status))
-                .then(html => { document.getElementById("mod-grade-body").innerHTML = html; })
-                .catch(() => { document.getElementById("mod-grade-body").innerHTML = '<p class="widget-empty">Не удалось загрузить оценку.</p>'; });
+            (function () {
+                const body = document.getElementById("mod-grade-body");
+                fetch("/player/{{ card.ally_code }}/mod-grade").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
+                    body.innerHTML = html;
+                    const grid = body.querySelector(".mg-grid");
+                    if (!grid) return;
+                    const cards = [...grid.querySelectorAll(".mg-card")];
+                    const search = body.querySelector(".mg-search"), sort = body.querySelector(".mg-sort"), relic = body.querySelector(".mg-relic");
+                    const letters = new Set();
+                    const sorters = {
+                        "score-asc": (a, b) => a.dataset.score - b.dataset.score || b.dataset.relic - a.dataset.relic,
+                        "score-desc": (a, b) => b.dataset.score - a.dataset.score,
+                        "relic-desc": (a, b) => b.dataset.relic - a.dataset.relic || a.dataset.score - b.dataset.score,
+                        "speed-desc": (a, b) => b.dataset.speed - a.dataset.speed,
+                        "name-asc": (a, b) => a.dataset.name.localeCompare(b.dataset.name, "ru"),
+                    };
+                    const apply = () => {
+                        const q = search.value.trim().toLowerCase(), minRelic = +relic.value;
+                        let shown = 0;
+                        cards.sort(sorters[sort.value]).forEach(c => {
+                            const ok = (!q || c.dataset.name.includes(q)) && +c.dataset.relic >= minRelic
+                                && (!letters.size || letters.has(c.dataset.letter));
+                            c.hidden = !ok; shown += ok;
+                            grid.appendChild(c);
+                        });
+                        body.querySelector(".mg-none").hidden = shown > 0;
+                    };
+                    search.addEventListener("input", apply);
+                    sort.addEventListener("change", apply);
+                    relic.addEventListener("change", apply);
+                    body.querySelectorAll("[data-mg-letter]").forEach(btn => btn.addEventListener("click", () => {
+                        const g = btn.dataset.mgLetter, on = !letters.has(g);
+                        on ? letters.add(g) : letters.delete(g);
+                        btn.setAttribute("aria-pressed", on);
+                        apply();
+                    }));
+                    const dialog = body.querySelector(".mg-dialog"), dBody = dialog.querySelector(".mg-dialog-body");
+                    dialog.querySelector(".mg-dialog-close").addEventListener("click", () => dialog.close());
+                    dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });
+                    grid.addEventListener("click", e => {
+                        const card = e.target.closest(".mg-card");
+                        if (!card) return;
+                        dialog.querySelector(".mg-dialog-title").textContent = card.querySelector(".mg-card-name").textContent;
+                        dBody.innerHTML = '<p class="widget-empty">Загружаю…</p>';
+                        dialog.showModal();
+                        fetch("/player/{{ card.ally_code }}/mod-grade/" + encodeURIComponent(card.dataset.baseId))
+                            .then(r => r.ok ? r.text() : Promise.reject(r.status))
+                            .then(html => { dBody.innerHTML = html; })
+                            .catch(() => { dBody.innerHTML = '<p class="widget-empty">Не удалось загрузить подробности.</p>'; });
+                    });
+                }).catch(() => { body.innerHTML = '<p class="widget-empty">Не удалось загрузить оценку.</p>'; });
+            })();
             </script>
         </div>
 

@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 import database
 import stat_engine
 from services import mod_analysis
-from services.mod_search import decode_mod
+from services.mod_search import SLOT_KEY_TO_LABEL, decode_mod
 
 REFERENCE_KEY = "mod_grade_reference"
 REFRESH_HOURS = 24
@@ -196,3 +196,54 @@ def player_grades(roster: dict, min_relic: int = 1) -> dict:
     return {"units": units, "counts": [(g, counts.get(g, 0)) for _t, g in GRADES],
             "average": round(sum(u["score"] for u in units) / len(units)) if units else None,
             "built": bool(ref_all)}
+
+
+SLOT_ORDER = ("square", "arrow", "diamond", "triangle", "circle", "cross")
+TOP_SHOWN = 3  # сколько популярных основ/наборов показать в подробностях
+FLAT_STAT_RU = {1: "Здоровье", 28: "Защита", 41: "Атака", 42: "Оборона"}  # плоские вторички; % — UNIT_STAT_RU
+
+
+def _ru_stats(d: dict) -> dict:
+    for s in ([d["primary"]] if d["primary"] else []) + d["secondaries"]:
+        s["name"] = FLAT_STAT_RU.get(s["stat_id"]) or stat_engine.UNIT_STAT_RU.get(s["stat_id"], s["name"])
+    return d
+
+
+def _share_list(counts: dict, total: int, label) -> list:
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:TOP_SHOWN]
+    return [{"label": label(k), "pct": round(v / total * 100), "key": k} for k, v in top]
+
+
+def unit_detail(roster: dict, base_id: str) -> dict | None:
+    """Подробности для попапа: оценка, моды по слотам и что у других — {name, relic, n, score,
+    letter, parts, hints, speed, speed_pct, speed_median, speed_top, mods: [...], sets_mine,
+    sets_top: [...]}. None — нет юнита/эталона."""
+    unit = roster.get(base_id)
+    ref = load_reference().get(base_id)
+    if not unit or not ref or not unit.get("equippedStatMod"):
+        return None
+    g = grade_unit(unit, ref)
+    decoded = _decoded(unit)
+    by_slot = {d["slot_key"]: _ru_stats(d) for d in decoded}
+    mods = []
+    for slot in SLOT_ORDER:
+        d = by_slot.get(slot)
+        row = {"slot": slot, "label": SLOT_KEY_TO_LABEL.get(slot, slot), "mod": d, "top": [], "mine_ok": True}
+        counts = {int(k): v for k, v in (ref["prim"].get(slot) or {}).items()}
+        if counts:
+            total = sum(counts.values())
+            row["top"] = _share_list(counts, total, lambda k: stat_engine.UNIT_STAT_RU.get(k, f"#{k}"))
+            mine = d["primary"]["stat_id"] if d and d["primary"] else None
+            row["mine_pct"] = round(counts.get(mine, 0) / total * 100)
+            row["mine_ok"] = counts.get(mine, 0) / max(counts.values()) >= 0.5
+        mods.append(row)
+    combo = _combo_key(mod_analysis._significant_sets(decoded))
+    return {
+        "base_id": base_id, "name": database.get_game_unit_names([base_id]).get(base_id, base_id),
+        "relic": stat_engine.get_current_relic_level(unit), "n": ref["n"], **g,
+        "speed_pct": round(_percentile(g["speed"], ref["speed"])),
+        "speed_median": round(ref["speed"][QUANTILES // 2]), "speed_top": round(ref["speed"][QUANTILES * 4 // 5]),
+        "mods": mods, "sets_mine": combo_label(combo),
+        "sets_mine_pct": round(ref["sets"].get(combo, 0) / ref["n"] * 100),
+        "sets_top": _share_list(ref["sets"], ref["n"], combo_label),
+    }

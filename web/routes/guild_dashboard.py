@@ -2518,11 +2518,11 @@ async def player_my_tb(request: Request, ally_code: str, user: dict = Depends(re
 
 @router.get("/player/{ally_code}/tb-advisor", response_class=HTMLResponse)
 async def player_tb_advisor(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
-    """«Докачать для взводов» — фрагмент карточки (services/tb_advisor.py, стандартная раскладка)."""
+    """«Докачать для взводов» — фрагмент карточки (services/tb_advisor.py: дыры гильдии во взводах стандартной раскладки)."""
     if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
         raise HTTPException(status_code=403)
     roster = await asyncio.to_thread(database.get_player_units, ally_code)
-    data = await asyncio.to_thread(tb_advisor.build, ally_code, roster) if roster else None
+    data = await asyncio.to_thread(tb_advisor.build, user["guild_id"], ally_code, roster) if roster else None
     return templates.TemplateResponse(request, "_player_tb_advisor.html", {"data": data})
 
 
@@ -2535,6 +2535,18 @@ async def player_mod_grade(request: Request, ally_code: str, user: dict = Depend
     data = await asyncio.to_thread(mod_grade.player_grades, roster) if roster else None
     return templates.TemplateResponse(request, "_player_mod_grade.html", {"data": data, "part_labels": {
         "primary": "основы", "sets": "наборы", "speed": "скорость", "quality": "качество"}})
+
+
+@router.get("/player/{ally_code}/mod-grade/{base_id}", response_class=HTMLResponse)
+async def player_mod_grade_unit(request: Request, ally_code: str, base_id: str, user: dict = Depends(require_member_access)):
+    """Попап «Оценки модов»: моды персонажа по слотам и что ставят другие."""
+    if user.get("tier") != "officer" and ally_code not in {a[0] for a in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    roster = await asyncio.to_thread(database.get_player_units, ally_code)
+    data = await asyncio.to_thread(mod_grade.unit_detail, roster or {}, base_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(request, "_player_mod_grade_unit.html", {"u": data})
 
 
 @router.get("/player/{ally_code}", response_class=HTMLResponse)

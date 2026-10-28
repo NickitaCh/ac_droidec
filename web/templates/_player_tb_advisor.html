@@ -1,36 +1,41 @@
 {# «Докачать для взводов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
 {% macro unit_row(u) %}
-    <li>
+    <li data-phases="{% for p in u.phases %} {{ p.phase }}{% endfor %} ">
         <strong>{{ u.name }}</strong>
         {% if u.now %}<span class="muted">{{ u.now }} →</span> {{ u.target }}{% if u.relics %} <span class="muted">(+{{ u.relics }} рел.)</span>{% endif %}
         {% else %}<span class="muted">открыть, минимум</span> {{ u.target }}{% endif %}
         {% if u.only_bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}
         <div class="my-tb-detail">
-            {% for p in u.phases %}<span class="{{ 'muted' if p.met }}">{{ "✓ " if p.met }}Э{{ p.phase }} {{ "7★" if u.is_ship else "R" ~ p.need }} {{ p.planets|join(", ") }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
-            {% if u.closes and u.closes < u.open %}<br><span class="muted">до {{ u.target }} закроет {{ u.closes }} из {{ u.open }} этапов</span>{% endif %}
+            {% for p in u.phases %}<span data-phase="{{ p.phase }}">Э{{ p.phase }} {{ "7★" if u.is_ship else "R" ~ p.need }} {{ p.planets|join(", ") }}:
+                {% if p.short %}нужно {{ p.demand }}, в гильдии {{ p.have }} — <strong>не хватает {{ p.short }}</strong>{% else %}нужно {{ p.demand }}, свободных сверх этого {{ p.spare }}{% endif %}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
         </div>
     </li>
 {% endmacro %}
 {% if not data %}
     <p class="widget-empty">Состав игрока ещё не загружен — появится после ежечасного обновления.</p>
 {% else %}
-    <p>Во взводах нужны <strong>{{ data.total }}</strong> юнитов · уже закрываешь все этапы: <strong>{{ data.covered }}</strong> · докачать: <strong>{{ data.upgrade|length }}</strong> · открыть: <strong>{{ data.unlock|length }}</strong></p>
+    {% set tabs = [("upgrade", "Докачать"), ("unlock", "Открыть"), ("tight", "Впритык")] %}
+    <p>Юнитов, которых гильдии не хватает во взводах: <strong>{{ data.short_total }}</strong>{% if data.upgrade or data.unlock %} · из них можешь закрыть: <strong>{{ data.upgrade|length + data.unlock|length }}</strong>{% endif %}</p>
+    {% if data.by_phase %}
+        <p class="tb-adv-phases">Этап:
+            <button type="button" class="pill-tab active" data-adv-phase="">все</button>
+            {% for ph, n in data.by_phase %}<button type="button" class="pill-tab" data-adv-phase="{{ ph }}">Э{{ ph }} · {{ n }}</button>{% endfor %}
+        </p>
+    {% endif %}
     <nav class="pill-tabs" role="tablist">
-        <button type="button" class="pill-tab active" data-adv="upgrade">Докачать ({{ data.upgrade|length }})</button>
-        <button type="button" class="pill-tab" data-adv="unlock">Открыть ({{ data.unlock|length }})</button>
+        {% for key, label in tabs %}<button type="button" class="pill-tab{{ ' active' if loop.first }}" data-adv="{{ key }}">{{ label }} ({{ data[key]|length }})</button>{% endfor %}
     </nav>
-    {% for key in ("upgrade", "unlock") %}
+    {% for key, _label in tabs %}
         {% set items = data[key] %}
-        <div class="tb-adv-list" data-adv="{{ key }}" {% if key != "upgrade" %}hidden{% endif %}>
+        <div class="tb-adv-list" data-adv="{{ key }}" {% if not loop.first %}hidden{% endif %}>
             {% if not items %}
-                <p class="widget-empty">{{ "Все юниты взводов уже на нужном уровне." if key == "upgrade" else "Все юниты взводов открыты." }}</p>
+                <p class="widget-empty">{{ {"upgrade": "Докачивать нечего: там, где гильдии не хватает, твоих юнитов нет или они уже подходят.",
+                                            "unlock": "Открывать нечего: недостающих во взводах юнитов, которых у тебя нет, не нашлось.",
+                                            "tight": "Юнитов впритык нет."}[key] }}</p>
             {% else %}
-                <ul class="my-tb-missions">{% for u in items[:12] %}{{ unit_row(u) }}{% endfor %}</ul>
-                {% if items|length > 12 %}
-                    <details><summary>Ещё {{ items|length - 12 }}</summary>
-                        <ul class="my-tb-missions">{% for u in items[12:] %}{{ unit_row(u) }}{% endfor %}</ul>
-                    </details>
-                {% endif %}
+                <ul class="my-tb-missions">{% for u in items %}{{ unit_row(u) }}{% endfor %}</ul>
+                <p class="widget-empty" data-adv-none hidden>На этом этапе — ничего.</p>
+                <button type="button" class="button-secondary" data-adv-more hidden>Показать ещё</button>
             {% endif %}
         </div>
     {% endfor %}
