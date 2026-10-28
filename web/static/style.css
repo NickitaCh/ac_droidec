@@ -2997,7 +2997,7 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 .gl-matrix th.gl-col { padding: 0.3em 0.1em; text-align: center; vertical-align: bottom; }
 .gl-matrix th.gl-col img { display: block; margin: 0 auto 0.15em; border-radius: 50%; }
 .gl-col-count { display: block; font-size: 0.75em; font-weight: 400; color: var(--fg-muted); white-space: nowrap; }
-.gl-matrix td { padding-left: 0.2em; padding-right: 0.2em; }
+table.data.gl-matrix td, table.data.gl-matrix th { padding-left: 0.25em; padding-right: 0.25em; }
 .gl-matrix td:not(:first-child) { text-align: center; }
 .gl-met { display: block; font-size: 0.75em; }
 .gl-pct-high { color: var(--accent, #4ade80); font-weight: 700; }
