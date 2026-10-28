@@ -2156,6 +2156,26 @@ def delete_tasks_by_batch(batch_id: str, guild_id: int) -> int:
     return deleted
 
 
+def resume_failed_tasks(task_ids: list, guild_id: int, deadline: str) -> int:
+    """Возобновляет просроченные задачи с новым сроком (RicardoOneS, 2026-10-28: «возобновлять
+    просроченные задачи с новым сроком» — массово поставленные переназначать по одной
+    долго). Снова ACTIVE, сбрасываются resolved_at/archived_at/reminder_sent_at; batch_id,
+    initial_value и автор остаются. Трогает только FAILED этой гильдии; возвращает число строк."""
+    if not task_ids:
+        return 0
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    marks = ",".join("?" * len(task_ids))
+    cursor.execute(
+        f"UPDATE tasks SET status = 'ACTIVE', deadline = ?, resolved_at = NULL, archived_at = NULL, "
+        f"reminder_sent_at = NULL WHERE guild_id = ? AND status = 'FAILED' AND task_id IN ({marks})",
+        (deadline, guild_id, *task_ids))
+    conn.commit()
+    resumed = cursor.rowcount
+    conn.close()
+    return resumed
+
+
 def mark_task_reminder_sent(task_id: int) -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()

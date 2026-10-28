@@ -2983,3 +2983,11 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 .card-tabs a { cursor: pointer; }
 .card-tabs a.active { color: #0b0f1c; background: var(--hero-fg); border-color: var(--hero-fg); font-weight: 600; }
 .dashboard-grid > [hidden] { display: none !important; }
+
+/* /tasks — «Возобновить просроченные» по группам постановки */
+.task-resume { margin: 0.5em 0 1em; }
+.task-resume > summary { cursor: pointer; font-weight: 600; }
+.task-resume table { margin-top: 0.5em; }
+.task-resume-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; max-width: none; margin: 0; }
+.task-resume-form input[type="date"] { width: auto; }
+.task-resume-all { margin-top: 0.6em; }

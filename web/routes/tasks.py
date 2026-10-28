@@ -9,7 +9,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -179,7 +179,8 @@ def _validate_target(base_id: str, target_type: str, target_value: str) -> str |
     return None
 
 
-async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
+async def _mention_new_tasks(guild_id: int, lines_by_code: dict,
+                             header: str = "📝 Новые задачи на прокачку:") -> None:
     """Тег игроков в канале задач о новых задачах — по флагу tasks_mention (включают
     гильдии сами, у AC выключен). Раньше это делала Discord-команда /задачи добавить;
     постановка теперь только на сайте (2026-10-14). Сбой отправки задачу не отменяет.
@@ -191,7 +192,7 @@ async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
         for code, text in lines_by_code.items():
             owner = outbox.owner_for_ally(guild_id, code)
             tg_lines.append(f"{f'<@{owner}> ' if owner else ''}**{names.get(code, code)}** — {text}")
-        outbox.enqueue_guild(guild_id, "tasks", "📝 Новые задачи на прокачку:\n" + "\n".join(tg_lines))
+        outbox.enqueue_guild(guild_id, "tasks", header + "\n" +"\n".join(tg_lines))
     if not lines_by_code or not feature_flags.is_enabled(guild_id, "tasks_mention"):
         return
     channel_id = (database.get_guild_config(guild_id) or {}).get("tasks_log_channel_id")
@@ -204,7 +205,7 @@ async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
             mention_ids.append(str(discord_id))
             lines.append(f"<@{discord_id}> — {text}")
     try:
-        for chunk in discord_rest.chunk_lines("📝 Новые задачи на прокачку:", lines):
+        for chunk in discord_rest.chunk_lines(header, lines):
             await discord_rest.send_message(str(channel_id), chunk, mention_ids)
     except Exception as e:
         print(f"⚠️ [web/tasks] Не удалось тегнуть игроков о новых задачах: {e}")
@@ -222,6 +223,35 @@ def _validate_deadline(deadline: str) -> str | None:
     if parsed < datetime.now().date():
         return "Дедлайн не может быть в прошлом."
     return None
+
+
+def _failed_groups(current: list) -> list:
+    """Просроченные текущие задачи по группам постановки (batch_id; поставленные по одной —
+    одна группа «single») — для «Возобновить группу» на /tasks. Новый срок по умолчанию =
+    сегодня + столько же дней, сколько давали в первый раз (не меньше недели)."""
+    today = datetime.now(MSK).date()
+    groups = {}
+    for t in current:
+        if t["status"] != "FAILED":
+            continue
+        g = groups.setdefault(t["batch_id"] or "single", {
+            "group": t["batch_id"] or "single", "count": 0, "players": [], "units": [],
+            "deadline": t["deadline"], "span": 7,
+        })
+        g["count"] += 1
+        for key, value in (("players", t["player_name"]), ("units", f'{t["unit_name"]} ({t["target_label"]})')):
+            if value not in g[key]:
+                g[key].append(value)
+        try:
+            span = (datetime.strptime(t["deadline"], "%Y-%m-%d").date()
+                    - datetime.strptime(t["date_created"][:10], "%Y-%m-%d").date()).days
+            g["span"] = max(g["span"], min(span, 60))
+        except (TypeError, ValueError):
+            pass
+    result = sorted(groups.values(), key=lambda g: (g["group"] == "single", -g["count"]))
+    for g in result:
+        g["new_deadline"] = (today + timedelta(days=g["span"])).isoformat()
+    return result
 
 
 @router.get("", response_class=HTMLResponse)
@@ -264,6 +294,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
             "personal": bool(is_personal),
             "resolved_at_text": _format_resolved_at(resolved_at),
             "activity_url": failed_task_activity_url(status, ally_code, date_created, resolved_at, deadline),
+            "date_created": date_created,
         })
 
     # "Архив" — отдельная вкладка: выполненные через TASK_ARCHIVE_AFTER_DAYS дней или
@@ -321,6 +352,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
                 if value not in g[key]:
                     g[key].append(value)
     batch_list = [{"batch_id": bid, **g} for bid, g in batch_groups.items()]
+    failed_groups = _failed_groups(current)
 
     players_view = []
     if view == "players":
@@ -352,6 +384,9 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "view": view,
         "counts": counts,
         "batch_list": batch_list,
+        "failed_groups": failed_groups,
+        "failed_total": sum(g["count"] for g in failed_groups),
+        "today": datetime.now(MSK).date().isoformat(),
         "players_view": players_view,
         "omicron_options_by_unit": omicron_options_by_unit,
         "target_type_options": TARGET_TYPE_OPTIONS,
@@ -705,6 +740,10 @@ async def task_edit(
             return RedirectResponse(f"/tasks?{urlencode({'error': 'Некорректная дата дедлайна (ГГГГ-ММ-ДД).'})}", status_code=303)
 
     database.update_task(task_id, target_value=target_value.strip(), deadline=deadline)
+    # Просроченная задача с новым сроком не в прошлом — снова в работе.
+    if task[6] == "FAILED" and deadline and not _validate_deadline(deadline):
+        database.resume_failed_tasks([task_id], guild_id, deadline)
+        return RedirectResponse(f"/tasks?{urlencode({'notice': f'Задача возобновлена, срок до {deadline}'})}", status_code=303)
     return RedirectResponse(f"/tasks?{urlencode({'notice': 'Задача обновлена'})}", status_code=303)
 
 
@@ -732,6 +771,44 @@ async def task_delete(task_id: int, user: dict = Depends(feature_flags.require_f
 async def batch_delete(batch_id: str, user: dict = Depends(feature_flags.require_feature("tasks"))):
     deleted = database.delete_tasks_by_batch(batch_id, user["guild_id"])
     return RedirectResponse(f"/tasks?{urlencode({'notice': f'Отменено заданий: {deleted}'})}", status_code=303)
+
+
+@router.post("/resume", response_class=HTMLResponse)
+async def tasks_resume(
+    group: str = Form(...),
+    deadline: str = Form(...),
+    user: dict = Depends(feature_flags.require_feature("tasks")),
+):
+    """Возобновить просроченные задачи с новым сроком: группу массовой постановки
+    (batch_id), все поставленные по одной («single») или все текущие просроченные («all»).
+    Архивные, личные и задачи выбывших не трогаем — те же «текущие», что в списке."""
+    guild_id = user["guild_id"]
+    err = _validate_deadline(deadline)
+    if err:
+        return RedirectResponse(f"/tasks?{urlencode({'error': err})}", status_code=303)
+    deadline = deadline.strip()
+
+    departed = set(database.get_departed_players(guild_id))
+    picked = []
+    for row in database.get_all_tasks(guild_id):
+        task_id, ally_code, base_id, target_type, target_value, _dl, status, batch_id = row[:8]
+        resolved_at, archived_at, is_personal = row[12], row[13], row[14]
+        if (status != "FAILED" or is_personal or ally_code in departed
+                or database.is_task_archived(resolved_at, status, archived_at)):
+            continue
+        if group == "all" or (group == "single" and not batch_id) or batch_id == group:
+            picked.append((task_id, ally_code, base_id, target_type, target_value))
+    resumed = database.resume_failed_tasks([p[0] for p in picked], guild_id, deadline)
+    if not resumed:
+        return RedirectResponse(f"/tasks?{urlencode({'error': 'Просроченных задач в этой группе нет.'})}", status_code=303)
+
+    unit_names = database.get_game_unit_names([p[2] for p in picked])
+    by_code = {}
+    for _tid, code, base_id, target_type, target_value in picked:
+        by_code.setdefault(code, []).append(f"{unit_names.get(base_id) or base_id}: {_target_label(target_type, target_value)}")
+    await _mention_new_tasks(guild_id, {code: f"{', '.join(items)}, новый срок до {deadline}" for code, items in by_code.items()},
+                             header="🔁 Просроченные задачи возобновлены:")
+    return RedirectResponse(f"/tasks?{urlencode({'notice': f'Возобновлено задач: {resumed}, срок до {deadline}'})}", status_code=303)
 
 
 @router.post("/sync-units", response_class=HTMLResponse)

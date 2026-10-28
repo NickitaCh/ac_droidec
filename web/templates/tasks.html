@@ -161,6 +161,39 @@
             <p class="muted">Задачи, которые игроки поставили себе сами в «Мой профиль». В счётчики, отчёты и канал задач не попадают.</p>
         {% endif %}
 
+        {% if failed_groups and view in ("flat", "players") and status_filter in (None, "FAILED") %}
+            <details class="task-resume"{% if status_filter == "FAILED" %} open{% endif %}>
+                <summary class="link-btn">🔁 Возобновить просроченные ({{ failed_total }}) с новым сроком</summary>
+                <table class="data cards-on-phone">
+                    <thead><tr><th>Задачи</th><th>Игроки</th><th>Был срок</th><th>Новый срок</th></tr></thead>
+                    <tbody>
+                        {% for g in failed_groups %}
+                            <tr>
+                                <td data-label="Задачи"><div>{% if g.group == "single" %}<span class="muted">Поставленные по одной:</span> {% endif %}{{ g.units|join(", ") }}</div></td>
+                                <td data-label="Игроки ({{ g.count }})"><div>{{ g.players|join(", ") }}</div></td>
+                                <td data-label="Был срок" class="nowrap">{{ g.deadline }}</td>
+                                <td data-label="Новый срок">
+                                    <form method="post" action="/tasks/resume" class="task-resume-form">
+                                        <input type="hidden" name="group" value="{{ g.group }}">
+                                        <input type="date" name="deadline" value="{{ g.new_deadline }}" min="{{ today }}" required>
+                                        <button type="submit">Возобновить {{ g.count }}</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% if failed_groups|length > 1 %}
+                    <form method="post" action="/tasks/resume" class="task-resume-form task-resume-all">
+                        <input type="hidden" name="group" value="all">
+                        <span>Все {{ failed_total }} сразу до</span>
+                        <input type="date" name="deadline" value="{{ failed_groups[0].new_deadline }}" min="{{ today }}" required>
+                        <button type="submit">Возобновить все</button>
+                    </form>
+                {% endif %}
+            </details>
+        {% endif %}
+
         {% if view == "players" %}
             {% if not players_view %}
                 <p class="empty-state">Активных или просроченных задач нет — все чисто. 🎉</p>
@@ -228,7 +261,7 @@
                                                     <input type="text" name="target_value" value="{{ t.target_value }}" style="width: 4em;">
                                                 {% endif %}
                                                 <input type="date" name="deadline" value="{{ t.deadline }}"{% if not t.personal %} required{% endif %}>
-                                                <button type="submit">Сохранить</button>
+                                                <button type="submit">{% if t.status == "FAILED" %}Возобновить{% else %}Сохранить{% endif %}</button>
                                             </form>
                                         </details>
                                         {% if not t.archived %}
