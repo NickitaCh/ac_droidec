@@ -197,8 +197,9 @@ class TBPlanPanel(disnake.ui.View):
         summary = f"Этап {self.stage}, план «{plan['name']}» — получат сообщение: {len(eligible)} игрок(ов)."
         if skipped:
             summary += f" Не зарегистрированы (пропущены всегда): {len(skipped)}."
-        summary += ("\nКуда: в личку Discord, а кому Discord недоступен — в Telegram (если привязан). "
-                    "Сначала Telegram или сразу в оба — на сайте: /tb/platoons → «Разослать взводы».")
+        mode = tb_platoon_notify.guild_mode(self.guild_id)
+        summary += (f"\nКуда: {tb_platoon_notify.MODES[mode].lower()} (меняется на сайте: /tb/platoons, "
+                    "блок «Рассылка взводов»).")
         summary += "\nМожно исключить конкретных игроков из выпадающих списков ниже — например тех, кто уже задонатил."
         await interaction.followup.send(summary, view=PlatoonNotifyView(self.guild_id, plan, self.stage, rows), ephemeral=True)
 

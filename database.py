@@ -289,6 +289,7 @@ GUILD_CONFIG_COLUMNS = [
     "personal_units",
     "is_active",
     "subscription_expires_at", "subscription_source", "payment_customer_id",
+    "tb_platoon_dm_mode",
 ]
 
 
@@ -385,6 +386,11 @@ def _ensure_guilds_table(cursor):
         # Задел на рекуррентные платежи (сохранённый способ оплаты ЮKassa) — пока
         # не используется, см. план C:\Users\Nick\.claude\plans\melodic-crunching-dream.md.
         cursor.execute("ALTER TABLE guilds ADD COLUMN payment_customer_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже добавлена ранее
+    try:
+        # Куда слать личку с взводами ВИ (tb_platoon_notify.MODES), NULL = DEFAULT_MODE.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tb_platoon_dm_mode TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
 

@@ -27,7 +27,7 @@ import httpx
 import database
 
 SOURCES_OVER_THREAD = ("generated", "image", "message", "edited")
-SOURCE_LABELS = {"thread": "из треда", "generated": "из плана", "image": "из картинки", "message": "из сообщения",
+SOURCE_LABELS = {"thread": "перенесён из треда", "generated": "из плана", "image": "из картинки", "message": "из сообщения",
                  "edited": "правка на сайте"}
 DISCORD_API = "https://discord.com/api/v10"
 USER_AGENT = "DiscordBot (https://swgoh-sng.ru, 1.0)"

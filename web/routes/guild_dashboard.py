@@ -1287,8 +1287,24 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
     if view not in ("planet", "player"):
         view = "planet"
 
+    dm = None
+    if plan and selected_round_num:
+        # Блок «Рассылка взводов»: куда уйдёт личка этого этапа при выбранном режиме гильдии.
+        mode = tb_platoon_notify.guild_mode(guild_id)
+        dm_rows = await tb_platoon_notify.build_player_rows(guild_id, plan, selected_round_num)
+        counts = {"discord": 0, "tg": 0, "none": 0}
+        for row in dm_rows:
+            targets = tb_platoon_notify.route(row["channels"], mode)
+            for t in targets:
+                counts[t] += 1
+            if not targets:
+                counts["none"] += 1
+        dm = {"mode": mode, "modes": tb_platoon_notify.MODES, "players": len(dm_rows), **counts,
+              "saved": bool(request.query_params.get("dm_saved"))}
+
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
+        "dm": dm,
         "round_options": round_options,
         "selected_round_num": selected_round_num,
         "planets": planet_blocks,
@@ -1974,8 +1990,19 @@ async def tb_platoons_notify_page(request: Request, user: dict = Depends(feature
     rows = await tb_platoon_notify.build_player_rows(guild_id, plan, round_num) if plan and round_num else []
     return templates.TemplateResponse(request, "tb_platoon_notify.html", {
         "user": user, "plan": plan, "round_num": round_num, "rows": rows, "error": error, "report": None,
-        "modes": tb_platoon_notify.MODES, "mode": tb_platoon_notify.DEFAULT_MODE,
+        "modes": tb_platoon_notify.MODES, "mode": tb_platoon_notify.guild_mode(guild_id),
     })
+
+
+@router.post("/tb/platoons/dm-mode")
+async def tb_platoons_dm_mode(mode: str = Form(...), back: str = Form(default="/tb/platoons"),
+                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Куда по умолчанию уходит личка с взводами (сайт и /тб_план в Discord)."""
+    if mode in tb_platoon_notify.MODES:
+        database.update_guild_config(user["guild_id"], tb_platoon_dm_mode=mode)
+    if not back.startswith("/tb/platoons"):
+        back = "/tb/platoons"
+    return RedirectResponse(back + ("&" if "?" in back else "?") + "dm_saved=1#platoon-dm", status_code=303)
 
 
 @router.post("/tb/platoons/notify", response_class=HTMLResponse)
@@ -1984,12 +2011,12 @@ async def tb_platoons_notify_send(
     plan_id: int = Form(...),
     round_num: int = Form(...),
     ally_codes: list[str] = Form([]),
-    mode: str = Form(default=tb_platoon_notify.DEFAULT_MODE),
+    mode: str = Form(default=""),
     user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     guild_id = user["guild_id"]
     if mode not in tb_platoon_notify.MODES:
-        mode = tb_platoon_notify.DEFAULT_MODE
+        mode = tb_platoon_notify.guild_mode(guild_id)
     plan = database.get_tb_saved_plan(plan_id)
     if not plan or plan["guild_id"] != guild_id:
         return templates.TemplateResponse(request, "tb_platoon_notify.html", {

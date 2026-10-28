@@ -3204,3 +3204,11 @@ dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 .notify-dest-none b { color: var(--status-critical); }
 .notify-hint { font-size: 0.85em; margin: 0.3em 0 0; }
 .notify-report { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35em; }
+
+/* Блок «Рассылка взводов» на /tb/platoons (2026-10-28) */
+.platoon-dm .platoon-dm-mode { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5em; max-width: none; }
+.platoon-dm .platoon-dm-mode select { flex: 1 1 18em; max-width: 30em; min-width: 0; }
+.platoon-dm-counts { display: flex; flex-wrap: wrap; gap: 0.3em 1em; margin: 0.7em 0 0.3em; }
+.platoon-dm-ch b { font-size: 1.1em; }
+.platoon-dm-none b { color: var(--status-critical); }
+.platoon-dm-hint { font-size: 0.85em; margin: 0.2em 0 0.7em; }

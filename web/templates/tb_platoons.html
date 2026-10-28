@@ -72,6 +72,33 @@
         </p>
     {% endif %}
 
+    {% if plan and planets and dm %}
+        <div class="panel platoon-dm" id="platoon-dm">
+            <div class="panel-title"><span>📨 Рассылка взводов в личку — этап {{ selected_round_num }}</span>
+                {% if dm.saved %}<span class="badge badge-ok">Сохранено</span>{% endif %}</div>
+            <form method="post" action="/tb/platoons/dm-mode" class="platoon-dm-mode">
+                <input type="hidden" name="back" value="/tb/platoons?plan_id={{ plan.id }}&round={{ selected_round_num }}">
+                <label for="dm-mode">Куда уходит личка</label>
+                <select id="dm-mode" name="mode" onchange="this.form.submit()">
+                    {% for key, label in dm.modes.items() %}<option value="{{ key }}"{{ " selected" if key == dm.mode }}>{{ label }}</option>{% endfor %}
+                </select>
+                <noscript><button type="submit">Сохранить</button></noscript>
+            </form>
+            <p class="platoon-dm-counts">
+                {% if dm.players %}
+                    Получат {{ dm.players - dm.none }} из {{ dm.players }} игроков этапа:
+                    <span class="platoon-dm-ch">Discord — <b>{{ dm.discord }}</b></span>
+                    <span class="platoon-dm-ch">Telegram — <b>{{ dm.tg }}</b></span>
+                    {% if dm.none %}<span class="platoon-dm-ch platoon-dm-none">не дойдёт — <b>{{ dm.none }}</b></span>{% endif %}
+                {% else %}
+                    На этом этапе никому не назначено ни одного слота.
+                {% endif %}
+            </p>
+            <p class="muted platoon-dm-hint">Режим общий для гильдии: так рассылают и сайт, и <code>/тб_план</code> в Discord. Перед отправкой можно снять игроков и посмотреть, куда уйдёт каждому.</p>
+            <a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать этап {{ selected_round_num }}…</a>
+        </div>
+    {% endif %}
+
     {% if plan and planets %}
         <p class="platoon-export-actions">
             <form method="post" action="/tb/platoons/autofill" style="display:inline">
@@ -81,7 +108,6 @@
             </form>
             <a class="button" href="/tb/platoons/export?plan_id={{ plan.id }}&round={{ selected_round_num }}">⬇ Скачать этап {{ selected_round_num }} (JSON для HotUtils)</a>
             <a class="button" href="/tb/platoons/export/all?plan_id={{ plan.id }}">⬇ Скачать все этапы (ZIP, по файлу на этап)</a>
-            <a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать взводы в личку (Discord / Telegram)</a>
         </p>
         <p class="muted platoon-export-hint">
             Формат — EchoBase Platoon Assigner, тот же, что импортирует HotUtils. Экспортируются

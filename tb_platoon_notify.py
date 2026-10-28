@@ -36,6 +36,13 @@ MODES = {
 DEFAULT_MODE = "discord_first"
 
 
+def guild_mode(guild_id: int) -> str:
+    """Режим рассылки, выбранный гильдией (guilds.tb_platoon_dm_mode; блок «Рассылка взводов»
+    на /tb/platoons), иначе DEFAULT_MODE."""
+    mode = (database.get_guild_config(guild_id) or {}).get("tb_platoon_dm_mode")
+    return mode if mode in MODES else DEFAULT_MODE
+
+
 def channels(owner_id: str | None) -> dict:
     """Куда можно написать владельцу регистрации: {"discord": bool, "tg": bool, "tg_name": str|None}.
     owner_id — discord_id из user_registration или "tg:<id>" (игрок только в Telegram).
@@ -190,7 +197,7 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
 
 
 async def send_broadcast(
-    token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str], mode: str = DEFAULT_MODE,
+    token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str], mode: str | None = None,
 ) -> list[dict]:
     """Отправляет DM только тем ally_code из ally_codes, у кого есть назначение на этом
     этапе И привязанный discord_id. Мейн и альт(ы) одного Discord-аккаунта — ОДНО общее
@@ -200,6 +207,7 @@ async def send_broadcast(
     [{"ally_code", "name", "status": "sent"|"failed"|"skipped_no_discord", "detail"}, ...]."""
     guild_cfg = database.get_guild_config(guild_id) or {}
     guild_name = guild_cfg.get("name") or "гильдия"
+    mode = mode if mode in MODES else guild_mode(guild_id)
     rows = await build_player_rows(guild_id, plan, round_num)
     selected = [row for row in rows if row["ally_code"] in ally_codes]
 
