@@ -244,11 +244,12 @@ def _row_summary(sr, plate: str, base_id: str, guild_id: int, stat: dict) -> lis
             continue
         label, norm = sr.progress_row_text(row)
         operator, threshold, priority, compare_key = row[4], row[5], row[6], row[13]
+        no_avg = row[3] == sr.STAT_SET  # «Сет: X (N мод.)» — среднее число наборов ничего не говорит
         item = {"label": label, "norm": norm, "required": priority == "required"}
         for side in ("own", "opp"):
             n, fails, margins = stat[key].get(side, [0, 0, []])
             avg = None
-            if margins:
+            if margins and not no_avg:
                 m = sum(margins) / len(margins)
                 # запас до нормы → среднее значение (у сравнения с персонажем норма плавающая —
                 # показываем только запас)
