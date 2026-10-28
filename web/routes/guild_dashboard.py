@@ -374,22 +374,6 @@ async def tb_order_phase_import(order_id: int, phase: int, link: str = Form(...)
     return _order_back(order_id, phase, msg=f"Этап {phase} перенесён из сообщения.")
 
 
-@router.post("/tb/order/{order_id}/phase/{phase}/reset")
-async def tb_order_phase_reset(order_id: int, phase: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    """Вернуть этап к треду: бот снова читает тред (правка сайта для этого этапа отменяется)."""
-    order = _own_order(user["guild_id"], order_id)
-    if not order.get("thread_id"):
-        return _order_back(order_id, phase, err="У ордера нет треда — возвращать не к чему.")
-    try:
-        blocks = await tb_order_store.thread_blocks(order["thread_id"])
-    except (RuntimeError, httpx.HTTPError) as e:
-        return _order_back(order_id, phase, err=f"Тред не прочитался: {e}")
-    if phase not in blocks:
-        return _order_back(order_id, phase, err=f"В треде нет этапа {phase}.")
-    tb_order_store.save_phase(order_id, phase, blocks[phase], "thread", by="thread", keep_tg=False)
-    return _order_back(order_id, phase, msg=f"Этап {phase} снова берётся из треда.")
-
-
 @router.post("/tb/order/{order_id}/phase/{phase}/send")
 async def tb_order_phase_send(order_id: int, phase: int, where: str = Form(...),
                               user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
@@ -534,7 +518,6 @@ async def tb_order_plans_from_image(
     name: str = Form(...),
     thread_link: str = Form(...),
     stars: int = Form(...),
-    force: str = Form(default=""),
     user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
     """Веб-версия /тб_ордер_из_картинки: распознавание идёт в фоне
@@ -546,7 +529,7 @@ async def tb_order_plans_from_image(
     if not tb_order_image.start_job(guild_id, name):
         return RedirectResponse(f"/tb/order?{urlencode({'error': 'Распознавание уже идёт — дождитесь результата'})}#from-image", status_code=303)
     task = asyncio.create_task(tb_order_image.run_web_job(
-        guild_id, thread_link, name, stars, bool(force), f"web:{user['discord_id']}"))
+        guild_id, thread_link, name, stars, f"web:{user['discord_id']}"))
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
     return RedirectResponse("/tb/order#from-image", status_code=303)
@@ -559,10 +542,8 @@ async def tb_order_plans_save_manual(
     stars: int = Form(...),
     user: dict = Depends(feature_flags.require_feature("tb_plan_order")),
 ):
-    # Веб-процесс не держит Discord-клиент (см. web/app.py — "без промежуточного
-    # API у бота"), поэтому, в отличие от бот-команды /тб_план сохранить, здесь
-    # НЕТ проверки, что в ветке реально лежит ордер на все 6 этапов — только
-    # синтаксическая валидация ссылки. Шаблон явно предупреждает об этом.
+    # Разовый перенос (2026-10-28): тексты 6 этапов копируются на сайт, тред к ордеру не
+    # привязывается и дальше не нужен (services/tb_order_store.py::import_thread).
     name = name.strip()
     if not name:
         return RedirectResponse(f"/tb/order?{urlencode({'error': 'Название не может быть пустым'})}", status_code=303)
@@ -571,8 +552,12 @@ async def tb_order_plans_save_manual(
         return RedirectResponse(
             f"/tb/order?{urlencode({'error': 'Не удалось распознать ссылку на тред'})}", status_code=303
         )
-    database.save_tb_plan(user["guild_id"], name, thread_id, stars, created_by=f"web:{user['discord_id']}")
-    return RedirectResponse("/tb/order?saved=1", status_code=303)
+    try:
+        order_id = await tb_order_store.import_thread(user["guild_id"], thread_id, name[:80], stars,
+                                                      f"web:{user['discord_id']}")
+    except (RuntimeError, httpx.HTTPError) as e:
+        return RedirectResponse(f"/tb/order?{urlencode({'error': str(e)})}", status_code=303)
+    return _order_back(order_id, 1, msg=f"Ордер «{name}» перенесён из треда — 6 этапов. Тред больше не нужен.")
 
 
 # =====================================================================
@@ -1024,8 +1009,7 @@ async def tb_plan_activate(plan_id: int, user: dict = Depends(feature_flags.requ
 
 
 @router.post("/tb/plan/{plan_id}/publish", response_class=HTMLResponse)
-async def tb_plan_publish(plan_id: int, thread_link: str = Form(default=""), name: str = Form(default=""),
-                          force: str = Form(default=""), make_active: str = Form(default=""),
+async def tb_plan_publish(plan_id: int, name: str = Form(default=""), make_active: str = Form(default=""),
                           user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     """Ордер из плана → ветка Discord (6 этапов, как у «ордера из картинки») → план ордера
     (database.tb_saved_plans), по желанию — активный."""
@@ -1034,8 +1018,8 @@ async def tb_plan_publish(plan_id: int, thread_link: str = Form(default=""), nam
     inp = await _plan_inputs(guild_id)
     result = tb_plan.evaluate(inp, plan["data"])
     try:
-        order_id, message = await tb_plan.publish(guild_id, result, thread_link, (name.strip() or plan["name"])[:80],
-                                                  bool(force), f"web:{user['discord_id']}")
+        order_id, message = await tb_plan.publish(guild_id, result, (name.strip() or plan["name"])[:80],
+                                                  f"web:{user['discord_id']}")
     except (tb_plan.PublishError, httpx.HTTPError) as e:
         return _plan_back(plan_id, error=str(e))
     tb_plan.update_plan(guild_id, plan_id, order_plan_id=order_id)

@@ -4,7 +4,7 @@
 {% set o = e.order %}
 <div class="panel" id="order-editor">
     <div class="panel-title">
-        <span>Ордер по этапам{% call ui.help() %}<p>Текст каждого этапа хранится на сайте. Пока этап не правили, бот берёт его из треда, как раньше. После правки или импорта из сообщения бот берёт текст с сайта.</p><p>Активный ордер бот публикует сам в 20:00 МСК в канал плана ВИ. Этап, отправленный кнопкой, автопост в тот день не повторяет.</p>{% endcall %}</span>
+        <span>Ордер по этапам{% call ui.help() %}<p>Текст каждого этапа хранится на сайте — тред в Discord не нужен. Перенести готовый этап можно по ссылке на сообщение.</p><p>Активный ордер бот публикует сам в 20:00 МСК в канал плана ВИ. Этап, отправленный кнопкой, автопост в тот день не повторяет.</p>{% endcall %}</span>
         <form method="get" action="/tb/order" class="tbo-pick">
             <select name="order" onchange="this.form.submit()" aria-label="Ордер">
                 {% for p in plans %}<option value="{{ p.id }}"{{ " selected" if p.id == o.id }}>{{ p.name }}{{ " · активный" if p.active }}</option>{% endfor %}
@@ -85,11 +85,6 @@
             <input type="text" name="link" placeholder="Ссылка на сообщение с ордером на {{ e.phase }} этап" required aria-label="Ссылка на сообщение">
             <button type="submit" class="button-secondary">Перенести из сообщения</button>
         </form>
-        {% if o.thread_id and e.source and e.source != "thread" %}
-            <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/reset" onsubmit="return confirm('Вернуть этап к тексту из треда? Правка на сайте пропадёт.');">
-                <button type="submit" class="button-secondary">Вернуть к треду</button>
-            </form>
-        {% endif %}
     </div>
 </div>
 <script>

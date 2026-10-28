@@ -13,7 +13,6 @@ import httpx
 
 import database
 
-ORDER_HEADER_RE = re.compile(r"^##\s.+—\s*(\d+)\s*этап", re.MULTILINE)
 
 ZONE_EMOJI = {"dark": "🔴", "mixed": "🟡", "light": "🔵", "bonus": "⚪"}
 
@@ -234,31 +233,9 @@ def _thread_id_from_link(link: str) -> int | None:
     return int(link) if link.isdigit() else None
 
 
-async def _bot_order_phases(client: httpx.AsyncClient, thread_id: int, bot_id: str) -> list:
-    """Номера этапов, уже опубликованных ботом в треде (последние 200 сообщений)."""
-    phases, before = set(), None
-    for _ in range(2):
-        params = {"limit": 100}
-        if before:
-            params["before"] = before
-        resp = await client.get(f"{DISCORD_API}/channels/{thread_id}/messages", params=params)
-        resp.raise_for_status()
-        batch = resp.json()
-        for msg in batch:
-            if msg.get("author", {}).get("id") != bot_id:
-                continue
-            m = ORDER_HEADER_RE.match(msg.get("content") or "")
-            if m:
-                phases.add(int(m.group(1)))
-        if len(batch) < 100:
-            break
-        before = batch[-1]["id"]
-    return sorted(phases)
-
-
-async def run_web_job(guild_id: int, link: str, plan_name: str, stars: int, force: bool, created_by: str) -> None:
+async def run_web_job(guild_id: int, link: str, plan_name: str, stars: int, created_by: str) -> None:
     try:
-        message = await _run(guild_id, link, plan_name, stars, force, created_by)
+        message = await _run(guild_id, link, plan_name, stars, created_by)
         _set_job(guild_id, state="done", message=message)
     except OrderImageError as e:
         _set_job(guild_id, state="error", message=str(e))
@@ -267,7 +244,7 @@ async def run_web_job(guild_id: int, link: str, plan_name: str, stars: int, forc
         print(f"❌ [web/tb_order_image] guild {guild_id}: {e!r}")
 
 
-async def _run(guild_id: int, link: str, plan_name: str, stars: int, force: bool, created_by: str) -> str:
+async def _run(guild_id: int, link: str, plan_name: str, stars: int, created_by: str) -> str:
     from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
     import tb_platoon_autofill
 
@@ -286,9 +263,6 @@ async def _run(guild_id: int, link: str, plan_name: str, stars: int, force: bool
     headers = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-        me = await client.get(f"{DISCORD_API}/users/@me")
-        me.raise_for_status()
-        bot_id = me.json()["id"]
         resp = await client.get(f"{DISCORD_API}/channels/{thread_id}")
         if resp.status_code in (403, 404):
             raise OrderImageError("Тред не найден или у бота нет к нему доступа — проверьте ссылку.")
@@ -306,13 +280,6 @@ async def _run(guild_id: int, link: str, plan_name: str, stars: int, force: bool
         if image is None:
             raise OrderImageError("В первом сообщении треда нет картинки.")
 
-        if not force:
-            existing = await _bot_order_phases(client, thread_id, bot_id)
-            if existing:
-                raise OrderImageError(
-                    f"В треде уже есть ордер для этапов: {', '.join(map(str, existing))}. Повторный запуск создаст "
-                    "дубли — если это осознанно (план поменялся), отметьте «Опубликовать заново».")
-
         _set_job(guild_id, step="Распознаю картинку (до пары минут)…")
         img = await client.get(image["url"])
         img.raise_for_status()
@@ -323,27 +290,17 @@ async def _run(guild_id: int, link: str, plan_name: str, stars: int, force: bool
         except Exception as e:
             raise OrderImageError(f"Не удалось разобрать ответ модели: {e}")
         if len(blocks) != 6:
-            raise OrderImageError(f"Распознано {len(blocks)} этапов вместо 6 — проверьте картинку, ничего не публикую.")
+            raise OrderImageError(f"Распознано {len(blocks)} этапов вместо 6 — проверьте картинку, ордер не сохранён.")
 
-        _set_job(guild_id, step="Публикую этапы в тред…")
-        for block in blocks:
-            resp = await client.post(f"{DISCORD_API}/channels/{thread_id}/messages",
-                                     json={"content": block, "allowed_mentions": {"parse": []}})
-            if resp.status_code >= 400:
-                raise OrderImageError(f"Публикация прервалась (не всё могло уйти в тред): Discord {resp.status_code}. "
-                                      "План не сохранён — проверьте тред и при необходимости повторите с «Опубликовать заново».")
-        posted = await _bot_order_phases(client, thread_id, bot_id)
-
-    if posted != [1, 2, 3, 4, 5, 6]:
-        missing = sorted(set(range(1, 7)) - set(posted))
-        raise OrderImageError(f"Сообщения отправлены, но в треде не нашлись этапы: {', '.join(map(str, missing))}. "
-                              "План не сохранён — проверьте тред вручную.")
-
-    plan_id = database.save_tb_plan(guild_id, plan_name, thread_id, total, created_by=created_by)
+    # Ордер — только на сайте (2026-10-28): в тред этапы больше не публикуются, тред — лишь
+    # место, откуда взяли картинку.
+    from services import tb_order_store
+    plan_id = tb_order_store.create_order(guild_id, plan_name, dict(enumerate(blocks, start=1)), total,
+                                          created_by, "image")
     parts = []
     if total != stars:
-        parts.append(f"⚠️ По распознанным данным сумма звёзд = {total}, а указано {stars}. Проверьте текст в треде.")
-    parts.append(f"✅ Опубликовано 6 этапов в тред «{thread_name}». План сохранён как «{plan_name}» ({total} ★).")
+        parts.append(f"⚠️ По распознанным данным сумма звёзд = {total}, а указано {stars}. Проверьте этапы на вкладке «Ордер».")
+    parts.append(f"✅ Ордер «{plan_name}» ({total} ★) собран из картинки треда «{thread_name}» — 6 этапов на вкладке «Ордер».")
     try:
         parts.append(summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, plan_id)) + " — /tb/platoons.")
     except (ValueError, RuntimeError) as e:

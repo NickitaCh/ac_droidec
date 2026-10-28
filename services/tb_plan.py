@@ -13,12 +13,10 @@ services/tb_forecast.py::simulate (залив ГМ — в любую плане�
 "no_platoons": {этап: [планеты без взводов]}}.
 
 Из плана собирается ордер в Discord (те же тексты этапов, что у «ордера из картинки»,
-services/tb_order_image.py::build_order_blocks) и публикуется в ветку."""
+services/tb_order_image.py::build_order_blocks) и сохраняется на сайте (services/tb_order_store.py)."""
 
 import json
 import sqlite3
-
-import httpx
 
 import database
 from services import tb_forecast, tb_order_image
@@ -276,54 +274,17 @@ class PublishError(Exception):
     pass
 
 
-async def publish(guild_id: int, result: dict, link: str, name: str, force: bool, created_by: str) -> tuple[int, str]:
-    """Сохранить ордер плана (6 этапов) как план ордера; с ссылкой на ветку — ещё и выложить в неё.
-    Без ветки этапы живут только в базе (services/tb_order_store.py, 2026-10-28) и уходят в канал
-    автопостом или кнопкой на вкладке «Ордер». → (id плана ордера, сообщение)."""
-    import os
+async def publish(guild_id: int, result: dict, name: str, created_by: str) -> tuple[int, str]:
+    """Собрать ордер плана (6 этапов) и сохранить его на сайте (services/tb_order_store.py). Тред
+    Discord не нужен (решение пользователя 2026-10-28): этапы уходят в канал автопостом в 20:00
+    или кнопкой на вкладке «Ордер». → (id плана ордера, сообщение)."""
     import tb_platoon_autofill
     from services import tb_order_store
 
     blocks, total = tb_order_image.build_order_blocks(order_data(result))
-    if not (link or "").strip():
-        order_id = database.save_tb_plan(guild_id, name, "", total, created_by=created_by)
-        for phase, block in enumerate(blocks, start=1):
-            tb_order_store.save_phase(order_id, phase, block, "generated", by=created_by, keep_tg=False)
-        parts = [f"Ордер «{name}» ({total}★) сохранён на сайте — 6 этапов, без ветки Discord."]
-        try:
-            parts.append(tb_order_image.summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, order_id)))
-        except (ValueError, RuntimeError) as e:
-            parts.append(f"Взводы автоматически не расставлены: {e}.")
-        return order_id, " ".join(parts)
-    thread_id = tb_order_image._thread_id_from_link(link)
-    if thread_id is None:
-        raise PublishError("Не удалось распознать ссылку на ветку.")
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        raise PublishError("DISCORD_TOKEN не настроен на сервере.")
-    headers = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}
-    api = tb_order_image.DISCORD_API
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-        me = await client.get(f"{api}/users/@me")
-        me.raise_for_status()
-        bot_id = me.json()["id"]
-        resp = await client.get(f"{api}/channels/{thread_id}")
-        if resp.status_code in (403, 404):
-            raise PublishError("Ветка не найдена или у бота нет к ней доступа — проверьте ссылку.")
-        resp.raise_for_status()
-        thread_name = resp.json().get("name") or str(thread_id)
-        if not force:
-            existing = await tb_order_image._bot_order_phases(client, thread_id, bot_id)
-            if existing:
-                raise PublishError(f"В ветке уже есть ордер для этапов: {', '.join(map(str, existing))}. "
-                                   "Повторная публикация создаст дубли — если план поменялся, отметьте «Опубликовать заново».")
-        for block in blocks:
-            resp = await client.post(f"{api}/channels/{thread_id}/messages",
-                                     json={"content": block, "allowed_mentions": {"parse": []}})
-            if resp.status_code >= 400:
-                raise PublishError(f"Публикация прервалась (не всё могло уйти в ветку): Discord {resp.status_code}.")
-    order_id = database.save_tb_plan(guild_id, name, thread_id, total, created_by=created_by)
-    parts = [f"Опубликовано 6 этапов в ветку «{thread_name}», ордер сохранён как «{name}» ({total}★)."]
+    order_id = tb_order_store.create_order(guild_id, name, dict(enumerate(blocks, start=1)), total,
+                                           created_by, "generated")
+    parts = [f"Ордер «{name}» ({total}★) собран — 6 этапов на вкладке «Ордер»."]
     try:
         parts.append(tb_order_image.summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, order_id)))
     except (ValueError, RuntimeError) as e:

@@ -1,27 +1,13 @@
 """/тб_ордер_из_картинки — по ссылке на тред достаёт первое сообщение с картинкой
 "Strategy Summary" (планировщик ТБ, вкладка со сводной таблицей Round 1..6 x
-Dark/Mixed/Light/Bonus), распознаёт её через Mistral vision (MISTRAL_API_KEY,
-бесплатный тариф, модель mistral-medium-latest — см. main.py) и публикует в тот
-же тред 6 сообщений, по одному на этап, в формате, которым офицеры уже пишут
-ордер вручную (см. тред "43*", TB_ORDER_SOURCE_CHANNEL_ID).
-
-После публикации, если в треде нашлись все 6 заголовков этапов (см.
-_find_existing_order_phases — это и есть "проверка, что ордер появился"), команда
-сохраняет план (обязательный параметр "название" + ветка + сумма звёзд) в
-database.tb_saved_plans. /тб_план — отдельная группа команд поверх этой таблицы
-(список / выбрать / удалить): "выбрать" пишет id плана в guilds.tb_active_plan_id,
-и tb_order_loop (cogs/guild_events.py) с этого момента берёт ежедневный блок
-этапа из ветки выбранного плана, а не из статического guilds.tb_order_source_
-channel_id. Так на одну ТБ можно держать несколько разобранных планов (например,
-если план поменяли) и переключаться между ними без обращения к /настройки.
-
-"/тб_план сохранить" — то же самое сохранение в tb_saved_plans, но без картинки/
-Mistral: для ветки, где ордер на все 6 этапов уже есть (написан вручную офицером
-или собран этой же командой раньше) — просто регистрирует её под названием и
-звёздами. Проверка на "появился ли ордер" здесь ищет номер этапа по тому же общему
-паттерну, что и tb_order_loop (guild_events.TB_ORDER_STAGE_RE — "1 этап"/
-"этап 1"/вариации, не завязан на наш конкретный текст заголовка), а не только
-среди сообщений бота — офицерский текст в любом формате тоже считается.
+Dark/Mixed/Light/Bonus), распознаёт её моделью (services/openrouter_vision.py) и
+сохраняет ордер на 6 этапов на сайте (services/tb_order_store.py, вкладка «Ордер»).
+С 2026-10-28 в тред ничего не публикуется и тред к ордеру не привязывается — решение
+пользователя «отказаться от обязательного дубликата в дискорде»; тред — только место,
+откуда взяли картинку. /тб_план — панель поверх database.tb_saved_plans: выбрать
+активный (guilds.tb_active_plan_id — его этапы tb_order_loop в cogs/guild_events.py
+публикует в 20:00), предпросмотр, взводы, удалить; «Сохранить ветку» — разовый перенос
+текстов этапов из треда на сайт (tb_order_store.import_thread).
 
 Изначально был реализован на Gemini (google-genai, GOOGLE_API_KEY), но бесплатный
 тариф Google блокирует запросы с датацентр-IP VPS (проверено 2026-08-21 — тот же
@@ -68,47 +54,15 @@ import guild_resolver
 import tb_platoon_autofill
 import tb_platoon_notify
 from services import feature_flags
-from cogs.guild_events import (
-    TB_ORDER_STAGE_RE,
-    _tb_order_stage_number,
-    chunk_tb_order_message,
-)
+from cogs.guild_events import chunk_tb_order_message
 from services.config_status import config_warning_text
 from services.message_image import extract_channel_id, guess_mime_type, is_image_attachment
 from services.openrouter_vision import call_vision_json, daily_used_ratio, OPENROUTER_DAILY_REQUEST_LIMIT
 # Промпт и сборка 6 этапов — общие с сайтом (/tb/order-plans, «Ордер из картинки»).
 from services.tb_order_image import (
-    ORDER_HEADER_RE, PROMPT, summarize_autofill as _summarize_autofill,
+    PROMPT, summarize_autofill as _summarize_autofill,
     build_order_blocks as _build_order_blocks, validate_response as _validate_response,
 )
-
-async def _find_existing_order_phases(thread: disnake.Thread, bot_user_id: int) -> list:
-    """Сканирует историю треда на уже опубликованные блоки ордера (заголовки
-    "## ... — N этап" от самого бота) — используется для защиты от повторной
-    публикации дублей при повторном запуске команды в том же треде."""
-    phases = set()
-    async for msg in thread.history(limit=200):
-        if msg.author.id != bot_user_id:
-            continue
-        m = ORDER_HEADER_RE.match(msg.content or "")
-        if m:
-            phases.add(int(m.group(1)))
-    return sorted(phases)
-
-
-async def _find_posted_phases_any_author(thread: disnake.Thread) -> list:
-    """Как _find_existing_order_phases, но не привязано к автору-боту и не к конкретному
-    тексту заголовка — использует тот же общий паттерн номера этапа, что и tb_order_loop
-    (guild_events.TB_ORDER_STAGE_RE: "1 этап"/"этап 1"/вариации), чтобы можно было
-    вручную сохранить план, где текст ордера писали офицеры в своём формате (не все
-    гильдии на этом боте используют наш "Восход Империи — N этап"), а не только бот."""
-    phases = set()
-    async for msg in thread.history(limit=None):
-        match = TB_ORDER_STAGE_RE.search(msg.content or "")
-        if match:
-            phases.add(int(_tb_order_stage_number(match)))
-    return sorted(phases)
-
 
 class TBOrderImage(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -178,17 +132,6 @@ class TBOrderImage(commands.Cog):
             await inter.edit_original_response("❌ В первом сообщении треда нет картинки.")
             return
 
-        if not принудительно:
-            existing_phases = await _find_existing_order_phases(thread, self.bot.user.id)
-            if existing_phases:
-                phases_str = ", ".join(str(p) for p in existing_phases)
-                await inter.edit_original_response(
-                    f"⚠️ В треде уже есть ордер для этапов: {phases_str}. "
-                    "Повторный запуск создаст дубли. Если это осознанно (например, план поменялся) — "
-                    "повторите команду с параметром `принудительно: True`."
-                )
-                return
-
         image_bytes = await image_attachment.read()
         mime_type = guess_mime_type(image_attachment)
 
@@ -216,34 +159,18 @@ class TBOrderImage(commands.Cog):
         if total != звёзды:
             warning = (
                 f"⚠️ Внимание: по распознанным данным сумма звёзд в общий зачёт = {total}, "
-                f"а вы указали {звёзды}. Проверьте текст в треде перед тем, как тегать гильдию.\n\n"
+                f"а вы указали {звёзды}. Проверьте этапы на сайте перед тем, как тегать гильдию.\n\n"
             )
-
-        try:
-            for block in blocks:
-                await thread.send(block)
-        except (disnake.Forbidden, disnake.HTTPException) as e:
-            await inter.edit_original_response(
-                f"{warning}❌ Публикация прервалась на середине (не всё могло уйти в тред): {e}\n"
-                "План не сохранён — проверьте тред вручную и, если нужно, повторите с `принудительно: True`."
-            )
-            return
-
-        # Проверяем, что все 6 этапов реально появились в треде (не просто что
-        # thread.send не бросил исключение), прежде чем сохранять план в память.
-        posted_phases = await _find_existing_order_phases(thread, self.bot.user.id)
-        if posted_phases != [1, 2, 3, 4, 5, 6]:
-            missing = sorted(set(range(1, 7)) - set(posted_phases))
-            await inter.edit_original_response(
-                f"{warning}⚠️ Сообщения отправлены, но в треде не нашлись все 6 этапов "
-                f"(не хватает: {', '.join(map(str, missing))}). План не сохранён — проверьте тред вручную."
-            )
-            return
 
         guild_id = guild_resolver.resolve_guild_id(inter.author)
         if guild_id is not None and not feature_flags.is_enabled(guild_id, "tb_plan_order"):
             guild_id = None
-        plan_id = database.save_tb_plan(guild_id, название, thread.id, total, created_by=str(inter.author.id))
+        # Ордер — только на сайте (2026-10-28): в тред этапы больше не публикуются, тред — лишь
+        # место, откуда взяли картинку. Параметр «принудительно» больше ничего не делает
+        # (уйдёт из описания команды при следующей ручной синхронизации команд).
+        from services import tb_order_store
+        plan_id = tb_order_store.create_order(guild_id, название, dict(enumerate(blocks, start=1)), total,
+                                              str(inter.author.id), "image")
 
         # Автозаполнение взводов сразу после сохранения плана — по прямому запросу
         # пользователя (см. план "Автозаполнение взводов ТБ + фильтры" от 2026-08-29,
@@ -260,9 +187,8 @@ class TBOrderImage(commands.Cog):
             autofill_note = f"\n⚠️ Не удалось автоматически расставить взводы: {e}. План сохранён, расставьте вручную на /tb/platoons."
 
         await inter.edit_original_response(
-            f"{warning}✅ Опубликовано 6 сообщений в тред «{thread.name}».\n"
-            f"💾 План сохранён как «{название}» ({total} ★) — выбрать его для ежедневной публикации: "
-            f"`/тб_план`."
+            f"{warning}✅ Ордер «{название}» ({total} ★) собран из картинки — 6 этапов на сайте, вкладка «Ордер» "
+            f"(там их можно поправить и отправить). Выбрать его активным: `/тб_план`."
             f"{autofill_note}"
         )
 
@@ -308,27 +234,17 @@ class TBOrderImage(commands.Cog):
         return chunk_tb_order_message(header + "\n\n".join(parts))
 
     async def save_thread_plan(self, guild_id: int, link: str, name: str, stars: int, author_id: int) -> str:
-        """Регистрирует готовую ветку как план — с проверкой, что в ней есть все 6 этапов."""
+        """Разовый перенос ордера из треда на сайт (все 6 этапов); тред к ордеру не привязывается."""
+        from services import tb_order_store
+
         channel_id = extract_channel_id(link)
         if channel_id is None:
             return "❌ Не удалось распознать ссылку на тред."
         try:
-            thread = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-        except disnake.NotFound:
-            return "❌ Тред не найден — проверьте ссылку."
-        except disnake.Forbidden:
-            return "❌ Нет доступа к этому треду."
-        posted_phases = await _find_posted_phases_any_author(thread)
-        if posted_phases != [1, 2, 3, 4, 5, 6]:
-            missing = sorted(set(range(1, 7)) - set(posted_phases))
-            found = ", ".join(map(str, posted_phases)) or "ни одного"
-            return (
-                f"⚠️ В треде нашлись заголовки этапов: {found}. Не хватает: {', '.join(map(str, missing))}. "
-                "План не сохранён — в треде должен быть текст ордера на все 6 этапов "
-                "(в каждом сообщении должен быть виден номер этапа, например «1 этап» или «этап 1»)."
-            )
-        database.save_tb_plan(guild_id, name, thread.id, stars, created_by=str(author_id))
-        return f"💾 План сохранён как «{name}» ({stars} ★, <#{thread.id}>)."
+            await tb_order_store.import_thread(guild_id, channel_id, name, stars, str(author_id))
+        except RuntimeError as e:
+            return f"⚠️ {e} Ордер не сохранён."
+        return f"💾 Ордер «{name}» ({stars} ★) перенесён из треда на сайт — тред больше не нужен."
 
 
 class TBPlanPanel(disnake.ui.View):
@@ -360,7 +276,7 @@ class TBPlanPanel(disnake.ui.View):
     def render(self) -> str:
         if not self.plans:
             return ("🗺️ **Планы ордера ТБ** — сохранённых планов пока нет. Соберите ордер командой "
-                    "`/тб_ордер_из_картинки` (или на сайте, /tb/order-plans) либо сохраните готовую ветку кнопкой ниже.")
+                    "`/тб_ордер_из_картинки`, на сайте (вкладка ВИ → «Ордер») либо перенесите готовый ордер из треда кнопкой ниже.")
         lines = ["🗺️ **Планы ордера ТБ** — активный план бот публикует по этапам в канал плана ТБ."]
         for p in self.plans[:25]:
             mark = " — 🟢 **активный**" if p["id"] == self.active_id else ""
@@ -400,7 +316,7 @@ class TBPlanPanel(disnake.ui.View):
             plan = self._plan()
             delete_label = (f"Точно удалить «{plan['name']}»?"[:80] if self.confirm_delete == self.plan_id and plan else "Удалить")
             buttons.append((delete_label, disnake.ButtonStyle.danger, self._on_delete, 3, False))
-        buttons.append(("➕ Сохранить ветку", disnake.ButtonStyle.secondary, self._on_save, 3, False))
+        buttons.append(("➕ Перенести из треда", disnake.ButtonStyle.secondary, self._on_save, 3, False))
         for label, style, callback, row, disabled in buttons:
             button = disnake.ui.Button(label=label, style=style, row=row, disabled=disabled)
             button.callback = callback
@@ -427,7 +343,7 @@ class TBPlanPanel(disnake.ui.View):
         await interaction.response.edit_message(content=self.render(), view=self.build())
         warning = config_warning_text(database.get_guild_config(self.guild_id), "tb_plan_order")
         await interaction.followup.send(
-            f"✅ Активный план: «{plan['name']}» — ежедневная публикация берёт этапы из этой ветки."
+            f"✅ Активный план: «{plan['name']}» — бот публикует его этапы в 20:00."
             + (f"\n{warning}" if warning else ""), ephemeral=True)
 
     async def _on_preview(self, interaction: disnake.MessageInteraction):
@@ -474,7 +390,7 @@ class TBPlanPanel(disnake.ui.View):
 class SaveTBPlanModal(disnake.ui.Modal):
     def __init__(self, panel: TBPlanPanel):
         self.panel = panel
-        super().__init__(title="Сохранить ветку как план", components=[
+        super().__init__(title="Перенести ордер из треда", components=[
             disnake.ui.TextInput(label="Ссылка на ветку с ордером на 6 этапов", custom_id="link",
                                  placeholder="https://discord.com/channels/…/…", max_length=200),
             disnake.ui.TextInput(label="Название плана", custom_id="name", max_length=80),

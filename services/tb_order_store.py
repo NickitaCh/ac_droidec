@@ -1,16 +1,16 @@
-"""Ордер ВИ по этапам в базе (2026-10-28): ордер больше не обязан жить в треде Discord.
+"""Ордер ВИ по этапам в базе (2026-10-28): ордер больше не живёт в треде Discord.
 
 Раньше ордер (database.tb_saved_plans) хранил только thread_id, а тексты этапов каждый раз
 перечитывались из треда: автопост (cogs/guild_events.py::tb_order_loop), «Мой ВИ», взводы,
-предпросмотр. Теперь у каждого этапа есть строка в tb_order_phases:
+предпросмотр. Теперь тексты этапов — строки tb_order_phases, а тред к ордеру не привязывается
+вовсе (решение пользователя: «отказаться от обязательного дубликата в дискорде»): тред или
+сообщение — лишь источник разового импорта. Все создатели ордера идут через create_order
+(план — "generated", картинка — "image", перенос треда — "thread", ссылки на сообщения —
+"message", правка на сайте — "edited"); thread_id у таких ордеров пустой.
 
-- source="thread"    — копия из треда. Тред по-прежнему главный: читатели берут живой тред, а
-                       копия нужна только если тред недоступен (и для редактора на сайте);
-- source="generated" — собран из плана (services/tb_plan.py::publish без ветки);
-- source="message"   — импорт по ссылке на сообщение Discord (source_link);
-- source="edited"    — правка на сайте.
-Любой источник, кроме "thread", главнее треда. Пока ордер на сайте не трогали, всё работает
-ровно как раньше (требование пользователя: на идущей ВИ ничего не должно сломаться).
+Ветка «тред главнее копии» (SOURCES_OVER_THREAD, resolve_blocks, fetch_plan_planets) осталась
+для ордеров, у которых thread_id ещё задан: так шёл переход на идущей ВИ — сначала копии
+этапов в базу при живом треде, сверка старого и нового кода, потом отвязка тредов.
 
 tg_text — свой текст для Telegram; NULL = тот же текст, что для Discord (в tg-разметку его
 переводит tg_bot/markup.py). Отправка с сайта — вручную по этапу (send_discord / send_telegram),
@@ -26,8 +26,9 @@ import httpx
 
 import database
 
-SOURCES_OVER_THREAD = ("generated", "message", "edited")
-SOURCE_LABELS = {"thread": "из треда", "generated": "из плана", "message": "из сообщения", "edited": "правка на сайте"}
+SOURCES_OVER_THREAD = ("generated", "image", "message", "edited")
+SOURCE_LABELS = {"thread": "из треда", "generated": "из плана", "image": "из картинки", "message": "из сообщения",
+                 "edited": "правка на сайте"}
 DISCORD_API = "https://discord.com/api/v10"
 USER_AGENT = "DiscordBot (https://swgoh-sng.ru, 1.0)"
 DISCORD_LIMIT = 2000
@@ -93,6 +94,18 @@ def save_phase(order_id: int, phase: int, text: str, source: str, by: str | None
     """, (int(order_id), int(phase), text.strip(), (tg_text or "").strip() or None, source, link, by, time.time()))
     conn.commit()
     conn.close()
+
+
+def create_order(guild_id: int, name: str, blocks: dict[int, str], total_stars: int | None, created_by: str,
+                 source: str, links: dict[int, str] | None = None) -> int:
+    """Новый ордер (или замена одноимённого) — тексты этапов только в базе, без треда.
+    С 2026-10-28 тред к ордеру не привязывается: он лишь источник разового импорта."""
+    order_id = database.save_tb_plan(guild_id, name, "", total_stars, created_by=created_by)
+    delete_order(order_id)  # одноимённый ордер заменяется целиком, старые этапы не остаются
+    for phase, text in blocks.items():
+        if text:
+            save_phase(order_id, phase, text, source, by=created_by, link=(links or {}).get(phase), keep_tg=False)
+    return order_id
 
 
 def copy_from_thread(order_id: int, blocks: dict[int, str]) -> None:
@@ -173,6 +186,23 @@ async def thread_blocks(thread_id: int | str) -> dict[int, str]:
     contents = await thread_contents(thread_id)
     blocks = {ph: extract_tb_order_block(contents, str(ph)) for ph in range(1, 7)}
     return {ph: b for ph, b in blocks.items() if b}
+
+
+async def import_thread(guild_id: int, thread_id: int | str, name: str, total_stars: int | None, created_by: str) -> int:
+    """Разовый перенос ордера из треда: тексты 6 этапов копируются в базу, тред к ордеру не
+    привязывается. RuntimeError, если тред не читается или в нём нет всех 6 этапов."""
+    try:
+        blocks = await thread_blocks(thread_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (403, 404):
+            raise RuntimeError("Тред не найден или у бота нет к нему доступа — проверьте ссылку.")
+        raise RuntimeError(f"Discord ответил {e.response.status_code}.")
+    missing = [ph for ph in range(1, 7) if ph not in blocks]
+    if missing:
+        found = ", ".join(map(str, sorted(blocks))) or "ни одного"
+        raise RuntimeError(f"В треде нашлись этапы: {found}; не хватает: {', '.join(map(str, missing))}. "
+                           "В каждом сообщении должен быть номер этапа («1 этап» или «этап 1»).")
+    return create_order(guild_id, name, blocks, total_stars, created_by, "thread")
 
 
 def parse_message_link(link: str) -> tuple[str, str] | None:

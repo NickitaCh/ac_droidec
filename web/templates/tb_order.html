@@ -199,7 +199,7 @@
         </div>
 
         <div class="panel" id="from-image">
-            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Запасной путь, если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её, опубликует в ветку 6 сообщений по этапам, сохранит ордер и расставит взводы. Ордер сам появится в списке планов («План») со звёздами из ветки.") }}</span></div>
+            <div class="panel-title"><span>Ордер из картинки{{ ui.help("Если план составлен в HotUtils. Ссылка на ветку, где в первом сообщении — картинка Strategy Summary. Бот распознает её и сохранит ордер на 6 этапов здесь, на сайте (в ветку ничего не пишет), и расставит взводы. Ордер сам появится в списке планов («План»).") }}</span></div>
             {% if image_job %}
                 {% if image_job.state == "running" %}
                     <p class="badge badge-neutral">⏳ «{{ image_job.plan_name }}»: {{ image_job.step }}</p>
@@ -223,15 +223,12 @@
                     Total Stars с картинки
                     <input type="number" name="stars" min="0" required>
                 </label>
-                <label class="checkbox">
-                    <input type="checkbox" name="force" value="1"> Опубликовать заново, даже если ордер уже есть (будут дубли)
-                </label>
-                <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и опубликовать</button>
+                <button type="submit"{% if image_job and image_job.state == "running" %} disabled{% endif %}>Распознать и сохранить</button>
             </form>
         </div>
 
         <div class="panel">
-            <div class="panel-title"><span>Зарегистрировать готовую ветку{{ ui.help("Для ветки, где ордер на все 6 этапов уже написан. Здесь наличие всех этапов не проверяется — проверка есть в Discord: /тб_план → «Сохранить ветку».") }}</span></div>
+            <div class="panel-title"><span>Перенести из треда{{ ui.help("Ордер на 6 этапов уже лежит в треде Discord (по сообщению на этап)? Бот один раз скопирует тексты этапов на сайт — дальше тред не нужен, его можно удалить. Нужны все 6 этапов, в каждом сообщении — номер этапа («1 этап» или «этап 1»).") }}</span></div>
             <form method="post" action="/tb/order-plans/save">
                 <label>
                     Название ордера
@@ -245,7 +242,7 @@
                     Total Stars
                     <input type="number" name="stars" min="0" required>
                 </label>
-                <button type="submit">Сохранить</button>
+                <button type="submit">Перенести</button>
             </form>
         </div>
     </div>
