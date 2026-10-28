@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}Матрица ГЛ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero page-hero-light">
+        <div class="page-hero-top">
+            <div>
+                <p class="page-hero-eyebrow">Состав гильдии</p>
+                <h1>Матрица ГЛ{% call ui.help(side="left") %}<p>Насколько каждый игрок готов к каждой цели «Руководства»: процент — средняя готовность требуемых юнитов (гир и реликвия против нужного уровня), рядом — сколько юнитов уже на уровне.</p><p>✓ — цель открыта (с «У» — куплена ульта), «можно» — все требования выполнены, цель можно открывать. Наведите на ячейку — какие юниты отстают. Данные из ежечасного обновления ростеров.</p>{% endcall %}</h1>
+            </div>
+            <div class="hero-links">
+                {% for k, label in kinds %}
+                    <a class="hero-link" href="/gl?kind={{ k }}"{% if k == kind %} aria-current="page"{% endif %}>{{ label }}</a>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    {% if not guides or not players %}
+        <div class="panel"><p class="muted">Нет данных: справочник «Руководства» или ростеры гильдии ещё не загружены.</p></div>
+    {% else %}
+        <div class="panel">
+            <div class="panel-title"><span>{{ players|length }} игроков</span><span class="panel-hint">в заголовке — сколько открыли · сколько могут открыть</span></div>
+            <table class="data cards-on-phone gl-matrix" id="gl-matrix">
+                <thead>
+                    <tr>
+                        <th data-sort="text">Игрок</th>
+                        <th data-sort="number" class="num">Открыто</th>
+                        {% for g in guides %}
+                            <th data-sort="number" class="num gl-col" title="{{ g.name }}">
+                                <img src="/unit-img/{{ g.base_id }}" alt="" loading="lazy" width="36" height="36">
+                                <span class="gl-col-count">{{ g.owners }}{% if g.ready %} · {{ g.ready }}{% endif %}</span>
+                            </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in players %}
+                        <tr>
+                            <td><a href="/player/{{ p.ally_code }}">{{ p.name }}</a></td>
+                            <td class="num" data-label="Открыто" data-value="{{ p.owned }}">{{ p.owned }}</td>
+                            {% for c in p.cells %}
+                                {% set g = guides[loop.index0] %}
+                                {% if c.owned %}
+                                    <td class="num nowrap" data-label="{{ g.name }}" data-value="{{ 200 if c.ultimate else 150 }}" title="{{ g.name }}: {{ c.level }}">
+                                        <span class="badge badge-ok">✓{% if c.ultimate %} У{% endif %}</span>
+                                    </td>
+                                {% elif c.met == c.total %}
+                                    <td class="num nowrap" data-label="{{ g.name }}" data-value="100" title="{{ g.name }}: все требования выполнены">
+                                        <span class="badge badge-warn" title="все требования выполнены">можно</span>
+                                    </td>
+                                {% else %}
+                                    <td class="num" data-label="{{ g.name }}" data-value="{{ c.pct|round(1) }}"
+                                        title="{{ g.name }} — не на уровне:{% for name, now, need in c.lagging %}&#10;{{ name }}: {{ now }} → {{ need }}{% endfor %}">
+                                        <span class="gl-pct{% if c.pct >= 90 %} gl-pct-high{% elif c.pct < 50 %} gl-pct-low{% endif %}">{{ c.pct|int }}%</span>
+                                        <span class="muted gl-met">{{ c.met }}/{{ c.total }}</span>
+                                    </td>
+                                {% endif %}
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

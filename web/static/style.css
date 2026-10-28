@@ -2991,3 +2991,17 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 .task-resume-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; max-width: none; margin: 0; }
 .task-resume-form input[type="date"] { width: auto; }
 .task-resume-all { margin-top: 0.6em; }
+
+/* Матрица ГЛ (/gl): узкие столбцы-портреты, процент над «N/M». */
+.gl-matrix th.gl-col { padding: 0.3em 0.15em; text-align: center; vertical-align: bottom; }
+.gl-matrix th.gl-col img { display: block; margin: 0 auto 0.15em; border-radius: 50%; }
+.gl-col-count { display: block; font-size: 0.75em; font-weight: 400; color: var(--fg-muted); white-space: nowrap; }
+.gl-matrix td { padding-left: 0.2em; padding-right: 0.2em; }
+.gl-matrix td:not(:first-child) { text-align: center; }
+.gl-met { display: block; font-size: 0.75em; }
+.gl-pct-high { color: var(--accent, #4ade80); font-weight: 700; }
+.gl-pct-low { color: var(--fg-muted); }
+@media (max-width: 40em) {
+    .gl-matrix td:not(:first-child) { text-align: right; }
+    .gl-met { display: inline; margin-left: 0.4em; }
+}

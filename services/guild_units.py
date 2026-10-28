@@ -170,3 +170,52 @@ def player_readiness(guild_id: int, guide_base_id: str, roster: dict) -> dict:
         "pct": sum(fractions) / len(fractions) * 100 if fractions else 0,
         "ready": all(u["status"] == "met" for u in units),
     }
+
+
+def guide_matrix(guild_id: int, kind: str = "gl") -> dict:
+    """Матрица «игрок × цель Руководства» одного вида (как HotUtils GL progress):
+    {guides: [{base_id, name, owners, ready}], players: [{name, ally_code, owned, cells}]},
+    ячейка — {owned, ultimate, level, pct, met, total, lagging: [(имя, сейчас, нужно)]}.
+    Ростеры читаются один раз на все цели."""
+    guides = [g for g in journey_guide.guide_options() if g["kind"] == kind]
+    grouped = {g["base_id"]: journey_guide.group_by_unit(database.get_journey_guide_requirements(g["base_id"], guild_id))
+               for g in guides}
+    all_ids = {u for units in grouped.values() for u in units} | set(grouped)
+    names = database.get_game_unit_names(list(all_ids))
+    types = database.get_unit_types(list(all_ids))
+    members = _members(guild_id)
+    rosters = database.get_player_units_bulk([c for c, _ in members])
+
+    players = []
+    for code, name in members:
+        roster = rosters.get(code)
+        if not roster:
+            continue
+        cells = []
+        for g in guides:
+            guide_unit = roster.get(g["base_id"])
+            if guide_unit is not None:
+                cells.append({"owned": True, "ultimate": bool(guide_unit.get("purchasedAbilityId")),
+                              "level": level_text(level_of(guide_unit), types.get(g["base_id"]) == "ship"), "pct": 100})
+                continue
+            fractions, met, lagging = [], 0, []
+            for unit_id, targets in grouped[g["base_id"]].items():
+                unit = roster.get(unit_id)
+                fractions.append(min(_fraction(unit, t, v) for t, v in targets))
+                if unit is not None and all(journey_guide.unit_meets(unit, t, v) for t, v in targets):
+                    met += 1
+                    continue
+                now = "нет" if unit is None else level_text(level_of(unit), types.get(unit_id) == "ship")
+                need = " ".join(journey_guide.short_label(t, v) for t, v in targets)
+                lagging.append((names.get(unit_id, unit_id), now, need, fractions[-1]))
+            lagging.sort(key=lambda x: x[3])
+            cells.append({"owned": False, "pct": sum(fractions) / len(fractions) * 100 if fractions else 0,
+                          "met": met, "total": len(fractions), "lagging": [x[:3] for x in lagging]})
+        players.append({"name": name or code, "ally_code": code, "cells": cells,
+                        "owned": sum(1 for c in cells if c["owned"])})
+    players.sort(key=lambda p: (-p["owned"], -sum(c["pct"] for c in p["cells"]), p["name"].lower()))
+    for i, g in enumerate(guides):
+        g["name"] = names.get(g["base_id"], g["name"])
+        g["owners"] = sum(1 for p in players if p["cells"][i]["owned"])
+        g["ready"] = sum(1 for p in players if not p["cells"][i]["owned"] and p["cells"][i]["met"] == p["cells"][i]["total"])
+    return {"guides": guides, "players": players, "kinds": journey_guide.KIND_LABELS}

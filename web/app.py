@@ -24,7 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, telegram, tw_defense, tw_scout, unit_images
+from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, telegram, tw_defense, tw_scout, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -134,5 +134,6 @@ app.include_router(qa_checklist.router, prefix="/qa-checklist", tags=["qa-checkl
 app.include_router(gear_farm.router, prefix="/farm", tags=["gear-farm"])
 app.include_router(raid_tickets.router, prefix="/tickets", tags=["raid-tickets"])
 app.include_router(raids.router, prefix="/raids", tags=["raids"])
+app.include_router(gl_matrix.router, prefix="/gl", tags=["gl-matrix"])
 app.include_router(conquest.router, prefix="/conquest", tags=["conquest"])
 app.include_router(telegram.router, tags=["telegram"])
