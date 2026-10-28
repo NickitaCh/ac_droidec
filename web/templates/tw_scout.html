@@ -133,7 +133,7 @@
 
         <div class="panel">
             <div class="panel-title"><span>Плейты</span>
-                {{ ui.help("Сколько игроков каждой гильдии полностью проходят плейт: есть все его персонажи и выполнены обязательные статы — как /статы «как есть». Внутри — по каждому персонажу: сколько проходят из тех, у кого он есть.") }}</div>
+                {{ ui.help("Сколько игроков каждой гильдии полностью проходят плейт: есть все его персонажи и выполнены обязательные статы — как /статы «как есть». Внутри — по каждому персонажу: сколько проходят из тех, у кого он есть; нажмите на персонажа — что именно не пройдено и какие значения в среднем.") }}</div>
             {% if not report.plates %}
                 <p class="widget-empty">{% if report.plates_selected %}У выбранных плейтов нет требований.{% else %}Выберите плейты выше и нажмите «Пересчитать».{% endif %}</p>
             {% endif %}
@@ -148,8 +148,31 @@
                         <thead><tr><th>Персонаж</th><th class="num">{{ report.own_name }}</th><th class="num">{{ report.opp_name }}</th></tr></thead>
                         <tbody>
                             {% for c in p.chars %}
-                                <tr>
-                                    <td class="scout-label">{{ game.portrait(c.base_id, "xs") }} {{ c.name }}</td>
+                                <tr{% if c.rows %} class="scout-char-row" data-scout-char tabindex="0" role="button" aria-label="Что не пройдено: {{ c.name }}"{% endif %}>
+                                    <td class="scout-label">{{ game.portrait(c.base_id, "xs") }} {{ c.name }}{% if c.rows %} <span class="scout-more" aria-hidden="true">›</span>
+                                        <template data-scout-detail>
+                                            <p class="muted">{{ p.plate }} · сколько не прошли из тех, у кого персонаж есть; «в среднем» — среднее значение у всех них.</p>
+                                            <table class="data cards-on-phone scout-detail">
+                                                <thead><tr><th>Требование</th><th>Норма</th><th>{{ report.own_name }}</th><th>{{ report.opp_name }}</th></tr></thead>
+                                                <tbody>
+                                                    {% for r in c.rows %}
+                                                        <tr>
+                                                            <td data-label="Требование"><div>{{ r.label }}{% if not r.required %} <span class="muted">(не обяз.)</span>{% endif %}</div></td>
+                                                            <td data-label="Норма"><div>{{ r.norm }}</div></td>
+                                                            {% for side, key in [(report.own_name, "own"), (report.opp_name, "opp")] %}
+                                                                {% set x = r[key] %}
+                                                                <td data-label="{{ side }}"><div>
+                                                                    {% if not x.n %}<span class="muted">нет персонажа</span>
+                                                                    {% else %}<span class="{{ 'scout-bad' if x.fails else 'scout-good' }}">не прошли {{ x.fails }} из {{ x.n }}</span>
+                                                                        {% if x.avg %}<br><span class="muted">в среднем {{ "запас " if x.is_margin }}</span><span class="{{ 'scout-bad' if r[key ~ '_short'] else '' }}">{{ x.avg }}</span>{% endif %}
+                                                                    {% endif %}
+                                                                </div></td>
+                                                            {% endfor %}
+                                                        </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </template>{% endif %}</td>
                                     <td class="num {{ side_class(c.own, c.opp) }}" data-label="{{ report.own_name }}">{{ c.own }} из {{ c.own_has }}</td>
                                     <td class="num {{ side_class(c.opp, c.own) }}" data-label="{{ report.opp_name }}">{{ c.opp }} из {{ c.opp_has }}</td>
                                 </tr>
@@ -180,4 +203,31 @@
             {% endif %}
         {% endfor %}
     {% endif %}
+    <dialog class="stat-problem-dialog scout-dialog" id="scout-dialog">
+        <div class="stat-problem-dialog-header"><h3 id="scout-dialog-title"></h3><button type="button" class="link-btn" data-scout-close aria-label="Закрыть">✕</button></div>
+        <div id="scout-dialog-body"></div>
+    </dialog>
+    <script>
+    (function () {
+        const dlg = document.getElementById("scout-dialog");
+        const open = row => {
+            const tpl = row.querySelector("template[data-scout-detail]");
+            if (!tpl) return;
+            document.getElementById("scout-dialog-title").textContent = row.querySelector(".scout-label").textContent.replace("›", "").trim();
+            const body = document.getElementById("scout-dialog-body");
+            body.replaceChildren(tpl.content.cloneNode(true));
+            dlg.showModal();
+        };
+        document.addEventListener("click", e => {
+            const row = e.target.closest("[data-scout-char]");
+            if (row) open(row);
+        });
+        document.addEventListener("keydown", e => {
+            const row = e.target.closest && e.target.closest("[data-scout-char]");
+            if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(row); }
+        });
+        dlg.querySelector("[data-scout-close]").addEventListener("click", () => dlg.close());
+        dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+    })();
+    </script>
 {% endblock %}

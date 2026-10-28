@@ -230,6 +230,38 @@ def _ranks(own_players: list[dict], opp_players: list[dict]) -> dict:
     return {"brackets": brackets, "rows": rows, "ahead": ahead, "compared": sum(r["diff"] is not None for r in rows)}
 
 
+def _row_summary(sr, plate: str, base_id: str, guild_id: int, stat: dict) -> list[dict]:
+    """Попап персонажа в «Плейтах»: по каждой строке плейта — сколько не прошли у нас и у них (из
+    тех, у кого персонаж есть) и среднее значение против нормы (запрос пользователя 28.10: «что
+    именно не пройдено хотя бы в среднем»). Сверху — строки, которые чаще всего не проходят."""
+    loaded = sr._load_char_rows(plate, base_id, guild_id)
+    if not loaded or not stat:
+        return []
+    out = []
+    for row in loaded[0]:
+        key = sr.progress_row_key(row)
+        if key not in stat:
+            continue
+        label, norm = sr.progress_row_text(row)
+        operator, threshold, priority, compare_key = row[4], row[5], row[6], row[13]
+        item = {"label": label, "norm": norm, "required": priority == "required"}
+        for side in ("own", "opp"):
+            n, fails, margins = stat[key].get(side, [0, 0, []])
+            avg = None
+            if margins:
+                m = sum(margins) / len(margins)
+                # запас до нормы → среднее значение (у сравнения с персонажем норма плавающая —
+                # показываем только запас)
+                avg = sr._fmt_compact(m) if compare_key else sr._fmt_compact(threshold + sr._compare_offset_sign(operator) * m)
+                item[f"{side}_short"] = m < 0
+            item[side] = {"n": n, "fails": fails, "avg": avg, "is_margin": bool(compare_key)}
+        if item["own"]["fails"] or item["opp"]["fails"]:
+            out.append(item)
+    share = lambda x: x["fails"] / x["n"] if x["n"] else 0
+    out.sort(key=lambda i: (not i["required"], -max(share(i["own"]), share(i["opp"]))))
+    return out
+
+
 async def _plates(guild_id: int, plates: list[str], sides: dict, stat_calc, state: dict) -> list[dict]:
     from cogs import stat_requirements as sr
     bot = types.SimpleNamespace(comlink=None, stat_calc=stat_calc)
@@ -243,6 +275,7 @@ async def _plates(guild_id: int, plates: list[str], sides: dict, stat_calc, stat
         per_char = {b: {"base_id": b, "name": names.get(b, b), "own": 0, "opp": 0, "own_has": 0, "opp_has": 0,
                         "checked": False} for b in chars}
         result = {"plate": plate, "own": 0, "opp": 0, "own_total": len(sides["own"]), "opp_total": len(sides["opp"])}
+        rows_stat: dict = {b: {} for b in chars}  # {base_id: {row_key: {side: [n, fails, [margin…]]}}}
         for side, players in sides.items():
             for code, name, roster in players:
                 passed = True
@@ -250,7 +283,9 @@ async def _plates(guild_id: int, plates: list[str], sides: dict, stat_calc, stat
                     if b not in roster:
                         passed = False
                         continue
-                    r = await sr._evaluate_character_player(bot, plate, b, code, False, name, guild_id=guild_id)
+                    rows_out = []
+                    r = await sr._evaluate_character_player(bot, plate, b, code, False, name, guild_id=guild_id,
+                                                            rows_out=rows_out)
                     if r is None:
                         continue
                     per_char[b]["checked"] = True
@@ -259,9 +294,19 @@ async def _plates(guild_id: int, plates: list[str], sides: dict, stat_calc, stat
                         passed = False
                     else:
                         per_char[b][side] += 1
+                    for row in rows_out:
+                        if row["ok"] is None:
+                            continue
+                        acc = rows_stat[b].setdefault(row["key"], {}).setdefault(side, [0, 0, []])
+                        acc[0] += 1
+                        acc[1] += not row["ok"]
+                        if row["margin"] is not None:
+                            acc[2].append(row["margin"])
                 result[side] += passed
                 # Расчёт идёт в потоке веб-процесса: пауза отпускает GIL, чтобы сайт не тормозил
                 time.sleep(PAUSE_SECONDS)
+        for b, c in per_char.items():
+            c["rows"] = _row_summary(sr, plate, b, guild_id, rows_stat[b])
         result["chars"] = [c for c in per_char.values() if c["checked"]]
         if result["chars"]:
             out.append(result)

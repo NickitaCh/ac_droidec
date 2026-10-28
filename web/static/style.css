@@ -3176,3 +3176,13 @@ dialog.stat-problem-dialog.mg-dialog { max-width: 56em; }
 @media (max-width: 40em) {
     table.cards-on-phone td.row-actions { flex-wrap: wrap; justify-content: flex-start; gap: 0.4em; }
 }
+
+/* Разведка ВГ: попап «что не пройдено» по персонажу плейта (tw_scout.html) */
+.scout-char-row { cursor: pointer; }
+.scout-char-row:hover, .scout-char-row:focus-visible { background: var(--surface-2); }
+.scout-more { color: var(--accent); font-weight: 700; }
+.scout-bad { color: var(--status-critical); }
+.scout-good { color: var(--status-good); }
+dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
+#scout-dialog-body { overflow-y: auto; }
+.scout-detail td { vertical-align: top; }
