@@ -29,7 +29,7 @@
                         <th data-sort="number" class="num">Открыто</th>
                         {% for g in guides %}
                             <th data-sort="number" class="num gl-col" title="{{ g.name }}">
-                                <img src="/unit-img/{{ g.base_id }}" alt="" loading="lazy" width="36" height="36">
+                                <img src="/unit-img/{{ g.base_id }}" alt="" loading="lazy" width="30" height="30">
                                 <span class="gl-col-count">{{ g.owners }}{% if g.ready %} · {{ g.ready }}{% endif %}</span>
                             </th>
                         {% endfor %}
