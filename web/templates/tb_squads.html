@@ -7,7 +7,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Восход Империи</p>
-                <h1>Отряды для боёв{% call ui.help(side="left") %}<p>Какими отрядами проходят каждую миссию. База — открытая карта ВИ {{ source }}, обновляется раз в сутки. Номера миссий (c1…c8) — как у источника, по месту на карте.</p><p>Под гильдию: базовый отряд можно скрыть, можно добавить свой. Правки видны только вашей гильдии и сохраняются при обновлении базы. Эти отряды подсказывает игрокам «Мой ВИ» в карточке.</p><p>«Могут выставить» — у скольких игроков гильдии все юниты отряда на реликвии планеты (корабли — 7★).</p>{% endcall %}</h1>
+                <h1>Отряды для боёв{% call ui.help(side="left") %}<p>Какими отрядами проходят каждую миссию. База — открытая карта ВИ {{ source }}, обновляется раз в сутки. Номера миссий (c1…c8) — как у источника, по месту на карте.</p><p>Под гильдию: базовый отряд можно скрыть, можно добавить свой. Правки видны только вашей гильдии и главнее базы: обновление их не трогает. Что появилось у источника за последние 2 недели — с пометкой «новое»; что источник убрал — остаётся у нас с пометкой, пока вы сами не скроете. Эти отряды подсказывает игрокам «Мой ВИ» в карточке.</p><p>«Могут выставить» — у скольких игроков гильдии все юниты отряда на реликвии планеты (корабли — 7★).</p>{% endcall %}</h1>
             </div>
             <div class="hero-links">
                 <a class="hero-link" href="/tb/plan">План ВИ</a>
@@ -18,6 +18,7 @@
         </nav>
     </section>
 
+    {% if new_total %}<p class="config-warning">В {{ source }} за последние 2 недели новых отрядов: {{ new_total }} (по всем этапам) — отмечены «новое».</p>{% endif %}
     {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
     {% if not planets %}
         <div class="panel"><p class="muted">База отрядов ещё не загружена — бот забирает её раз в сутки.</p></div>
@@ -30,6 +31,9 @@
                 <details class="tbsq-mission" {% if loop.first %}open{% endif %}>
                     <summary>
                         <strong>{{ m.label }} {{ m.id }}</strong>
+                        {% if m.new %}<span class="badge badge-warn">новая миссия</span>{% endif %}
+                        {% if m.removed_at %}<span class="badge badge-neutral">убрана в {{ source }}</span>{% endif %}
+                        {% set fresh = m.squads|selectattr("new")|list|length %}{% if fresh and not m.new %}<span class="badge badge-warn">новых отрядов: {{ fresh }}</span>{% endif %}
                         <span class="muted">{{ m.requirements|join("; ") }}</span>
                         <span class="badge badge-neutral">{{ m.squads|rejectattr("hidden")|list|length }} отр.</span>
                     </summary>
@@ -43,6 +47,8 @@
                                 <div class="tbsq-info">
                                     <strong>{{ s.name or s.names[0] }}</strong>
                                     {% if s.source == "guild" %}<span class="badge badge-ok">наш</span>{% else %}<span class="badge badge-neutral">{{ source }}</span>{% endif %}
+                                    {% if s.new %}<span class="badge badge-warn">новое в {{ source }}</span>{% endif %}
+                                    {% if s.removed_at %}<span class="badge badge-neutral" title="Источник убрал отряд; у нас он остаётся, пока вы его не скроете">убран в {{ source }}</span>{% endif %}
                                     {% if s.hidden %}<span class="badge badge-warn">скрыт</span>{% endif %}
                                     <div class="muted">{{ s.names|join(", ") }}{% if s.omicron %} · нужен омикрон: {% for u in s.omicron %}{{ s.names[s.units.index(u)] }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
                                     <div>Могут выставить: <strong>{{ s.can }}</strong> из {{ members }}{% if s.video %} · <a href="{{ s.video }}" target="_blank" rel="noopener">видео</a>{% endif %}</div>

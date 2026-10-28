@@ -44,7 +44,8 @@ def _page(guild_id: int, phase: int) -> dict:
                 s["names"] = [names.get(u, u) for u in s["units"]]
                 s["can"] = sum(1 for r in rosters.values()
                                if all(tb_squads._fits(r.get(u), p["min_relic"], u in ships) for u in s["units"]))
-    return {"planets": planets, "members": len(rosters), "phases": sorted({v["phase"] for v in lib.values() if v["phase"]}),
+    new_total = sum(1 for v in lib.values() for m in v["missions"] for s in m["squads"] if s.get("new"))
+    return {"planets": planets, "members": len(rosters), "new_total": new_total, "phases": sorted({v["phase"] for v in lib.values() if v["phase"]}),
             "fetched": tb_squads.base().get("fetched")}
 
 

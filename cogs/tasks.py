@@ -63,12 +63,37 @@ class TasksCog(commands.Cog):
             print(f"✅ [Задачи] Требования «Руководства» обновлены: {rows}")
         except Exception as e:
             print(f"⚠️ [Задачи] Не удалось обновить требования «Руководства»: {e}")
+        await self._sync_tb_squads()
+
+    async def _sync_tb_squads(self):
+        """База отрядов для боёв ВИ со swgoh.ru (services/tb_squads.py). Не скачалась или
+        сменился формат — владельцу бота в личку, один раз за полосу сбоев (bot_state
+        FAIL_STATE), и ещё раз, когда загрузка снова пошла."""
+        from services import tb_squads
+        was_failing = database.get_bot_state(tb_squads.FAIL_STATE, guild_id=0)
         try:
-            from services import tb_squads
-            squads = await asyncio.to_thread(tb_squads.sync)
-            print(f"✅ [ВИ] Отряды для боёв ({tb_squads.SOURCE_NAME}) обновлены: {squads}")
+            res = await asyncio.to_thread(tb_squads.sync)
         except Exception as e:
             print(f"⚠️ [ВИ] Не удалось обновить отряды для боёв: {e!r}")
+            if not was_failing:
+                database.set_bot_state(tb_squads.FAIL_STATE, str(e)[:500], guild_id=0)
+                await self._dm_owners(
+                    f"⚠️ Не получается обновить отряды для боёв ВИ с {tb_squads.SOURCE_NAME}: {e}\n"
+                    "На сайте остаётся последняя загруженная база и правки офицеров. Напишу, когда загрузка снова пойдёт.")
+            return
+        print(f"✅ [ВИ] Отряды для боёв ({tb_squads.SOURCE_NAME}): {res}")
+        if was_failing:
+            database.set_bot_state(tb_squads.FAIL_STATE, "", guild_id=0)
+            await self._dm_owners(f"✅ Отряды для боёв ВИ с {tb_squads.SOURCE_NAME} снова обновляются: "
+                                  f"{res['squads']} отрядов, новых {res['new']}, убрано источником {res['removed']}.")
+
+    async def _dm_owners(self, text: str):
+        from services import discord_rest
+        for user_id in self.bot.allowed_user_ids:
+            try:
+                await discord_rest.send_dm(str(user_id), text)
+            except Exception as e:
+                print(f"⚠️ [ВИ] Личка {user_id} не отправлена: {e!r}")
 
     @units_sync_loop.before_loop
     async def before_units_sync(self):

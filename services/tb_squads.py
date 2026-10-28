@@ -25,6 +25,10 @@ from services import tb_covert, tb_projection, unit_forecast
 BASE_KEY = "tb_squads_base"
 SOURCE_URL = "https://swgoh.ru/api/tbmap"
 SOURCE_NAME = "swgoh.ru"
+USER_AGENT = "AC-Droidec-bot/1.0 (+https://swgoh-sng.ru)"
+MIN_PLANETS, MIN_SQUADS = 15, 50  # меньше — считаем, что у источника сменился формат
+NEW_DAYS = 14  # сколько дней отряд/миссия источника помечены «новое»
+FAIL_STATE = "tb_squads_fail"  # bot_state: текст последней ошибки, пока загрузка не починится
 # Типы миссий у источника; deploy/platoon — не бои, их не берём.
 MISSION_TYPES = {"usual": "Бой", "fleet": "Флот", "special": "Спецмиссия", "special2": "Спецмиссия", "reva": "Спецмиссия"}
 MAX_UNITS = {"fleet": 8}
@@ -78,15 +82,54 @@ def parse(raw: dict) -> dict:
     return out
 
 
-def sync() -> int:
-    """Забирает базу с источника (блокирующая — звать через to_thread). Возвращает число отрядов."""
-    resp = httpx.get(SOURCE_URL, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
-    resp.raise_for_status()
-    planets = parse(resp.json())
+class SourceError(Exception):
+    """Источник не ответил или ответ не похож на карту ВИ (сменился формат)."""
+
+
+def merge(prev: dict, new: dict, now: float) -> dict:
+    """Свежая база поверх прошлой: у каждой миссии и отряда — first_seen (когда впервые
+    появились у источника; 0 — были с самого начала, не «новые»). Убранное источником не
+    теряется: остаётся с removed_at, пока гильдия сама не скроет (правки офицеров главнее)."""
+    first_load = not prev
+    out = {}
+    for planet in list(new) + [p for p in prev if p not in new]:
+        n_planet, p_planet = new.get(planet), prev.get(planet) or {"missions": []}
+        old_missions = {m["id"]: m for m in p_planet.get("missions") or []}
+        missions = []
+        for m in (n_planet or {"missions": []})["missions"]:
+            old = old_missions.pop(m["id"], None)
+            old_squads = {sq["key"]: sq for sq in (old or {}).get("squads") or []}
+            squads = []
+            for sq in m["squads"]:
+                was = old_squads.pop(sq["key"], None)
+                squads.append({**sq, "first_seen": was.get("first_seen", 0) if was else (0 if first_load else now)})
+            squads += [{**sq, "removed_at": sq.get("removed_at") or now} for sq in old_squads.values()]
+            missions.append({**m, "squads": squads,
+                             "first_seen": old.get("first_seen", 0) if old else (0 if first_load else now)})
+        missions += [{**m, "removed_at": m.get("removed_at") or now} for m in old_missions.values()]
+        out[planet] = {**(n_planet or p_planet), "missions": missions}
+    return out
+
+
+def sync() -> dict:
+    """Забирает базу с источника и сливает с прошлой (блокирующая — звать через to_thread).
+    → {squads, new, removed}; SourceError — не скачалось или формат не тот (бот пишет владельцу)."""
+    try:
+        resp = httpx.get(SOURCE_URL, timeout=60, headers={"User-Agent": USER_AGENT})
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as e:
+        raise SourceError(f"не скачалось: {e!r}"[:300]) from e
+    planets = parse(raw)
     total = sum(len(m["squads"]) for p in planets.values() for m in p["missions"])
-    if total:
-        database.set_bot_state(BASE_KEY, json.dumps({"fetched": time.time(), "planets": planets}, ensure_ascii=False), guild_id=0)
-    return total
+    if len(planets) < MIN_PLANETS or total < MIN_SQUADS:
+        raise SourceError(f"ответ не похож на карту ВИ: планет {len(planets)}, отрядов {total} — похоже, сменился формат")
+    now = time.time()
+    merged = merge(base().get("planets") or {}, planets, now)
+    database.set_bot_state(BASE_KEY, json.dumps({"fetched": now, "planets": merged}, ensure_ascii=False), guild_id=0)
+    squads = [sq for p in merged.values() for m in p["missions"] for sq in m["squads"]]
+    return {"squads": total, "new": sum(1 for sq in squads if sq.get("first_seen") == now),
+            "removed": sum(1 for sq in squads if sq.get("removed_at") == now)}
 
 
 def base() -> dict:
@@ -160,9 +203,11 @@ def library(guild_id: int) -> dict:
         missions = []
         for m in p["missions"]:
             o = ov.get((planet, m["id"])) or {"hidden": set(), "custom": []}
-            squads = [{**s, "source": "base", "hidden": s["key"] in o["hidden"]} for s in m["squads"]]
+            fresh = time.time() - NEW_DAYS * 86400
+            squads = [{**s, "source": "base", "hidden": s["key"] in o["hidden"],
+                       "new": (s.get("first_seen") or 0) > fresh and not s.get("removed_at")} for s in m["squads"]]
             squads += [{**s, "source": "guild", "hidden": False} for s in o["custom"]]
-            missions.append({**m, "squads": squads})
+            missions.append({**m, "squads": squads, "new": (m.get("first_seen") or 0) > fresh and not m.get("removed_at")})
         out[planet] = {**p, "missions": missions, "ru": tb_covert.planet_ru(planet),
                        "min_relic": tb_platoon_data.ROTE_MIN_RELIC_BY_PLANET.get(planet, 5)}
     sides = {planet: i for i, branch in enumerate(tb_projection.BRANCHES.values()) for planet in branch}
