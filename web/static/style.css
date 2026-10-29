@@ -2966,7 +2966,8 @@ button.adv-tile.active { border-color: var(--accent); box-shadow: inset 0 0 0 1p
     display: flex; flex-direction: column; gap: 0.4em; min-width: 0; padding: 0.55em 0.65em; border-radius: 10px;
     border: 1px solid var(--border); border-left: 4px solid var(--border); background: var(--surface);
 }
-.adv-card[hidden], .tb-adv-list [hidden] { display: none !important; }
+.adv-card[hidden], .tb-adv-list [hidden], .tb-adv-phases [hidden] { display: none !important; }
+.tb-adv-phases { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35em; }
 .adv-upgrade { border-left-color: var(--status-warning); }
 .adv-unlock { border-left-color: var(--status-critical); }
 .adv-tight { border-left-color: var(--status-good); }

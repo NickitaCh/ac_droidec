@@ -42,7 +42,7 @@
         <p class="tb-adv-phases">Этап:
             <button type="button" class="pill-tab active" data-adv-phase="">все</button>
             {% for ph in data.phases %}<button type="button" class="pill-tab" data-adv-phase="{{ ph }}"
-                {% for key, _l, _h in tabs %} data-n-{{ key }}="{{ data.phase_counts[key][ph] or 0 }}"{% endfor %}>Э{{ ph }} · <span class="adv-n">{{ data.phase_counts["upgrade"][ph] or 0 }}</span></button>{% endfor %}
+                {% for key, _l, _h in tabs %} data-n-{{ key }}="{{ data.phase_counts[key][ph] or 0 }}"{% endfor %}{% if not data.phase_counts["upgrade"][ph] %} hidden{% endif %}>Э{{ ph }} · <span class="adv-n">{{ data.phase_counts["upgrade"][ph] or 0 }}</span></button>{% endfor %}
         </p>
     {% endif %}
     {% for key, _label, _hint in tabs %}

@@ -444,10 +444,17 @@
                     body.querySelectorAll("button[data-adv]").forEach(btn => btn.addEventListener("click", () => {
                         body.querySelectorAll("button[data-adv]").forEach(b => b.classList.toggle("active", b === btn));
                         body.querySelectorAll(".tb-adv-list").forEach(d => { d.hidden = d.dataset.adv !== btn.dataset.adv; });
-                        // счёт на кнопках этапов — по открытой вкладке
+                        // кнопки этапов — только этапы открытой вкладки, со счётом по ней
                         body.querySelectorAll("[data-adv-phase]").forEach(p => {
                             const n = p.dataset["n" + btn.dataset.adv[0].toUpperCase() + btn.dataset.adv.slice(1)];
-                            if (n !== undefined) p.querySelector(".adv-n").textContent = n;
+                            if (n === undefined) return;
+                            p.querySelector(".adv-n").textContent = n;
+                            p.hidden = n === "0";
+                            if (p.hidden && p.classList.contains("active")) {
+                                p.classList.remove("active");
+                                body.querySelector('[data-adv-phase=""]').classList.add("active");
+                                phase = "";
+                            }
                         });
                         limit = 24; apply();
                     }));
