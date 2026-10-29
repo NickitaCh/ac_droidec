@@ -218,6 +218,12 @@
                             Эта планета есть и на более позднем этапе плана — автозаполнение не
                             добивает её здесь до конца автоматически, включать вручную не нужно.
                         </p>
+                    {% elif auto_order and not p.held and not p.unresolved %}
+                        <p class="muted platoon-hold-toggle">
+                            Не добивать планету на этом этапе — поставьте ей «копим» в
+                            {% if step_plan %}<a href="/tb/plan?id={{ step_plan.id }}#day-{{ selected_round_num }}">плане</a>{% else %}плане{% endif %}:
+                            ордер и взводы подстроятся сами.
+                        </p>
                     {% elif not p.unresolved and plan %}
                         <form method="post" action="/tb/platoons/hold" class="platoon-hold-toggle">
                             <input type="hidden" name="plan_id" value="{{ plan.id }}">

@@ -16,6 +16,7 @@
 {% if row.stars %}<span class="tbp-stars">{{ "★" * row.stars }}</span>{% if not row.bonus %}<span class="muted">{{ "☆" * (row.max - row.stars) }}</span>{% endif %}{% elif row.carry %}<span class="muted nowrap">копим {{ mln(row.points) }}</span>{% else %}<span class="muted nowrap">не берём</span>{% endif %}
 {%- endmacro %}
 {% block content %}
+    <div id="tbplan-root">
     {% call tbui.tb_hero("План ТБ", "plan", plan.id if plan else None, order.id if order else None) %}
         <div class="hero-kpis">
             {% if result %}
@@ -179,6 +180,7 @@
                             {% if row.no_platoons %}<span class="muted">не ставим</span>
                             {% else %}<span class="badge {{ 'badge-ok' if row.ops_closed == 6 else ('badge-danger' if row.ops_closed == 0 else 'badge-warn') }}">{{ row.ops_closed }} из 6</span>
                                 {% if row.stars %}+{{ mln(row.ops_points) }}{% elif row.ops_pending %}<span class="muted">+{{ mln(row.ops_pending) }} при закрытии</span>{% endif %}
+                                {% if row.carry and ph.phase < 6 %}<span class="muted tbm-small" title="Автозаполнение оставит по слоту в операциях — добьём, когда планета возьмёт звезду">· держим</span>{% endif %}
                             {% endif %}
                             <form method="post" action="/tb/plan/{{ plan.id }}/platoons" class="tbplan-inline">
                                 <input type="hidden" name="phase" value="{{ ph.phase }}">
@@ -280,12 +282,15 @@
         <p class="muted">Не распознаны в справочнике юнитов (во взводы не вошли): {{ r.unresolved|join(", ") }}</p>
     {% endif %}
     {% endif %}
+    </div>
     <script>
+    // Правки плана без перезагрузки (2026-10-29): POST-формы внутри #tbplan-root уходят fetch'ем,
+    // сервер отвечает тем же редиректом на /tb/plan, из ответа берём новый #tbplan-root. Вкладка
+    // этапа, прокрутка и раскрытые <details> сохраняются. Нет fetch/ошибка — обычная отправка.
     (function () {
-        const tabs = document.querySelectorAll("#tbplan-tabs [data-tab]");
-        if (!tabs.length) return;
+        const ROOT = "tbplan-root";
         function show(key) {
-            tabs.forEach(t => {
+            document.querySelectorAll("#tbplan-tabs [data-tab]").forEach(t => {
                 if (t.dataset.tab === key) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
             });
             document.querySelectorAll(".tbp-pane").forEach(p => { p.hidden = p.dataset.pane !== key; });
@@ -295,19 +300,60 @@
             history.replaceState(null, "", location.pathname + location.search + "#day-" + key);
             if (scroll) document.getElementById("tbplan-tabs").scrollIntoView({ behavior: "smooth", block: "start" });
         }
-        tabs.forEach(a => a.addEventListener("click", e => { e.preventDefault(); go(a.dataset.tab, false); }));
-        document.querySelectorAll("[data-day-link]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); go(a.dataset.dayLink, true); }));
-        const m = location.hash.match(/^#day-(\d)$/);
-        if (m) show(m[1]);
-        // после правки страница перезагружается — возвращаем прокрутку туда, где нажали
-        const KEY = "tbplan-scroll";
-        try {
-            const y = sessionStorage.getItem(KEY);
-            if (y !== null) { sessionStorage.removeItem(KEY); window.scrollTo(0, +y); }
-        } catch (e) {}
-        document.querySelectorAll(".tbp-pane form, .tbplan-tools form").forEach(f => f.addEventListener("submit", () => {
-            try { sessionStorage.setItem(KEY, String(window.scrollY)); } catch (e) {}
-        }));
+        // раскрытый <details> узнаём по этапу, планете и подписи без чисел — порядок и счётчики меняются
+        function detailsKey(d) {
+            const pane = d.closest("[data-pane]"), card = d.closest(".tbplan-card");
+            const head = card && card.querySelector("h3"), sum = d.querySelector("summary");
+            return [pane && pane.dataset.pane, head && head.textContent, sum && sum.textContent.replace(/\d+/g, "")].join("|");
+        }
+        function init() {
+            const m = location.hash.match(/^#day-(\d)$/);
+            if (m && document.querySelector('#tbplan-tabs [data-tab="' + m[1] + '"]')) show(m[1]);
+        }
+        document.addEventListener("click", e => {
+            const a = e.target.closest("#tbplan-tabs [data-tab], [data-day-link]");
+            if (!a) return;
+            e.preventDefault();
+            go(a.dataset.tab || a.dataset.dayLink, !a.dataset.tab);
+        });
+        document.addEventListener("submit", async e => {
+            const form = e.target;
+            const root = document.getElementById(ROOT);
+            if (e.defaultPrevented || !root || !root.contains(form) || (form.method || "").toLowerCase() !== "post"
+                || !window.fetch || !window.DOMParser) return;
+            e.preventDefault();
+            const body = new FormData(form);
+            const sub = e.submitter;
+            if (sub && sub.name) body.append(sub.name, sub.value);
+            const y = window.scrollY, hash = location.hash;
+            const opened = new Set(Array.from(root.querySelectorAll("details[open]:not(.tbplan-menu)")).map(detailsKey));
+            root.classList.add("tbplan-busy");
+            root.setAttribute("aria-busy", "true");
+            try {
+                const resp = await fetch(form.action, { method: "POST", body, credentials: "same-origin" });
+                if (!resp.ok) throw new Error("HTTP " + resp.status);
+                const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+                const fresh = doc.getElementById(ROOT);
+                if (!fresh) throw new Error("no root");
+                const url = new URL(resp.url);
+                const samePlan = url.searchParams.get("id") === new URL(location.href).searchParams.get("id");
+                if (samePlan) fresh.querySelectorAll("details:not(.tbplan-menu)").forEach(d => { d.open = opened.has(detailsKey(d)); });
+                root.replaceWith(fresh);
+                history.replaceState(null, "", url.pathname + url.search + (samePlan ? hash : ""));
+                init();
+                window.scrollTo(0, samePlan ? y : 0);
+            } catch (err) {
+                root.classList.remove("tbplan-busy");
+                root.removeAttribute("aria-busy");
+                if (sub && sub.name) {
+                    const h = document.createElement("input");
+                    h.type = "hidden"; h.name = sub.name; h.value = sub.value;
+                    form.appendChild(h);
+                }
+                HTMLFormElement.prototype.submit.call(form);
+            }
+        });
+        init();
     })();
     </script>
 {% endblock %}

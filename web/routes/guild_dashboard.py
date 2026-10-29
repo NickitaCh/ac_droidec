@@ -1402,6 +1402,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
         "error": error,
         "plan": plan,
         "step_plan": tb_plan.plan_for_order(guild_id, plan["id"]) if plan else None,
+        "auto_order": _auto_order(guild_id),
         "saved_plans": saved_plans,
         "active_plan_id": active_plan_id,
         "autofill_summary": request.query_params.get("autofill_summary"),
