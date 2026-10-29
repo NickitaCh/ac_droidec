@@ -57,6 +57,16 @@ async def _send_attachment(app: App, chat_id: int, thread_id, att: dict):
     resp.raise_for_status()
     data, filename = resp.content, att.get("filename") or "file"
     mime = att.get("content_type") or "application/octet-stream"
+    # Серверный эмодзи Discord (сообщение из одних эмодзи, cogs/tg_relay.py): статичный — стикером,
+    # анимированный — GIF-анимацией; не принял Telegram — обычной картинкой ниже.
+    method, field = {"sticker": ("sendSticker", "sticker"), "animation": ("sendAnimation", "animation")}.get(
+        att.get("as"), (None, None))
+    if method:
+        try:
+            await app.api.call(method, files={field: (filename, data, mime)}, chat_id=chat_id, message_thread_id=thread_id)
+            return
+        except TelegramError:
+            pass
     if mime.startswith("image/") and not mime.endswith("gif"):
         try:
             await app.api.send_photo(chat_id, data, filename, thread_id=thread_id)

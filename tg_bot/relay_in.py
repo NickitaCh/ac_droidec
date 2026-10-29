@@ -96,6 +96,9 @@ async def handle_group_message(app, message: dict):
     if not targets:
         return
     text = message.get("text") or message.get("caption") or ""
+    sticker = message.get("sticker") or {}
+    if sticker.get("is_animated") or sticker.get("is_video"):
+        text = text or f"{sticker.get('emoji') or ''} (анимированный стикер)".strip()  # .tgs/.webm Discord не покажет
     media = _media(message)
     if not text.strip() and not media:
         return  # служебное сообщение (вход в группу, закреп и т. п.)

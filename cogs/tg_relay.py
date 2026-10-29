@@ -31,7 +31,21 @@ ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024  # больше — ссылкой в т
 _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
 _ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
 _CHANNEL_MENTION_RE = re.compile(r"<#(\d+)>")
-_CUSTOM_EMOJI_RE = re.compile(r"<a?:(\w+):\d+>")
+_CUSTOM_EMOJI_RE = re.compile(r"<(a?):(\w+):(\d+)>")
+MAX_EMOJI_STICKERS = 3  # сообщение из одних серверных эмодзи — до стольких картинок-стикеров
+EMOJI_URL = "https://cdn.discordapp.com/emojis/{id}.{ext}?size=160"
+
+
+def _emoji_attachments(text: str) -> list[dict] | None:
+    """Сообщение только из серверных эмодзи (и пробелов) — их картинки для Telegram (стикер /
+    GIF): вставить свою картинку в текст бот Telegram не может. Иначе None."""
+    found = _CUSTOM_EMOJI_RE.findall(text)
+    if not found or _CUSTOM_EMOJI_RE.sub("", text).strip() or len(found) > MAX_EMOJI_STICKERS:
+        return None
+    return [{"url": EMOJI_URL.format(id=eid, ext="gif" if animated else "webp"),
+             "filename": f"{name}.{'gif' if animated else 'webp'}",
+             "content_type": "image/gif" if animated else "image/webp",
+             "as": "animation" if animated else "sticker"} for animated, name, eid in found]
 _EVERYONE_RE = re.compile(r"@(?:everyone|here)\b")
 
 
@@ -71,11 +85,13 @@ def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[di
                 group.append(tag(member.id, member.display_name))
 
     text = message.content or ""
+    emoji_only = _emoji_attachments(text)
     text = _USER_MENTION_RE.sub(user, text)
     text = _ROLE_MENTION_RE.sub("", text)
     text = _EVERYONE_RE.sub("", text)
     text = _CHANNEL_MENTION_RE.sub(lambda m: f"#{channels.get(m.group(1), 'канал')}", text)
-    text = _CUSTOM_EMOJI_RE.sub("", text)
+    # Серверный эмодзи: в одиночку — картинкой ниже, внутри текста — его именем :имя:.
+    text = _CUSTOM_EMOJI_RE.sub("" if emoji_only else (lambda m: f":{m.group(2)}:"), text)
     text = "\n".join(line.rstrip() for line in text.split("\n")).strip()
     # Сообщения других ботов часто без текста, всё в эмбедах. Превью ссылок (YouTube и т. п.)
     # пропускаем: Telegram покажет своё, а их текст в копии выглядит мусором.
@@ -86,7 +102,7 @@ def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[di
         if part:
             text = f"{text}\n\n{part}" if text else part
 
-    attachments, too_big = [], []
+    attachments, too_big = list(emoji_only or []), []
     for att in message.attachments[:MAX_ATTACHMENTS]:
         if att.size > ATTACHMENT_MAX_BYTES:
             too_big.append(f"{att.filename}: {att.url}")
