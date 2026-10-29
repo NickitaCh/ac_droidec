@@ -253,6 +253,30 @@
                 </table>
             {% endif %}
         </div>
+
+        {% if order %}
+        {% set ot = order_texts.get(ph.phase) %}
+        <div class="panel tbplan-ordertext">
+            <div class="panel-title">
+                <span>Текст ордера на {{ ph.phase }} этап{% call ui.help() %}Так этап уйдёт в Discord (автопост в 20:00 МСК или кнопка «Отправить» на шаге «Ордер»). Этап «из плана» меняется вместе с планом; правленный вручную план не трогает.{% endcall %}</span>
+                <a class="hero-link" href="/tb/order?{{ {'order': order.id, 'phase': ph.phase}|urlencode }}#order-editor">Править / отправить</a>
+            </div>
+            {% if ot %}
+                <p class="muted tbplan-ordertext-meta">{{ ot.source }}{% for s in ot.sent %} · отправлен {{ s }}{% endfor %}{% if ot.changed %} · <span class="tbm-label-warn">план изменился после правки</span>{% endif %}</p>
+                <div class="tbo-preview tbo-preview-discord">
+                    {% for html in ot.discord %}<div class="dc-msg"><span class="dc-avatar">AC</span><div class="dc-body"><div class="dc-author">AC Droidec <span class="dc-bot">БОТ</span></div><div class="dc-content">{{ html|safe }}</div></div></div>{% endfor %}
+                </div>
+                {% if ot.tg %}
+                    <details class="tbplan-ordertext-tg">
+                        <summary>Для Telegram — свой текст</summary>
+                        <div class="tbo-preview tbo-preview-tg">{% for html in ot.tg %}<div class="tg-bubble">{{ html|safe }}</div>{% endfor %}</div>
+                    </details>
+                {% endif %}
+            {% else %}
+                <p class="muted">Текста на этот этап нет.</p>
+            {% endif %}
+        </div>
+        {% endif %}
     </section>
     {% endfor %}
 

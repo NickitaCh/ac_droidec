@@ -867,7 +867,25 @@ async def tb_plan_page(request: Request, id: int = 0,
     manual = tb_order_store.manual_phases(order["id"]) if order and order["guild_id"] == guild_id else []
     changed = ([ph for ph, row in tb_order_store.get_phases(order["id"]).items() if tb_order_store.plan_changed(row)]
                if manual else [])
+    # Текст ордера на каждый этап — внизу вкладки этапа (как уйдёт в Discord/Telegram).
+    order_texts = {}
+    if order and order["guild_id"] == guild_id:
+        from tg_bot import notifier as tg_notifier
+        role_id = guild_cfg.get("tb_order_role_id")
+        names = {str(role_id): "роль ордера"} if role_id else {}
+        for ph, row in tb_order_store.get_phases(order["id"]).items():
+            if not (row.get("text") or "").strip():
+                continue
+            order_texts[ph] = {
+                "discord": [discord_preview.render(c, names) for c in tb_order_store.discord_chunks(row["text"], role_id)],
+                "tg": tg_notifier.render(row["tg_text"]) if (row.get("tg_text") or "").strip() else None,
+                "source": tb_order_store.SOURCE_LABELS.get(row.get("source"), row.get("source")),
+                "changed": tb_order_store.plan_changed(row),
+                "sent": [f"{where}: {time.strftime('%d.%m %H:%M', time.gmtime(row[col] + 3 * 3600))} МСК"
+                         for where, col in (("в Discord", "sent_discord_at"), ("в Telegram", "sent_tg_at")) if row.get(col)],
+            }
     return templates.TemplateResponse(request, "tb_plan.html", {
+        "order_texts": order_texts,
         "user": user,
         "plans": plans,
         "plan": plan,
