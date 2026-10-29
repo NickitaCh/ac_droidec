@@ -32,27 +32,48 @@ _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
 _ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
 _CHANNEL_MENTION_RE = re.compile(r"<#(\d+)>")
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:(\w+):\d+>")
+_EVERYONE_RE = re.compile(r"@(?:everyone|here)\b")
 
 
-def relay_payload(message: disnake.Message) -> tuple[str, list[dict]]:
+def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[dict]]:
     """Текст для Telegram (Discord-разметка, её переводит tg_bot/notifier.py) и вложения.
-    Упоминание игрока остаётся <@id>, только если у него есть Telegram (станет упоминанием
-    там), иначе — его имя; роли и каналы — по имени."""
+    Упоминание игрока становится Telegram-упоминанием, если у него есть Telegram (привязка
+    к профилю или регистрация в боте на тот же код союзника, outbox.tg_owner_for), иначе — имя.
+    Роли и @everyone/@here из текста убираются, а их участники с Telegram упоминаются
+    строкой в конце (в Telegram нет ролей; просьба из TG-ветки 2026-10-29). Каналы — по имени."""
     users = {str(u.id): u.display_name for u in message.mentions}
-    roles = {str(r.id): r.name for r in message.role_mentions}
     channels = {str(c.id): getattr(c, "name", "канал") for c in message.channel_mentions}
+    tagged: list[str] = []  # упомянутые в тексте — в строку тегов не повторяем
 
     def user(m):
         uid = m.group(1)
-        return f"<@{uid}>" if outbox.has_tg(uid) else f"@{users.get(uid, 'игрок')}"
+        owner = outbox.tg_owner_for(uid)
+        if owner is None:
+            return f"@{users.get(uid, 'игрок')}"
+        tagged.append(owner)
+        return f"<@{owner}>"
+
+    group: list[str] = []
+    if message.mention_everyone:
+        group += outbox.guild_tg_owners(guild_id)
+    for role in message.role_mentions:
+        for member in getattr(role, "members", []):
+            owner = outbox.tg_owner_for(member.id)
+            if owner:
+                group.append(owner)
 
     text = message.content or ""
     text = _USER_MENTION_RE.sub(user, text)
-    text = _ROLE_MENTION_RE.sub(lambda m: f"@{roles.get(m.group(1), 'роль')}", text)
+    text = _ROLE_MENTION_RE.sub("", text)
+    text = _EVERYONE_RE.sub("", text)
     text = _CHANNEL_MENTION_RE.sub(lambda m: f"#{channels.get(m.group(1), 'канал')}", text)
     text = _CUSTOM_EMOJI_RE.sub("", text)
-    # Сообщения других ботов часто без текста, всё в эмбедах.
+    text = "\n".join(line.rstrip() for line in text.split("\n")).strip()
+    # Сообщения других ботов часто без текста, всё в эмбедах. Превью ссылок (YouTube и т. п.)
+    # пропускаем: Telegram покажет своё, а их текст в копии выглядит мусором.
     for embed in message.embeds:
+        if getattr(embed, "type", "rich") != "rich":
+            continue
         part = "\n".join(p for p in (f"**{embed.title}**" if embed.title else "", embed.description or "") if p)
         if part:
             text = f"{text}\n\n{part}" if text else part
@@ -66,6 +87,14 @@ def relay_payload(message: disnake.Message) -> tuple[str, list[dict]]:
     if too_big:
         text = "\n".join([text, "Большие файлы — по ссылке:", *too_big]).strip()
 
+    tags = list(dict.fromkeys(o for o in group if o not in tagged))
+    if tags:
+        text = f"{text}\n\n" + " ".join(f"<@{o}>" for o in tags)
+
+    # Сообщение самого бота (ордер ВИ по ссылке) — без подписи: в Telegram оно и так от бота.
+    me = getattr(message.guild, "me", None)
+    if me is not None and message.author.id == me.id:
+        return text, attachments
     author = getattr(message.author, "display_name", None) or message.author.name
     text = f"**{author}**:\n{text}" if text.strip() else f"**{author}**"
     return text, attachments
@@ -128,9 +157,12 @@ class TgRelayCog(commands.Cog):
             return
         if not (message.content or message.attachments or message.embeds):
             return
-        text, attachments = await asyncio.to_thread(relay_payload, message)
+        payloads = {}
         for guild_id, label in targets:
             try:
+                if guild_id not in payloads:
+                    payloads[guild_id] = await asyncio.to_thread(relay_payload, message, guild_id)
+                text, attachments = payloads[guild_id]
                 sent = await asyncio.to_thread(outbox.enqueue_relay, guild_id, label, text, attachments)
                 if sent is None:
                     print(f"⚠️ [TG зеркала] guild {guild_id}: метки «{label}» нет в Telegram (/topic)")
@@ -181,7 +213,7 @@ class TgRelayCog(commands.Cog):
             except (disnake.NotFound, disnake.Forbidden):
                 await inter.edit_original_response("❌ Сообщение не найдено или у бота нет доступа к этому каналу.")
                 return
-            text, attachments = await asyncio.to_thread(relay_payload, message)
+            text, attachments = await asyncio.to_thread(relay_payload, message, guild_id)
         else:
             text, attachments = f"**{inter.author.display_name}**:\n{сообщение}", []
         await asyncio.to_thread(outbox.enqueue_relay, guild_id, label, text, attachments)
