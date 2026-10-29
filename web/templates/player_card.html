@@ -30,6 +30,9 @@
                     {% else %}
                         · Discord не привязан
                     {% endif %}
+                    {% if card_tg %}
+                        · Telegram: {{ card_tg|join(", ") }}
+                    {% endif %}
                     {% if card.birthday_label %}
                         · 🎂 {{ card.birthday_label }}
                     {% endif %}
@@ -79,7 +82,10 @@
                 </form>
                 <p class="muted">Альт должен состоять в гильдии, которую обслуживает бот. Отвязать — <code>/регистрация_отмена</code> в Discord.</p>
             </details>
-            {% if telegram_bot_username() %}
+            {% if card_tg %}
+            <p>📱 Telegram привязан: {{ card_tg|join(", ") }}
+                <span class="muted">— <a href="/me/telegram" target="_blank" rel="noopener">привязать другой</a></span></p>
+            {% elif telegram_bot_username() %}
             <p><a class="link-btn" href="/me/telegram" target="_blank" rel="noopener">📱 Привязать Telegram</a>
                 <span class="muted">— бот в Telegram будет знать вас как этого же игрока</span></p>
             {% endif %}
@@ -521,7 +527,7 @@
             </script>
         </div>
 
-        <div class="widget" id="player-compare" data-tab="tools">
+        <div class="widget" id="player-compare" data-tab="tools" data-not-all>
             <div class="widget-header">
                 <h2>⚖️ Сравнение игроков</h2>
                 {{ ui.help("Этот игрок и ещё до 7 в столбик: ГМ, прокачка, модули, датакроны, ГЛ, мета и флот. Можно любые коды союзника, не только из гильдии.") }}
@@ -531,7 +537,7 @@
         {% endif %}
 
         {% if forecast_units %}
-        <div class="widget" id="unit-forecast" data-tab="tools">
+        <div class="widget" id="unit-forecast" data-tab="tools" data-not-all>
             <div class="widget-header">
                 <h2>🔭 Прогноз юнита</h2>
                 {{ ui.help("Статы юнита в текущих модулях сейчас и на других звёздах, гире или релике — как /юнит в Discord. Для корабля — только звёзды: его статы зависят от звёзд и прокачки экипажа. Состав — из ежечасного обновления.") }}

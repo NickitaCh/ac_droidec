@@ -2919,8 +2919,24 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "forecast_units": _forecast_units(ally_code) if not card.departed_at else [],
         "compare_members": _compare_members(guild_id, ally_code) if not card.departed_at else [],
         "kpis": _card_kpis(guild_id, ally_code, card, is_officer),
+        "card_tg": _card_telegram(card.discord_id),
         "show_my_tb": not card.departed_at and feature_flags.is_enabled(guild_id, "tb_plan_order"),
     })
+
+
+def _card_telegram(discord_id) -> list[str]:
+    """Telegram игрока для шапки карточки: «@ник» (или имя) каждого аккаунта. Привязка к
+    профилю либо отдельная регистрация через бота на тот же код союзника (tg_owner_for)."""
+    if not discord_id:
+        return []
+    owner = str(discord_id) if tg_store.is_tg_owner(str(discord_id)) else tg_outbox.tg_owner_for(discord_id)
+    if not owner:
+        return []
+    try:
+        users = tg_store.tg_users_for_owner(owner)
+    except Exception:
+        return []
+    return [f"@{u['username']}" if u["username"] else (u["full_name"] or "привязан") for u in users]
 
 
 def _card_kpis(guild_id: int, ally_code: str, card, is_officer: bool) -> list[dict]:
