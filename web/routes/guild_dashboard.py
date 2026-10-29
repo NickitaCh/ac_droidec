@@ -28,6 +28,7 @@ from cogs.violations import WARNS_STRUCTURE
 from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
 from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_store, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
+from tg_bot import outbox as tg_outbox
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
 from web.deps import own_accounts, require_guild_access, require_member_access
@@ -3293,15 +3294,73 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             })
         groups.append({"name": group["name"], "hint": group["hint"], "rows": rows, "tab": group["tab"]})
     has_units = any(r["kind"] == "units" for g in groups for r in g["rows"])
+    # Вкладка «Telegram» — своя панель со своими формами (/settings/tg/...), вне общей формы.
+    tg_channel_options = await _channel_options("")
+    channel_names = {o["id"]: o["label"] for o in tg_channel_options}
+    tg_topics = tg_outbox.guild_topics(user["guild_id"])
+    tg_settings = {
+        "enabled": feature_flags.is_enabled(user["guild_id"], "tg_relay_auto"),
+        "topics": [{**t, "place": tg_outbox.topic_place(t)} for t in tg_topics],
+        "mirrors": [
+            {**m, "channel_name": channel_names.get(m["discord_channel_id"]) or f"канал {m['discord_channel_id']}",
+             "has_topic": any(t["label"] == m["label"] for t in tg_topics)}
+            for m in tg_outbox.relay_channels(user["guild_id"])
+        ],
+        "channel_options": tg_channel_options,
+    }
+    tabs = sorted(dict.fromkeys(g["tab"] for g in groups), key=lambda t: SETTINGS_TAB_ORDER.index(t) if t in SETTINGS_TAB_ORDER else 99)
     return templates.TemplateResponse(request, "guild_settings.html", {
         "user": user,
         "groups": groups,
+        "tg": tg_settings,
         "unit_options": _character_options() if has_units else [],
         # Вкладки над формой (ТБ / ВГ / Энка / ...) — порядок как в GUILD_SETTINGS_GROUPS.
-        "tabs": sorted(dict.fromkeys(g["tab"] for g in groups), key=lambda t: SETTINGS_TAB_ORDER.index(t) if t in SETTINGS_TAB_ORDER else 99),
+        "tabs": tabs + ["Telegram"],
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
     })
+
+
+def _tg_settings_back(error: str | None = None) -> RedirectResponse:
+    query = f"?{urlencode({'error': error})}" if error else "?saved=1"
+    return RedirectResponse(f"/settings{query}#Telegram", status_code=303)
+
+
+@router.post("/settings/tg/toggle")
+async def tg_relay_toggle(enabled: str = Form(default=""), user: dict = Depends(require_guild_access)):
+    feature_flags.set_enabled(user["guild_id"], "tg_relay_auto", bool(enabled), updated_by=str(user["discord_id"]))
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/mirror")
+async def tg_relay_add(channel_id: str = Form(default=""), channel_manual: str = Form(default=""),
+                       label: str = Form(default=""), user: dict = Depends(require_guild_access)):
+    channel_id = (channel_manual or channel_id).strip()
+    label = tg_outbox.normalize_label(label)
+    if not channel_id.isdigit():
+        return _tg_settings_back("Выберите Discord-канал (или впишите его ID цифрами).")
+    if not label:
+        return _tg_settings_back("Выберите ветку Telegram.")
+    tg_outbox.add_relay_channel(user["guild_id"], channel_id, label, str(user["discord_id"]))
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/mirror/{relay_id}/toggle")
+async def tg_relay_pause(relay_id: int, enabled: str = Form(default=""), user: dict = Depends(require_guild_access)):
+    tg_outbox.set_relay_enabled(user["guild_id"], relay_id, bool(enabled))
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/mirror/{relay_id}/delete")
+async def tg_relay_delete(relay_id: int, user: dict = Depends(require_guild_access)):
+    tg_outbox.remove_relay_channel(user["guild_id"], relay_id)
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/topic/delete")
+async def tg_topic_delete(label: str = Form(...), user: dict = Depends(require_guild_access)):
+    tg_outbox.remove_topic(user["guild_id"], tg_outbox.normalize_label(label))
+    return _tg_settings_back()
 
 
 @router.post("/settings", response_class=HTMLResponse)

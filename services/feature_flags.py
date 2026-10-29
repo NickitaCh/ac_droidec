@@ -55,6 +55,7 @@ FEATURES: dict[str, dict] = {
     "mod_ku_plates": {"label": "МодКу — режим «с учётом плейтов»", "category": "Мод-инструменты"},
     "gear_farm": {"label": "Фарм снаряжения", "category": "Прочее"},
     "antispam": {"label": "Антиспам", "category": "Прочее"},
+    "tg_relay_auto": {"label": "Telegram — зеркала Discord-каналов", "category": "Прочее"},
 }
 
 
@@ -65,7 +66,9 @@ FEATURES: dict[str, dict] = {
 # возвращает прежние 4 вкладки; данные у обоих видов общие.
 # raid_tickets_dm — личка каждому недосдавшему энку вместе с напоминанием в канале
 # (решение пользователя 2026-10-28: «опционально, по умолчанию выкл»).
-OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm"}
+# tg_relay_auto — копии сообщений Discord-каналов в ветки Telegram (cogs/tg_relay.py);
+# тумблер на /settings → Telegram (решение пользователя 2026-10-29: «нужен тумблер»).
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm", "tg_relay_auto"}
 
 
 def label(key: str) -> str:

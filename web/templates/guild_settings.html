@@ -133,6 +133,98 @@
         {% endfor %}
         <button type="submit">Сохранить</button>
     </form>
+
+    <div class="panel settings-group" data-tab="Telegram">
+        <h3 style="margin-top: 0;">Telegram — копии из Discord{% call ui.help() %}Ветки Telegram-группы гильдии, куда бот кладёт копии сообщений Discord. Метку ветке даёт офицер в самом Telegram: группа привязана к гильдии (<code>/bind</code>), в нужной ветке пишете <code>/topic вг</code>. Дальше — либо командой <code>/тг канал: вг сообщение: ссылка</code> в Discord (одно сообщение, тумблер ниже на неё не влияет), либо зеркалом: всё, что пишут в выбранном Discord-канале, уходит копией в ветку вместе с картинками и файлами. Сообщения самого бота не зеркалятся, правки и удаления в Telegram не переносятся. Игроки с привязанным Telegram упоминаются там, остальные — по имени.{% endcall %}</h3>
+
+        <h4>Ветки в Telegram</h4>
+        {% if tg.topics %}
+            <table class="data cards-on-phone">
+                <thead><tr><th>Метка</th><th>Где</th><th></th></tr></thead>
+                <tbody>
+                    {% for t in tg.topics %}
+                        <tr>
+                            <td data-label="Метка"><b>{{ t.label }}</b></td>
+                            <td data-label="Где">{{ t.place }}</td>
+                            <td data-label="">
+                                <form method="post" action="/settings/tg/topic/delete" style="max-width: none;">
+                                    <input type="hidden" name="label" value="{{ t.label }}">
+                                    <button type="submit" class="button-secondary">Убрать</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="muted">Пока ни одной. Привяжите группу командой <code>/bind</code>{% if telegram_bot_username() %} в <a href="https://t.me/{{ telegram_bot_username() }}" target="_blank" rel="noopener">@{{ telegram_bot_username() }}</a>{% endif %} и напишите <code>/topic вг</code> в нужной ветке.</p>
+        {% endif %}
+
+        <h4>Зеркала каналов</h4>
+        <form method="post" action="/settings/tg/toggle" style="max-width: none;">
+            <label class="checkbox">
+                <input type="checkbox" name="enabled" value="1" {% if tg.enabled %}checked{% endif %} onchange="this.form.submit()">
+                Зеркала включены
+            </label>
+            <noscript><button type="submit">Сохранить</button></noscript>
+        </form>
+        {% if not tg.enabled %}<p class="muted">Выключено — зеркала ниже ничего не отправляют (настройки сохраняются).</p>{% endif %}
+
+        {% if tg.mirrors %}
+            <table class="data cards-on-phone">
+                <thead><tr><th>Discord-канал</th><th>Ветка Telegram</th><th>Работает</th><th></th></tr></thead>
+                <tbody>
+                    {% for m in tg.mirrors %}
+                        <tr>
+                            <td data-label="Discord-канал">{{ m.channel_name }}</td>
+                            <td data-label="Ветка Telegram">{{ m.label }}{% if not m.has_topic %} <span class="badge badge-warn">нет такой метки</span>{% endif %}</td>
+                            <td data-label="Работает">
+                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/toggle" style="max-width: none;">
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="enabled" value="1" {% if m.enabled %}checked{% endif %} onchange="this.form.submit()">
+                                        {{ "да" if m.enabled else "пауза" }}
+                                    </label>
+                                </form>
+                            </td>
+                            <td data-label="">
+                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/delete" style="max-width: none;">
+                                    <button type="submit" class="button-secondary">Удалить</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+
+        {% if tg.topics %}
+            <form method="post" action="/settings/tg/mirror" class="tg-mirror-add" style="max-width: 32em;">
+                <label>
+                    Discord-канал
+                    <select name="channel_id">
+                        <option value="">— выберите —</option>
+                        {% for opt in tg.channel_options if opt.group != "server" %}
+                            <option value="{{ opt.id }}">{{ opt.label }}</option>
+                        {% endfor %}
+                        {% set server_opts = tg.channel_options|selectattr("group", "equalto", "server")|list %}
+                        {% if server_opts %}
+                            <optgroup label="Остальные каналы сервера">
+                                {% for opt in server_opts %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
+                            </optgroup>
+                        {% endif %}
+                    </select>
+                    <input type="text" name="channel_manual" placeholder="или ID канала/ветки вручную" inputmode="numeric" pattern="[0-9]*" style="margin-top: 0.35em;">
+                </label>
+                <label>
+                    Ветка Telegram
+                    <select name="label">
+                        {% for t in tg.topics %}<option value="{{ t.label }}">{{ t.label }} — {{ t.place }}</option>{% endfor %}
+                    </select>
+                </label>
+                <button type="submit">Добавить зеркало</button>
+            </form>
+        {% endif %}
+    </div>
     <script>
     // Вкладки: форма одна (сохраняются все вкладки разом), видна только группа выбранной.
     // Вкладка живёт в #хэше — переживает сохранение (редирект сохраняет фрагмент адреса).

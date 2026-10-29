@@ -243,5 +243,9 @@ def update_chat_id(old_chat_id: int, new_chat_id: int):
     """Группа превратилась в супергруппу — у неё новый chat_id (migrate_to_chat_id)."""
     conn = _connect()
     conn.execute("UPDATE tg_chats SET chat_id = ? WHERE chat_id = ?", (int(new_chat_id), int(old_chat_id)))
+    try:
+        conn.execute("UPDATE tg_topics SET chat_id = ? WHERE chat_id = ?", (int(new_chat_id), int(old_chat_id)))
+    except sqlite3.OperationalError:
+        pass  # меток ещё нет (таблицу создаёт tg_bot/outbox.py)
     conn.commit()
     conn.close()
