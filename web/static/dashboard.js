@@ -705,12 +705,17 @@ document.addEventListener("DOMContentLoaded", () => {
     // Поповеры переименования/редактирования (details.row-actions) и выпадающие
     // пункты навбара (details.nav-dropdown) — закрывать остальные открытые details
     // (в своей же группе) при открытии одного и по клику вне, иначе накапливаются открытыми.
+    // Группы бокового меню закрывают друг друга только в свёрнутом виде (там они
+    // всплывают поверх контента); в развёрнутом раскрываются на месте и живут вместе.
+    const sidebarCollapsed = () => document.documentElement.getAttribute("data-sidebar") === "collapsed"
+        && window.matchMedia("(min-width: 56.01em)").matches;
     document.querySelectorAll(".row-actions details, .nav-dropdown").forEach((d) => {
         const group = d.classList.contains("nav-dropdown") ? ".nav-dropdown" : ".row-actions details";
         const isNavDropdown = d.classList.contains("nav-dropdown");
         const menu = isNavDropdown ? d.querySelector(".nav-dropdown-menu") : null;
         d.addEventListener("toggle", () => {
             if (!d.open) return;
+            if (isNavDropdown && !sidebarCollapsed()) return;
             document.querySelectorAll(`${group}[open]`).forEach((other) => {
                 if (other !== d) other.open = false;
             });
@@ -732,7 +737,8 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
     document.addEventListener("click", (e) => {
-        document.querySelectorAll(".row-actions details[open], .nav-dropdown[open]").forEach((d) => {
+        const navSel = sidebarCollapsed() ? ", .nav-dropdown[open]" : "";
+        document.querySelectorAll(`.row-actions details[open]${navSel}`).forEach((d) => {
             if (!d.contains(e.target)) d.open = false;
         });
     });

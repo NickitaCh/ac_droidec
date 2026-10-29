@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261029e">
+    <link rel="stylesheet" href="/static/style.css?v=20261029f">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -27,7 +27,7 @@
         })();
     </script>
     <script src="/static/feedback.js?v=20261022a"></script>
-    <script src="/static/dashboard.js?v=20261027a" defer></script>
+    <script src="/static/dashboard.js?v=20261029a" defer></script>
 </head>
 <body>
     <div class="app-shell">
@@ -40,108 +40,143 @@
             </a>
             <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Свернуть меню" title="Свернуть меню">‹</button>
         </div>
+        {#- Боковое меню (2026-10-29): разделы по задачам (События · Гильдия · Развитие
+            ростера · Модули · Управление), группы раскрываются на месте; текущая
+            страница подсвечена, её группа открыта (скрипт сразу после </nav>).
+            nav_link: active, если путь = href или начинается с href + "/"; exact — только
+            точное совпадение (у /tb, /tw, /conquest, /mod-analysis есть дочерние пункты),
+            also — ещё префиксы, которые относятся к этому пункту. -#}
+        {% set nav_path = request.url.path %}
+        {% macro nav_on(prefixes) -%}
+            {%- set ns = namespace(on=false) -%}
+            {%- for m in prefixes -%}{%- if nav_path == m or nav_path.startswith(m ~ "/") -%}{%- set ns.on = true -%}{%- endif -%}{%- endfor -%}
+            {{- "1" if ns.on else "" -}}
+        {%- endmacro %}
+        {% macro nav_link(href, icon, label, exact=false, also=()) -%}
+            {%- set ns = namespace(on=(nav_path == href or (not exact and nav_path.startswith(href ~ "/")))) -%}
+            {%- if nav_on(also) %}{% set ns.on = true %}{% endif -%}
+            <a href="{{ href }}" title="{{ label }}"{% if ns.on %} class="nav-active" aria-current="page"{% endif %}><span class="nav-icon">{{ icon }}</span><span class="nav-label">{{ label }}</span></a>
+        {%- endmacro %}
+        {% macro nav_group(icon, label, prefixes) -%}
+            <details class="nav-dropdown{% if nav_on(prefixes) %} nav-current{% endif %}">
+                <summary title="{{ label }}"><span class="nav-icon">{{ icon }}</span><span class="nav-label">{{ label }}</span></summary>
+                <div class="nav-dropdown-menu">{{ caller() }}</div>
+            </details>
+        {%- endmacro %}
         <nav>
-            <a href="/start" title="Начало работы"><span class="nav-icon">🚀</span><span class="nav-label">Начало работы</span></a>
-            <a href="/commands" title="Документация"><span class="nav-icon">📘</span><span class="nav-label">Документация</span></a>
             {% if user and user.tier not in ("officer", "member") %}
-                <a href="/subscribe" title="Подписка"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
+                {{ nav_link("/subscribe", "💳", "Подписка") }}
             {% endif %}
             {% if user and user.tier in ("officer", "member") %}
-                <a href="/me" title="Мой профиль"><span class="nav-icon">👤</span><span class="nav-label">Мой профиль</span></a>
+                {{ nav_link("/me", "👤", "Мой профиль") }}
             {% endif %}
-            {% if user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
-                <a href="/conquest" title="Завоевание"><span class="nav-icon">🏆</span><span class="nav-label">Завоевание</span></a>
+
+            {% set is_officer = user and user.tier == "officer" %}
+            {% set conquest_ok = user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
+            {% if is_officer or conquest_ok %}
+                <div class="nav-section">События</div>
             {% endif %}
-            {% if user and user.tier == "member" %}
-                <a href="/mod-builder" title="Калькулятор модулей"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор модулей</span></a>
+            {% if is_officer %}
+                {% call nav_group("🗺️", "ТБ", ("/tb",)) %}
+                    {{ nav_link("/tb/plan", "🪐", "План", also=("/tb/goal", "/tb/projection")) }}
+                    {{ nav_link("/tb/platoons", "👥", "Взводы") }}
+                    {{ nav_link("/tb/order", "📜", "Ордер", also=("/tb/order-plans",)) }}
+                    {{ nav_link("/tb/squads", "🗡️", "Отряды для боёв") }}
+                    {{ nav_link("/tb", "📄", "Итоги", exact=true, also=("/tb/player", "/tb/compare")) }}
+                    {{ nav_link("/tb/missions", "🎯", "Бои и ОЗ") }}
+                {% endcall %}
+                {% call nav_group("⚔️", "ВГ", ("/tw",)) %}
+                    {{ nav_link("/tw/def/plans", "🛡️", "Деф: расстановка и паки", also=("/tw/def",)) }}
+                    {{ nav_link("/tw/scout", "🔭", "Разведка") }}
+                    {{ nav_link("/tw", "📚", "История", exact=true) }}
+                {% endcall %}
+                {{ nav_link("/raids", "🐉", "Рейды") }}
             {% endif %}
-            {% if user %}
-                {% if user.tier == "officer" %}
-                    <a href="/activity" title="Активность"><span class="nav-icon">📈</span><span class="nav-label">Активность</span></a>
-                    <a href="/violations" title="Нарушения"><span class="nav-icon">⚠️</span><span class="nav-label">Нарушения</span></a>
-                    <details class="nav-dropdown">
-                        <summary title="ТБ"><span class="nav-icon">🗺️</span><span class="nav-label">ТБ</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/tb/plan"><span class="nav-icon">🪐</span><span class="nav-label">План</span></a>
-                            <a href="/tb/platoons"><span class="nav-icon">👥</span><span class="nav-label">Взводы</span></a>
-                            <a href="/tb/order"><span class="nav-icon">📜</span><span class="nav-label">Ордер</span></a>
-                            <a href="/tb"><span class="nav-icon">📄</span><span class="nav-label">Итоги</span></a>
-                            <a href="/tb/squads"><span class="nav-icon">🗡️</span><span class="nav-label">Отряды для боёв</span></a>
-                        </div>
-                    </details>
-                    <details class="nav-dropdown">
-                        <summary title="ВГ"><span class="nav-icon">⚔️</span><span class="nav-label">ВГ</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/tw"><span class="nav-icon">📄</span><span class="nav-label">История</span></a>
-                            <a href="/tw/def/plans"><span class="nav-icon">🛡️</span><span class="nav-label">Деф (расстановка и паки)</span></a>
-                            <a href="/tw/scout"><span class="nav-icon">🔭</span><span class="nav-label">Разведка</span></a>
-                        </div>
-                    </details>
-                    <a href="/tasks" title="Задачи"><span class="nav-icon">✅</span><span class="nav-label">Задачи</span></a>
-                    <a href="/gl" title="Матрица ГЛ"><span class="nav-icon">🌟</span><span class="nav-label">Матрица ГЛ</span></a>
-                    <a href="/datacrons" title="Датакроны"><span class="nav-icon">🔮</span><span class="nav-label">Датакроны</span></a>
-                    <details class="nav-dropdown">
-                        <summary title="Модули"><span class="nav-icon">🧩</span><span class="nav-label">Модули</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/plates"><span class="nav-icon">🎛️</span><span class="nav-label">Плейты</span></a>
-                            <a href="/stats-check"><span class="nav-icon">📊</span><span class="nav-label">Статы</span></a>
-                            <a href="/mod-builder"><span class="nav-icon">🛠️</span><span class="nav-label">Калькулятор</span></a>
-                            <a href="/mod-search"><span class="nav-icon">🔍</span><span class="nav-label">Поиск модулей</span></a>
-                            <a href="/mod-analysis"><span class="nav-icon">📈</span><span class="nav-label">Анализ модинга</span></a>
-                            <a href="/mod-analysis/compare"><span class="nav-icon">⚖️</span><span class="nav-label">Сравнение гильдий</span></a>
-                            <a href="/mod-progress"><span class="nav-icon">📅</span><span class="nav-label">Прогресс модинга</span></a>
-                            {% if user.guild_id == 1 %}
-                                <a href="/mod-scan"><span class="nav-icon">📡</span><span class="nav-label">Скан модулей</span></a>
-                            {% endif %}
-                        </div>
-                    </details>
-                    <details class="nav-dropdown">
-                        <summary title="Омикроны"><span class="nav-icon">Ω</span><span class="nav-label">Омикроны</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/omicron/phrases"><span class="nav-icon">💬</span><span class="nav-label">Фразы для омикронов</span></a>
-                            <a href="/omicrons/priority"><span class="nav-icon">🎯</span><span class="nav-label">Приоритет для ВГ</span></a>
-                            <a href="/omicrons/report"><span class="nav-icon">📋</span><span class="nav-label">Отчёт по игрокам</span></a>
-                        </div>
-                    </details>
-                    <a href="/raids" title="Рейды"><span class="nav-icon">⚔️</span><span class="nav-label">Рейды</span></a>
-                    <a href="/birthdays" title="Дни рождения"><span class="nav-icon">🎂</span><span class="nav-label">Дни рождения</span></a>
-                    <details class="nav-dropdown">
-                        <summary title="Админ меню"><span class="nav-icon">🛡️</span><span class="nav-label">Админ меню</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/tickets"><span class="nav-icon">🎟️</span><span class="nav-label">Энка</span></a>
-                            <a href="/registration"><span class="nav-icon">📝</span><span class="nav-label">Регистрация</span></a>
-                            <a href="/access"><span class="nav-icon">🔑</span><span class="nav-label">Ручной доступ</span></a>
-                            <a href="/settings"><span class="nav-icon">⚙️</span><span class="nav-label">Настройки</span></a>
-                            <a href="/subscribe"><span class="nav-icon">💳</span><span class="nav-label">Подписка</span></a>
-                        </div>
-                    </details>
-                    {# Только супер-админам (в режиме «смотреть как» скрыто, как у настоящих офицеров). #}
-                    {% if user.is_super_admin %}
-                    <details class="nav-dropdown">
-                        <summary title="СуперАдмин меню"><span class="nav-icon">👑</span><span class="nav-label">СуперАдмин меню</span></summary>
-                        <div class="nav-dropdown-menu">
-                            <a href="/admin/feedback"><span class="nav-icon">📨</span><span class="nav-label">Обращения</span></a>
-                            <a href="/admin/donations"><span class="nav-icon">💛</span><span class="nav-label">Донаты</span></a>
-                            <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии и подписки</span></a>
-                            <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
-                            <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
-                            <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
-                            <a href="/admin/audit"><span class="nav-icon">🕵️</span><span class="nav-label">Аудит действий</span></a>
-                            <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
-                            <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модулей</span></a>
-                            <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>
-                            <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
-                            <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Функции по гильдиям</span></a>
-                            <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
-                            <a href="/admin/unit-aliases"><span class="nav-icon">🔤</span><span class="nav-label">Сокращения юнитов</span></a>
-                            <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
-                            <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
-                            <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
-                        </div>
-                    </details>
+            {% if conquest_ok %}
+                {% call nav_group("🏆", "Завоевание", ("/conquest",)) %}
+                    {{ nav_link("/conquest", "🏆", "Калькулятор", exact=true) }}
+                    {{ nav_link("/conquest/effects", "✨", "Эффекты способностей") }}
+                {% endcall %}
+            {% endif %}
+
+            {% if is_officer %}
+                <div class="nav-section">Гильдия</div>
+                {{ nav_link("/activity", "📈", "Активность") }}
+                {{ nav_link("/tickets", "🎟️", "Энка") }}
+                {{ nav_link("/tasks", "✅", "Задачи") }}
+                {{ nav_link("/violations", "⚠️", "Нарушения") }}
+                {{ nav_link("/birthdays", "🎂", "Дни рождения") }}
+
+                <div class="nav-section">Развитие ростера</div>
+                {{ nav_link("/gl", "🌟", "Матрица ГЛ") }}
+                {{ nav_link("/datacrons", "🔮", "Датакроны") }}
+                {% call nav_group("Ω", "Омикроны", ("/omicrons", "/omicron")) %}
+                    {{ nav_link("/omicrons/priority", "🎯", "Приоритет для ВГ") }}
+                    {{ nav_link("/omicrons/report", "📋", "Отчёт по игрокам") }}
+                    {{ nav_link("/omicron/phrases", "💬", "Фразы для омикронов") }}
+                {% endcall %}
+            {% endif %}
+
+            {% if is_officer or (user and user.tier == "member") %}
+                <div class="nav-section">Модули</div>
+            {% endif %}
+            {% if is_officer %}
+                {% call nav_group("🎛️", "Плейты и проверка", ("/plates", "/stats-check", "/mod-progress")) %}
+                    {{ nav_link("/plates", "🎛️", "Плейты (требования)") }}
+                    {{ nav_link("/stats-check", "📊", "Проверка статов") }}
+                    {{ nav_link("/mod-progress", "📅", "Прогресс модинга") }}
+                {% endcall %}
+                {% call nav_group("🛠️", "Инструменты", ("/mod-builder", "/mod-search")) %}
+                    {{ nav_link("/mod-builder", "🛠️", "Калькулятор") }}
+                    {{ nav_link("/mod-search", "🔍", "Поиск модулей") }}
+                {% endcall %}
+                {% call nav_group("📊", "Аналитика", ("/mod-analysis", "/mod-scan")) %}
+                    {{ nav_link("/mod-analysis", "📉", "Анализ модинга", exact=true) }}
+                    {{ nav_link("/mod-analysis/compare", "⚖️", "Сравнение гильдий") }}
+                    {% if user.guild_id == 1 %}
+                        {{ nav_link("/mod-scan", "📡", "Скан модулей") }}
                     {% endif %}
+                {% endcall %}
+            {% elif user and user.tier == "member" %}
+                {{ nav_link("/mod-builder", "🛠️", "Калькулятор модулей") }}
+            {% endif %}
+
+            {% if is_officer %}
+                <div class="nav-section">Управление</div>
+                {{ nav_link("/settings", "⚙️", "Настройки") }}
+                {{ nav_link("/registration", "📝", "Регистрация") }}
+                {{ nav_link("/access", "🔑", "Ручной доступ") }}
+                {{ nav_link("/subscribe", "💳", "Подписка") }}
+                {# Только супер-админам (в режиме «смотреть как» скрыто, как у настоящих офицеров). #}
+                {% if user.is_super_admin %}
+                <details class="nav-dropdown{% if nav_path.startswith('/admin/') or nav_path in ('/mod-optimizer', '/mod-ku', '/farm') %} nav-current{% endif %}">
+                    <summary title="СуперАдмин меню"><span class="nav-icon">👑</span><span class="nav-label">СуперАдмин меню</span></summary>
+                    <div class="nav-dropdown-menu">
+                        <a href="/admin/feedback"><span class="nav-icon">📨</span><span class="nav-label">Обращения</span></a>
+                        <a href="/admin/donations"><span class="nav-icon">💛</span><span class="nav-label">Донаты</span></a>
+                        <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии и подписки</span></a>
+                        <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
+                        <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
+                        <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
+                        <a href="/admin/audit"><span class="nav-icon">🕵️</span><span class="nav-label">Аудит действий</span></a>
+                        <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
+                        <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модулей</span></a>
+                        <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>
+                        <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
+                        <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Функции по гильдиям</span></a>
+                        <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
+                        <a href="/admin/unit-aliases"><span class="nav-icon">🔤</span><span class="nav-label">Сокращения юнитов</span></a>
+                        <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
+                        <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
+                        <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
+                    </div>
+                </details>
                 {% endif %}
             {% endif %}
+
+            <div class="nav-section nav-section-help">Справка</div>
+            {{ nav_link("/start", "🚀", "Начало работы") }}
+            {{ nav_link("/commands", "📘", "Документация") }}
             {# Офицерам — с кнопкой «Оплатить»; участникам только срок (продлевают офицеры). #}
             {% if user and user.subscription %}
                 {% set sub = user.subscription %}
@@ -160,6 +195,16 @@
             {% endif %}
             <a class="nav-donate-widget" href="/donate" title="Поддержать проект">💛 Поддержать проект</a>
         </nav>
+        <script>
+            // Группа с текущей страницей открыта в развёрнутом меню; в свёрнутом
+            // (иконки) группы всплывают поверх контента — там не открываем.
+            (function () {
+                var collapsed = document.documentElement.getAttribute("data-sidebar") === "collapsed"
+                    && window.matchMedia("(min-width: 56.01em)").matches;
+                if (collapsed) return;
+                document.querySelectorAll(".sidebar .nav-dropdown.nav-current").forEach(function (d) { d.open = true; });
+            })();
+        </script>
         <div class="sidebar-footer">
             {% if user %}
                 {% if user.real_super_admin %}

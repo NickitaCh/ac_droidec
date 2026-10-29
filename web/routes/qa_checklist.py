@@ -82,9 +82,9 @@ PAGES = [
     ("omicrons_report", "Омикроны — Отчёт по игрокам", "/omicrons/report", "officers"),
     ("omicrons_report_player", "Омикроны — отчёт, карточка игрока (клик из отчёта)", "/omicrons/report/{name}", "officers"),
     ("birthdays", "Дни рождения", "/birthdays", "officers"),
-    ("registration", "Админ меню — Регистрация", "/registration", "officers"),
-    ("guild_access", "Админ меню — Ручной доступ", "/access", "officers"),
-    ("settings", "Админ меню — Настройки", "/settings", "officers"),
+    ("registration", "Управление — Регистрация", "/registration", "officers"),
+    ("guild_access", "Управление — Ручной доступ", "/access", "officers"),
+    ("settings", "Управление — Настройки", "/settings", "officers"),
     ("player_card", "Карточка игрока (клик из ростера/отчётов)", "/player/{ally_code}", "officers"),
     ("player_compare", "Сравнение игроков (до 8 в столбик, из карточки)", "/player/{ally_code}/compare", "officers"),
     # ---- Доступно игрокам (get_current_user — любой залогиненный, не только офицер) ----

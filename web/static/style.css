@@ -285,6 +285,28 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 }
 .nav-dropdown-menu a:hover { background: var(--surface-2); color: var(--fg); }
 
+/* Разделы бокового меню (События · Гильдия · …) — подписи, не ссылки; текущая
+   страница — .nav-active, группа с ней — .nav-current (открыта, см. base.html). */
+.nav-section {
+    margin: 0.9em 0 0.2em;
+    padding: 0 0.7em;
+    color: var(--fg-muted);
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.nav-section-help { margin-top: 1.4em; }
+.sidebar nav a.nav-active,
+.nav-dropdown-menu a.nav-active {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--fg);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-dropdown.nav-current > summary { color: var(--fg); }
+
 /* ---- Низ бокового меню (переключатель гильдии/пользователь/логин/тема) —
    раньше был правым краем горизонтальной шапки, теперь прижат к низу
    .sidebar (flex-direction: column, .sidebar nav занимает flex:1 выше). ---- */
@@ -407,6 +429,17 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
     html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary .nav-label,
     html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary::after {
         display: none;
+    }
+    /* Подпись раздела в иконочной колонке — просто черта-разделитель. */
+    html[data-sidebar="collapsed"] .nav-section {
+        height: 0;
+        margin: 0.5em 0.3em;
+        padding: 0;
+        border-top: 1px solid var(--border);
+        font-size: 0;
+    }
+    html[data-sidebar="collapsed"] .nav-dropdown.nav-current > summary {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
     }
 
     /* Раскрытая выпадашка (ТБ/Модули/Омикроны/Админ меню) в свёрнутом виде всплывает
