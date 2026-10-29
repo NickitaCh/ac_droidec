@@ -14,7 +14,7 @@
         </div>
     </section>
 
-    {% include "_player_compare_form.html" %}
+    {% with self_name=(players[0].meta.name if players else "") %}{% include "_player_compare_form.html" %}{% endwith %}
 
     {% if error %}
         <p class="{{ 'config-warning' if loading else 'error' }}">{{ error }}</p>

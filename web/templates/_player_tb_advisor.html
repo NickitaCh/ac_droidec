@@ -1,31 +1,50 @@
 {# «Докачать для взводов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
-{% macro unit_row(u) %}
-    <li data-phases="{% for p in u.phases %} {{ p.phase }}{% endfor %} ">
-        <strong>{{ u.name }}</strong>
-        {% if u.now %}<span class="muted">{{ u.now }} →</span> {{ u.target }}{% if u.relics %} <span class="muted">(+{{ u.relics }} рел.)</span>{% endif %}
-        {% else %}<span class="muted">открыть, минимум</span> {{ u.target }}{% endif %}
-        {% if u.only_bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}
-        <div class="my-tb-detail">
-            {% for p in u.phases %}<span data-phase="{{ p.phase }}">Э{{ p.phase }} {{ "7★" if u.is_ship else "R" ~ p.need }} {{ p.planets|join(", ") }}:
-                {% if p.short %}нужно {{ p.demand }}, в гильдии {{ p.have }} — <strong>не хватает {{ p.short }}</strong>{% else %}нужно {{ p.demand }}, свободных сверх этого {{ p.spare }}{% endif %}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+{% import "_game.html" as game %}
+{% macro unit_card(u, kind) %}
+    <div class="adv-card adv-{{ kind }}" data-phases="{% for p in u.phases %} {{ p.phase }}{% endfor %} ">
+        <div class="adv-card-head">
+            {{ game.portrait(u.base_id, "sm") }}
+            <div class="adv-card-title">
+                <span class="adv-card-name">{{ u.name }}</span>
+                <span class="adv-card-level">
+                    {% if u.now %}<span class="muted">{{ u.now }} →</span> <strong>{{ u.target }}</strong>{% if u.relics %} <span class="muted">(+{{ u.relics }} рел.)</span>{% endif %}
+                    {% else %}<span class="muted">нет · открыть до</span> <strong>{{ u.target }}</strong>{% endif %}
+                    {% if u.only_bonus %} <span class="badge badge-neutral">бонус</span>{% endif %}
+                </span>
+            </div>
         </div>
-    </li>
+        <div class="adv-phases">
+            {% for p in u.phases %}
+                <span class="adv-phase{{ ' adv-phase-short' if p.short }}" data-phase="{{ p.phase }}"
+                      title="{{ p.planets|join(', ') }}: нужно {{ p.demand }}, в гильдии могут {{ p.have }}{% if not p.short %}, свободных сверх нужного {{ p.spare }}{% endif %}">
+                    <b>Э{{ p.phase }}</b> {{ "7★" if u.is_ship else "R" ~ p.need }}
+                    · {% if p.short %}не хватает {{ p.short }} из {{ p.demand }}{% else %}запас {{ p.spare }}{% endif %}
+                </span>
+            {% endfor %}
+        </div>
+        <div class="adv-planets muted">{% for p in u.phases %}{{ p.planets|join(", ") }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
 {% endmacro %}
 {% if not data %}
     <p class="widget-empty">Состав игрока ещё не загружен — появится после ежечасного обновления.</p>
 {% else %}
-    {% set tabs = [("upgrade", "Докачать"), ("unlock", "Открыть"), ("tight", "Впритык")] %}
-    <p>Юнитов, которых гильдии не хватает во взводах: <strong>{{ data.short_total }}</strong>{% if data.upgrade or data.unlock %} · из них можешь закрыть: <strong>{{ data.upgrade|length + data.unlock|length }}</strong>{% endif %}</p>
+    {% set tabs = [("upgrade", "Докачать", "твои юниты ниже нужного уровня"), ("unlock", "Открыть", "юнитов у тебя нет"), ("tight", "Впритык", "хватает, но без запаса")] %}
+    <div class="adv-tiles">
+        <div class="adv-tile"><span class="adv-tile-value">{{ data.short_total }}</span><span class="adv-tile-label">юнитов не хватает гильдии</span></div>
+        {% for key, label, hint in tabs %}
+            <button type="button" class="adv-tile adv-tile-{{ key }}{{ ' active' if loop.first }}" data-adv="{{ key }}">
+                <span class="adv-tile-value">{{ data[key]|length }}</span>
+                <span class="adv-tile-label">{{ label }} — {{ hint }}</span>
+            </button>
+        {% endfor %}
+    </div>
     {% if data.by_phase %}
         <p class="tb-adv-phases">Этап:
             <button type="button" class="pill-tab active" data-adv-phase="">все</button>
             {% for ph, n in data.by_phase %}<button type="button" class="pill-tab" data-adv-phase="{{ ph }}">Э{{ ph }} · {{ n }}</button>{% endfor %}
         </p>
     {% endif %}
-    <nav class="pill-tabs" role="tablist">
-        {% for key, label in tabs %}<button type="button" class="pill-tab{{ ' active' if loop.first }}" data-adv="{{ key }}">{{ label }} ({{ data[key]|length }})</button>{% endfor %}
-    </nav>
-    {% for key, _label in tabs %}
+    {% for key, _label, _hint in tabs %}
         {% set items = data[key] %}
         <div class="tb-adv-list" data-adv="{{ key }}" {% if not loop.first %}hidden{% endif %}>
             {% if not items %}
@@ -33,7 +52,7 @@
                                             "unlock": "Открывать нечего: недостающих во взводах юнитов, которых у тебя нет, не нашлось.",
                                             "tight": "Юнитов впритык нет."}[key] }}</p>
             {% else %}
-                <ul class="my-tb-missions">{% for u in items %}{{ unit_row(u) }}{% endfor %}</ul>
+                <div class="adv-grid">{% for u in items %}{{ unit_card(u, key) }}{% endfor %}</div>
                 <p class="widget-empty" data-adv-none hidden>На этом этапе — ничего.</p>
                 <button type="button" class="button-secondary" data-adv-more hidden>Показать ещё</button>
             {% endif %}

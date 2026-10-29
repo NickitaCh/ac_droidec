@@ -1,29 +1,74 @@
-{# Форма «Сравнить с…» — в карточке игрока и на странице сравнения. Нужны ally_code, members, raw. #}
-<form method="get" action="/player/{{ ally_code }}/compare" class="cmp-form filter-row">
-    <label>Коды союзника
-        <input type="text" name="with" value="{{ raw or '' }}" autocomplete="off" placeholder="через запятую">
-    </label>
-    {% if members %}
-    <label>Добавить из гильдии
-        <select class="cmp-add">
-            <option value="">— игрок —</option>
-            {% for name, code in members %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
-        </select>
-    </label>
-    {% endif %}
-    <button type="submit">Сравнить</button>
+{# Форма «Сравнить с…» — в карточке игрока и на странице сравнения. Нужны ally_code, members, raw;
+   self_name — ник самого игрока (необязательно). Выбранные игроки — «фишками», в запрос уходит
+   скрытое поле with (коды через запятую), как раньше. #}
+{% set list_id = "cmp-members-" ~ ally_code %}
+<form method="get" action="/player/{{ ally_code }}/compare" class="cmp-form">
+    <input type="hidden" name="with" value="{{ raw or '' }}">
+    <div class="cmp-chips" aria-live="polite">
+        <span class="cmp-chip cmp-chip-self" title="Этот игрок — всегда первый столбец">{{ self_name or ally_code }}</span>
+    </div>
+    <div class="cmp-add-row">
+        <input type="search" class="cmp-search" list="{{ list_id }}" autocomplete="off"
+               placeholder="{{ 'Ник игрока гильдии или код союзника' if members else 'Код союзника, 9 цифр' }}" aria-label="Добавить игрока">
+        {% if members %}
+        <datalist id="{{ list_id }}">
+            {% for name, code in members %}<option value="{{ name }}" data-code="{{ code }}"></option>{% endfor %}
+        </datalist>
+        {% endif %}
+        <button type="button" class="button-secondary cmp-add-btn">Добавить</button>
+        <button type="submit" class="cmp-go">Сравнить</button>
+    </div>
+    <p class="cmp-note muted"></p>
 </form>
 <script>
 (function () {
     const form = document.currentScript.previousElementSibling;
-    const input = form.querySelector("input[name=with]");
-    const add = form.querySelector(".cmp-add");
-    if (!add) return;
-    add.addEventListener("change", () => {
-        const code = add.value;
-        add.value = "";
-        if (!code || input.value.replace(/-/g, "").includes(code)) return;
-        input.value = (input.value.trim() ? input.value.trim().replace(/,$/, "") + ", " : "") + code;
+    const hidden = form.querySelector("input[name=with]");
+    const search = form.querySelector(".cmp-search");
+    const chips = form.querySelector(".cmp-chips");
+    const note = form.querySelector(".cmp-note");
+    const go = form.querySelector(".cmp-go");
+    const MAX = 7, self = "{{ ally_code }}";
+    const byName = {}, byCode = {};
+    form.querySelectorAll("datalist option").forEach(o => { byName[o.value.toLowerCase()] = o.dataset.code; byCode[o.dataset.code] = o.value; });
+    let picked = hidden.value.split(/[,;\s]+/).map(c => c.replace(/-/g, "")).filter(c => /^[1-9]{9}$/.test(c) && c !== self);
+    picked = [...new Set(picked)].slice(0, MAX);
+
+    function render(msg) {
+        chips.querySelectorAll(".cmp-chip:not(.cmp-chip-self)").forEach(c => c.remove());
+        picked.forEach(code => {
+            const chip = document.createElement("span");
+            chip.className = "cmp-chip";
+            chip.textContent = byCode[code] || code.replace(/(\d{3})(\d{3})(\d{3})/, "$1-$2-$3");
+            const x = document.createElement("button");
+            x.type = "button"; x.className = "cmp-chip-x"; x.textContent = "×"; x.title = "Убрать";
+            x.addEventListener("click", () => { picked = picked.filter(c => c !== code); render(); });
+            chip.appendChild(x);
+            chips.appendChild(chip);
+        });
+        hidden.value = picked.join(", ");
+        go.disabled = !picked.length;
+        search.disabled = picked.length >= MAX;
+        note.textContent = msg || (picked.length ? `Выбрано ${picked.length} из ${MAX}` : "Добавьте хотя бы одного игрока");
+        note.classList.toggle("error", !!msg);
+    }
+    function add() {
+        const v = search.value.trim();
+        if (!v) return;
+        const digits = v.replace(/[\s-]/g, "");
+        const code = byName[v.toLowerCase()] || (/^[1-9]{9}$/.test(digits) ? digits : null);
+        if (!code) { render(/^\d+$/.test(digits) ? "Код союзника — 9 цифр без нулей" : "Нет такого игрока в гильдии — введите код союзника"); return; }
+        if (code === self || picked.includes(code)) { search.value = ""; render(); return; }
+        if (picked.length >= MAX) { render(`Не больше ${MAX} игроков`); return; }
+        picked.push(code); search.value = ""; render();
+    }
+    form.querySelector(".cmp-add-btn").addEventListener("click", add);
+    search.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    // выбор из подсказки — сразу фишкой
+    search.addEventListener("input", e => {
+        if ((!(e instanceof InputEvent) || e.inputType === "insertReplacementText") && byName[search.value.trim().toLowerCase()]) add();
     });
+    form.addEventListener("submit", e => { if (search.value.trim()) add(); if (!picked.length) e.preventDefault(); });
+    render();
 })();
 </script>

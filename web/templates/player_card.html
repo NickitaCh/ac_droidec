@@ -374,7 +374,7 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="widget" data-tab="checks">
+        <div class="widget wc-wide" data-tab="checks">
             <div class="widget-header">
                 <h2>🧬 Омикроны</h2>
             </div>
@@ -383,7 +383,7 @@
             {% elif not omicron_missing %}
                 <p class="widget-empty">✅ Нет готовых, но ещё не поставленных омикронов.</p>
             {% else %}
-                <ul class="unit-list">
+                <ul class="unit-list unit-list-cols">
                     {% for m in omicron_missing %}
                         <li class="unit-list-item">{{ game.portrait(m.base_id, "xs") }}<span>{{ m.unit_name }} — {{ m.skill_name }}</span></li>
                     {% endfor %}
@@ -416,7 +416,7 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="widget" id="tb-advisor" data-tab="tb" data-not-all>
+        <div class="widget wc-wide" id="tb-advisor" data-tab="tb" data-not-all>
             <div class="widget-header">
                 <h2>🧱 Докачать для взводов</h2>
                 {{ ui.help("Только юниты, которых гильдии не хватает во взводах «Восхода Империи» (стандартная раскладка, как в плане ВИ): по каждому этапу считаем, сколько копий нужно и сколько игроков гильдии уже могут их поставить. Юнит ставится во взвод раз за этап. «Впритык» — хватает, но свободных игроков сверх нужного не больше одного. Э — этап.") }}
@@ -427,11 +427,11 @@
                 const body = document.getElementById("tb-advisor-body");
                 fetch("/player/{{ card.ally_code }}/tb-advisor").then(r => r.ok ? r.text() : Promise.reject(r.status)).then(html => {
                     body.innerHTML = html;
-                    // Этап фильтрует строки (и подсвечивает его в деталях), во вкладке — первые 12 + «Показать ещё».
-                    let phase = "", limit = 12;
+                    // Этап фильтрует карточки (и подсвечивает его в карточке), во вкладке — первые 24 + «Показать ещё».
+                    let phase = "", limit = 24;
                     const apply = () => body.querySelectorAll(".tb-adv-list").forEach(list => {
                         let matched = 0;
-                        list.querySelectorAll("li[data-phases]").forEach(li => {
+                        list.querySelectorAll(".adv-card[data-phases]").forEach(li => {
                             const ok = !phase || li.dataset.phases.includes(" " + phase + " ");
                             if (ok) matched++;
                             li.hidden = !ok || matched > limit;
@@ -441,13 +441,13 @@
                         if (more) { more.hidden = matched <= limit; more.textContent = `Показать ещё ${matched - limit}`; }
                         if (none) none.hidden = matched > 0;
                     });
-                    body.querySelectorAll("[data-adv]").forEach(btn => btn.tagName === "BUTTON" && btn.addEventListener("click", () => {
+                    body.querySelectorAll("button[data-adv]").forEach(btn => btn.addEventListener("click", () => {
                         body.querySelectorAll("button[data-adv]").forEach(b => b.classList.toggle("active", b === btn));
                         body.querySelectorAll(".tb-adv-list").forEach(d => { d.hidden = d.dataset.adv !== btn.dataset.adv; });
                     }));
                     body.querySelectorAll("[data-adv-phase]").forEach(btn => btn.addEventListener("click", () => {
                         body.querySelectorAll("[data-adv-phase]").forEach(b => b.classList.toggle("active", b === btn));
-                        phase = btn.dataset.advPhase; limit = 12; apply();
+                        phase = btn.dataset.advPhase; limit = 24; apply();
                     }));
                     body.querySelectorAll("[data-adv-more]").forEach(btn => btn.addEventListener("click", () => { limit = 1e9; apply(); }));
                     apply();
@@ -530,9 +530,9 @@
         <div class="widget" id="player-compare" data-tab="tools" data-not-all>
             <div class="widget-header">
                 <h2>⚖️ Сравнение игроков</h2>
-                {{ ui.help("Этот игрок и ещё до 7 в столбик: ГМ, прокачка, модули, датакроны, ГЛ, мета и флот. Можно любые коды союзника, не только из гильдии.") }}
+                {{ ui.help("Этот игрок и ещё до 7 в столбик: ГМ, прокачка, модули, датакроны, ГЛ, мета и флот. Игроков гильдии выбирайте поиском по нику, остальных — кодом союзника.") }}
             </div>
-            {% with ally_code=card.ally_code, members=compare_members, raw="" %}{% include "_player_compare_form.html" %}{% endwith %}
+            {% with ally_code=card.ally_code, members=compare_members, raw="", self_name=card.player_name %}{% include "_player_compare_form.html" %}{% endwith %}
         </div>
         {% endif %}
 
