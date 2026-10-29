@@ -3464,6 +3464,25 @@ def get_tb_saved_plan_by_name(guild_id: int, name: str) -> dict | None:
     return {"id": row[0], "guild_id": row[1], "name": row[2], "thread_id": row[3], "total_stars": row[4], "created_at": row[5]}
 
 
+def update_tb_saved_plan(plan_id: int, name: str = None, total_stars: int = None) -> None:
+    """Имя / звёзды ордера по id (ордер плана следует за планом, services/tb_plan.py::sync_order)."""
+    sets, args = [], []
+    if name is not None:
+        sets.append("name = ?")
+        args.append(name)
+    if total_stars is not None:
+        sets.append("total_stars = ?")
+        args.append(total_stars)
+    if not sets:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    _ensure_tb_saved_plans_table(cursor)
+    cursor.execute(f"UPDATE tb_saved_plans SET {', '.join(sets)} WHERE id = ?", (*args, plan_id))
+    conn.commit()
+    conn.close()
+
+
 def delete_tb_saved_plan(guild_id: int, name: str) -> bool:
     """Если удаляемый план был активным (guilds.tb_active_plan_id) — сбрасывает
     указатель, чтобы tb_order_loop не ссылался на несуществующую запись."""

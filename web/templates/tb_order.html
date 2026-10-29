@@ -27,7 +27,7 @@
                 <div class="hero-links tb-order-step">
                     <a class="hero-link" href="/tb/order?plan={{ step_plan.id }}&preview_plan_id={{ step_order.id }}#preview">Предпросмотр этапов</a>
                     {% if not step_order.active %}<form method="post" action="/tb/plan/{{ step_plan.id }}/activate"><button type="submit">Сделать активным</button></form>{% endif %}
-                    <a class="hero-link" href="/tb/plan?id={{ step_plan.id }}#publish">Опубликовать заново</a>
+                    <a class="hero-link" href="/tb/plan?id={{ step_plan.id }}">Открыть план</a>
                 </div>
             {% else %}
                 <p class="empty-state">Ордер этого плана ещё не собран. <a href="/tb/plan?id={{ step_plan.id }}#publish">Собрать из плана</a> — 6 этапов появятся ниже, их можно поправить и отправить.</p>
@@ -39,7 +39,7 @@
 
     <div class="panel">
         <div class="panel-title">
-            <span>{{ "Ордеры в Discord" if classic else "Все ордера" }}{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>Ордер проще всего собрать из плана: вкладка «План» → «Опубликовать ордер».</p>{% endcall %}</span>
+            <span>{{ "Ордеры в Discord" if classic else "Все ордера" }}{% call ui.help() %}<p>Ветки Discord с готовым ордером на 6 этапов.</p><p>Из активного ордера бот каждый день публикует нужный этап в канал плана ТБ (<a href="/settings">Настройки</a> → «ТБ — план и ордер»).</p><p>У каждого плана свой ордер: этапы «из плана» меняются сами, когда меняется план.</p>{% endcall %}</span>
         </div>
         {% if not plans %}
             <p class="empty-state">Ордеров пока нет — опубликуйте его из <a href="/tb/plan">плана</a>, соберите из картинки или зарегистрируйте готовую ветку формами ниже.</p>

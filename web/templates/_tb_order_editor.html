@@ -38,6 +38,16 @@
         {% if e.sent_discord %} · <span class="muted">в Discord: <span data-ts="{{ e.sent_discord }}"></span></span>{% endif %}
         {% if e.sent_tg %} · <span class="muted">в Telegram: <span data-ts="{{ e.sent_tg }}"></span></span>{% endif %}
     </p>
+    {% if e.plan_bound %}
+        {% if e.source == "generated" %}<p class="muted tbo-hint">Этап меняется вместе с планом. Сохраните свою правку — и план его больше не тронет.{% if e.sent_discord or e.sent_tg %} Этап уже отправлен — правки плана его не меняют.{% endif %}</p>
+        {% elif e.plan_text %}
+            <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/from-plan" class="tbo-from-plan"
+                  onsubmit="return confirm('Заменить текст этапа текстом из плана? Ручная правка пропадёт.');">
+                <p class="{{ 'tbm-label-warn' if e.plan_changed else 'muted' }} tbo-hint">{% if e.plan_changed %}⚠ План изменился после ручной правки — здесь прежний текст.{% else %}Этап правлен вручную — план его не меняет.{% endif %}
+                    <button type="submit" class="link-btn">Взять текст из плана</button></p>
+            </form>
+        {% endif %}
+    {% endif %}
 
     <form method="post" action="/tb/order/{{ o.id }}/phase/{{ e.phase }}/save" class="tbo-form" id="tbo-form">
         <nav class="pill-tabs" role="tablist">

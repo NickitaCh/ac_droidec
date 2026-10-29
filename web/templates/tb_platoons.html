@@ -63,7 +63,7 @@
 
     {% if plan %}
         <p>
-            Смотрите план: <strong>{{ plan.name }}</strong>
+            Смотрите план: <strong>{{ step_plan.name if step_plan else plan.name }}</strong>
             {% if plan.id == active_plan_id %}
                 <span class="badge badge-ok">активен</span>
             {% else %}

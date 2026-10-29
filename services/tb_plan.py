@@ -274,6 +274,56 @@ class PublishError(Exception):
     pass
 
 
+def order_blocks(result: dict) -> tuple[dict[int, str], int]:
+    blocks, total = tb_order_image.build_order_blocks(order_data(result))
+    return dict(enumerate(blocks, start=1)), total
+
+
+def free_order_name(guild_id: int, name: str, own_order_id: int | None = None) -> str:
+    """Имя ордера уникально в гильдии (create_order заменяет одноимённый) — чужое имя не занимаем."""
+    taken = {o["name"] for o in database.get_tb_saved_plans(guild_id) if o["id"] != own_order_id}
+    base, n = name[:76], 2
+    while name in taken:
+        name, n = f"{base} ({n})", n + 1
+    return name
+
+
+def bound_order(guild_id: int, plan: dict) -> dict | None:
+    order = database.get_tb_saved_plan(plan["order_plan_id"]) if plan.get("order_plan_id") else None
+    return order if order and order["guild_id"] == guild_id else None
+
+
+async def ensure_order(guild_id: int, plan: dict, result: dict, created_by: str) -> tuple[dict | None, str | None]:
+    """У плана всегда есть свой ордер (2026-10-29): нет — собираем (этапы «из плана», взводы
+    автозаполнением, не активный). Есть — запоминаем текст из плана как точку отсчёта для
+    пометки «план изменился» (ничего не переписываем). → (ордер, сообщение о создании)."""
+    from services import tb_order_store
+
+    order = bound_order(guild_id, plan)
+    if order:
+        blocks, _total = order_blocks(result)
+        tb_order_store.sync_from_plan(order["id"], blocks, baseline=True)
+        return order, None
+    order_id, message = await publish(guild_id, result, free_order_name(guild_id, plan["name"]), created_by)
+    update_plan(guild_id, plan["id"], order_plan_id=order_id)
+    plan["order_plan_id"] = order_id
+    return database.get_tb_saved_plan(order_id), message
+
+
+def sync_order(guild_id: int, plan: dict, result: dict, from_phase: int = 1, by: str | None = None) -> dict | None:
+    """План изменился → этапы его ордера «из плана» с from_phase переписываются, звёзды ордера
+    обновляются (services/tb_order_store.py::sync_from_plan). Нет ордера — None."""
+    from services import tb_order_store
+
+    order = bound_order(guild_id, plan)
+    if not order:
+        return None
+    blocks, total = order_blocks(result)
+    out = tb_order_store.sync_from_plan(order["id"], blocks, from_phase, by=by)
+    database.update_tb_saved_plan(order["id"], total_stars=total)
+    return out
+
+
 async def publish(guild_id: int, result: dict, name: str, created_by: str) -> tuple[int, str]:
     """Собрать ордер плана (6 этапов) и сохранить его на сайте (services/tb_order_store.py). Тред
     Discord не нужен (решение пользователя 2026-10-28): этапы уходят в канал автопостом в 20:00
@@ -281,9 +331,9 @@ async def publish(guild_id: int, result: dict, name: str, created_by: str) -> tu
     import tb_platoon_autofill
     from services import tb_order_store
 
-    blocks, total = tb_order_image.build_order_blocks(order_data(result))
-    order_id = tb_order_store.create_order(guild_id, name, dict(enumerate(blocks, start=1)), total,
-                                           created_by, "generated")
+    blocks, total = order_blocks(result)
+    order_id = tb_order_store.create_order(guild_id, name, blocks, total, created_by, "generated")
+    tb_order_store.sync_from_plan(order_id, blocks, baseline=True)
     parts = [f"Ордер «{name}» ({total}★) собран — 6 этапов на вкладке «Ордер»."]
     try:
         parts.append(tb_order_image.summarize_autofill(await tb_platoon_autofill.autofill_plan(guild_id, order_id)))

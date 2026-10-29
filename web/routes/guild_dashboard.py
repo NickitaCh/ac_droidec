@@ -321,6 +321,8 @@ async def _order_editor(request: Request, guild_id: int, guild_cfg: dict, plans:
         "text": block.get("text") or "", "source": block.get("source"), "link": block.get("link"),
         "tg_text": row.get("tg_text") or "",
         "sent_discord": row.get("sent_discord_at"), "sent_tg": row.get("sent_tg_at"),
+        "plan_bound": bool(tb_plan.plan_for_order(guild_id, order["id"])) and _auto_order(guild_id),
+        "plan_text": row.get("plan_text") or "", "plan_changed": tb_order_store.plan_changed(row or None),
         "source_labels": tb_order_store.SOURCE_LABELS,
         "channel_set": bool(guild_cfg.get("tb_plan_channel_id")),
         "role_set": bool(guild_cfg.get("tb_order_role_id")),
@@ -350,9 +352,26 @@ async def tb_order_phase_save(order_id: int, phase: int, text: str = Form(defaul
         raise HTTPException(status_code=404)
     if not text.strip():
         return _order_back(order_id, phase, err="Текст этапа пустой — нечего сохранять.")
-    tb_order_store.save_phase(order_id, phase, text, "edited", by=f"web:{user['discord_id']}",
+    row = tb_order_store.get_phases(order_id).get(phase) or {}
+    # Сохранили текст как в плане и без отдельного Telegram — этап и дальше следует за планом.
+    same = row.get("source") == "generated" and text.strip() == row.get("text", "").strip() and not tg_text.strip()
+    tb_order_store.save_phase(order_id, phase, text, "generated" if same else "edited", by=f"web:{user['discord_id']}",
                               tg_text=tg_text, keep_tg=False)
-    return _order_back(order_id, phase, msg=f"Этап {phase} сохранён — бот опубликует этот текст.")
+    return _order_back(order_id, phase, msg=f"Этап {phase} сохранён — бот опубликует этот текст."
+                       + ("" if same else " План этот этап больше не меняет (вернуть — «Взять текст из плана»)."))
+
+
+@router.post("/tb/order/{order_id}/phase/{phase}/from-plan")
+async def tb_order_phase_from_plan(order_id: int, phase: int,
+                                   user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Этап снова «из плана»: текст — какой дал план при последнем изменении, дальше следует за планом."""
+    _own_order(user["guild_id"], order_id)
+    row = tb_order_store.get_phases(order_id).get(phase) or {}
+    if not row.get("plan_text"):
+        return _order_back(order_id, phase, err="Текста из плана для этого этапа нет — откройте план, он соберёт его.")
+    tb_order_store.save_phase(order_id, phase, row["plan_text"], "generated", by=f"web:{user['discord_id']}",
+                              keep_tg=False)
+    return _order_back(order_id, phase, msg=f"Этап {phase}: взят текст из плана, дальше он меняется вместе с планом.")
 
 
 @router.post("/tb/order/{order_id}/phase/{phase}/import")
@@ -614,7 +633,7 @@ def _resolve_viewed_plan(guild_id: int, plan_id_param: str | None) -> tuple[dict
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_id = guild_cfg.get("tb_active_plan_id")
     if not active_id:
-        return None, "Нет активного ордера: опубликуйте его из плана (вкладка «План» → «Опубликовать ордер») или выберите на вкладке «Ордер»."
+        return None, "Нет активного плана: выберите план выше или сделайте план активным на шаге «1 · Звёзды и залив»."
     plan = database.get_tb_saved_plan(int(active_id))
     if not plan or plan["guild_id"] != guild_id:
         return None, "Активный ордер не найден — выберите его заново на вкладке «Ордер»."
@@ -781,9 +800,26 @@ def _plan_back(plan_id: int, day: int | None = None, **query) -> RedirectRespons
     return RedirectResponse(f"/tb/plan?{qs}" + (f"#day-{day}" if day else ""), status_code=303)
 
 
-def _plan_save(guild_id: int, plan_id: int, inp: dict, data: dict) -> None:
-    total = tb_plan.evaluate(inp, data)["total"]
-    tb_plan.update_plan(guild_id, plan_id, data=data, stars=total)
+def _auto_order(guild_id: int) -> bool:
+    """Ордер плана следует за планом (2026-10-29). Флаг tb_classic_nav — прежний порядок:
+    ордер собирается только кнопкой «Собрать ордер»."""
+    return not feature_flags.is_enabled(guild_id, "tb_classic_nav")
+
+
+def _plan_save(guild_id: int, plan: dict, inp: dict, data: dict, from_phase: int = 1, by: str = None) -> str | None:
+    """Сохранить план (прежний вариант — в data["undo"] для «Отменить») и обновить его ордер с
+    этапа from_phase. → подсказка для офицера (какие этапы ордера план не поменял) или None."""
+    data = {**data, "undo": {k: v for k, v in plan["data"].items() if k != "undo"}}
+    result = tb_plan.evaluate(inp, data)
+    tb_plan.update_plan(guild_id, plan["id"], data=data, stars=result["total"])
+    if not _auto_order(guild_id):
+        return None
+    out = tb_plan.sync_order(guild_id, plan, result, from_phase, by=by)
+    if out and out["manual"]:
+        phases = ", ".join(map(str, out["manual"]))
+        return (f"Ордер обновлён, кроме этапов {phases}: они правлены вручную — "
+                "на вкладке «Ордер» можно взять для них текст из плана.")
+    return None
 
 
 def _parse_number(raw: str) -> float | None:
@@ -811,14 +847,24 @@ async def tb_plan_page(request: Request, id: int = 0,
     fc = r.get("forecast")
     result = None
     readiness, bottlenecks = _plan_readiness(r)
+    created_msg = None
     if plan and fc:
         result = await asyncio.to_thread(tb_plan.evaluate, fc["inputs"], plan["data"])
         _plan_shortages(result, fc["inputs"], bottlenecks)
+        if _auto_order(guild_id):
+            # У плана всегда есть ордер: старый план без ордера получает его при первом открытии.
+            try:
+                _order, created_msg = await tb_plan.ensure_order(guild_id, plan, result, f"web:{user['discord_id']}")
+            except Exception as e:  # ордер не должен ронять страницу плана
+                import_errors.append(f"Не удалось собрать ордер плана: {e}")
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_order_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
     order = database.get_tb_saved_plan(plan["order_plan_id"]) if plan and plan.get("order_plan_id") else None
     if order and order["guild_id"] == guild_id:
         readiness = await asyncio.to_thread(_plan_platoon_conflicts, guild_id, readiness, order["id"])
+    manual = tb_order_store.manual_phases(order["id"]) if order and order["guild_id"] == guild_id else []
+    changed = ([ph for ph, row in tb_order_store.get_phases(order["id"]).items() if tb_order_store.plan_changed(row)]
+               if manual else [])
     return templates.TemplateResponse(request, "tb_plan.html", {
         "user": user,
         "plans": plans,
@@ -830,9 +876,12 @@ async def tb_plan_page(request: Request, id: int = 0,
         "bonus_planets": sorted(((fc or {}).get("inputs") or {}).get("zone_data", {}).get("bonus") or {}),
         "order": order if order and order["guild_id"] == guild_id else None,
         "order_active": bool(order and order["id"] == active_order_id),
+        "auto_order": _auto_order(guild_id),
+        "manual_phases": manual,
+        "changed_phases": sorted(changed),
         "active_id": active_id,
         "goal_enabled": feature_flags.is_enabled(guild_id, "tb_star_goal"),
-        "msg": request.query_params.get("msg"),
+        "msg": request.query_params.get("msg") or created_msg,
         "error": request.query_params.get("error") or "; ".join(import_errors) or None,
         "today": datetime.now(MSK).strftime("%d.%m"),
         "planet_ru": _planet_ru,
@@ -851,9 +900,17 @@ async def tb_plan_new(name: str = Form(default=""), copy_id: int = Form(default=
     else:
         data = await asyncio.to_thread(tb_plan.suggest, inp, {})
         name = name.strip() or f"План {datetime.now(MSK).strftime('%d.%m')}"
-    total = tb_plan.evaluate(inp, data)["total"]
-    plan_id = tb_plan.create_plan(guild_id, name[:80], data, total, f"web:{user['discord_id']}")
-    return _plan_back(plan_id)
+    data = {k: v for k, v in data.items() if k not in ("undo", "imported")}
+    result = tb_plan.evaluate(inp, data)
+    plan_id = tb_plan.create_plan(guild_id, name[:80], data, result["total"], f"web:{user['discord_id']}")
+    msg = None
+    if _auto_order(guild_id):
+        try:
+            _order, msg = await tb_plan.ensure_order(guild_id, tb_plan.get_plan(guild_id, plan_id), result,
+                                                     f"web:{user['discord_id']}")
+        except (tb_plan.PublishError, httpx.HTTPError) as e:
+            return _plan_back(plan_id, error=f"План создан, ордер к нему не собрался: {e}")
+    return _plan_back(plan_id, msg=msg)
 
 
 @router.post("/tb/plan/{plan_id}/stars", response_class=HTMLResponse)
@@ -865,8 +922,8 @@ async def tb_plan_stars(plan_id: int, phase: int = Form(...), planet: str = Form
     if planet not in (inp["zone_data"].get("planets") or {}) or not 1 <= phase <= 6:
         return _plan_back(plan_id, phase, error="Нет такой планеты или этапа")
     data = await asyncio.to_thread(tb_plan.set_stars, inp, plan["data"], phase, planet, stars)
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, phase)
+    note = _plan_save(guild_id, plan, inp, data, phase, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, phase, msg=note)
 
 
 @router.post("/tb/plan/{plan_id}/preload", response_class=HTMLResponse)
@@ -887,8 +944,8 @@ async def tb_plan_preload(plan_id: int, phase: int = Form(...), planet: str = Fo
     data["preload"] = {k: v for k, v in pre.items() if v}
     data = await asyncio.to_thread(tb_plan.suggest, inp, data, phase)
     data["preload"] = {k: v for k, v in pre.items() if v and int(k) <= phase}
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, phase)
+    note = _plan_save(guild_id, plan, inp, data, phase, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, phase, msg=note)
 
 
 @router.post("/tb/plan/{plan_id}/expect", response_class=HTMLResponse)
@@ -906,8 +963,8 @@ async def tb_plan_expect(plan_id: int, planet: str = Form(...), pct: str = Form(
     else:
         expect[planet] = max(0.0, min(100.0, value))
     data["expect"] = expect
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, phase or None)
+    note = _plan_save(guild_id, plan, inp, data, 1, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, phase or None, msg=note)
 
 
 @router.post("/tb/plan/{plan_id}/settings", response_class=HTMLResponse)
@@ -920,8 +977,9 @@ async def tb_plan_settings(plan_id: int, deploy_pct: str = Form(default=""), bon
     value = _parse_number(deploy_pct)
     data["deploy_pct"] = None if value is None else max(10.0, min(100.0, value))
     data["bonus"] = [b for b in bonus if b in (inp["zone_data"].get("bonus") or {})]
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, msg="Настройки сохранены. Чтобы подобрать звёзды под них — «Подобрать заново».")
+    note = _plan_save(guild_id, plan, inp, data, 1, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, msg=" ".join(filter(None, [
+        "Настройки сохранены. Чтобы подобрать звёзды под них — «Подобрать заново».", note])))
 
 
 @router.post("/tb/plan/{plan_id}/platoons", response_class=HTMLResponse)
@@ -937,8 +995,8 @@ async def tb_plan_platoons(plan_id: int, phase: int = Form(...), planet: str = F
     if off:
         skip.setdefault(str(phase), []).append(planet)
     data["no_platoons"] = {k: v for k, v in skip.items() if v}
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, phase)
+    note = _plan_save(guild_id, plan, inp, data, phase, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, phase, msg=note)
 
 
 @router.post("/tb/plan/{plan_id}/resuggest", response_class=HTMLResponse)
@@ -949,23 +1007,49 @@ async def tb_plan_resuggest(plan_id: int, from_day: int = Form(default=1),
     inp = await _plan_inputs(guild_id)
     from_day = max(1, min(6, from_day))
     data = await asyncio.to_thread(tb_plan.suggest, inp, plan["data"], from_day - 1)
-    _plan_save(guild_id, plan_id, inp, data)
-    return _plan_back(plan_id, from_day, msg=f"Этапы {from_day}–6 подобраны заново.")
+    note = _plan_save(guild_id, plan, inp, data, from_day, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, from_day, msg=" ".join(filter(None, [f"Этапы {from_day}–6 подобраны заново.", note])))
+
+
+@router.post("/tb/plan/{plan_id}/undo", response_class=HTMLResponse)
+async def tb_plan_undo(plan_id: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    """Вернуть план как было до последнего изменения (повторное нажатие — вернуть обратно)."""
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    prev = plan["data"].get("undo")
+    if not prev:
+        return _plan_back(plan_id, error="Отменять нечего.")
+    inp = await _plan_inputs(guild_id)
+    note = _plan_save(guild_id, plan, inp, prev, 1, f"web:{user['discord_id']}")
+    return _plan_back(plan_id, msg=" ".join(filter(None, ["Последнее изменение отменено.", note])))
 
 
 @router.post("/tb/plan/{plan_id}/rename", response_class=HTMLResponse)
 async def tb_plan_rename(plan_id: int, name: str = Form(...),
                          user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    _plan_or_404(user["guild_id"], plan_id)
+    plan = _plan_or_404(user["guild_id"], plan_id)
     if name.strip():
         tb_plan.update_plan(user["guild_id"], plan_id, name=name.strip()[:80])
+        order = tb_plan.bound_order(user["guild_id"], plan)
+        if order and _auto_order(user["guild_id"]):
+            database.update_tb_saved_plan(order["id"], name=tb_plan.free_order_name(
+                user["guild_id"], name.strip()[:80], order["id"]))
     return _plan_back(plan_id)
 
 
 @router.post("/tb/plan/{plan_id}/delete", response_class=HTMLResponse)
 async def tb_plan_delete(plan_id: int, user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
-    _plan_or_404(user["guild_id"], plan_id)
-    tb_plan.delete_plan(user["guild_id"], plan_id)
+    guild_id = user["guild_id"]
+    plan = _plan_or_404(guild_id, plan_id)
+    order = tb_plan.bound_order(guild_id, plan)
+    if order and _auto_order(guild_id):
+        # План и его ордер — одно целое: удаляются вместе; активный не удаляем (по нему идёт автопост).
+        if str((database.get_guild_config(guild_id) or {}).get("tb_active_plan_id") or "") == str(order["id"]):
+            return _plan_back(plan_id, error="Это активный план — бот публикует по нему ордер. "
+                                             "Сначала сделайте активным другой план.")
+        database.delete_tb_saved_plan(guild_id, order["name"])
+        database.clear_tb_platoon_assignments_for_plan(guild_id, order["id"])
+    tb_plan.delete_plan(guild_id, plan_id)
     return RedirectResponse("/tb/plan", status_code=303)
 
 
@@ -990,6 +1074,9 @@ async def tb_plan_publish(plan_id: int, name: str = Form(default=""), make_activ
     plan = _plan_or_404(guild_id, plan_id)
     inp = await _plan_inputs(guild_id)
     result = tb_plan.evaluate(inp, plan["data"])
+    own = tb_plan.bound_order(guild_id, plan)
+    if own and _auto_order(guild_id):
+        name = own["name"]  # «Пересобрать все этапы»: тот же ордер, взводы на нём остаются
     try:
         order_id, message = await tb_plan.publish(guild_id, result, (name.strip() or plan["name"])[:80],
                                                   f"web:{user['discord_id']}")
@@ -1245,7 +1332,9 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
             "unfilled_count": sum(1 for op in operations for s in op["slots"] if not s["assigned_ally_code"]),
         })
 
-    saved_plans = database.get_tb_saved_plans(guild_id)
+    # В выпадашке — названия планов (у каждого плана свой ордер, взводы хранятся по ордеру).
+    plan_names = {p["order_plan_id"]: p["name"] for p in tb_plan.list_plans(guild_id) if p.get("order_plan_id")}
+    saved_plans = [{**o, "name": plan_names.get(o["id"], o["name"])} for o in database.get_tb_saved_plans(guild_id)]
     guild_cfg = database.get_guild_config(guild_id) or {}
     active_plan_id = int(guild_cfg["tb_active_plan_id"]) if guild_cfg.get("tb_active_plan_id") else None
 

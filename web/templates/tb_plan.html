@@ -49,6 +49,7 @@
                 <form method="post" action="/tb/plan/{{ plan.id }}/activate"><button type="submit">Сделать активным</button></form>
             {% endif %}
             {% if plan %}
+                {% if plan.data.undo %}<form method="post" action="/tb/plan/{{ plan.id }}/undo"><button type="submit" class="button-secondary" title="Вернуть план как было до последнего изменения">↶ Отменить</button></form>{% endif %}
                 <form method="post" action="/tb/plan/new"><input type="hidden" name="copy_id" value="{{ plan.id }}"><button type="submit" class="button-secondary">Копия</button></form>
                 <details class="tbplan-menu">
                     <summary class="button-secondary">Ещё ▾</summary>
@@ -57,7 +58,7 @@
                             <input type="text" name="name" value="{{ plan.name }}" maxlength="80" aria-label="Название плана">
                             <button type="submit" class="button-secondary">Переименовать</button>
                         </form>
-                        <form method="post" action="/tb/plan/{{ plan.id }}/delete" onsubmit="return confirm('Удалить план «{{ plan.name }}»?');">
+                        <form method="post" action="/tb/plan/{{ plan.id }}/delete" onsubmit="return confirm('Удалить план «{{ plan.name }}»{{ ' вместе с его ордером и взводами' if auto_order and order else '' }}?');">
                             <button type="submit" class="button-danger">Удалить план</button>
                         </form>
                     </div>
@@ -66,7 +67,14 @@
         </div>
     </div>
 
-    {% if plan and not tb_classic_nav(user) %}
+    {% if plan and auto_order %}
+        <p class="muted tbplan-active-note">
+            {% if order_active %}<span class="badge badge-ok">активный</span> бот публикует этапы этого плана в 20:00 МСК, взводы открываются по нему.
+            {% else %}План не активный — бот публикует другой. Взводы и ордер плана уже можно готовить.{% endif %}
+            Ордер обновляется сам, когда вы меняете план{% if manual_phases %}, кроме этапов {{ manual_phases|join(", ") }} — они правлены вручную или перенесены{% endif %}. <a href="/tb/order?plan={{ plan.id }}">Ордер →</a>
+        </p>
+        {% if changed_phases %}<p class="tbm-label-warn tbplan-warn">⚠ План изменился после ручной правки этапов {{ changed_phases|join(", ") }} — текст ордера там прежний. <a href="/tb/order?plan={{ plan.id }}&phase={{ changed_phases[0] }}#order-editor">Посмотреть и взять текст из плана</a></p>{% endif %}
+    {% elif plan and not tb_classic_nav(user) %}
         <p class="muted tbplan-active-note">
             {% if order_active %}<span class="badge badge-ok">активный</span> бот публикует этапы по ордеру этого плана, взводы открываются по нему.
             {% elif order %}Ордер опубликован, но план не активный — бот публикует другой.
@@ -224,7 +232,7 @@
 
         <div class="panel">
             <div class="panel-title">
-                <span>Этап {{ ph.phase }}: кого не хватает во взводах{% call ui.help() %}<p>Слоты взводов на планетах этого этапа, которые нынешние склады не закрывают (юнит игрока встаёт один раз за этап; на копящей планете дефицитные юниты можно добирать на следующих этапах). «В шаге» — у кого юнит в одной-двух реликвиях от порога (корабль — в одной звезде).</p><p>Расставить игроков по слотам — вкладка «Взводы»: она берёт планеты из опубликованного ордера, поэтому сначала опубликуйте план. Планета с «не ставить на этом этапе» уходит в ордер как «Взводы: нет», и конструктор её пропускает.</p>{% endcall %}</span>
+                <span>Этап {{ ph.phase }}: кого не хватает во взводах{% call ui.help() %}<p>Слоты взводов на планетах этого этапа, которые нынешние склады не закрывают (юнит игрока встаёт один раз за этап; на копящей планете дефицитные юниты можно добирать на следующих этапах). «В шаге» — у кого юнит в одной-двух реликвиях от порога (корабль — в одной звезде).</p><p>Расставить игроков по слотам — шаг «2 · Взводы» (планеты берутся из ордера плана). Планета с «не ставить на этом этапе» уходит в ордер как «Взводы: нет», и конструктор её пропускает.</p>{% endcall %}</span>
                 <span class="panel-hint">{% if ph.shortages %}{{ ph.shortages|sum(attribute="short") }} слотов не закрыть{% else %}все слоты закрываются{% endif %}</span>
             </div>
             {% if ph.shortages %}
@@ -246,6 +254,14 @@
     </section>
     {% endfor %}
 
+    {% if auto_order and order %}
+    <details class="panel" id="publish">
+        <summary class="panel-title"><span>Пересобрать ордер целиком{% call ui.help() %}<p>Обычно не нужно: этапы ордера «из плана» обновляются сами при каждом изменении плана. Этапы, которые правили вручную или перенесли из сообщения, план не трогает.</p><p>Эта кнопка заново собирает все 6 этапов из плана и <b>затирает ручные правки</b> (и тексты для Telegram). Взводы остаются, пустые слоты дозаполняются.</p>{% endcall %}</span></summary>
+        <form method="post" action="/tb/plan/{{ plan.id }}/publish" class="tbplan-publish" onsubmit="return confirm('Пересобрать все 6 этапов ордера из плана? Ручные правки этапов пропадут.');">
+            <button type="submit" class="button-secondary">Пересобрать все 6 этапов из плана</button>
+        </form>
+    </details>
+    {% else %}
     <div class="panel" id="publish">
         <div class="panel-title">
             <span>Собрать ордер{% call ui.help() %}<p>Из плана получится ордер на 6 этапов: планеты, цель в звёздах, «копим до …», взводы. Он сохранится на вкладке «Ордер» — там каждый этап можно поправить отдельно для Discord и Telegram, посмотреть, как он будет выглядеть, и отправить. Если отметить «активным», бот сам публикует нужный этап в 20:00 МСК в канал плана ВИ и расставит взводы.</p><p>Ветка Discord не нужна. Если ордер с таким названием уже есть, он заменится.</p>{% endcall %}</span>
@@ -257,6 +273,7 @@
             <button type="submit">Собрать ордер</button>
         </form>
     </div>
+    {% endif %}
 
     {% endif %}
     {% if r.unresolved %}

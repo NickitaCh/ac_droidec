@@ -52,6 +52,13 @@ def _ensure(cursor) -> None:
             PRIMARY KEY (order_id, phase)
         )
     """)
+    # Текст, который этап получил бы из плана сейчас (sync_from_plan), и когда он менялся:
+    # этап, правленный руками раньше, чем план поменял этот текст, помечается на сайте.
+    for col in ("plan_text TEXT", "plan_text_at REAL"):
+        try:
+            cursor.execute(f"ALTER TABLE tb_order_phases ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
 
 
 def _conn():
@@ -62,7 +69,7 @@ def _conn():
 
 
 _COLS = ("order_id", "phase", "text", "tg_text", "source", "source_link", "updated_by", "updated_at",
-         "sent_discord_at", "sent_tg_at")
+         "sent_discord_at", "sent_tg_at", "plan_text", "plan_text_at")
 
 
 def get_phases(order_id: int) -> dict[int, dict]:
@@ -122,6 +129,66 @@ def delete_order(order_id: int) -> None:
     conn.execute("DELETE FROM tb_order_phases WHERE order_id = ?", (int(order_id),))
     conn.commit()
     conn.close()
+
+
+SYNC_SKIP_SENT_DAYS = 7  # этап, отправленный за это время, — уже история текущей ВИ, план его не переписывает
+
+
+def sync_from_plan(order_id: int, blocks: dict[int, str], from_phase: int = 1, by: str | None = None,
+                   baseline: bool = False) -> dict:
+    """Ордер плана следует за планом (2026-10-29): этапы с источником «из плана» (или без текста)
+    получают новый текст, правленные руками / перенесённые — не трогаются, им только запоминается
+    plan_text (и plan_text_at, если он поменялся) — по нему сайт подсказывает «план изменился».
+    Этапы раньше from_phase и уже отправленные за SYNC_SKIP_SENT_DAYS не трогаются вовсе.
+    baseline — только запомнить plan_text там, где его ещё нет, без правок и без пометки.
+    → {"updated": [этапы], "manual": [ручные этапы, чей текст из плана изменился]}"""
+    rows = get_phases(order_id)
+    now = time.time()
+    out = {"updated": [], "manual": []}
+    conn = _conn()
+    for phase in range(1, 7):
+        text = (blocks.get(phase) or "").strip()
+        row = rows.get(phase)
+        if baseline:
+            if text and row and row["plan_text"] is None:
+                conn.execute("UPDATE tb_order_phases SET plan_text = ? WHERE order_id = ? AND phase = ?",
+                             (text, int(order_id), phase))
+            continue
+        if phase < from_phase or not text:
+            continue
+        sent = row and max(row["sent_discord_at"] or 0, row["sent_tg_at"] or 0)
+        if sent and now - sent < SYNC_SKIP_SENT_DAYS * 86400:
+            continue
+        if row is None or row["source"] == "generated":
+            if row is None or row["text"] != text:
+                conn.execute("""
+                    INSERT INTO tb_order_phases (order_id, phase, text, source, updated_by, updated_at)
+                    VALUES (?, ?, ?, 'generated', ?, ?)
+                    ON CONFLICT(order_id, phase) DO UPDATE SET text = excluded.text, source = 'generated',
+                        source_link = NULL, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+                """, (int(order_id), phase, text, by, now))
+                out["updated"].append(phase)
+            conn.execute("UPDATE tb_order_phases SET plan_text = ?, plan_text_at = ? WHERE order_id = ? AND phase = ?",
+                         (text, now, int(order_id), phase))
+        elif row["plan_text"] != text:
+            conn.execute("UPDATE tb_order_phases SET plan_text = ?, plan_text_at = ? WHERE order_id = ? AND phase = ?",
+                         (text, now, int(order_id), phase))
+            if row["text"] != text:
+                out["manual"].append(phase)
+    conn.commit()
+    conn.close()
+    return out
+
+
+def plan_changed(row: dict | None) -> bool:
+    """Этап правлен руками, а план после этого дал ему другой текст."""
+    return bool(row and row["source"] != "generated" and row.get("plan_text") and row.get("plan_text_at")
+                and row["plan_text_at"] > (row["updated_at"] or 0) and row["plan_text"].strip() != row["text"].strip())
+
+
+def manual_phases(order_id: int) -> list[int]:
+    """Этапы ордера, которые план не меняет (правлены руками или перенесены)."""
+    return sorted(ph for ph, r in get_phases(order_id).items() if r["source"] != "generated")
 
 
 def mark_sent(order_id: int, phase: int, where: str) -> None:
