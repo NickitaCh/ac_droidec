@@ -50,7 +50,7 @@
             </div>
         {% endif %}
         <nav class="hero-tabs card-tabs" hidden>
-            {% for key, label in [("all", "Всё"), ("overview", "Обзор"), ("tb", "ВИ"), ("checks", "Проверки"), ("tools", "Инструменты")] %}
+            {% for key, label in [("all", "Всё"), ("tb", "ВИ"), ("checks", "Проверки"), ("tools", "Инструменты")] %}
                 <a href="#{{ key }}" data-filter="{{ key }}">{{ label }}</a>
             {% endfor %}
         </nav>
