@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261029f">
+    <link rel="stylesheet" href="/static/style.css?v=20261029g">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -63,6 +63,14 @@
                 <div class="nav-dropdown-menu">{{ caller() }}</div>
             </details>
         {%- endmacro %}
+        {#- Раздел меню: подпись-кнопка сворачивает его (запоминается в localStorage, скрипт
+            после </nav>); раздел с текущей страницей всегда открыт. -#}
+        {% macro nav_block(key, label) -%}
+            <div class="nav-block" data-block="{{ key }}">
+                <button type="button" class="nav-section" aria-expanded="true">{{ label }}</button>
+                <div class="nav-block-body">{{ caller() }}</div>
+            </div>
+        {%- endmacro %}
         <nav>
             {% if user and user.tier not in ("officer", "member") %}
                 {{ nav_link("/subscribe", "💳", "Подписка") }}
@@ -73,9 +81,7 @@
 
             {% set is_officer = user and user.tier == "officer" %}
             {% set conquest_ok = user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
-            {% if is_officer or conquest_ok %}
-                <div class="nav-section">События</div>
-            {% endif %}
+            {% if is_officer or conquest_ok %}{% call nav_block("events", "События") %}
             {% if is_officer %}
                 {% call nav_group("🗺️", "ТБ", ("/tb",)) %}
                     {{ nav_link("/tb/plan", "🪐", "План", also=("/tb/goal", "/tb/projection")) }}
@@ -98,16 +104,18 @@
                     {{ nav_link("/conquest/effects", "✨", "Эффекты способностей") }}
                 {% endcall %}
             {% endif %}
+            {% endcall %}{% endif %}
 
             {% if is_officer %}
-                <div class="nav-section">Гильдия</div>
+                {% call nav_block("guild", "Гильдия") %}
                 {{ nav_link("/activity", "📈", "Активность") }}
                 {{ nav_link("/tickets", "🎟️", "Энка") }}
                 {{ nav_link("/tasks", "✅", "Задачи") }}
                 {{ nav_link("/violations", "⚠️", "Нарушения") }}
                 {{ nav_link("/birthdays", "🎂", "Дни рождения") }}
 
-                <div class="nav-section">Развитие ростера</div>
+                {% endcall %}
+                {% call nav_block("growth", "Развитие") %}
                 {{ nav_link("/gl", "🌟", "Матрица ГЛ") }}
                 {{ nav_link("/datacrons", "🔮", "Датакроны") }}
                 {% call nav_group("Ω", "Омикроны", ("/omicrons", "/omicron")) %}
@@ -115,11 +123,10 @@
                     {{ nav_link("/omicrons/report", "📋", "Отчёт по игрокам") }}
                     {{ nav_link("/omicron/phrases", "💬", "Фразы для омикронов") }}
                 {% endcall %}
+                {% endcall %}
             {% endif %}
 
-            {% if is_officer or (user and user.tier == "member") %}
-                <div class="nav-section">Модули</div>
-            {% endif %}
+            {% if is_officer or (user and user.tier == "member") %}{% call nav_block("mods", "Модули") %}
             {% if is_officer %}
                 {% call nav_group("🎛️", "Плейты и проверка", ("/plates", "/stats-check", "/mod-progress")) %}
                     {{ nav_link("/plates", "🎛️", "Плейты (требования)") }}
@@ -140,9 +147,10 @@
             {% elif user and user.tier == "member" %}
                 {{ nav_link("/mod-builder", "🛠️", "Калькулятор модулей") }}
             {% endif %}
+            {% endcall %}{% endif %}
 
             {% if is_officer %}
-                <div class="nav-section">Управление</div>
+                {% call nav_block("admin", "Управление") %}
                 {{ nav_link("/settings", "⚙️", "Настройки") }}
                 {{ nav_link("/registration", "📝", "Регистрация") }}
                 {{ nav_link("/access", "🔑", "Ручной доступ") }}
@@ -172,11 +180,13 @@
                     </div>
                 </details>
                 {% endif %}
+                {% endcall %}
             {% endif %}
 
-            <div class="nav-section nav-section-help">Справка</div>
-            {{ nav_link("/start", "🚀", "Начало работы") }}
-            {{ nav_link("/commands", "📘", "Документация") }}
+            {% call nav_block("help", "Справка") %}
+                {{ nav_link("/start", "🚀", "Начало работы") }}
+                {{ nav_link("/commands", "📘", "Документация") }}
+            {% endcall %}
             {# Офицерам — с кнопкой «Оплатить»; участникам только срок (продлевают офицеры). #}
             {% if user and user.subscription %}
                 {% set sub = user.subscription %}
@@ -201,8 +211,28 @@
             (function () {
                 var collapsed = document.documentElement.getAttribute("data-sidebar") === "collapsed"
                     && window.matchMedia("(min-width: 56.01em)").matches;
-                if (collapsed) return;
-                document.querySelectorAll(".sidebar .nav-dropdown.nav-current").forEach(function (d) { d.open = true; });
+                if (!collapsed) {
+                    document.querySelectorAll(".sidebar .nav-dropdown.nav-current").forEach(function (d) { d.open = true; });
+                }
+                // Свёрнутые разделы (События, Гильдия, …) — только удобство этого браузера.
+                var KEY = "navClosedBlocks", closed = [];
+                try { closed = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
+                document.querySelectorAll(".sidebar .nav-block").forEach(function (b) {
+                    var btn = b.querySelector(".nav-section"), key = b.getAttribute("data-block");
+                    var set = function (isClosed) {
+                        b.classList.toggle("nav-block-closed", isClosed);
+                        btn.setAttribute("aria-expanded", isClosed ? "false" : "true");
+                    };
+                    var hasCurrent = b.querySelector(".nav-active, .nav-current");
+                    if (closed.indexOf(key) !== -1 && !hasCurrent) set(true);
+                    btn.addEventListener("click", function () {
+                        var isClosed = !b.classList.contains("nav-block-closed");
+                        set(isClosed);
+                        closed = closed.filter(function (k) { return k !== key; });
+                        if (isClosed) closed.push(key);
+                        try { localStorage.setItem(KEY, JSON.stringify(closed)); } catch (e) {}
+                    });
+                });
             })();
         </script>
         <div class="sidebar-footer">

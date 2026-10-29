@@ -287,18 +287,34 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
 
 /* Разделы бокового меню (События · Гильдия · …) — подписи, не ссылки; текущая
    страница — .nav-active, группа с ней — .nav-current (открыта, см. base.html). */
+.nav-block { display: flex; flex-direction: column; }
+.nav-block-body { display: flex; flex-direction: column; gap: 0.15em; }
+.nav-block-closed > .nav-block-body { display: none; }
 .nav-section {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    width: 100%;
     margin: 0.9em 0 0.2em;
-    padding: 0 0.7em;
+    padding: 0.25em 0.7em;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
     color: var(--fg-muted);
+    font: inherit;
     font-size: 0.72em;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
+    cursor: pointer;
 }
-.nav-section-help { margin-top: 1.4em; }
+.nav-section::after { content: "▾"; margin-left: auto; letter-spacing: 0; transition: transform 0.15s ease; }
+.nav-block-closed > .nav-section::after { transform: rotate(-90deg); }
+.nav-section:hover { color: var(--fg); background: var(--surface-2); }
+.nav-block[data-block="help"] > .nav-section { margin-top: 1.4em; }
 .sidebar nav a.nav-active,
 .nav-dropdown-menu a.nav-active {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -421,23 +437,33 @@ dialog.docs-image-lightbox img { display: block; max-width: 92vw; max-height: 92
        подписи не теряют — они уезжают во всплывающую панель чуть ниже, там место
        под текст снова есть. */
     html[data-sidebar="collapsed"] .sidebar nav > a,
-    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary {
+    html[data-sidebar="collapsed"] .nav-block-body > a,
+    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary,
+    html[data-sidebar="collapsed"] .nav-block-body > .nav-dropdown > summary {
         justify-content: center;
         padding: 0.55em;
     }
     html[data-sidebar="collapsed"] .sidebar nav > a .nav-label,
+    html[data-sidebar="collapsed"] .nav-block-body > a .nav-label,
     html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary .nav-label,
-    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary::after {
+    html[data-sidebar="collapsed"] .nav-block-body > .nav-dropdown > summary .nav-label,
+    html[data-sidebar="collapsed"] .sidebar nav > .nav-dropdown > summary::after,
+    html[data-sidebar="collapsed"] .nav-block-body > .nav-dropdown > summary::after {
         display: none;
     }
-    /* Подпись раздела в иконочной колонке — просто черта-разделитель. */
+    /* Подпись раздела в иконочной колонке — просто черта-разделитель, разделы
+       не сворачиваются (иконки и так компактны). */
     html[data-sidebar="collapsed"] .nav-section {
         height: 0;
         margin: 0.5em 0.3em;
         padding: 0;
+        border-radius: 0;
         border-top: 1px solid var(--border);
         font-size: 0;
+        pointer-events: none;
     }
+    html[data-sidebar="collapsed"] .nav-section::after { display: none; }
+    html[data-sidebar="collapsed"] .nav-block-closed > .nav-block-body { display: flex; }
     html[data-sidebar="collapsed"] .nav-dropdown.nav-current > summary {
         background: color-mix(in srgb, var(--accent) 14%, transparent);
     }
