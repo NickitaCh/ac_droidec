@@ -2949,7 +2949,7 @@ tr.row-highlight > td { background: color-mix(in srgb, var(--accent) 10%, transp
 .my-tb-missions li { padding: 0.3rem 0; border-top: 1px solid var(--border, rgba(127,127,127,.2)); overflow-wrap: anywhere; }
 .my-tb-missions li:first-child { border-top: 0; }
 /* «Докачать для взводов» (карточка игрока). */
-.adv-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr)); gap: 0.5em; margin-bottom: 0.7em; }
+.adv-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5em, 1fr)); gap: 0.5em; margin-bottom: 0.7em; }
 .adv-tile {
     display: flex; flex-direction: column; gap: 0.15em; padding: 0.55em 0.75em; border-radius: 10px; text-align: left;
     border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit;
