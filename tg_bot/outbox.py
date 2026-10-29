@@ -312,13 +312,13 @@ def tg_owner_for(discord_id) -> str | None:
     return row[0] if row else None
 
 
-def guild_tg_owners(guild_id: int) -> list[str]:
-    """Все игроки гильдии с Telegram — для @everyone/@here и роли участников."""
+def guild_owners(guild_id: int) -> list[str]:
+    """Все зарегистрированные игроки гильдии (Discord id и "tg:<id>") — для @everyone/@here."""
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT DISTINCT r.discord_id FROM user_registration r"
-            " JOIN tg_users u ON u.owner_id = r.discord_id WHERE r.guild_id = ? ORDER BY r.discord_id",
+            "SELECT discord_id FROM user_registration WHERE guild_id = ?"
+            " GROUP BY discord_id ORDER BY MIN(rowid)",
             (int(guild_id),),
         ).fetchall()
     except sqlite3.OperationalError:

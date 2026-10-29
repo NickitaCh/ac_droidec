@@ -39,28 +39,36 @@ def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[di
     """Текст для Telegram (Discord-разметка, её переводит tg_bot/notifier.py) и вложения.
     Упоминание игрока становится Telegram-упоминанием, если у него есть Telegram (привязка
     к профилю или регистрация в боте на тот же код союзника, outbox.tg_owner_for), иначе — имя.
-    Роли и @everyone/@here из текста убираются, а их участники с Telegram упоминаются
-    строкой в конце (в Telegram нет ролей; просьба из TG-ветки 2026-10-29). Каналы — по имени."""
+    Роли и @everyone/@here из текста убираются, а их участники перечисляются строкой в конце:
+    с Telegram — упоминанием, без него — ником Discord (в Telegram нет ролей; просьба из
+    TG-ветки 2026-10-29; @everyone = зарегистрированные игроки гильдии). Каналы — по имени."""
     users = {str(u.id): u.display_name for u in message.mentions}
     channels = {str(c.id): getattr(c, "name", "канал") for c in message.channel_mentions}
     tagged: list[str] = []  # упомянутые в тексте — в строку тегов не повторяем
 
+    def tag(discord_id, name):
+        owner = outbox.tg_owner_for(discord_id)
+        return f"<@{owner}>" if owner else f"@{name}"
+
     def user(m):
         uid = m.group(1)
-        owner = outbox.tg_owner_for(uid)
-        if owner is None:
-            return f"@{users.get(uid, 'игрок')}"
-        tagged.append(owner)
-        return f"<@{owner}>"
+        value = tag(uid, users.get(uid, "игрок"))
+        tagged.append(value)
+        return value
 
     group: list[str] = []
     if message.mention_everyone:
-        group += outbox.guild_tg_owners(guild_id)
+        for owner in outbox.guild_owners(guild_id):
+            if outbox.is_tg_owner(owner):
+                group.append(f"<@{owner}>")
+                continue
+            member = message.guild.get_member(int(owner)) if message.guild else None
+            if member is not None:  # ушедших с сервера не перечисляем
+                group.append(tag(owner, member.display_name))
     for role in message.role_mentions:
         for member in getattr(role, "members", []):
-            owner = outbox.tg_owner_for(member.id)
-            if owner:
-                group.append(owner)
+            if not member.bot:
+                group.append(tag(member.id, member.display_name))
 
     text = message.content or ""
     text = _USER_MENTION_RE.sub(user, text)
@@ -89,7 +97,7 @@ def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[di
 
     tags = list(dict.fromkeys(o for o in group if o not in tagged))
     if tags:
-        text = f"{text}\n\n" + " ".join(f"<@{o}>" for o in tags)
+        text = f"{text}\n\n" + " ".join(tags)
 
     # Сообщение самого бота (ордер ВИ по ссылке) — без подписи: в Telegram оно и так от бота.
     me = getattr(message.guild, "me", None)
