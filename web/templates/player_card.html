@@ -388,7 +388,7 @@
         {% endif %}
 
         {% if show_my_tb %}
-        <div class="widget wc-wide" id="my-tb" data-tab="tb">
+        <div class="widget wc-wide" id="my-tb" data-tab="tb" data-not-all>
             <div class="widget-header">
                 <h2>⚔️ Мой ВИ</h2>
                 {{ ui.help("По каждому этапу активного ордера: каких юнитов ставить во взводы и какие боевые миссии и спецмиссии планет этапа игрок проходит. Юниты из взводов до конца этапа заняты, поэтому готовность считается без них: «мешают взводы» — бой прошёл бы, но нужные юниты уходят во взводы. «Кем» — подходящие юниты игрока из списка боя (у боёв «любой персонаж» список не показываем). Состав — из ежечасного обновления.") }}
@@ -410,7 +410,7 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="widget" id="tb-advisor" data-tab="tb">
+        <div class="widget" id="tb-advisor" data-tab="tb" data-not-all>
             <div class="widget-header">
                 <h2>🧱 Докачать для взводов</h2>
                 {{ ui.help("Только юниты, которых гильдии не хватает во взводах «Восхода Империи» (стандартная раскладка, как в плане ВИ): по каждому этапу считаем, сколько копий нужно и сколько игроков гильдии уже могут их поставить. Юнит ставится во взвод раз за этап. «Впритык» — хватает, но свободных игроков сверх нужного не больше одного. Э — этап.") }}
@@ -583,12 +583,12 @@
         {% endif %}
 
         {% if not card.departed_at %}
-        <div class="wc-wide widget-cols-even" data-tab="checks">
+        <div class="wc-wide widget-cols-even" data-tab="checks" data-not-all>
         <div class="widget">
             <div class="widget-header">
                 <h2>📐 Проверка статов</h2>
             </div>
-            <form method="get" class="filter-row">
+            <form method="get" action="#checks" class="filter-row">
                 <label>
                     Плейт
                     <select name="plate">
@@ -659,7 +659,7 @@
             <div class="widget-header">
                 <h2>🔮 Проверка датакронов</h2>
             </div>
-            <form method="get" class="filter-row">
+            <form method="get" action="#checks" class="filter-row">
                 <label>
                     Сезон
                     <select name="season">
@@ -699,7 +699,8 @@
         function apply(key) {
             if (!nav.querySelector(`[data-filter="${key}"]`)) key = "all";
             nav.querySelectorAll("[data-filter]").forEach(a => a.classList.toggle("active", a.dataset.filter === key));
-            widgets.forEach(w => { w.hidden = key !== "all" && w.dataset.tab !== key; });
+            // data-not-all — тяжёлые виджеты только на своей вкладке, не во «Все»
+            widgets.forEach(w => { w.hidden = key === "all" ? w.hasAttribute("data-not-all") : w.dataset.tab !== key; });
             try { localStorage.setItem("playerCardTab", key); } catch (_) {}
         }
         nav.addEventListener("click", e => {
@@ -712,14 +713,16 @@
         let start = location.hash.slice(1);
         if (!links.some(a => a.dataset.filter === start)) {
             // якорь на виджет (#my-tasks) — показываем всё, чтобы он был виден
-            if (start && document.getElementById(start)) start = "all";
+            const box = start && document.getElementById(start);
+            if (box) start = box.closest("[data-not-all]") ? box.closest("[data-tab]").dataset.tab : "all";
             else { try { start = localStorage.getItem("playerCardTab") || "all"; } catch (_) { start = "all"; } }
         }
         apply(start);
         // Ссылки из шапки на виджет (#my-tasks): если он скрыт фильтром — показываем всё.
         window.addEventListener("hashchange", () => {
             const el = document.getElementById(location.hash.slice(1));
-            if (el && el.closest("[data-tab]") && el.closest("[data-tab]").hidden) { apply("all"); el.scrollIntoView(); }
+            const box = el && el.closest("[data-tab]");
+            if (box && box.hidden) { apply(box.hasAttribute("data-not-all") ? box.dataset.tab : "all"); el.scrollIntoView(); }
         });
     })();
     </script>
