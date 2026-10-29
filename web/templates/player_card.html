@@ -438,12 +438,18 @@
                             li.querySelectorAll("[data-phase]").forEach(sp => sp.classList.toggle("muted", !!phase && sp.dataset.phase !== phase));
                         });
                         const more = list.querySelector("[data-adv-more]"), none = list.querySelector("[data-adv-none]");
-                        if (more) { more.hidden = matched <= limit; more.textContent = `Показать ещё ${matched - limit}`; }
+                        if (more) { more.hidden = matched <= limit; if (matched > limit) more.textContent = `Показать ещё ${matched - limit}`; }
                         if (none) none.hidden = matched > 0;
                     });
                     body.querySelectorAll("button[data-adv]").forEach(btn => btn.addEventListener("click", () => {
                         body.querySelectorAll("button[data-adv]").forEach(b => b.classList.toggle("active", b === btn));
                         body.querySelectorAll(".tb-adv-list").forEach(d => { d.hidden = d.dataset.adv !== btn.dataset.adv; });
+                        // счёт на кнопках этапов — по открытой вкладке
+                        body.querySelectorAll("[data-adv-phase]").forEach(p => {
+                            const n = p.dataset["n" + btn.dataset.adv[0].toUpperCase() + btn.dataset.adv.slice(1)];
+                            if (n !== undefined) p.querySelector(".adv-n").textContent = n;
+                        });
+                        limit = 24; apply();
                     }));
                     body.querySelectorAll("[data-adv-phase]").forEach(btn => btn.addEventListener("click", () => {
                         body.querySelectorAll("[data-adv-phase]").forEach(b => b.classList.toggle("active", b === btn));

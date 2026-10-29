@@ -1,7 +1,7 @@
 {# «Докачать для взводов» — фрагмент карточки игрока (подгружается fetch'ем из player_card.html). #}
 {% import "_game.html" as game %}
 {% macro unit_card(u, kind) %}
-    <div class="adv-card adv-{{ kind }}" data-phases="{% for p in u.phases %} {{ p.phase }}{% endfor %} ">
+    <div class="adv-card adv-{{ kind }}" data-phases="{% for p in u.phases if p.main %} {{ p.phase }}{% endfor %} ">
         <div class="adv-card-head">
             {{ game.portrait(u.base_id, "sm") }}
             <div class="adv-card-title">
@@ -15,7 +15,7 @@
         </div>
         <div class="adv-phases">
             {% for p in u.phases %}
-                <span class="adv-phase{{ ' adv-phase-short' if p.short }}" data-phase="{{ p.phase }}"
+                <span class="adv-phase{{ ' adv-phase-short' if p.short }}{{ ' adv-phase-extra' if not p.main }}" data-phase="{{ p.phase }}"
                       title="{{ p.planets|join(', ') }}: нужно {{ p.demand }}, в гильдии могут {{ p.have }}{% if not p.short %}, свободных сверх нужного {{ p.spare }}{% endif %}">
                     <b>Э{{ p.phase }}</b> {{ "7★" if u.is_ship else "R" ~ p.need }}
                     · {% if p.short %}не хватает {{ p.short }} из {{ p.demand }}{% else %}запас {{ p.spare }}{% endif %}
@@ -38,10 +38,11 @@
             </button>
         {% endfor %}
     </div>
-    {% if data.by_phase %}
+    {% if data.phases %}
         <p class="tb-adv-phases">Этап:
             <button type="button" class="pill-tab active" data-adv-phase="">все</button>
-            {% for ph, n in data.by_phase %}<button type="button" class="pill-tab" data-adv-phase="{{ ph }}">Э{{ ph }} · {{ n }}</button>{% endfor %}
+            {% for ph in data.phases %}<button type="button" class="pill-tab" data-adv-phase="{{ ph }}"
+                {% for key, _l, _h in tabs %} data-n-{{ key }}="{{ data.phase_counts[key][ph] or 0 }}"{% endfor %}>Э{{ ph }} · <span class="adv-n">{{ data.phase_counts["upgrade"][ph] or 0 }}</span></button>{% endfor %}
         </p>
     {% endif %}
     {% for key, _label, _hint in tabs %}

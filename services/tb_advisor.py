@@ -104,9 +104,9 @@ def _level_text(unit: dict, is_ship: bool) -> str:
 
 
 def build(guild_id: int, ally_code: str, roster: dict) -> dict:
-    """{members, short_total, by_phase: [(этап, юнитов)], upgrade: [...], unlock: [...], tight: [...]}. Элемент —
-    {base_id, name, is_ship, now, target, relics, cost, phases: [{phase, need, planets, demand,
-    have, short, bonus}]}. В «докачать/открыть» — юниты, где гильдии не хватает копий и игрок
+    """{members, short_total, phases, phase_counts: {вкладка: {этап: юнитов}}, upgrade: [...], unlock: [...],
+    tight: [...]}. Элемент — {base_id, name, is_ship, now, target, relics, cost, phases: [{phase, need,
+    planets, demand, have, short, bonus, main}]}; main=False — этап «впритык» у юнита из «докачать/открыть». В «докачать/открыть» — юниты, где гильдии не хватает копий и игрок
     ещё не подходит; в «впритык» — где хватает с запасом ≤ TIGHT_SPARE и игрок не подходит."""
     demand, types = _demand()
     guild = _guild_levels(guild_id, demand, types)
@@ -141,15 +141,19 @@ def build(guild_id: int, ally_code: str, roster: dict) -> dict:
             elif spare <= TIGHT_SPARE:
                 row["spare"] = spare
                 tight_rows.append(row)
-        rows = short_rows or tight_rows
-        if not rows:
+        if not short_rows and not tight_rows:
             continue
-        target = min(r["need"] for r in rows)
+        # в карточке — все этапы юнита (нехватка и впритык), цель и вкладка — по нехватке, если она есть
+        main_rows = short_rows or tight_rows
+        rows = sorted(short_rows + tight_rows, key=lambda r: r["phase"])
+        for r in rows:
+            r["main"] = r in main_rows
+        target = min(r["need"] for r in main_rows)
         item = {"base_id": bid, "name": names.get(bid, bid), "is_ship": is_ship, "phases": rows,
-                "only_bonus": all(r["bonus"] for r in rows),
+                "only_bonus": all(r["bonus"] for r in main_rows),
                 "short": sum(r["short"] for r in rows),
                 "target": f"{SHIP_MIN_STARS}★" if is_ship else f"R{target}",
-                "closes": sum(1 for r in rows if r["need"] <= target)}
+                "closes": sum(1 for r in main_rows if r["need"] <= target)}
         # cost — для сортировки: реликвий до цели (без реликвии — ещё +1 за гир), не открыт — в конец
         item["cost"] = 99
         if unit is not None:
@@ -164,9 +168,12 @@ def build(guild_id: int, ally_code: str, roster: dict) -> dict:
         else:
             upgrade.append(item)
     # сверху — ближе всего докачать, потом ранние этапы (их гильдия проходит каждую ВИ)
-    key = lambda x: (x["only_bonus"], x["cost"], min(r["phase"] for r in x["phases"]), -x["short"], x["name"].lower())
+    key = lambda x: (x["only_bonus"], x["cost"], min(r["phase"] for r in x["phases"] if r["main"]), -x["short"], x["name"].lower())
     for lst in (upgrade, unlock, tight):
         lst.sort(key=key)
-    by_phase = Counter(r["phase"] for x in upgrade + unlock for r in x["phases"])
-    return {"members": len(guild), "short_total": len(short_units), "by_phase": sorted(by_phase.items()),
+    # сколько юнитов на каждом этапе — отдельно для каждой вкладки (кнопки этапов показывают счёт открытой)
+    phase_counts = {kind: Counter(r["phase"] for x in lst for r in x["phases"] if r["main"])
+                    for kind, lst in (("upgrade", upgrade), ("unlock", unlock), ("tight", tight))}
+    phases = sorted(set().union(*phase_counts.values()))
+    return {"members": len(guild), "short_total": len(short_units), "phases": phases, "phase_counts": phase_counts,
             "upgrade": upgrade, "unlock": unlock, "tight": tight}
