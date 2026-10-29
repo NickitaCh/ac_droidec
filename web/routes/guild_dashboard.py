@@ -29,6 +29,7 @@ from services import activity_diff, channel_health, dashboard_data, discord_rest
 from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_store, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
 from tg_bot import outbox as tg_outbox
+from tg_bot import store as tg_store
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
 import services.stat_forecast as stat_forecast
 from web.deps import own_accounts, require_guild_access, require_member_access
@@ -3298,8 +3299,29 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
     tg_channel_options = await _channel_options("")
     channel_names = {o["id"]: o["label"] for o in tg_channel_options}
     tg_topics = tg_outbox.guild_topics(user["guild_id"])
+    tg_destinations = tg_outbox.destinations(user["guild_id"])
+    tg_routes = tg_outbox.guild_routes(user["guild_id"])
+    tg_activities = []
+    for kind, info in tg_outbox.KIND_INFO.items():
+        route = tg_routes.get(kind)
+        value = f"{route['chat_id']}:{route['thread_id'] or ''}" if route and route["bound"] else ""
+        discord_id = str(guild_cfg.get(info["discord"]) or "")
+        tg_activities.append({
+            "kind": kind, "label": info["label"], "officer": info.get("officer", False),
+            "forwarded": info.get("forwarded", False),
+            "discord": (channel_names.get(discord_id) or f"канал {discord_id}") if discord_id else None,
+            "dest": value, "enabled": bool(route and route["enabled"] and route["bound"]),
+            # маршрут в ветку без метки (/notify прямо в ветке) — в списке мест его нет
+            "dest_extra": value and not any(d["value"] == value for d in tg_destinations),
+        })
     tg_settings = {
         "enabled": feature_flags.is_enabled(user["guild_id"], "tg_relay_auto"),
+        "chats": [
+            {**c, "topics": [t for t in tg_topics if t["chat_id"] == c["chat_id"]]}
+            for c in tg_store.guild_chats(user["guild_id"])
+        ],
+        "destinations": tg_destinations,
+        "activities": tg_activities,
         "topics": [{**t, "place": tg_outbox.topic_place(t)} for t in tg_topics],
         "mirrors": [
             {**m, "channel_name": channel_names.get(m["discord_channel_id"]) or f"канал {m['discord_channel_id']}",
@@ -3318,11 +3340,13 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
         "tabs": tabs + ["Telegram"],
         "error": request.query_params.get("error"),
         "saved": request.query_params.get("saved"),
+        "tg_error": request.query_params.get("tg_error"),
+        "tg_saved": request.query_params.get("tg_saved"),
     })
 
 
 def _tg_settings_back(error: str | None = None) -> RedirectResponse:
-    query = f"?{urlencode({'error': error})}" if error else "?saved=1"
+    query = f"?{urlencode({'tg_error': error})}" if error else "?tg_saved=1"
     return RedirectResponse(f"/settings{query}#Telegram", status_code=303)
 
 
@@ -3354,6 +3378,30 @@ async def tg_relay_pause(relay_id: int, enabled: str = Form(default=""), user: d
 @router.post("/settings/tg/mirror/{relay_id}/delete")
 async def tg_relay_delete(relay_id: int, user: dict = Depends(require_guild_access)):
     tg_outbox.remove_relay_channel(user["guild_id"], relay_id)
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/route")
+async def tg_route_save(kind: str = Form(...), dest: str = Form(default=""), enabled: str = Form(default=""),
+                        user: dict = Depends(require_guild_access)):
+    """Куда в Telegram уходит вид оповещений и уходит ли вообще (строка таблицы «Оповещения»)."""
+    if kind not in tg_outbox.KIND_INFO:
+        return _tg_settings_back("Неизвестное оповещение.")
+    allowed = {d["value"] for d in tg_outbox.destinations(user["guild_id"])}
+    current = tg_outbox.guild_routes(user["guild_id"]).get(kind)
+    if current:  # ветка, заданная /notify без метки, тоже допустима — она уже стоит
+        allowed.add(f"{current['chat_id']}:{current['thread_id'] or ''}")
+    if dest not in allowed:
+        return _tg_settings_back("Выберите группу или ветку Telegram — сначала привяжите группу командой /bind.")
+    chat_id, thread_id = tg_outbox.parse_destination(dest)
+    tg_outbox.set_route(user["guild_id"], kind, chat_id, thread_id, bool(enabled), str(user["discord_id"]))
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/chat/{chat_id}/unbind")
+async def tg_chat_unbind(chat_id: int, user: dict = Depends(require_guild_access)):
+    if tg_store.chat_guild(chat_id) == user["guild_id"]:
+        tg_store.unbind_chat(chat_id)
     return _tg_settings_back()
 
 

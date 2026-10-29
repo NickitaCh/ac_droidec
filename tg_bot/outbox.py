@@ -23,13 +23,23 @@ import time
 
 import database
 
-# Виды оповещений гильдии, которые можно включить для чата (/notify).
-KINDS = {
-    "raid_tickets": "Энка — напоминания до сброса и итог дня",
-    "tasks": "Задачи — новые, напоминания о сроке, итоги",
-    "omicrons": "Выданные омикроны",
-    "tb_order": "Ордер ВИ — этап (автопост в 20:00 и отправка с сайта)",
+# Виды оповещений гильдии. Куда уходит каждый — маршрут гильдии (tg_routes: один чат или
+# ветка на вид, можно в другую группу — например, офицерскую), задаётся на сайте
+# (/settings → Telegram) или /notify прямо в нужном чате/ветке.
+# discord — поле guilds с каналом, куда то же уходит в Discord (сайт показывает его рядом);
+# forwarded — в Telegram уходит копия поста бота в Discord (cogs/tg_relay.py::forward_sent),
+# без канала Discord не уйдёт и в Telegram; officer — для офицеров (сайт помечает).
+KIND_INFO = {
+    "raid_tickets": {"label": "Энка — напоминания до сброса и итог дня", "discord": "raid_tickets_channel_id"},
+    "tasks": {"label": "Задачи — новые, напоминания о сроке, итоги", "discord": "tasks_log_channel_id"},
+    "omicrons": {"label": "Выданные омикроны", "discord": "omicron_channel_id"},
+    "tb_order": {"label": "Ордер ВИ — этап (автопост в 20:00 и отправка с сайта)", "discord": "tb_plan_channel_id"},
+    "tb_ping": {"label": "Тег на ротацию/взводы ВИ", "discord": "ping_channel_id", "forwarded": True},
+    "birthdays": {"label": "Поздравления с днём рождения", "discord": "birthday_channel_id", "forwarded": True},
+    "tb_report": {"label": "Автоотчёт ВИ и «кто что не сделал»", "discord": "officer_channel_id",
+                  "forwarded": True, "officer": True},
 }
+KINDS = {kind: info["label"] for kind, info in KIND_INFO.items()}
 
 
 def _connect():
@@ -101,30 +111,115 @@ def ensure_tables(cursor):
             UNIQUE (guild_id, discord_channel_id, label)
         )
     """)
+    # Куда уходит каждый вид оповещений гильдии: один чат (thread_id NULL — общий) или ветка.
+    # enabled = 0 — место запомнено, но в Telegram не шлём (галочка на сайте снята).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tg_routes (
+            guild_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            chat_id INTEGER NOT NULL,
+            thread_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            set_by TEXT,
+            set_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, kind)
+        )
+    """)
+    # Разовый перенос со старой схемы (tg_chats.kinds — виды, включённые /notify в чате).
+    for chat_id, guild_id, kinds in cursor.execute(
+            "SELECT chat_id, guild_id, kinds FROM tg_chats WHERE kinds != ''").fetchall():
+        for kind in kinds.split(","):
+            cursor.execute(
+                "INSERT OR IGNORE INTO tg_routes (guild_id, kind, chat_id, thread_id, enabled, set_by, set_at)"
+                " VALUES (?, ?, ?, NULL, 1, 'notify', datetime('now'))", (guild_id, kind, chat_id))
+        cursor.execute("UPDATE tg_chats SET kinds = '' WHERE chat_id = ?", (chat_id,))
 
 
-def chats_for(guild_id: int, kind: str) -> list[int]:
+def guild_routes(guild_id: int) -> dict[str, dict]:
+    """{kind: {chat_id, thread_id, enabled, bound}} — bound: чат всё ещё привязан к гильдии."""
     conn = _connect()
-    rows = conn.execute("SELECT chat_id, kinds FROM tg_chats WHERE guild_id = ?", (int(guild_id),)).fetchall()
+    rows = conn.execute(
+        """SELECT r.kind, r.chat_id, r.thread_id, r.enabled, c.chat_id IS NOT NULL FROM tg_routes r
+           LEFT JOIN tg_chats c ON c.chat_id = r.chat_id AND c.guild_id = r.guild_id
+           WHERE r.guild_id = ?""",
+        (int(guild_id),),
+    ).fetchall()
     conn.close()
-    return [chat_id for chat_id, kinds in rows if kind in (kinds or "").split(",")]
+    return {r[0]: {"chat_id": r[1], "thread_id": r[2], "enabled": bool(r[3]), "bound": bool(r[4])} for r in rows}
+
+
+def set_route(guild_id: int, kind: str, chat_id: int, thread_id: int | None, enabled: bool, set_by: str):
+    conn = _connect()
+    conn.execute(
+        """INSERT INTO tg_routes (guild_id, kind, chat_id, thread_id, enabled, set_by, set_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(guild_id, kind) DO UPDATE SET chat_id = excluded.chat_id, thread_id = excluded.thread_id,
+               enabled = excluded.enabled, set_by = excluded.set_by, set_at = excluded.set_at""",
+        (int(guild_id), kind, int(chat_id), thread_id, int(bool(enabled)), set_by),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_route_enabled(guild_id: int, kind: str, enabled: bool):
+    conn = _connect()
+    conn.execute("UPDATE tg_routes SET enabled = ? WHERE guild_id = ? AND kind = ?",
+                 (int(bool(enabled)), int(guild_id), kind))
+    conn.commit()
+    conn.close()
+
+
+def chats_for(guild_id: int, kind: str) -> list[tuple[int, int | None]]:
+    """Куда слать вид оповещений: [(chat_id, thread_id)] — пусто, если выключен или чат отвязан."""
+    route = guild_routes(guild_id).get(kind)
+    if not route or not route["enabled"] or not route["bound"]:
+        return []
+    return [(route["chat_id"], route["thread_id"])]
 
 
 def guild_wants(guild_id: int, kind: str) -> bool:
     return bool(chats_for(guild_id, kind))
 
 
-def enqueue_guild(guild_id: int, kind: str, text: str) -> bool:
+def enqueue_guild(guild_id: int, kind: str, text: str, attachments: list[dict] | None = None) -> bool:
     if not guild_wants(guild_id, kind):
         return False
     conn = _connect()
     conn.execute(
-        "INSERT INTO tg_outbox (guild_id, kind, text, created_at) VALUES (?, ?, ?, ?)",
-        (int(guild_id), kind, text, time.time()),
+        "INSERT INTO tg_outbox (guild_id, kind, text, created_at, attachments) VALUES (?, ?, ?, ?, ?)",
+        (int(guild_id), kind, text, time.time(),
+         json.dumps(attachments, ensure_ascii=False) if attachments else None),
     )
     conn.commit()
     conn.close()
     return True
+
+
+def destinations(guild_id: int) -> list[dict]:
+    """Места, куда можно направить оповещение: общий чат каждой привязанной группы + ветки с
+    метками (/topic). {value: "chat_id:thread_id", chat_id, thread_id, label}."""
+    conn = _connect()
+    chats = conn.execute("SELECT chat_id, title FROM tg_chats WHERE guild_id = ? ORDER BY bound_at",
+                         (int(guild_id),)).fetchall()
+    conn.close()
+    topics = guild_topics(guild_id)
+    out = []
+    for chat_id, title in chats:
+        title = title or "чат"
+        out.append({"value": f"{chat_id}:", "chat_id": chat_id, "thread_id": None, "label": f"{title} — общий чат"})
+        for t in topics:
+            if t["chat_id"] == chat_id and t["thread_id"]:
+                out.append({"value": f"{chat_id}:{t['thread_id']}", "chat_id": chat_id, "thread_id": t["thread_id"],
+                            "label": f"{title} / {t['topic_title'] or 'ветка'} (метка {t['label']})"})
+    return out
+
+
+def parse_destination(value: str) -> tuple[int, int | None] | None:
+    chat, _, thread = (value or "").partition(":")
+    try:
+        return int(chat), (int(thread) if thread else None)
+    except ValueError:
+        return None
 
 
 def can_dm(owner_id: str) -> bool:
@@ -195,18 +290,10 @@ def mark_sent(item_id: int, error: str | None = None):
     conn.close()
 
 
-def chat_kinds(chat_id: int) -> set[str]:
-    conn = _connect()
-    row = conn.execute("SELECT kinds FROM tg_chats WHERE chat_id = ?", (int(chat_id),)).fetchone()
-    conn.close()
-    return set((row[0] or "").split(",")) - {""} if row else set()
-
-
-def set_chat_kinds(chat_id: int, kinds: set[str]):
-    conn = _connect()
-    conn.execute("UPDATE tg_chats SET kinds = ? WHERE chat_id = ?", (",".join(sorted(kinds)), int(chat_id)))
-    conn.commit()
-    conn.close()
+def route_here(route: dict | None, chat_id: int, thread_id: int | None) -> bool:
+    """Включён ли вид оповещений именно в этот чат/ветку (для /notify)."""
+    return bool(route and route["enabled"] and route["chat_id"] == chat_id
+                and (route["thread_id"] or None) == (thread_id or None))
 
 
 # ---- метки веток и пересылка (/topic, /тг, зеркала каналов) ----

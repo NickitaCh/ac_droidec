@@ -71,6 +71,10 @@ async def _deliver_relay(app: App, item: dict) -> str | None:
     chat_id, thread_id = item["chat_id"], item["thread_id"]
     if store.chat_guild(chat_id) != item["guild_id"]:
         return f"{chat_id}: чат больше не привязан к гильдии"
+    return await _send_to(app, chat_id, thread_id, item)
+
+
+async def _send_to(app: App, chat_id: int, thread_id, item: dict) -> str | None:
     try:
         for chunk in render(item["text"]) if item["text"].strip() else []:
             await app.api.send_message(chat_id, chunk, thread_id=thread_id)
@@ -89,17 +93,14 @@ async def _deliver(app: App, item: dict) -> str | None:
     if item["kind"] == "relay":
         return await _deliver_relay(app, item)
     if item["kind"] == "dm":
-        targets = [u["tg_user_id"] for u in store.tg_users_for_owner(item["owner_id"]) if u["dm_open"]]
+        targets = [(u["tg_user_id"], None) for u in store.tg_users_for_owner(item["owner_id"]) if u["dm_open"]]
     else:
-        targets = outbox.chats_for(item["guild_id"], item["kind"])
+        targets = outbox.chats_for(item["guild_id"], item["kind"])  # маршрут вида: чат или ветка
     errors = []
-    for chat_id in targets:
-        for chunk in render(item["text"]):
-            try:
-                await app.api.send_message(chat_id, chunk)
-            except TelegramError as e:
-                errors.append(f"{chat_id}: {e.description}")
-                break
+    for chat_id, thread_id in targets:
+        error = await _send_to(app, chat_id, thread_id, item)
+        if error:
+            errors.append(error)
     return "; ".join(errors) or None
 
 
@@ -121,11 +122,19 @@ async def run_notifier(app: App):
 
 # ---------------------------------------------------------------- /notify
 
-def _notify_view(chat_id: int) -> tuple[str, list]:
-    enabled = outbox.chat_kinds(chat_id)
-    lines = ["<b>Оповещения гильдии в этот чат</b>", "Нажмите, чтобы включить или выключить:"]
-    keyboard = [[{"text": f"{'✅' if kind in enabled else '▫️'} {label}", "callback_data": f"nt|{kind}"}]
-                for kind, label in outbox.KINDS.items()]
+def _notify_view(ctx: Ctx) -> tuple[str, list]:
+    """✅ — вид идёт сюда, ↪ — включён, но в другой чат/ветку (нажатие перенесёт сюда)."""
+    routes = outbox.guild_routes(store.chat_guild(ctx.chat_id))
+    where = "эту ветку" if ctx.thread_id else "этот чат"
+    lines = [f"<b>Оповещения гильдии в {where}</b>",
+             "Нажмите, чтобы включить или выключить. ↪ — сейчас идёт в другое место, нажатие перенесёт сюда. "
+             "Всё то же — на сайте: Настройки → Telegram."]
+    keyboard = []
+    for kind, label in outbox.KINDS.items():
+        route = routes.get(kind)
+        mark = "✅" if outbox.route_here(route, ctx.chat_id, ctx.thread_id) else \
+            "↪" if route and route["enabled"] and route["bound"] else "▫️"
+        keyboard.append([{"text": f"{mark} {label}", "callback_data": f"nt|{kind}"}])
     return "\n".join(lines), keyboard
 
 
@@ -144,7 +153,7 @@ async def cmd_notify(ctx: Ctx):
     if denial:
         await ctx.reply(denial)
         return
-    text, keyboard = _notify_view(ctx.chat_id)
+    text, keyboard = _notify_view(ctx)
     await ctx.reply(text, keyboard=keyboard)
 
 
@@ -156,10 +165,13 @@ async def cb_notify(ctx: Ctx, kind: str):
         return
     if kind not in outbox.KINDS:
         return
-    kinds = outbox.chat_kinds(ctx.chat_id)
-    kinds ^= {kind}
-    outbox.set_chat_kinds(ctx.chat_id, kinds)
-    text, keyboard = _notify_view(ctx.chat_id)
+    guild_id = store.chat_guild(ctx.chat_id)
+    route = outbox.guild_routes(guild_id).get(kind)
+    if outbox.route_here(route, ctx.chat_id, ctx.thread_id):
+        outbox.set_route_enabled(guild_id, kind, False)
+    else:
+        outbox.set_route(guild_id, kind, ctx.chat_id, ctx.thread_id, True, ctx.owner_id)
+    text, keyboard = _notify_view(ctx)
     await ctx.edit(text, keyboard=keyboard)
 
 

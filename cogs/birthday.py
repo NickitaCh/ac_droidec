@@ -3,6 +3,7 @@ from disnake.ext import commands, tasks
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import database
+from cogs import tg_relay
 import guild_resolver
 from services import feature_flags
 from services.config_status import config_warning_text
@@ -123,7 +124,8 @@ class Birthday(commands.Cog):
 
             # Отправляем поздравление
             try:
-                await channel.send(f"### 🎉 {member.mention} сегодня отмечает день рождения!")
+                sent = await channel.send(f"### 🎉 {member.mention} сегодня отмечает день рождения!")
+                await tg_relay.forward_sent(sent, gid, "birthdays")
                 print(f"✅ [Birthday] [{gname}] Поздравление для {member.display_name}")
                 # Запоминаем, что сегодня уже поздравляли
                 self.last_congratulated[key] = today

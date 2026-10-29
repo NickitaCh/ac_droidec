@@ -108,6 +108,21 @@ def relay_payload(message: disnake.Message, guild_id: int) -> tuple[str, list[di
     return text, attachments
 
 
+async def forward_sent(message: disnake.Message | None, guild_id: int, kind: str) -> None:
+    """Пост бота в Discord — той же копией в Telegram, если у гильдии включён этот вид
+    оповещений (маршрут tg_routes, /settings → Telegram). Теги — как у зеркал (relay_payload).
+    Ошибка не мешает посту в Discord."""
+    if message is None:
+        return
+    try:
+        if not await asyncio.to_thread(outbox.guild_wants, guild_id, kind):
+            return
+        text, attachments = await asyncio.to_thread(relay_payload, message, guild_id)
+        await asyncio.to_thread(outbox.enqueue_guild, guild_id, kind, text, attachments)
+    except Exception as e:
+        print(f"⚠️ [TG] guild {guild_id} {kind}: {e!r}")
+
+
 async def autocomplete_topics(inter: disnake.ApplicationCommandInteraction, current: str):
     guild_id = guild_resolver.autocomplete_guild_id(inter)
     if guild_id is None:

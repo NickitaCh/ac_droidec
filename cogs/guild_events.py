@@ -574,14 +574,17 @@ class GuildEvents(commands.Cog):
             except Exception as e:
                 print(f"Ошибка подсчёта наград за спецмиссии: {e}")
                 covert = ""
-            await self.send_as_file(channel, report, "tb_report.txt", message=covert or None)
+            sent = await self.send_as_file(channel, report, "tb_report.txt", message=covert or None)
+            from cogs import tg_relay
+            await tg_relay.forward_sent(sent, gid, "tb_report")
             # «Кто что не сделал» — галочка в настройках ВИ (services/tb_misses.py), не нарушения.
             if event_id and feature_flags.is_enabled(gid, "tb_misses_report"):
                 try:
                     from services import raid_tickets, tb_misses
                     lines = tb_misses.build(gid, event_id, player_names)
                     for text in raid_tickets.chunk(lines):
-                        await channel.send(text, allowed_mentions=disnake.AllowedMentions.none())
+                        sent = await channel.send(text, allowed_mentions=disnake.AllowedMentions.none())
+                        await tg_relay.forward_sent(sent, gid, "tb_report")
                 except Exception as e:
                     print(f"Ошибка списка «кто что не сделал» по ТБ: {e!r}")
 
@@ -776,7 +779,7 @@ class GuildEvents(commands.Cog):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
             f.write(content)
             f.flush()
-            await channel.send(content=message, file=disnake.File(f.name, filename=filename))
+            return await channel.send(content=message, file=disnake.File(f.name, filename=filename))
 
     # ------------------ Детальная статистика игрока (расшифровка по фазам/планетам) ------------------
     def _decode_tb_stats(self, tb_result, member_id):

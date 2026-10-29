@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import database
+from cogs import tg_relay
 from services import feature_flags, tb_schedule
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -82,7 +83,8 @@ class RotationPing(commands.Cog):
                     continue
 
                 try:
-                    await channel.send(f"{role.mention} {text}")
+                    sent = await channel.send(f"{role.mention} {text}")
+                    await tg_relay.forward_sent(sent, gid, "tb_ping")
                     print(f"✅ [RotationPing] [{gname}] Тег '{text}' отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
                     self.last_sent_minutes[key] = current_minute_key
                 except Exception as e:

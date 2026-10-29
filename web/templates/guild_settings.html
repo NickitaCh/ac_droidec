@@ -134,39 +134,87 @@
         <button type="submit">Сохранить</button>
     </form>
 
-    <div class="panel settings-group" data-tab="Telegram">
-        <h3 style="margin-top: 0;">Telegram — копии из Discord{% call ui.help() %}Ветки Telegram-группы гильдии, куда бот кладёт копии сообщений Discord. Метку ветке даёт офицер в самом Telegram: группа привязана к гильдии (<code>/bind</code>), в нужной ветке пишете <code>/topic вг</code>. Дальше — либо командой <code>/тг канал: вг сообщение: ссылка</code> в Discord (одно сообщение, тумблер ниже на неё не влияет), либо зеркалом: всё, что пишут в выбранном Discord-канале, уходит копией в ветку вместе с картинками и файлами. Сообщения самого бота не зеркалятся, правки и удаления в Telegram не переносятся. Игроки с привязанным Telegram упоминаются там, остальные — по имени.{% endcall %}</h3>
+    <div class="panel settings-group tg-settings" data-tab="Telegram" id="tg-root">
+        <h3 style="margin-top: 0;">Telegram{% call ui.help() %}Бот дублирует оповещения гильдии и сообщения Discord в группы Telegram. Группу привязывает офицер: добавить в неё бота{% if telegram_bot_username() %} (@{{ telegram_bot_username() }}){% endif %} и написать там <code>/bind</code>. Групп может быть несколько — например, офицерские оповещения в отдельный офицерский чат, чтобы их не видели все. Чтобы слать в конкретную ветку группы, напишите в ней <code>/topic метка</code> (например, <code>/topic энка</code>) — ветка появится в списках ниже. Игроки с Telegram в копиях упоминаются там, остальные — ником Discord.{% endcall %}</h3>
+        {% if tg_error %}<p class="error">{{ tg_error }}</p>{% endif %}
+        {% if tg_saved %}<p class="tg-saved"><span class="badge badge-ok">Сохранено</span></p>{% endif %}
 
-        <h4>Ветки в Telegram</h4>
-        {% if tg.topics %}
+        <h4>Группы</h4>
+        {% if tg.chats %}
             <table class="data cards-on-phone">
-                <thead><tr><th>Метка</th><th>Где</th><th></th></tr></thead>
+                <thead><tr><th>Группа</th><th>Ветки с метками</th><th></th></tr></thead>
                 <tbody>
-                    {% for t in tg.topics %}
+                    {% for c in tg.chats %}
                         <tr>
-                            <td data-label="Метка"><b>{{ t.label }}</b></td>
-                            <td data-label="Где">{{ t.place }}</td>
+                            <td data-label="Группа"><b>{{ c.title or "чат" }}</b></td>
+                            <td data-label="Ветки">
+                                <div>
+                                {% for t in c.topics %}
+                                    <form method="post" action="/settings/tg/topic/delete" class="tg-inline">
+                                        <input type="hidden" name="label" value="{{ t.label }}">
+                                        <span class="badge">{{ t.label }}{% if t.thread_id and t.topic_title %} · {{ t.topic_title }}{% elif not t.thread_id %} · общий чат{% endif %}</span>
+                                        <button type="submit" class="button-secondary tg-x" title="Убрать метку">✕</button>
+                                    </form>
+                                {% else %}
+                                    <span class="muted">нет — /topic метка в нужной ветке</span>
+                                {% endfor %}
+                                </div>
+                            </td>
                             <td data-label="">
-                                <form method="post" action="/settings/tg/topic/delete" style="max-width: none;">
-                                    <input type="hidden" name="label" value="{{ t.label }}">
-                                    <button type="submit" class="button-secondary">Убрать</button>
+                                <form method="post" action="/settings/tg/chat/{{ c.chat_id }}/unbind" class="tg-inline"
+                                      data-confirm="Отвязать группу «{{ c.title or 'чат' }}» от гильдии? Оповещения туда перестанут уходить.">
+                                    <button type="submit" class="button-secondary">Отвязать</button>
                                 </form>
                             </td>
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            <p class="muted">Ещё группа (например, офицерская): добавьте в неё бота и напишите там <code>/bind</code>.</p>
         {% else %}
-            <p class="muted">Пока ни одной. Привяжите группу командой <code>/bind</code>{% if telegram_bot_username() %} в <a href="https://t.me/{{ telegram_bot_username() }}" target="_blank" rel="noopener">@{{ telegram_bot_username() }}</a>{% endif %} и напишите <code>/topic вг</code> в нужной ветке.</p>
+            <p class="muted">Ни одной группы. Добавьте бота{% if telegram_bot_username() %} <a href="https://t.me/{{ telegram_bot_username() }}" target="_blank" rel="noopener">@{{ telegram_bot_username() }}</a>{% endif %} в группу гильдии и напишите там <code>/bind</code>.</p>
         {% endif %}
 
-        <h4>Зеркала каналов</h4>
-        <form method="post" action="/settings/tg/toggle" style="max-width: none;">
+        <h4>Оповещения{% call ui.help() %}Что бот постит в Discord сам и куда то же слать в Telegram. Канал Discord меняется на вкладках выше. Строки с пометкой «копия поста» уходят в Telegram копией сообщения из Discord — если канал Discord не задан, в Telegram тоже ничего не уйдёт. Остальные уходят в Telegram и без канала Discord. То же можно включить командой <code>/notify</code> прямо в нужной ветке.{% endcall %}</h4>
+        <table class="data cards-on-phone tg-routes">
+            <thead><tr><th>Оповещение</th><th>Канал Discord</th><th>Куда в Telegram</th><th>В Telegram</th></tr></thead>
+            <tbody>
+                {% for a in tg.activities %}
+                    <tr>
+                        <td data-label="Оповещение">
+                            <div>{{ a.label }}{% if a.officer %} <span class="badge badge-warn">офицерское</span>{% endif %}</div>
+                        </td>
+                        <td data-label="Канал Discord">
+                            <div>{% if a.discord %}{{ a.discord }}{% else %}<span class="muted">не задан</span>{% endif %}{% if a.forwarded %} <span class="muted">· копия поста</span>{% endif %}</div>
+                        </td>
+                        <td data-label="Куда в Telegram" colspan="2">
+                            <form method="post" action="/settings/tg/route" class="tg-route-form">
+                                <input type="hidden" name="kind" value="{{ a.kind }}">
+                                <select name="dest" data-autosubmit {% if not tg.destinations and not a.dest_extra %}disabled{% endif %}>
+                                    {% if not a.dest %}<option value="">— выберите —</option>{% endif %}
+                                    {% if a.dest_extra %}<option value="{{ a.dest }}" selected>ветка без метки (задана /notify)</option>{% endif %}
+                                    {% for d in tg.destinations %}
+                                        <option value="{{ d.value }}" {% if d.value == a.dest %}selected{% endif %}>{{ d.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <label class="checkbox">
+                                    <input type="checkbox" name="enabled" value="1" data-autosubmit {% if a.enabled %}checked{% endif %} {% if not a.dest %}disabled title="Сначала выберите, куда слать"{% endif %}>
+                                    постить
+                                </label>
+                                {% if a.forwarded and a.enabled and not a.discord %}<span class="muted tg-note">канал Discord не задан — не уйдёт</span>{% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h4>Зеркала каналов{% call ui.help() %}Всё, что люди пишут в выбранном Discord-канале, уходит копией в ветку Telegram вместе с картинками и файлами. Сообщения самого бота не зеркалятся (для них — «Оповещения» выше), правки и удаления не переносятся. Одно сообщение можно отправить и вручную: <code>/тг канал: метка сообщение: ссылка</code> в Discord.{% endcall %}</h4>
+        <form method="post" action="/settings/tg/toggle" class="tg-inline">
             <label class="checkbox">
-                <input type="checkbox" name="enabled" value="1" {% if tg.enabled %}checked{% endif %} onchange="this.form.submit()">
+                <input type="checkbox" name="enabled" value="1" data-autosubmit {% if tg.enabled %}checked{% endif %}>
                 Зеркала включены
             </label>
-            <noscript><button type="submit">Сохранить</button></noscript>
         </form>
         {% if not tg.enabled %}<p class="muted">Выключено — зеркала ниже ничего не отправляют (настройки сохраняются).</p>{% endif %}
 
@@ -177,17 +225,17 @@
                     {% for m in tg.mirrors %}
                         <tr>
                             <td data-label="Discord-канал">{{ m.channel_name }}</td>
-                            <td data-label="Ветка Telegram">{{ m.label }}{% if not m.has_topic %} <span class="badge badge-warn">нет такой метки</span>{% endif %}</td>
+                            <td data-label="Ветка Telegram"><div>{{ m.label }}{% if not m.has_topic %} <span class="badge badge-warn">нет такой метки</span>{% endif %}</div></td>
                             <td data-label="Работает">
-                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/toggle" style="max-width: none;">
+                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/toggle" class="tg-inline">
                                     <label class="checkbox">
-                                        <input type="checkbox" name="enabled" value="1" {% if m.enabled %}checked{% endif %} onchange="this.form.submit()">
+                                        <input type="checkbox" name="enabled" value="1" data-autosubmit {% if m.enabled %}checked{% endif %}>
                                         {{ "да" if m.enabled else "пауза" }}
                                     </label>
                                 </form>
                             </td>
                             <td data-label="">
-                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/delete" style="max-width: none;">
+                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/delete" class="tg-inline">
                                     <button type="submit" class="button-secondary">Удалить</button>
                                 </form>
                             </td>
@@ -198,7 +246,7 @@
         {% endif %}
 
         {% if tg.topics %}
-            <form method="post" action="/settings/tg/mirror" class="tg-mirror-add" style="max-width: 32em;">
+            <form method="post" action="/settings/tg/mirror" class="tg-mirror-add">
                 <label>
                     Discord-канал
                     <select name="channel_id">
@@ -223,8 +271,41 @@
                 </label>
                 <button type="submit">Добавить зеркало</button>
             </form>
+        {% else %}
+            <p class="muted">Для зеркала нужна ветка с меткой: <code>/topic метка</code> в ней.</p>
         {% endif %}
     </div>
+    <script>
+    // Вкладка «Telegram» без перезагрузки: формы уходят fetch'ем, панель подменяется ответом
+    // (тот же /settings после редиректа). Любая ошибка — обычная отправка формы.
+    (() => {
+        const bind = (root) => {
+            root.addEventListener("change", (e) => {
+                if (e.target.matches("[data-autosubmit]")) e.target.form.requestSubmit();
+            });
+            root.addEventListener("submit", async (e) => {
+                const form = e.target;
+                if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) { e.preventDefault(); return; }
+                e.preventDefault();
+                root.classList.add("is-busy");
+                try {
+                    const resp = await fetch(form.action, { method: "POST", body: new FormData(form) });
+                    if (!resp.ok) throw new Error(resp.status);
+                    const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+                    const fresh = doc.getElementById("tg-root");
+                    if (!fresh) throw new Error("no root");
+                    root.innerHTML = fresh.innerHTML;
+                } catch (err) {
+                    form.submit();
+                } finally {
+                    root.classList.remove("is-busy");
+                }
+            });
+        };
+        const root = document.getElementById("tg-root");
+        if (root) bind(root);
+    })();
+    </script>
     <script>
     // Вкладки: форма одна (сохраняются все вкладки разом), видна только группа выбранной.
     // Вкладка живёт в #хэше — переживает сохранение (редирект сохраняет фрагмент адреса).
