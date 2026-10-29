@@ -3339,6 +3339,7 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             for c in tg_store.guild_chats(user["guild_id"])
         ],
         "destinations": tg_destinations,
+        "directions": tg_outbox.DIRECTIONS,
         "activities": tg_activities,
         "topics": [{**t, "place": tg_outbox.topic_place(t)} for t in tg_topics],
         "mirrors": [
@@ -3376,20 +3377,27 @@ async def tg_relay_toggle(enabled: str = Form(default=""), user: dict = Depends(
 
 @router.post("/settings/tg/mirror")
 async def tg_relay_add(channel_id: str = Form(default=""), channel_manual: str = Form(default=""),
-                       label: str = Form(default=""), user: dict = Depends(require_guild_access)):
+                       label: str = Form(default=""), direction: str = Form(default="both"),
+                       user: dict = Depends(require_guild_access)):
     channel_id = (channel_manual or channel_id).strip()
     label = tg_outbox.normalize_label(label)
     if not channel_id.isdigit():
         return _tg_settings_back("Выберите Discord-канал (или впишите его ID цифрами).")
     if not label:
         return _tg_settings_back("Выберите ветку Telegram.")
-    tg_outbox.add_relay_channel(user["guild_id"], channel_id, label, str(user["discord_id"]))
+    tg_outbox.add_relay_channel(user["guild_id"], channel_id, label, str(user["discord_id"]), direction)
     return _tg_settings_back()
 
 
 @router.post("/settings/tg/mirror/{relay_id}/toggle")
 async def tg_relay_pause(relay_id: int, enabled: str = Form(default=""), user: dict = Depends(require_guild_access)):
     tg_outbox.set_relay_enabled(user["guild_id"], relay_id, bool(enabled))
+    return _tg_settings_back()
+
+
+@router.post("/settings/tg/mirror/{relay_id}/direction")
+async def tg_relay_direction(relay_id: int, direction: str = Form(...), user: dict = Depends(require_guild_access)):
+    tg_outbox.set_relay_direction(user["guild_id"], relay_id, direction)
     return _tg_settings_back()
 
 

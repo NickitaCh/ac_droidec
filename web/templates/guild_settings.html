@@ -209,7 +209,7 @@
             </tbody>
         </table>
 
-        <h4>Зеркала каналов{% call ui.help() %}Всё, что люди пишут в выбранном Discord-канале, уходит копией в ветку Telegram вместе с картинками и файлами. Сообщения самого бота не зеркалятся (для них — «Оповещения» выше), правки и удаления не переносятся. Одно сообщение можно отправить и вручную: <code>/тг канал: метка сообщение: ссылка</code> в Discord.{% endcall %}</h4>
+        <h4>Зеркала каналов{% call ui.help() %}Всё, что люди пишут в выбранном Discord-канале, уходит копией в ветку Telegram вместе с картинками и файлами, и наоборот — из ветки в Discord (с подписью: имя и @ник в Telegram); направление можно ограничить одной стороной. Файлы из Telegram больше 10 МБ в Discord не влезают. Сообщения самого бота не зеркалятся (для них — «Оповещения» выше), правки и удаления не переносятся. Одно сообщение можно отправить и вручную: <code>/тг канал: метка сообщение: ссылка</code> в Discord.{% endcall %}</h4>
         <form method="post" action="/settings/tg/toggle" class="tg-inline">
             <label class="checkbox">
                 <input type="checkbox" name="enabled" value="1" data-autosubmit {% if tg.enabled %}checked{% endif %}>
@@ -220,12 +220,19 @@
 
         {% if tg.mirrors %}
             <table class="data cards-on-phone">
-                <thead><tr><th>Discord-канал</th><th>Ветка Telegram</th><th>Работает</th><th></th></tr></thead>
+                <thead><tr><th>Discord-канал</th><th>Ветка Telegram</th><th>Направление</th><th>Работает</th><th></th></tr></thead>
                 <tbody>
                     {% for m in tg.mirrors %}
                         <tr>
                             <td data-label="Discord-канал">{{ m.channel_name }}</td>
                             <td data-label="Ветка Telegram"><div>{{ m.label }}{% if not m.has_topic %} <span class="badge badge-warn">нет такой метки</span>{% endif %}</div></td>
+                            <td data-label="Направление">
+                                <form method="post" action="/settings/tg/mirror/{{ m.id }}/direction" class="tg-inline">
+                                    <select name="direction" data-autosubmit>
+                                        {% for key, label in tg.directions.items() %}<option value="{{ key }}" {% if key == m.direction %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                    </select>
+                                </form>
+                            </td>
                             <td data-label="Работает">
                                 <form method="post" action="/settings/tg/mirror/{{ m.id }}/toggle" class="tg-inline">
                                     <label class="checkbox">
@@ -267,6 +274,12 @@
                     Ветка Telegram
                     <select name="label">
                         {% for t in tg.topics %}<option value="{{ t.label }}">{{ t.label }} — {{ t.place }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Направление
+                    <select name="direction">
+                        {% for key, label in tg.directions.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
                     </select>
                 </label>
                 <button type="submit">Добавить зеркало</button>

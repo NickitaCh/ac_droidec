@@ -209,6 +209,8 @@ def _parse_command(text: str, bot_username: str) -> tuple[str, str] | None:
 
 # Инлайн-подсказки «@бот …» — регистрирует tg_bot/inline.py (там поиск и команды).
 INLINE_HANDLER: dict = {"handler": None}
+# Обычные (не команды) сообщения групп — зеркала Telegram → Discord, регистрирует tg_bot/relay_in.py.
+GROUP_MESSAGE_HANDLER: dict = {"handler": None}
 
 
 async def handle_update(app: App, update: dict):
@@ -234,6 +236,8 @@ async def _handle_message(app: App, message: dict):
         return
     parsed = _parse_command(message.get("text") or "", app.username)
     if parsed is None:
+        if message["chat"].get("type") in ("group", "supergroup") and GROUP_MESSAGE_HANDLER["handler"]:
+            await GROUP_MESSAGE_HANDLER["handler"](app, message)
         return
     name, args = parsed
     cmd = COMMANDS.get(name)

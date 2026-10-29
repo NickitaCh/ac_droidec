@@ -139,19 +139,19 @@ class TgRelayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         # {discord_channel_id: [(guild_id, label), ...]} — только включённые зеркала гильдий с
-        # включённым тумблером; правки с сайта подхватываются за минуту.
+        # включённым тумблером; правки с сайта подхватываются за 10 секунд.
         self.mirrors: dict[int, list[tuple[int, str]]] = {}
         self.refresh_mirrors.start()
 
     def cog_unload(self):
         self.refresh_mirrors.cancel()
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(seconds=10)  # новое зеркало с сайта начинает работать почти сразу
     async def refresh_mirrors(self):
         def load():
             mirrors, flags = {}, {}
             for row in outbox.relay_channels():
-                if not row["enabled"]:
+                if not row["enabled"] or row["direction"] not in outbox.TO_TG:
                     continue
                 gid = row["guild_id"]
                 if gid not in flags:

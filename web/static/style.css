@@ -3221,12 +3221,12 @@ dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 }
 
 /* /settings → Telegram */
-.tg-settings form.tg-inline { max-width: none; display: inline-flex; align-items: center; gap: 0.3em; margin: 0 0.4em 0.3em 0; }
+.tg-settings form.tg-inline { max-width: none; display: inline-flex; flex-direction: row; align-items: center; gap: 0.3em; margin: 0 0.4em 0.3em 0; }
 .tg-settings form.tg-inline .checkbox { margin: 0; }
 .tg-settings form.tg-inline .badge { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .tg-settings form.tg-inline { max-width: 100%; }
 .tg-settings .tg-x { padding: 0.1em 0.45em; line-height: 1.2; }
-.tg-settings form.tg-route-form { max-width: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.8em; margin: 0; }
+.tg-settings form.tg-route-form { max-width: none; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.4em 0.8em; margin: 0; }
 .tg-settings form.tg-route-form select { flex: 1 1 14em; min-width: 0; max-width: 100%; width: auto; }
 .tg-settings form.tg-route-form .checkbox { margin: 0; white-space: nowrap; }
 .tg-settings .tg-note { flex-basis: 100%; font-size: 0.9em; }

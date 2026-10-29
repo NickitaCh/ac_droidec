@@ -1,6 +1,7 @@
 """Discord REST от имени бота для веб-процесса (у веба нет шлюза disnake): отправка
 сообщения в канал и список текстовых каналов сервера. Токен — DISCORD_TOKEN из .env."""
 
+import json
 import os
 
 import httpx
@@ -38,6 +39,21 @@ async def send_message(channel_id: str, content: str, mention_user_ids: list[str
     payload = {"content": content, "allowed_mentions": {"parse": [], "users": list(mention_user_ids or [])[:100]}}
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(f"{DISCORD_API}/channels/{channel_id}/messages", headers=_headers(), json=payload)
+    from services import channel_health
+    if resp.status_code >= 400:
+        await channel_health.report_failure(channel_id, resp.status_code)
+        raise DiscordRestError(f"Discord ответил {resp.status_code}: {resp.text[:200]}")
+    channel_health.report_success(channel_id)
+
+
+async def send_message_files(channel_id: str, content: str, files: list[tuple[str, bytes]]) -> None:
+    """Сообщение с вложениями (multipart). Упоминания не срабатывают — это копия чужого текста."""
+    payload = {"content": content, "allowed_mentions": {"parse": []},
+               "attachments": [{"id": i, "filename": name} for i, (name, _data) in enumerate(files)]}
+    multipart = {f"files[{i}]": (name, data) for i, (name, data) in enumerate(files)}
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{DISCORD_API}/channels/{channel_id}/messages", headers=_headers(),
+                                 data={"payload_json": json.dumps(payload, ensure_ascii=False)}, files=multipart)
     from services import channel_health
     if resp.status_code >= 400:
         await channel_health.report_failure(channel_id, resp.status_code)

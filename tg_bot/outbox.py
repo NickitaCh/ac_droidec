@@ -111,6 +111,10 @@ def ensure_tables(cursor):
             UNIQUE (guild_id, discord_channel_id, label)
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE tg_relay_channels ADD COLUMN direction TEXT NOT NULL DEFAULT 'both'")
+    except sqlite3.OperationalError:
+        pass  # колонка уже есть
     # Куда уходит каждый вид оповещений гильдии: один чат (thread_id NULL — общий) или ветка.
     # enabled = 0 — место запомнено, но в Telegram не шлём (галочка на сайте снята).
     cursor.execute("""
@@ -414,28 +418,60 @@ def guild_owners(guild_id: int) -> list[str]:
     return [r[0] for r in rows]
 
 
+# Направление зеркала: в обе стороны (по умолчанию, просьба 2026-10-29) или только в одну.
+DIRECTIONS = {"both": "в обе стороны", "dc_tg": "Discord → Telegram", "tg_dc": "Telegram → Discord"}
+TO_TG, TO_DISCORD = ("both", "dc_tg"), ("both", "tg_dc")
+
+
 def relay_channels(guild_id: int | None = None) -> list[dict]:
     conn = _connect()
-    sql = "SELECT id, guild_id, discord_channel_id, label, enabled FROM tg_relay_channels"
+    sql = "SELECT id, guild_id, discord_channel_id, label, enabled, direction FROM tg_relay_channels"
     if guild_id is not None:
         rows = conn.execute(sql + " WHERE guild_id = ? ORDER BY id", (int(guild_id),)).fetchall()
     else:
         rows = conn.execute(sql + " ORDER BY id").fetchall()
     conn.close()
-    return [{"id": r[0], "guild_id": r[1], "discord_channel_id": r[2], "label": r[3], "enabled": bool(r[4])}
-            for r in rows]
+    return [{"id": r[0], "guild_id": r[1], "discord_channel_id": r[2], "label": r[3], "enabled": bool(r[4]),
+             "direction": r[5] if r[5] in DIRECTIONS else "both"} for r in rows]
 
 
-def add_relay_channel(guild_id: int, discord_channel_id: str, label: str, created_by: str):
+def add_relay_channel(guild_id: int, discord_channel_id: str, label: str, created_by: str, direction: str = "both"):
+    direction = direction if direction in DIRECTIONS else "both"
     conn = _connect()
     conn.execute(
-        """INSERT INTO tg_relay_channels (guild_id, discord_channel_id, label, enabled, created_by, created_at)
-           VALUES (?, ?, ?, 1, ?, datetime('now'))
-           ON CONFLICT(guild_id, discord_channel_id, label) DO UPDATE SET enabled = 1""",
-        (int(guild_id), str(discord_channel_id), label, created_by),
+        """INSERT INTO tg_relay_channels (guild_id, discord_channel_id, label, enabled, created_by, created_at, direction)
+           VALUES (?, ?, ?, 1, ?, datetime('now'), ?)
+           ON CONFLICT(guild_id, discord_channel_id, label) DO UPDATE SET enabled = 1, direction = excluded.direction""",
+        (int(guild_id), str(discord_channel_id), label, created_by, direction),
     )
     conn.commit()
     conn.close()
+
+
+def set_relay_direction(guild_id: int, relay_id: int, direction: str):
+    if direction not in DIRECTIONS:
+        return
+    conn = _connect()
+    conn.execute("UPDATE tg_relay_channels SET direction = ? WHERE id = ? AND guild_id = ?",
+                 (direction, int(relay_id), int(guild_id)))
+    conn.commit()
+    conn.close()
+
+
+def tg_mirrors_for(chat_id: int, thread_id: int | None) -> list[tuple[int, str]]:
+    """Куда в Discord копировать сообщение из этого чата/ветки Telegram: [(guild_id, discord_channel_id)]
+    — включённые зеркала «в обе стороны» / «Telegram → Discord», чья метка указывает сюда."""
+    conn = _connect()
+    rows = conn.execute(
+        """SELECT DISTINCT m.guild_id, m.discord_channel_id FROM tg_relay_channels m
+           JOIN tg_topics t ON t.guild_id = m.guild_id AND t.label = m.label
+           JOIN tg_chats c ON c.chat_id = t.chat_id AND c.guild_id = t.guild_id
+           WHERE m.enabled = 1 AND m.direction IN ('both', 'tg_dc')
+             AND t.chat_id = ? AND COALESCE(t.thread_id, 0) = COALESCE(?, 0)""",
+        (int(chat_id), thread_id),
+    ).fetchall()
+    conn.close()
+    return [(r[0], r[1]) for r in rows]
 
 
 def set_relay_enabled(guild_id: int, relay_id: int, enabled: bool):
