@@ -46,9 +46,10 @@ async def send_message(channel_id: str, content: str, mention_user_ids: list[str
     channel_health.report_success(channel_id)
 
 
-async def send_message_files(channel_id: str, content: str, files: list[tuple[str, bytes]]) -> None:
-    """Сообщение с вложениями (multipart). Упоминания не срабатывают — это копия чужого текста."""
-    payload = {"content": content, "allowed_mentions": {"parse": []},
+async def send_message_files(channel_id: str, content: str, files: list[tuple[str, bytes]],
+                             mention_user_ids: list[str] | None = None) -> None:
+    """Сообщение с вложениями (multipart). Срабатывают только упоминания из mention_user_ids."""
+    payload = {"content": content, "allowed_mentions": {"parse": [], "users": list(mention_user_ids or [])[:100]},
                "attachments": [{"id": i, "filename": name} for i, (name, _data) in enumerate(files)]}
     multipart = {f"files[{i}]": (name, data) for i, (name, data) in enumerate(files)}
     async with httpx.AsyncClient(timeout=120) as client:

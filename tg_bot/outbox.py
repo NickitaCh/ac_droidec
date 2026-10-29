@@ -403,6 +403,28 @@ def tg_owner_for(discord_id) -> str | None:
     return row[0] if row else None
 
 
+def discord_for_owner(owner_id) -> str | None:
+    """Обратное к tg_owner_for: Discord id игрока для тега в Discord. Привязавший Telegram и так
+    владелец с Discord id; у "tg:" ищем Discord-регистрацию с тем же кодом союзника."""
+    owner_id = str(owner_id or "")
+    if not owner_id:
+        return None
+    if not is_tg_owner(owner_id):
+        return owner_id
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT DISTINCT r2.discord_id FROM user_registration r1"
+            " JOIN user_registration r2 ON r2.ally_code = r1.ally_code"
+            " WHERE r1.discord_id = ? AND r2.discord_id NOT LIKE 'tg:%' LIMIT 1",
+            (owner_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    conn.close()
+    return row[0] if row else None
+
+
 def guild_owners(guild_id: int) -> list[str]:
     """Все зарегистрированные игроки гильдии (Discord id и "tg:<id>") — для @everyone/@here."""
     conn = _connect()

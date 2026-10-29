@@ -13,7 +13,7 @@ import asyncio
 import httpx
 
 from services import discord_rest, feature_flags
-from tg_bot import core, outbox
+from tg_bot import core, outbox, store
 
 FEATURE = "tg_relay_auto"
 DISCORD_LIMIT = 2000
@@ -55,6 +55,29 @@ async def _download(app, file_id: str) -> bytes:
     return resp.content
 
 
+def _discord_tags(message: dict, text: str) -> tuple[str, list[str]]:
+    """Теги Telegram → теги Discord: @ник (entity mention) или упоминание без ника (text_mention)
+    у игрока с Discord (привязка или регистрация на тот же код союзника) становится <@id>.
+    Смещения entities — в UTF-16, поэтому режем по UTF-16."""
+    entities = message.get("entities") or message.get("caption_entities") or []
+    raw = text.encode("utf-16-le")
+    ids = []
+    for ent in sorted(entities, key=lambda e: e["offset"], reverse=True):
+        if ent.get("type") not in ("mention", "text_mention"):
+            continue
+        start, end = ent["offset"] * 2, (ent["offset"] + ent["length"]) * 2
+        if ent["type"] == "mention":
+            found = store.find_by_username(raw[start:end].decode("utf-16-le"))
+            owner = found["owner_id"] if found else None
+        else:
+            owner = store.get_owner_id((ent.get("user") or {}).get("id") or 0)
+        discord_id = outbox.discord_for_owner(owner)
+        if discord_id:
+            raw = raw[:start] + f"<@{discord_id}>".encode("utf-16-le") + raw[end:]
+            ids.append(discord_id)
+    return raw.decode("utf-16-le"), ids
+
+
 def _chunks(text: str) -> list[str]:
     out = []
     while len(text) > DISCORD_LIMIT:
@@ -76,6 +99,7 @@ async def handle_group_message(app, message: dict):
     media = _media(message)
     if not text.strip() and not media:
         return  # служебное сообщение (вход в группу, закреп и т. п.)
+    text, mention_ids = await asyncio.to_thread(_discord_tags, message, text)
 
     files, skipped = [], []
     for file_id, name, size in media:
@@ -96,9 +120,9 @@ async def handle_group_message(app, message: dict):
             for i, chunk in enumerate(chunks):
                 last = i == len(chunks) - 1
                 if last and files:
-                    await discord_rest.send_message_files(channel_id, chunk, files)
+                    await discord_rest.send_message_files(channel_id, chunk, files, mention_ids)
                 else:
-                    await discord_rest.send_message(channel_id, chunk)
+                    await discord_rest.send_message(channel_id, chunk, mention_ids)
         except Exception as e:
             print(f"⚠️ [TG→Discord] guild {guild_id} → канал {channel_id}: {e!r}")
 
