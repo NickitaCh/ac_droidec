@@ -26,7 +26,7 @@ DEMO_GUILD_ID = 900
 REF_TABLES = (
     "game_units", "game_equipment", "game_equipment_locations", "game_scavenger_recipes",
     "journey_guide_requirements", "relic_promotion_recipe", "skill_tier_thresholds",
-    "unit_gear_tier_recipe", "unit_omicron_skills", "omicron_phrases", "datacron_ability_shorts",
+    "unit_gear_tier_recipe", "unit_omicron_skills", "datacron_ability_shorts",
 )
 
 NAMES = [

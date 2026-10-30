@@ -7,7 +7,7 @@ GET с query-параметрами (как /mod-search, /steal-build) — ре�
 чат 2026-09-15). По умолчанию данные — уже закэшированный player_unit_cache своей гильдии,
 без обращений к Comlink, кроме однократной сборки StatCalc. Опция "чужая гильдия" (добавлено
 2026-09-16, по прямому запросу пользователя) переиспользует services.steal_build.resolve_guild
-и бьёт по Comlink живьём, как /steal-build."""
+и использует общий суточный кэш ростеров services.mod_compare."""
 
 import asyncio
 import json
@@ -23,7 +23,6 @@ import database
 import services.mod_analysis as mod_analysis
 import services.mod_compare as mod_compare
 import services.stat_forecast as stat_forecast
-import services.steal_build as steal_build
 from services import feature_flags
 
 router = APIRouter()
@@ -100,11 +99,11 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
         return templates.TemplateResponse(request, "mod_analysis.html", context)
 
     try:
-        relic = int(relic_raw)
+        relic = int(relic_raw) if relic_raw else None
     except ValueError:
         context["error"] = "Некорректный уровень реликвии."
         return templates.TemplateResponse(request, "mod_analysis.html", context)
-    if not (0 <= relic <= 10):
+    if relic is not None and not (0 <= relic <= 10):
         context["error"] = "Релик должен быть от 0 до 10."
         return templates.TemplateResponse(request, "mod_analysis.html", context)
 
@@ -117,7 +116,7 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
 
     guild_name_for_history = None
     if guild_ref:
-        lookup = await steal_build.resolve_guild(comlink, guild_ref)
+        lookup = await mod_compare.resolve(comlink, guild_ref)
         if not lookup.ok:
             context["error"] = lookup.error
             return templates.TemplateResponse(request, "mod_analysis.html", context)
@@ -150,7 +149,7 @@ async def mod_analysis_page(request: Request, user: dict = Depends(feature_flags
     # реально другие прошлые запуски (запрос пользователя 2026-09-22, тот же тред).
     last = database.get_mod_analysis_history(guild_id=guild_id, limit=1)
     is_same_as_last = bool(last) and last[0][1] == character and str(last[0][2]) == str(relic) and (last[0][5] or "") == (guild_ref or "")
-    if not is_same_as_last:
+    if not is_same_as_last and relic is not None:
         database.add_mod_analysis_history(
             character, relic, user["discord_id"], guild_id=guild_id,
             guild_ref=guild_ref or None, guild_name=guild_name_for_history,
@@ -193,7 +192,7 @@ async def mod_compare_page(request: Request, user: dict = Depends(feature_flags.
     context = {
         "user": user, "params": params, "max_guilds": mod_compare.MAX_GUILDS, "max_chars": mod_compare.MAX_CHARS,
         "char_labels": {c: _char_label(c) for c in params["chars"]},
-        "guild_errors": {}, "guild_names": {}, "pending": [], "result": None, "loading": False,
+        "guild_errors": {}, "guild_retries": {}, "guild_names": {}, "pending": [], "result": None, "loading": False,
     }
     if not submitted:
         return templates.TemplateResponse(request, "mod_compare.html", context)
@@ -212,6 +211,12 @@ async def mod_compare_page(request: Request, user: dict = Depends(feature_flags.
             continue
         context["guild_names"][ref] = lookup.guild_name
         gid = lookup.swgoh_guild_id
+        state = mod_compare.progress(gid)
+        if state and state.get("error") and not mod_compare.is_fetching(gid) and refresh != gid:
+            context["guild_errors"][ref] = state["error"]
+            context["guild_retries"][ref] = str(request.url.include_query_params(refresh=gid))
+            context["error"] = "Сбор данных не завершён. Можно повторить сбор для этой гильдии."
+            continue
         if mod_compare.is_fetching(gid) or not mod_compare.is_fresh(gid) or refresh == gid:
             if not mod_compare.is_fetching(gid) and (refresh == gid or not mod_compare.is_fresh(gid)):
                 mod_compare.start_fetch(comlink, lookup)

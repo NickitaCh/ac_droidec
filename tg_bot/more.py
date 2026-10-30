@@ -158,7 +158,7 @@ async def cmd_unit(ctx: Ctx):
     await _unit_run(ctx, state, matches[0][0])
 
 
-@callback("un")
+@callback("un", command_name="unit")
 async def cb_unit(ctx: Ctx, payload: str):
     token, _, base_id = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -168,7 +168,7 @@ async def cb_unit(ctx: Ctx, payload: str):
     await _unit_run(ctx, state, base_id)
 
 
-@callback("uw")
+@callback("uw", command_name="unit")
 async def cb_unit_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -232,8 +232,8 @@ async def _unit_card(ctx: Ctx, state: dict, base_id: str, codes: list[str]):
         print(f"⚠️ [TG юнит] {base_id} {codes}: {e!r}")
         await ctx.reply("❌ Не удалось собрать карточку.")
         return
-    await ctx.reply_photo(png, "toon.png", caption="\n".join(note_lines))
-    await _unit_compare_offer(ctx, state, base_id, codes)
+    await ctx.reply_photo(png, "toon.png", caption="\n".join(note_lines),
+                          keyboard=_unit_compare_keyboard(ctx, state, base_id, codes), replace=True)
 
 
 UNIT_COMPARE_MAX = 4  # как панель сравнения /юнит в Discord
@@ -245,7 +245,7 @@ def _own_ally_code(ctx: Ctx) -> str | None:
     return main[0][1] if main else None
 
 
-async def _unit_compare_offer(ctx: Ctx, state: dict, base_id: str, codes: list[str]):
+def _unit_compare_keyboard(ctx: Ctx, state: dict, base_id: str, codes: list[str]):
     """Кнопки под карточкой — добавить к сравнению игрока гильдии или себя, не набирая
     «/unit Рей | Ник, код» (NicolozZ 2026-10-24: «подсказку не нашёл»)."""
     if len(codes) >= UNIT_COMPARE_MAX or database.get_unit_types([base_id]).get(base_id) == "ship":
@@ -256,10 +256,10 @@ async def _unit_compare_offer(ctx: Ctx, state: dict, base_id: str, codes: list[s
     own = _own_ally_code(ctx)
     if own and own not in codes:
         row.append({"text": "➕ Я", "callback_data": f"ua|{token}|{own}"})
-    await ctx.reply("Сравнить с кем-то ещё? Или сразу: <code>/unit Рей | Ник, 123456789</code>", keyboard=[row])
+    return [row]
 
 
-@callback("ua")
+@callback("ua", command_name="unit")
 async def cb_unit_add(ctx: Ctx, payload: str):
     token, _, target = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -322,7 +322,7 @@ async def cmd_guildunit(ctx: Ctx):
     await _guildunit_run(ctx, state, matches[0][0])
 
 
-@callback("gu")
+@callback("gu", command_name="guildunit")
 async def cb_guildunit(ctx: Ctx, payload: str):
     token, _, base_id = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -402,7 +402,7 @@ async def cmd_ready(ctx: Ctx):
     await _ready_run(ctx, state, matches[0]["base_id"])
 
 
-@callback("rd")
+@callback("rd", command_name="ready")
 async def cb_ready(ctx: Ctx, payload: str):
     token, _, guide = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -412,7 +412,7 @@ async def cb_ready(ctx: Ctx, payload: str):
     await _ready_run(ctx, state, guide)
 
 
-@callback("rw")
+@callback("rw", command_name="ready")
 async def cb_ready_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -489,7 +489,7 @@ async def cmd_faction(ctx: Ctx):
     await _faction_run(ctx, state, hits[0][0])
 
 
-@callback("fc")
+@callback("fc", command_name="faction")
 async def cb_faction(ctx: Ctx, payload: str):
     token, _, cid = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -499,7 +499,7 @@ async def cb_faction(ctx: Ctx, payload: str):
     await _faction_run(ctx, state, cid)
 
 
-@callback("fw")
+@callback("fw", command_name="faction")
 async def cb_faction_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -545,7 +545,7 @@ async def cmd_omicrons(ctx: Ctx):
         await _omicrons_player(ctx, guild_id, code)
 
 
-@callback("om")
+@callback("om", command_name="omicrons")
 async def cb_omicrons(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -597,7 +597,7 @@ async def cmd_tasks(ctx: Ctx):
         await _tasks_player(ctx, guild_id, code)
 
 
-@callback("tk")
+@callback("tk", command_name="tasks")
 async def cb_tasks(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -700,7 +700,7 @@ def _dossier_view(state: dict, token: str) -> tuple[str, list]:
     return text[:4000], keyboard
 
 
-@callback("wp", tier=TIER_OFFICER)
+@callback("wp", tier=TIER_OFFICER, command_name="warns")
 async def cb_warns_player(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -711,7 +711,7 @@ async def cb_warns_player(ctx: Ctx, payload: str):
     await ctx.edit(text, keyboard=keyboard)
 
 
-@callback("wa", tier=TIER_OFFICER)
+@callback("wa", tier=TIER_OFFICER, command_name="warns")
 async def cb_warns_add(ctx: Ctx, payload: str):
     """Добавление: режим → нарушение → запись сегодняшним числом."""
     from cogs.violations import WARNS_STRUCTURE
@@ -742,7 +742,7 @@ async def cb_warns_add(ctx: Ctx, payload: str):
         await ctx.reply(f"✅ Нарушение зафиксировано: <b>{esc(name)}</b> — {esc(state['mode'])}: {esc(violation)} ({date})")
 
 
-@callback("wr", tier=TIER_OFFICER)
+@callback("wr", tier=TIER_OFFICER, command_name="warns")
 async def cb_warns_remove(ctx: Ctx, payload: str):
     token, _, step = payload.partition("|")
     state = await session_for_callback(ctx, token)

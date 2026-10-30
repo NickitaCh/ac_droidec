@@ -18,6 +18,8 @@
 
     <div class="twdef-toolbar">
         <a class="button" href="/tw/def/squads/new">+ Новый пак</a>
+        <a class="button button-secondary" href="/tw/def/squads/import">Загрузить библиотеку</a>
+        {% if squads %}<a class="button button-secondary" href="/tw/def/squads/export">Экспорт паков</a>{% endif %}
         {% if squads %}<input type="search" class="twdef-search" data-twdef-filter=".twdef-squad-card" placeholder="Поиск по названию или юниту…">{% endif %}
         <span class="muted twdef-sync">Ростеры обновлены: {{ last_sync or "—" }} (UTC)</span>
     </div>

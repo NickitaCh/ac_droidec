@@ -4,7 +4,7 @@
 {% block title %}Рассылка — {{ plan.name }}{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {{ twui.tw_hero(plan.name, "plans", "Каждому отмеченному игроку в личку Discord уйдёт его часть плана: зона, отряд, персонажи и датакрон.") }}
+    {{ twui.tw_hero(plan.name, "plans", "Каждому отмеченному игроку в личку Discord или Telegram уйдёт его часть плана: зона, отряд, персонажи и датакрон. Для Telegram игроку нужно сначала открыть бота в личке и нажать /start.") }}
     <p><a href="/tw/def/plans/{{ plan.id }}">← К карте</a></p>
 
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -22,7 +22,7 @@
                         {% elif r.status == "skipped_no_discord" %}<span class="badge badge-neutral">⏭ пропущен</span>
                         {% else %}<span class="badge badge-danger">❌ ошибка</span>{% endif %}
                         {{ r.name }}
-                        {% if r.status != "sent" %}<span class="muted">— {{ r.detail }}</span>{% endif %}
+                        {% if r.detail %}<span class="muted">— {{ r.detail }}</span>{% endif %}
                     </li>
                 {% endfor %}
             </ul>
@@ -39,7 +39,7 @@
                 </p>
                 <div class="panel">
                     <div class="panel-title">
-                        <span>Кому отправить{% call ui.help() %}Сообщение уходит только тем, кто привязал Discord через /регистрация. Основной аккаунт и альт одного человека получают одно сообщение.{% endcall %}</span>
+                        <span>Кому отправить{% call ui.help() %}Сообщение уходит зарегистрированным игрокам в Discord или Telegram. Для Telegram сначала напишите боту /start в личке. Основной аккаунт и альт одного человека получают одно сообщение.{% endcall %}</span>
                         <span class="panel-hint">игроков с назначениями: {{ rows|length }}</span>
                     </div>
                     <div class="notify-recipients-grid">
@@ -49,7 +49,7 @@
                                        {% if row.discord_id %}checked{% else %}disabled{% endif %}>
                                 <span class="notify-recipient-name">{{ row.name }}</span>
                                 <span class="badge badge-neutral">отрядов: {{ row.entries|length }}</span>
-                                {% if not row.discord_id %}<span class="badge badge-danger">нет привязки Discord</span>{% endif %}
+                                {% if not row.discord_id %}<span class="badge badge-danger">нет регистрации</span>{% endif %}
                             </label>
                         {% endfor %}
                     </div>

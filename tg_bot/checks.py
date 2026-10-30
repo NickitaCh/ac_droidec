@@ -120,7 +120,7 @@ async def cmd_stats(ctx: Ctx):
     await _stats_run(ctx, state, plate)
 
 
-@callback("sp")
+@callback("sp", command_name="stats")
 async def cb_stats_plate(ctx: Ctx, payload: str):
     token, _, idx = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -131,7 +131,7 @@ async def cb_stats_plate(ctx: Ctx, payload: str):
     await _stats_run(ctx, state, plate)
 
 
-@callback("st")
+@callback("st", command_name="stats")
 async def cb_stats_target(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -288,7 +288,7 @@ async def _reply_with_options(ctx: Ctx, state: dict, lines: list):
     state["summary_ids"] = await _send_or_edit(ctx, state.get("summary_ids") or [], messages)
 
 
-@callback("so")
+@callback("so", command_name="stats")
 async def cb_stats_option(ctx: Ctx, payload: str):
     token, _, option = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -316,7 +316,7 @@ def _picker_keyboard(token: str, pages: list) -> list:
     return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
 
 
-@callback("sc")
+@callback("sc", command_name="stats")
 async def cb_stats_page(ctx: Ctx, payload: str):
     token, _, target = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -388,7 +388,7 @@ async def cmd_dc(ctx: Ctx):
     await ctx.reply("Какой сезон проверить?", keyboard=keyboard)
 
 
-@callback("ds")
+@callback("ds", command_name="dc")
 async def cb_dc_season(ctx: Ctx, payload: str):
     token, _, set_id = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -399,7 +399,7 @@ async def cb_dc_season(ctx: Ctx, payload: str):
     await _dc_target(ctx, state)
 
 
-@callback("dt")
+@callback("dt", command_name="dc")
 async def cb_dc_target(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)

@@ -24,7 +24,7 @@
                     {% set ref = params.guilds[i] if i < params.guilds|length else "" %}
                     <label class="mc-field">
                         <input type="text" name="guild" value="{{ ref }}" placeholder="Гильдия {{ i + 1 }}" aria-label="Гильдия {{ i + 1 }}">
-                        {% if ref and guild_errors.get(ref) %}<span class="error mc-note">{{ guild_errors[ref] }}</span>
+                        {% if ref and guild_errors.get(ref) %}<span class="error mc-note">{{ guild_errors[ref] }}</span>{% if guild_retries.get(ref) %}<a class="mc-note" href="{{ guild_retries[ref] }}">Повторить сбор</a>{% endif %}
                         {% elif ref and guild_names.get(ref) %}<span class="muted mc-note">{{ guild_names[ref] }}</span>{% endif %}
                     </label>
                 {% endfor %}
@@ -37,7 +37,7 @@
             <div class="mc-grid">
                 {% for i in range(max_chars) %}
                     {% set c = params.chars[i] if i < params.chars|length else "" %}
-                    <div class="unit-search mc-field" data-unit-search>
+                    <div class="unit-search mc-field" data-unit-search data-required="false">
                         <input type="text" class="unit-search-input" placeholder="Персонаж {{ i + 1 }}" aria-label="Персонаж {{ i + 1 }}" autocomplete="off" value="{{ char_labels.get(c, '') }}">
                         <input type="hidden" name="char" class="unit-search-value" value="{{ c }}">
                         <div class="unit-search-results"></div>
@@ -79,7 +79,8 @@
                                 <td data-label="Гильдия"><div>
                                     <strong>{{ row.guild.name }}</strong>
                                     <div class="muted mc-note">{% if s.n %}{{ s.n }} из {{ s.players }} игроков · ср. R{{ "%.1f"|format(s.avg_relic)|replace(".", ",") }}{% else %}{{ s.players }} игроков{% endif %}</div>
-                                    {% if row.guild.info %}<div class="muted mc-note">данные {{ row.guild.info.fetched_msk }}{% if row.guild.info.errors %}, не ответили {{ row.guild.info.errors }}{% endif %} · <a href="{{ request.url.include_query_params(refresh=row.guild.id) }}">обновить</a></div>{% endif %}
+                                    {% if row.guild.info %}<div class="muted mc-note">данные {{ row.guild.info.fetched_msk }}{% if row.guild.info.errors %}, не ответили {{ row.guild.info.errors }}{% endif %}</div>{% endif %}
+                                    <a class="mc-note" href="{{ row.analysis_url }}">Развёрнутый анализ</a>
                                 </div></td>
                                 {% if not s.n %}
                                     <td data-label="Скорость" colspan="3"><div class="muted">нет игроков с этим персонажем R6+ и модулями 15 ур.</div></td>

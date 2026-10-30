@@ -8,13 +8,13 @@ import os
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 import database
 import tw_def_engine as engine
-from services import datacron_catalog, feature_flags, stat_forecast, tw_def_notify
+from services import datacron_catalog, feature_flags, stat_forecast, tw_def_notify, tw_def_library
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -171,6 +171,41 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
         "saved": request.query_params.get("saved"),
         "error": request.query_params.get("error"),
     })
+
+
+@router.get("/squads/export")
+async def squads_export(user: dict = Depends(_require)):
+    payload = tw_def_library.export_library(user["guild_id"])
+    return Response(json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="def-packs.json"'})
+
+
+@router.get("/squads/import", response_class=HTMLResponse)
+async def squads_import_page(request: Request, user: dict = Depends(_require)):
+    return templates.TemplateResponse(request, "tw_def_import.html", {"user": user})
+
+
+@router.post("/squads/import", response_class=HTMLResponse)
+async def squads_import(request: Request, library: UploadFile | None = File(None),
+                        payload: str = Form(""), apply: str = Form(""), user: dict = Depends(_require)):
+    context = {"user": user}
+    try:
+        if library and library.filename:
+            content = await library.read(tw_def_library.MAX_BYTES + 1)
+            if len(content) > tw_def_library.MAX_BYTES:
+                raise ValueError("Файл больше 1 МБ.")
+            payload = content.decode("utf-8-sig")
+        rows = tw_def_library.preview(payload, user["guild_id"])
+        if apply:
+            form = await request.form()
+            selected = {int(v) for v in form.getlist("selected") if str(v).isdigit()}
+            count = tw_def_library.import_selected(payload, user["guild_id"], selected, _who(user))
+            context["imported"] = count
+        else:
+            context.update({"rows": rows, "payload": payload})
+    except (ValueError, TypeError, AttributeError) as e:
+        context["error"] = str(e)
+    return templates.TemplateResponse(request, "tw_def_import.html", context)
 
 
 def _editor_payload(squad: dict | None) -> dict:

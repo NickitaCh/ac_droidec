@@ -7,7 +7,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Омикроны</p>
-                <h1>Фразы для объявлений о выдаче омикронов{% call ui.help(side="left") %}Бот сам объявляет в Discord-канале гильдии (канал задаётся на <a href="/settings">Настройках</a>), когда игрок выдаёт омикрон персонажу: «Игрок выдал омикрон Персонаж.» — и, если для персонажа задана фраза ниже, дописывает её. У персонажа с несколькими омикронами можно задать одну фразу «по умолчанию» на все сразу, либо переопределить её для конкретного омикрона отдельной строкой ниже.{% endcall %}</h1>
+                <h1>Фразы для объявлений о выдаче омикронов{% call ui.help(side="left") %}Фразы ниже действуют только в вашей гильдии. Бот дописывает их к стандартному объявлению о выдаче омикрона. Канал задаётся на <a href="/settings">Настройках</a>. Можно задать одну приписку на все омикроны персонажа либо отдельную для конкретного омикрона.{% endcall %}</h1>
             </div>
         </div>
     </section>
@@ -42,7 +42,7 @@
                 </select>
             </div>
             <div class="table-scroll">
-                <table class="data" id="omicron-phrases-table">
+                <table class="data cards-on-phone" id="omicron-phrases-table">
                     <thead>
                         <tr>
                             <th data-sort="text">Персонаж</th>
@@ -54,34 +54,34 @@
                     <tbody>
                         {% for c in characters %}
                             <tr data-search="{{ (c.name ~ ' ' ~ (c.omicrons | map(attribute='label') | join(' '))) | lower }}" data-mode="{{ c.modes }}">
-                                <td><strong>{{ c.name }}</strong></td>
-                                <td>{% if c.multi %}<span class="muted">все омикроны (по умолчанию)</span>{% else %}{{ c.omicrons[0].label }}{% if c.omicrons[0].extra %} <span class="muted">· {{ c.omicrons[0].extra }}</span>{% endif %}{% endif %}</td>
-                                <td>
+                                <td data-label="Персонаж"><strong>{{ c.name }}</strong></td>
+                                <td data-label="Омикрон">{% if c.multi %}<span class="muted">все омикроны (по умолчанию)</span>{% else %}{{ c.omicrons[0].label }}{% if c.omicrons[0].extra %} <span class="muted">· {{ c.omicrons[0].extra }}</span>{% endif %}{% endif %}</td>
+                                <td data-label="Фраза">
                                     <form method="post" action="/omicron/phrases/set" class="inline-form">
                                         <input type="hidden" name="character_key" value="{{ c.base_id }}">
                                         <input type="hidden" name="skill_id" value="">
-                                        <input type="text" name="phrase" value="{{ c.default_phrase }}" placeholder="Фраза не задана — оставьте пустым, чтобы убрать" style="min-width: 18em;">
+                                        <input type="text" name="phrase" value="{{ c.default_phrase }}" placeholder="Фраза не задана" style="min-width: 0; width: 100%;">
                                         <button type="submit">Сохранить</button>
                                         {% if c.default_updated_by_name %}<span class="muted" style="font-size: 0.8em;">— {{ c.default_updated_by_name }}</span>{% endif %}
                                     </form>
                                 </td>
-                                <td><span class="badge {{ c.default_badge_class }}">{{ c.default_badge_text }}</span></td>
+                                <td data-label="Статус"><span class="badge {{ c.default_badge_class }}">{{ c.default_badge_text }}</span></td>
                             </tr>
                             {% if c.multi %}
                                 {% for o in c.omicrons %}
                                     <tr class="omicron-subrow" data-search="{{ (c.name ~ ' ' ~ o.label) | lower }}" data-mode="{{ o.mode }}">
-                                        <td class="muted">↳ {{ c.name }}</td>
-                                        <td>{{ o.label }}{% if o.extra %} <span class="muted">· {{ o.extra }}</span>{% endif %}</td>
-                                        <td>
+                                        <td data-label="Персонаж" class="muted">↳ {{ c.name }}</td>
+                                        <td data-label="Омикрон">{{ o.label }}{% if o.extra %} <span class="muted">· {{ o.extra }}</span>{% endif %}</td>
+                                        <td data-label="Фраза">
                                             <form method="post" action="/omicron/phrases/set" class="inline-form">
                                                 <input type="hidden" name="character_key" value="{{ c.base_id }}">
                                                 <input type="hidden" name="skill_id" value="{{ o.skill_id }}">
-                                                <input type="text" name="phrase" value="{{ o.phrase }}" placeholder="Своя фраза для этого омикрона — необязательно" style="min-width: 18em;">
+                                                <input type="text" name="phrase" value="{{ o.phrase }}" placeholder="Своя фраза — необязательно" style="min-width: 0; width: 100%;">
                                                 <button type="submit">Сохранить</button>
                                                 {% if o.updated_by_name %}<span class="muted" style="font-size: 0.8em;">— {{ o.updated_by_name }}</span>{% endif %}
                                             </form>
                                         </td>
-                                        <td><span class="badge {{ o.badge_class }}">{{ o.badge_text }}</span></td>
+                                        <td data-label="Статус"><span class="badge {{ o.badge_class }}">{{ o.badge_text }}</span></td>
                                     </tr>
                                 {% endfor %}
                             {% endif %}

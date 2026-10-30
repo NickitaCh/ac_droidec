@@ -111,17 +111,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const initTableSort = (root) => root.querySelectorAll("table.data").forEach((table) => {
         const headers = table.querySelectorAll("th[data-sort]");
-        headers.forEach((th, colIndex) => {
+        headers.forEach((th) => {
             th.addEventListener("click", () => {
                 const tbody = table.tBodies[0];
                 const rows = Array.from(tbody.rows);
+                const colIndex = th.cellIndex;
                 const type = th.dataset.sort; // "num" или "text"
                 const asc = th.dataset.sortDir !== "asc";
 
                 rows.sort((a, b) => {
                     let va = a.cells[colIndex].dataset.value ?? a.cells[colIndex].textContent.trim();
                     let vb = b.cells[colIndex].dataset.value ?? b.cells[colIndex].textContent.trim();
-                    if (type === "num") {
+                    if (type === "num" || type === "number") {
                         // Числа выводятся с пробелами между разрядами и запятой («32 447», «5,1»).
                         const toNum = (v) => parseFloat(String(v).replace(/[\s  ]/g, "").replace(",", ".")) || 0;
                         va = toNum(va);
@@ -233,6 +234,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         input.addEventListener("input", () => {
             hidden.value = "";
+            input.setCustomValidity("");
             const q = input.value.trim();
             clearTimeout(debounceTimer);
             if (q.length < minLength) { results.classList.remove("open"); return; }
@@ -261,11 +263,11 @@ document.addEventListener("DOMContentLoaded", () => {
         // data-required="false" — для форм, где рядом есть равноценная альтернатива
         // выбору из подсказок (например, ручной ввод ID), поэтому пустой hidden не
         // должен блокировать отправку. По умолчанию — обязательный выбор, как раньше.
-        if (required) {
+        {
             const form = wrap.closest("form");
             if (form) {
                 form.addEventListener("submit", (e) => {
-                    if (!hidden.value) {
+                    if (!hidden.value && (required || input.value.trim())) {
                         e.preventDefault();
                         input.setCustomValidity("Выберите вариант из списка подсказок");
                         input.reportValidity();
@@ -280,7 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("[data-unit-search]").forEach((wrap) => {
         initSearchWidget(wrap, {
             url: "/plates/api/units", valueField: "base_id", labelField: "name",
-            minLength: 2, emptyText: "Ничего не найдено",
+            minLength: 2, emptyText: "Ничего не найдено", required: wrap.dataset.required !== "false",
         });
     });
 

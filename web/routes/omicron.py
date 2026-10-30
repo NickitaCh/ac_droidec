@@ -23,7 +23,7 @@ def _get_comlink():
 
 # =====================================================================
 # ФРАЗЫ-ПРИПИСКИ ДЛЯ АВТООБЪЯВЛЕНИЙ О ВЫДАЧЕ ОМИКРОНОВ
-# Справочник глобальный (не per-guild, см. database.py::_ensure_omicron_phrases_table),
+# Приписки изолированы по guild_id (см. database.py::_ensure_omicron_phrases_table),
 # но, в отличие от /admin/guilds и /admin/access, это гильдийская фича, а не
 # настройка бота — доступна обычным офицерам (require_officer_access), не только
 # супер-админам; до 2026-09-02 жила под /admin и была ограничена супер-админами,
@@ -64,7 +64,7 @@ async def omicron_phrases_page(request: Request, user: dict = Depends(require_of
     skill_info = database.get_skill_display_info([sid for sids in skills_by_base.values() for sid in sids])
     names = database.get_game_unit_names(list(skills_by_base.keys()))
 
-    phrase_map = {(r[1], r[2]): r for r in database.get_all_omicron_phrases()}  # (character_key, skill_id) -> row
+    phrase_map = {(r[1], r[2]): r for r in database.get_all_omicron_phrases(user["guild_id"])}
     username_cache = {}
 
     def _updated_by_name(discord_id):
@@ -143,9 +143,9 @@ async def omicron_phrases_set(
     # Пустое поле = убрать фразу (единая точка входа вместо отдельных add/edit/delete —
     # так и default-строка, и override на конкретный омикрон правятся одной формой).
     if phrase:
-        database.set_omicron_phrase(character_key, phrase, user["discord_id"], skill_id=skill_id)
+        database.set_omicron_phrase(character_key, phrase, user["discord_id"], skill_id=skill_id, guild_id=user["guild_id"])
     else:
-        database.delete_omicron_phrase(character_key, skill_id=skill_id)
+        database.delete_omicron_phrase(character_key, skill_id=skill_id, guild_id=user["guild_id"])
     return RedirectResponse("/omicron/phrases", status_code=303)
 
 

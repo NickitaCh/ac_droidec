@@ -178,7 +178,9 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
     targets = route(ch, mode)
     if not targets:
         if outbox.is_tg_owner(discord_id):
-            return False, "только в Telegram и ещё не писал боту в личку"
+            username = database.get_bot_state("telegram_bot_username", guild_id=0)
+            target = f"@{username}" if username else "бота"
+            return False, f"Telegram: игроку нужно открыть {target} в личке и нажать /start, затем повторить рассылку"
         return False, "нет ни Discord, ни Telegram"
     sent, problems = [], []
     for target in targets:

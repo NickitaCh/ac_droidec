@@ -1700,7 +1700,7 @@ class StatRequirementsCog(commands.Cog):
                 if outbox.guild_wants(guild_id, "omicrons"):
                     if guild_id not in names_by_guild:
                         names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-                    line = self._omicron_line(names_by_guild[guild_id].get(ally_code, ally_code), base_id, skill_id, skill_info)
+                    line = self._omicron_line(names_by_guild[guild_id].get(ally_code, ally_code), base_id, skill_id, skill_info, guild_id=guild_id)
                     outbox.enqueue_guild(guild_id, "omicrons", line)
                     database.mark_activity_event_announced(event_id)
                 continue
@@ -1722,7 +1722,7 @@ class StatRequirementsCog(commands.Cog):
                 names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
             channel = channels_by_id[channel_id]
-            line = self._omicron_line(player_name, base_id, skill_id, skill_info, getattr(channel, "guild", None))
+            line = self._omicron_line(player_name, base_id, skill_id, skill_info, getattr(channel, "guild", None), guild_id=guild_id)
             items_by_channel.setdefault(channel_id, []).append((event_id, line))
 
         for channel_id, items in items_by_channel.items():
@@ -1752,7 +1752,7 @@ class StatRequirementsCog(commands.Cog):
                     outbox.enqueue_guild(guild_id, "omicrons", line)
 
     @staticmethod
-    def _omicron_line(player_name: str, base_id: str, skill_id: str, skill_info: dict, discord_guild=None) -> str:
+    def _omicron_line(player_name: str, base_id: str, skill_id: str, skill_info: dict, discord_guild=None, *, guild_id: int) -> str:
         ability_name, _ability_id, ability_type, omicron_mode = skill_info.get(skill_id, (None, None, None, None))
         line = f"**{player_name}** выдал омикрон"
         if ability_name:
@@ -1762,7 +1762,7 @@ class StatRequirementsCog(commands.Cog):
         if omicron_mode:
             line += f" для {omicron_mode}"
         line += f" на **{_unit_display_name(base_id)}**."
-        phrase = database.get_omicron_phrase(base_id, skill_id)
+        phrase = database.get_omicron_phrase(base_id, skill_id, guild_id=guild_id)
         if phrase:
             line += f" {_resolve_emoji_shortcodes(phrase, discord_guild)}"
         return line

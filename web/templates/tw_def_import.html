@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_tw.html" as twui %}
+{% block title %}Загрузить деф-паки{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{{ twui.tw_hero("Загрузить деф-паки", "squads", "Загрузите JSON, полученный кнопкой «Экспорт паков» у другой гильдии. Сначала покажем список для выбора. Названия, составы и требования переносятся; привязки к датакронам задаются заново в вашей гильдии. Существующие паки не заменяются.") }}
+<p><a href="/tw/def/squads">К деф-пакам</a></p>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if imported is defined %}<p class="dash-flash">Добавлено паков: {{ imported }}.</p>{% endif %}
+{% if rows %}
+<form method="post" action="/tw/def/squads/import" style="max-width:none">
+    <input type="hidden" name="payload" value="{{ payload }}">
+    <input type="hidden" name="apply" value="1">
+    <div class="panel">
+    {% for s in rows %}
+        <label class="checkbox"><input type="checkbox" name="selected" value="{{ s.index }}"{% if s.exists %} disabled{% else %} checked{% endif %}>
+            {{ s.name }} · {{ "Флот" if s.combat_type == "ship" else "Персонажи" }} · {{ s.slots|length }} слотов{% if s.exists %} — уже есть{% endif %}</label>
+        <details><summary>Состав и требования</summary><ol>{% for label in s.slot_labels %}<li>{{ label }}</li>{% endfor %}</ol>{% if s.note %}<p>{{ s.note }}</p>{% endif %}</details>
+    {% endfor %}
+    </div>
+    <button type="submit">Добавить выбранные</button>
+</form>
+{% else %}
+<form method="post" action="/tw/def/squads/import" enctype="multipart/form-data" style="max-width:40em">
+    <label>Библиотека деф-паков <input type="file" name="library" accept=".json,application/json" required style="max-width:100%"></label>
+    <button type="submit">Посмотреть состав библиотеки</button>
+</form>
+{% endif %}
+{% endblock %}

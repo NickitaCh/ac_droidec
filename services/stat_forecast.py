@@ -22,6 +22,15 @@ _TTL_SECONDS = 12 * 60 * 60
 
 _stat_calc = None
 _cached_at = 0.0
+_refresh_task: asyncio.Task | None = None
+
+
+async def _refresh_stat_calc(comlink):
+    global _stat_calc, _cached_at
+    fresh = await stat_engine.build_stat_calc(comlink)
+    _stat_calc = fresh
+    _cached_at = time.time()
+    return fresh
 
 
 async def get_stat_calc(comlink):
@@ -29,20 +38,21 @@ async def get_stat_calc(comlink):
     недоступен — вызывающий код должен обработать (страница показывает "ещё
     загружается", не падает с 500). Если уже был построен хотя бы раз, сетевой
     сбой при плановом обновлении молча игнорируется, возвращается прошлый."""
-    global _stat_calc, _cached_at
+    global _refresh_task
     now = time.time()
     if _stat_calc is not None and (now - _cached_at) <= _TTL_SECONDS:
         return _stat_calc
+    if _refresh_task is None or _refresh_task.done():
+        _refresh_task = asyncio.create_task(_refresh_stat_calc(comlink))
     try:
-        fresh = await stat_engine.build_stat_calc(comlink)
+        # One expensive build per process, shared by page requests and background warmup.
+        # A disconnected HTTP client must not cancel the build for everyone else.
+        return await asyncio.shield(_refresh_task)
     except Exception as e:
         if _stat_calc is not None:
             print(f"⚠️ [web] Не удалось обновить калькулятор статов, использую прошлый: {e}")
             return _stat_calc
         raise
-    _stat_calc = fresh
-    _cached_at = now
-    return _stat_calc
 
 
 def cached_stat_calc():
@@ -82,7 +92,8 @@ def start_background_build(comlink) -> None:
 def build_status() -> dict:
     return {
         "ready": _stat_calc is not None,
-        "loading": _build_task is not None and not _build_task.done(),
+        "loading": (_build_task is not None and not _build_task.done()) or
+                   (_refresh_task is not None and not _refresh_task.done()),
         "error": _last_error if _stat_calc is None else None,
     }
 

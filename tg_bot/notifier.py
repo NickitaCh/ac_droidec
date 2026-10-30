@@ -167,7 +167,7 @@ async def cmd_notify(ctx: Ctx):
     await ctx.reply(text, keyboard=keyboard)
 
 
-@callback("nt", tier=TIER_OFFICER)
+@callback("nt", tier=TIER_OFFICER, command_name="notify")
 async def cb_notify(ctx: Ctx, kind: str):
     denial = _notify_denied(ctx)
     if denial:
@@ -227,7 +227,7 @@ async def cmd_topic(ctx: Ctx):
                     f"<code>/тг канал: {html.escape(label)} сообщение: ссылка или текст</code>")
 
 
-@callback("tp", tier=TIER_OFFICER)
+@callback("tp", tier=TIER_OFFICER, command_name="topic")
 async def cb_topic(ctx: Ctx, label: str):
     denial = _notify_denied(ctx)
     if denial:

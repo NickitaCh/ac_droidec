@@ -16,6 +16,9 @@ from services import stat_forecast
 from tg_bot import checks, handlers, inline, more, notifier, relay_in  # noqa: F401 — регистрируют команды
 from tg_bot.api import TelegramAPI
 from tg_bot.core import App, menu_commands, run_polling
+from tg_bot import command_access
+
+command_access.install()
 
 sys.stdout.reconfigure(line_buffering=True)
 

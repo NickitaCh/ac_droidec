@@ -397,7 +397,7 @@ def _compute_player_deltas(stat_calc, target_relic: int, relevant: list) -> None
     вынесено из _aggregate_report, чтобы результат можно было закэшировать (_REPORT_CACHE) и
     не пересчитывать при одной только смене view (см. докстринг кэша выше)."""
     for p in relevant:
-        projected = stat_engine.project_unit_relic(p["unit"], target_relic)
+        projected = p["unit"] if target_relic is None else stat_engine.project_unit_relic(p["unit"], target_relic)
         final_values = stat_engine.calc_final_stats(stat_calc, projected)
         base_values = stat_engine.calc_base_stats(stat_calc, projected)
 
@@ -591,7 +591,7 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
             for _discord_id, ally_code, name in roster
         ]
         relevant, total_open = _build_relevant(base_id, roster_units)
-        _compute_player_deltas(stat_calc, target_relic, relevant)
+        await asyncio.to_thread(_compute_player_deltas, stat_calc, target_relic, relevant)
         _cache_put(cache_key, relevant, total_open)
 
     return _aggregate_report(base_id, target_relic, relevant, total_open, view=view)
@@ -600,43 +600,34 @@ async def build_report(stat_calc, base_id: str, target_relic: int, guild_id: int
 async def build_report_live(comlink, stat_calc, base_id: str, target_relic: int, guild, view: str = "delta") -> dict:
     """Анализ по ЧУЖОЙ гильдии (добавлено 2026-09-16, по прямому запросу пользователя —
     "чужую гильдию, а не только свою") — `guild` это services.steal_build.GuildLookupResult,
-    уже отресолвленный по коду союзника/ID гильдии (см. web/routes/mod_analysis.py). В отличие
-    от build_report, участников чужой гильдии приходится тянуть живым
-    comlink.get_player(player_id=...) по одному — та же плата и тот же троттлинг, что
-    services/steal_build.py::build_report (для крупной гильдии может занять до минуты)."""
+    уже отресолвленный по коду союзника/ID гильдии. Общий суточный кэш с /mod-analysis/compare;
+    первый запрос собирает ростеры, остальные персонажи и представления используют их повторно."""
     if not guild.members:
         return {"error": f"В гильдии «{guild.guild_name}» нет участников."}
 
-    cache_key = ("live", guild.swgoh_guild_id, base_id, target_relic)
+    from services import mod_compare
+    try:
+        roster = await mod_compare.ensure_roster(comlink, guild)
+    except Exception as e:
+        return {"error": f"Не удалось загрузить гильдию: {e}"}
+    info = mod_compare.roster_info(guild.swgoh_guild_id) or {}
+    cache_key = ("live", guild.swgoh_guild_id, base_id, target_relic, info.get("fetched_at"))
     cached = _cache_get(cache_key)
     if cached is not None:
         relevant, total_open, extra = cached
         fetch_errors = extra.get("fetch_errors", 0)
     else:
-        roster_units = []
-        fetch_errors = 0
-        for player_id, player_name in guild.members:
-            try:
-                player_data = await asyncio.to_thread(comlink.get_player, player_id=player_id)
-            except Exception:
-                fetch_errors += 1
-                continue
-            roster = player_data.get("rosterUnit") or player_data.get("roster") or []
-            unit = next(
-                (u for u in roster if (u.get("baseId") or (u.get("definitionId", "") or "").split(":")[0]) == base_id),
-                None,
-            )
-            roster_units.append((player_id, player_name, unit))
-            await asyncio.sleep(0.1)
+        roster_units = [(pid, name, units.get(base_id)) for pid, name, units in roster]
+        fetch_errors = info.get("errors", 0)
 
         relevant, total_open = _build_relevant(base_id, roster_units)
-        _compute_player_deltas(stat_calc, target_relic, relevant)
+        await asyncio.to_thread(_compute_player_deltas, stat_calc, target_relic, relevant)
         _cache_put(cache_key, relevant, total_open, extra={"fetch_errors": fetch_errors})
 
     report = _aggregate_report(base_id, target_relic, relevant, total_open, view=view)
     if report["error"] is None:
         report["guild_name"] = guild.guild_name
         report["swgoh_guild_id"] = guild.swgoh_guild_id
-        report["total_members"] = len(guild.members)
+        report["total_members"] = info.get("members", len(guild.members))
         report["fetch_errors"] = fetch_errors
     return report

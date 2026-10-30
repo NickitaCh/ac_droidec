@@ -78,21 +78,23 @@ class TelegramAPI:
         )
 
     async def send_photo(self, chat_id, png: bytes, filename: str, caption: str | None = None,
-                         reply_to: int | None = None, thread_id: int | None = None) -> dict:
+                         reply_to: int | None = None, thread_id: int | None = None, keyboard: list | None = None) -> dict:
         return await self.call(
             "sendPhoto", files={"photo": (filename, png, "image/png")},
             chat_id=chat_id, caption=(caption or "")[:CAPTION_LIMIT] or None, parse_mode="HTML",
             reply_parameters={"message_id": reply_to, "allow_sending_without_reply": True} if reply_to else None,
             message_thread_id=thread_id,
+            reply_markup={"inline_keyboard": keyboard} if keyboard else None,
         )
 
     async def send_document(self, chat_id, data: bytes, filename: str, mime: str, caption: str | None = None,
-                            reply_to: int | None = None, thread_id: int | None = None) -> dict:
+                            reply_to: int | None = None, thread_id: int | None = None, keyboard: list | None = None) -> dict:
         return await self.call(
             "sendDocument", files={"document": (filename, data, mime)},
             chat_id=chat_id, caption=(caption or "")[:CAPTION_LIMIT] or None, parse_mode="HTML",
             reply_parameters={"message_id": reply_to, "allow_sending_without_reply": True} if reply_to else None,
             message_thread_id=thread_id,
+            reply_markup={"inline_keyboard": keyboard} if keyboard else None,
         )
 
     async def edit_message_text(self, chat_id, message_id: int, text: str, keyboard: list | None = None) -> dict:

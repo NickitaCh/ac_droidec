@@ -6764,58 +6764,50 @@ def get_player_names(guild_id: int) -> dict:
 
 # =====================================================================
 # ФРАЗЫ-ПРИПИСКИ ДЛЯ ОБЪЯВЛЕНИЙ О ВЫДАЧЕ ОМИКРОНОВ (cogs/stat_requirements.py)
-# Глобальный справочник (не per-guild) — персонаж редко зависит от того, в какой
-# из обслуживаемых гильдий выдан омикрон, а управляется он супер-админами через
-# веб (web/routes/omicron_phrases.py), а не гильдийскими офицерами.
+# Приписки принадлежат гильдии; старый глобальный справочник переносится только в АС (id=1).
 # =====================================================================
+
 def _ensure_omicron_phrases_table(cursor):
-    cursor.execute("""
+    schema = """
         CREATE TABLE IF NOT EXISTS omicron_phrases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL DEFAULT 1,
             character_key TEXT NOT NULL,
             skill_id TEXT NOT NULL DEFAULT '',
             phrase TEXT NOT NULL,
             updated_by TEXT,
             updated_at TEXT NOT NULL,
-            UNIQUE(character_key, skill_id)
+            UNIQUE(guild_id, character_key, skill_id)
         )
-    """)
-    # Миграция со старой схемы (до 2026-08-31: character_key TEXT UNIQUE, без skill_id,
-    # ровно одна фраза на персонажа сразу на все его омикроны). Расширено под запрос
-    # "выбрать, для какого конкретно омикрона нужна фраза" — skill_id='' теперь значит
-    # "фраза по умолчанию на все омикроны персонажа", непустой skill_id — override на
-    # конкретный омикрон (см. get_omicron_phrase). Старый UNIQUE(character_key) не даёт
-    # добавить вторую строку на того же персонажа, поэтому не ALTER, а пересоздание
-    # таблицы — определяем старую схему по отсутствию колонки skill_id.
+    """
+    cursor.execute(schema)
     cursor.execute("PRAGMA table_info(omicron_phrases)")
     columns = {row[1] for row in cursor.fetchall()}
-    if "skill_id" not in columns:
-        cursor.execute("ALTER TABLE omicron_phrases RENAME TO omicron_phrases_old")
-        cursor.execute("""
-            CREATE TABLE omicron_phrases (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                character_key TEXT NOT NULL,
-                skill_id TEXT NOT NULL DEFAULT '',
-                phrase TEXT NOT NULL,
-                updated_by TEXT,
-                updated_at TEXT NOT NULL,
-                UNIQUE(character_key, skill_id)
-            )
-        """)
-        cursor.execute("""
-            INSERT INTO omicron_phrases (character_key, skill_id, phrase, updated_by, updated_at)
-            SELECT character_key, '', phrase, updated_by, updated_at FROM omicron_phrases_old
-        """)
-        cursor.execute("DROP TABLE omicron_phrases_old")
-        # Обязательный commit прямо здесь: INSERT — DML, sqlite3 открывает под него
-        # implicit-транзакцию, а вызывающие read-only функции (get_all_omicron_phrases и
-        # т.п.) закрывают соединение без conn.commit() — без этой строки перенос старых
-        # фраз в новую таблицу молча откатывался бы при conn.close() (найдено локальным
-        # тестом миграции 2026-08-31, реального инцидента на проде не было).
+    if "guild_id" in columns:
+        return
+    # Rebuild to remove the old global UNIQUE constraint. Recheck under the write lock:
+    # bot and web can reach this migration at the same time.
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("PRAGMA table_info(omicron_phrases)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "guild_id" not in columns:
+            cursor.execute("ALTER TABLE omicron_phrases RENAME TO omicron_phrases_old")
+            cursor.execute(schema)
+            skill_column = "skill_id" if "skill_id" in columns else "''"
+            cursor.execute(f"""
+                INSERT INTO omicron_phrases (id, guild_id, character_key, skill_id, phrase, updated_by, updated_at)
+                SELECT id, 1, character_key, {skill_column}, phrase, updated_by, updated_at FROM omicron_phrases_old
+            """)
+            cursor.execute("DROP TABLE omicron_phrases_old")
+        # Read functions close without committing; persist migration here as well.
         cursor.connection.commit()
+    except Exception:
+        cursor.connection.rollback()
+        raise
 
 
-def set_omicron_phrase(character_key: str, phrase: str, updated_by: str = None, skill_id: str = "") -> None:
+def set_omicron_phrase(character_key: str, phrase: str, updated_by: str = None, skill_id: str = "", *, guild_id: int) -> None:
     """Добавляет фразу либо (при уже существующей записи на тот же character_key+skill_id)
     заменяет её. skill_id='' (по умолчанию) — фраза на все омикроны персонажа; конкретный
     skill_id — override только на этот омикрон (см. get_omicron_phrase)."""
@@ -6823,14 +6815,14 @@ def set_omicron_phrase(character_key: str, phrase: str, updated_by: str = None, 
     cursor = conn.cursor()
     _ensure_omicron_phrases_table(cursor)
     cursor.execute("""
-        INSERT OR REPLACE INTO omicron_phrases (character_key, skill_id, phrase, updated_by, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
-    """, (character_key, skill_id, phrase, updated_by))
+        INSERT OR REPLACE INTO omicron_phrases (guild_id, character_key, skill_id, phrase, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (guild_id, character_key, skill_id, phrase, updated_by))
     conn.commit()
     conn.close()
 
 
-def get_omicron_phrase(character_key: str, skill_id: str | None = None) -> str | None:
+def get_omicron_phrase(character_key: str, skill_id: str | None = None, *, guild_id: int) -> str | None:
     """Фраза для конкретного омикрона (skill_id), если она задана отдельно; иначе фраза
     "по умолчанию" на все омикроны персонажа (skill_id=''); None, если не задано ни то,
     ни другое. skill_id=None — то же самое, что не передавать конкретный омикрон вовсе
@@ -6840,40 +6832,40 @@ def get_omicron_phrase(character_key: str, skill_id: str | None = None) -> str |
     _ensure_omicron_phrases_table(cursor)
     if skill_id:
         cursor.execute(
-            "SELECT phrase FROM omicron_phrases WHERE character_key = ? AND skill_id = ?",
-            (character_key, skill_id),
+            "SELECT phrase FROM omicron_phrases WHERE guild_id = ? AND character_key = ? AND skill_id = ?",
+            (guild_id, character_key, skill_id),
         )
         row = cursor.fetchone()
         if row:
             conn.close()
             return row[0]
     cursor.execute(
-        "SELECT phrase FROM omicron_phrases WHERE character_key = ? AND skill_id = ''",
-        (character_key,),
+        "SELECT phrase FROM omicron_phrases WHERE guild_id = ? AND character_key = ? AND skill_id = ''",
+        (guild_id, character_key),
     )
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
 
 
-def get_all_omicron_phrases() -> list:
+def get_all_omicron_phrases(guild_id: int) -> list:
     """[(id, character_key, skill_id, phrase, updated_by, updated_at), ...] по алфавиту
     персонажа. skill_id='' — фраза по умолчанию на все омикроны персонажа; непустой —
     override на конкретный омикрон (см. set_omicron_phrase)."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_omicron_phrases_table(cursor)
-    cursor.execute("SELECT id, character_key, skill_id, phrase, updated_by, updated_at FROM omicron_phrases ORDER BY character_key")
+    cursor.execute("SELECT id, character_key, skill_id, phrase, updated_by, updated_at FROM omicron_phrases WHERE guild_id = ? ORDER BY character_key", (guild_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 
-def delete_omicron_phrase(character_key: str, skill_id: str = "") -> bool:
+def delete_omicron_phrase(character_key: str, skill_id: str = "", *, guild_id: int) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_omicron_phrases_table(cursor)
-    cursor.execute("DELETE FROM omicron_phrases WHERE character_key = ? AND skill_id = ?", (character_key, skill_id))
+    cursor.execute("DELETE FROM omicron_phrases WHERE guild_id = ? AND character_key = ? AND skill_id = ?", (guild_id, character_key, skill_id))
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()

@@ -33,7 +33,7 @@
 
             <label>
                 Целевой уровень реликвии (для нормирования всех билдов)
-                <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" required>
+                <input type="number" name="relic" min="0" max="10" value="{{ selected_relic }}" placeholder="как есть">
             </label>
 
             <label>
@@ -45,7 +45,7 @@
             <p class="muted" style="margin-top: .5em;">
                 Без кода/ID — анализ по своей гильдии (быстро, по сохранённым данным). С кодом союзника
                 любого игрока чужой гильдии (или её ID напрямую, если уже известен) — бот
-                опрашивает участников живьём, на крупной гильдии может занять до минуты.
+                использует общий со сравнением кэш на сутки; первый опрос может занять до минуты.
             </p>
         </form>
     </div>
@@ -60,7 +60,7 @@
                     {% if result.guild_name %}<span class="muted">— {{ result.guild_name }} (ID {{ result.swgoh_guild_id }})</span>{% endif %}
                 </span>
                 <span class="panel-hint">
-                    релик {{ result.target_relic }} · открыт у {{ result.total_open }}{% if result.total_members %}/{{ result.total_members }}{% endif %}, релевантно {{ result.relevant_count }}
+                    {% if result.target_relic is none %}релик как есть{% else %}релик {{ result.target_relic }}{% endif %} · открыт у {{ result.total_open }}{% if result.total_members %}/{{ result.total_members }}{% endif %}, релевантно {{ result.relevant_count }}
                     {%- if result.fetch_errors %}, ошибок опроса {{ result.fetch_errors }}{% endif %}
                 </span>
             </div>
@@ -75,11 +75,11 @@
 
                 <div class="panel-title" style="margin-top: 1em;"><span>Три самых частых сочетания сетов</span></div>
                 <div class="table-scroll">
-                    <table class="data">
+                    <table class="data cards-on-phone">
                         <thead><tr><th>Комбинация</th><th>Игроков</th><th>Доля</th></tr></thead>
                         <tbody>
                             {% for c in result.top_combos %}
-                                <tr><td>{{ c.label }}</td><td>{{ c.count }}</td><td>{{ c.freq_pct }}</td></tr>
+                                <tr><td data-label="Комбинация">{{ c.label }}</td><td data-label="Игроков">{{ c.count }}</td><td data-label="Доля">{{ c.freq_pct }}</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -87,14 +87,14 @@
 
                 <div class="panel-title" style="margin-top: 1em;"><span>Три самые частые основные характеристики по слоту</span></div>
                 <div class="table-scroll">
-                    <table class="data">
+                    <table class="data cards-on-phone">
                         <thead><tr><th>Слот</th><th>Основа</th><th>Игроков</th><th>Доля</th></tr></thead>
                         <tbody>
                             {% for slot in result.top_primaries_by_slot %}
                                 {% for row in slot.rows %}
                                     <tr>
-                                        {% if loop.first %}<td rowspan="{{ slot.rows|length }}"><span class="mod-cell">{{ game.mod_icon(slot.slot_key, none, 6) }}{{ slot.slot_label }}</span></td>{% endif %}
-                                        <td>{{ row.name }}</td><td>{{ row.count }}</td><td>{{ row.freq_pct }}</td>
+                                        <td data-label="Слот"><span class="mod-cell">{{ game.mod_icon(slot.slot_key, none, 6) }}{{ slot.slot_label }}</span></td>
+                                        <td data-label="Основа">{{ row.name }}</td><td data-label="Игроков">{{ row.count }}</td><td data-label="Доля">{{ row.freq_pct }}</td>
                                     </tr>
                                 {% endfor %}
                             {% endfor %}
@@ -108,9 +108,9 @@
                 <div class="ma-view" data-view="{{ r.view }}"{% if r.view != result.view %} hidden{% endif %}>
                 <div class="panel-title" style="margin-top: 1em;">
                     <span>Характеристики</span>
-                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модулей на релике {{ r.target_relic }}</span>
+                    <span class="panel-hint">ранг — по силе фокуса гильдии (GF); дельта = вклад модулей {% if r.target_relic is none %}на текущем релике{% else %}на релике {{ r.target_relic }}{% endif %}</span>
                 </div>
-                <div class="segmented-toggle" style="margin-bottom: .5em;">
+                <div class="segmented-toggle ma-toggle" style="margin-bottom: .5em;">
                     <span class="muted">Показывать:</span>
                     <span class="segmented-toggle-options">
                         {% for v, vlabel in (("delta", "Дельта"), ("pct", "% от базы"), ("final", "Итоговый стат")) %}
@@ -124,7 +124,7 @@
                     <span class="muted" style="margin-left: .5em;">(влияет и на таблицы направлений ниже)</span>
                 </div>
                 <div class="table-scroll">
-                    <table class="data">
+                    <table class="data cards-on-phone">
                         <thead>
                             <tr>
                                 <th>Ранг</th><th>Характеристика</th><th>SF</th>
@@ -140,19 +140,19 @@
                         <tbody>
                             {% for row in r.stat_rows %}
                                 <tr class="{{ 'muted' if row.n == 0 }}">
-                                    <td>{{ row.rank or "—" }}</td>
-                                    <td>{{ row.label }}</td>
+                                    <td data-label="Ранг">{{ row.rank or "—" }}</td>
+                                    <td data-label="Характеристика">{{ row.label }}</td>
                                     {% if row.n == 0 %}
-                                        <td colspan="8">нет данных</td>
+                                        <td data-label="Данные" colspan="8">нет данных</td>
                                     {% else %}
-                                        <td>{{ row.sf_pct }}</td>
-                                        <td>{{ row.p50_fmt }}</td>
-                                        <td>{{ row.p70_fmt }}</td>
-                                        <td>{{ row.p90_fmt }}</td>
-                                        <td>{{ row.spread_fmt }}</td>
-                                        <td title="{{ row.cv_level or '' }}">{{ row.cv_fmt }}</td>
-                                        <td>{{ row.nm_fmt }}</td>
-                                        <td title="{{ row.gf_level or '' }}">{{ row.gf_fmt }}</td>
+                                        <td data-label="SF">{{ row.sf_pct }}</td>
+                                        <td data-label="p50">{{ row.p50_fmt }}</td>
+                                        <td data-label="p70">{{ row.p70_fmt }}</td>
+                                        <td data-label="p90">{{ row.p90_fmt }}</td>
+                                        <td data-label="Разброс">{{ row.spread_fmt }}</td>
+                                        <td data-label="CV" title="{{ row.cv_level or '' }}">{{ row.cv_fmt }}</td>
+                                        <td data-label="NM">{{ row.nm_fmt }}</td>
+                                        <td data-label="GF" title="{{ row.gf_level or '' }}">{{ row.gf_fmt }}</td>
                                     {% endif %}
                                 </tr>
                             {% endfor %}
@@ -184,7 +184,7 @@
                                 <span class="panel-hint">{{ d.count }} игроков · {{ d.freq_pct }} · средний релик {{ "%.1f"|format(d.avg_relic) }}</span>
                             </div>
                             <div class="table-scroll">
-                                <table class="data">
+                                <table class="data cards-on-phone">
                                     <thead>
                                         <tr>
                                             <th>Характеристика</th>
@@ -196,7 +196,7 @@
                                     </thead>
                                     <tbody>
                                         {% for s in d.stats %}
-                                            <tr><td>{{ s.label }}</td><td>{{ s.p50_fmt }}</td><td>{{ s.p70_fmt }}</td><td>{{ s.p90_fmt }}</td><td>{{ s.cv_fmt }}</td></tr>
+                                            <tr><td data-label="Характеристика">{{ s.label }}</td><td data-label="p50">{{ s.p50_fmt }}</td><td data-label="p70">{{ s.p70_fmt }}</td><td data-label="p90">{{ s.p90_fmt }}</td><td data-label="CV">{{ s.cv_fmt }}</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>

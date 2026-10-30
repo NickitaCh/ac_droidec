@@ -1027,6 +1027,8 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .segmented-toggle-options a.active { background: var(--accent); color: white; font-weight: 600; }
 .settings-tabs { margin-bottom: 1em; }
 .settings-tabs .segmented-toggle-options { flex-wrap: wrap; }
+.ma-toggle { display: flex; flex-wrap: wrap; max-width: 100%; }
+.ma-toggle .segmented-toggle-options { flex-wrap: wrap; }
 .segmented-toggle-options a + a,
 .segmented-toggle-options strong + a,
 .segmented-toggle-options a + strong { border-left: 1px solid var(--border); }

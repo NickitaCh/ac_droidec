@@ -20,6 +20,7 @@ import sqlite3
 import statistics
 import time
 import zlib
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,7 +32,7 @@ MAX_GUILDS = 6
 MAX_CHARS = 6
 ROSTER_TTL_SECONDS = 24 * 3600
 FETCH_PARALLEL = 5
-_REF_TTL_SECONDS = 3600
+_REF_TTL_SECONDS = ROSTER_TTL_SECONDS
 MSK = ZoneInfo("Europe/Moscow")
 
 # Строки блока «Статы»: (ключ, подпись). Урон — родной тип персонажа (физ./особый, по базе).
@@ -40,6 +41,7 @@ STAT_LINES = [
     ("Critical Damage", "Крит. урон"),
     ("Health", "Здоровье"),
     ("Protection", "Защита"),
+    ("Defense", "Оборона"),
     ("Potency", "Эффективность"),
     ("Tenacity", "Стойкость"),
 ]
@@ -77,6 +79,8 @@ def _connect():
             payload BLOB NOT NULL
         )
     """)
+    conn.commit()
+    conn.execute("CREATE TABLE IF NOT EXISTS mod_compare_refs (ref TEXT PRIMARY KEY, swgoh_guild_id TEXT NOT NULL)")
     conn.commit()
     return conn
 
@@ -116,15 +120,30 @@ def is_fetching(swgoh_guild_id: str) -> bool:
 
 
 async def resolve(comlink, ref: str):
-    """Код союзника/ID гильдии -> GuildLookupResult (кэш на час — страница перезагружается
+    """Код союзника/ID гильдии -> GuildLookupResult (кэш на сутки — страница перезагружается
     во время сбора, не опрашивать игру на каждую перезагрузку)."""
     from services import steal_build
+    conn = _connect()
+    row = conn.execute("SELECT swgoh_guild_id FROM mod_compare_refs WHERE ref = ?", (ref,)).fetchone()
+    conn.close()
+    gid = row[0] if row else ref
+    info = roster_info(gid)
+    if info and is_fresh(gid):
+        roster = load_roster(gid)
+        return steal_build.GuildLookupResult(ok=True, swgoh_guild_id=gid, guild_name=info["name"],
+                                             members=[(pid, name) for pid, name, _units in roster])
     cached = _refs.get(ref)
     if cached and time.time() - cached[0] < _REF_TTL_SECONDS:
         return cached[1]
     lookup = await steal_build.resolve_guild(comlink, ref)
     if lookup.ok:
+        if len(_refs) >= 256:
+            _refs.clear()
         _refs[ref] = (time.time(), lookup)
+        conn = _connect()
+        conn.execute("INSERT OR REPLACE INTO mod_compare_refs VALUES (?, ?)", (ref, lookup.swgoh_guild_id))
+        conn.commit()
+        conn.close()
     return lookup
 
 
@@ -143,12 +162,16 @@ async def _fetch(comlink, lookup) -> None:
             finally:
                 state["done"] += 1
         units = {}
-        for u in data.get("rosterUnit") or []:
-            if mod_analysis._relevant_unit(u):
-                units[(u.get("definitionId") or "").split(":")[0]] = u
+        for u in data.get("rosterUnit") or data.get("roster") or []:
+            base_id = u.get("baseId") or (u.get("definitionId") or "").split(":")[0]
+            if base_id:
+                # Keep ownership for the detailed report without retaining every low-level unit's mods.
+                units[base_id] = u if mod_analysis._relevant_unit(u) else {"definitionId": base_id}
         players.append({"id": player_id, "name": data.get("name") or name, "units": units})
 
     await asyncio.gather(*(one(pid, name) for pid, name in lookup.members))
+    if lookup.members and not players:
+        raise RuntimeError("Не удалось получить ни одного игрока; предыдущий кэш сохранён.")
     payload = zlib.compress(json.dumps(players, ensure_ascii=False).encode("utf-8"), 6)
     conn = _connect()
     conn.execute("INSERT OR REPLACE INTO mod_compare_rosters VALUES (?, ?, ?, ?, ?, ?)",
@@ -179,6 +202,17 @@ def progress(swgoh_guild_id: str) -> dict | None:
     return {k: v for k, v in p.items() if k != "task"} if p else None
 
 
+async def ensure_roster(comlink, lookup) -> list[tuple]:
+    """Shared daily roster for comparison and detailed analysis; concurrent callers join one fetch."""
+    gid = lookup.swgoh_guild_id
+    if not is_fresh(gid) or is_fetching(gid):
+        start_fetch(comlink, lookup)
+        await asyncio.shield(_progress[gid]["task"])
+        if _progress[gid].get("error"):
+            raise RuntimeError(_progress[gid]["error"])
+    return load_roster(gid)
+
+
 def own_roster(guild_id: int) -> list[tuple]:
     """Своя гильдия из player_unit_cache — в том же виде, что load_roster."""
     roster = database.get_all_user_mappings(guild_id)
@@ -196,8 +230,6 @@ def _fmt(value, stat: str) -> str:
         return "—"
     if stat in PERCENT_STATS:
         return f"{value:.0f}%"
-    if abs(value) >= 10000:
-        return f"{value / 1000:.0f}к"
     if abs(value) >= 1000:
         return f"{value / 1000:.1f}к".replace(".", ",")
     return f"{value:.0f}"
@@ -208,7 +240,7 @@ def _summary(stat_calc, base_id: str, roster: list[tuple], target_relic: int | N
     rows = []
     for _pid, _name, units in roster:
         unit = units.get(base_id)
-        if not unit:
+        if not unit or not mod_analysis._relevant_unit(unit):
             continue
         decoded = [d for d in (mod_search.decode_mod(m) for m in unit["equippedStatMod"]) if d is not None]
         if len(decoded) != mod_analysis.REQUIRED_MOD_COUNT:
@@ -217,6 +249,9 @@ def _summary(stat_calc, base_id: str, roster: list[tuple], target_relic: int | N
         projected = unit if target_relic is None else stat_engine.project_unit_relic(unit, target_relic)
         final = stat_engine.calc_final_stats(stat_calc, projected)
         base = stat_engine.calc_base_stats(stat_calc, projected)
+        defense = mod_analysis._defense_delta(final, base)
+        final = {**final, "Defense": defense["base"] + defense["delta"]}
+        base = {**base, "Defense": defense["base"]}
         rows.append({"relic": current_relic, "decoded": decoded, "final": final, "base": base,
                      "config": mod_analysis._config_key(decoded)})
     n = len(rows)
@@ -295,6 +330,10 @@ def compare(stat_calc, base_ids: list[str], guilds: list[dict], target_relic: in
     names = database.get_game_unit_names(base_ids)
     out = []
     for base_id in base_ids:
-        rows = [{"guild": g, "summary": _summary(stat_calc, base_id, g["roster"], target_relic)} for g in guilds]
+        rows = [{"guild": {k: v for k, v in g.items() if k != "roster"},
+                 "analysis_url": "/mod-analysis?" + urlencode({"character": base_id,
+                    "relic": "" if target_relic is None else target_relic,
+                    **({"guild_ref": g["id"]} if not g["own"] else {})}),
+                 "summary": _summary(stat_calc, base_id, g["roster"], target_relic)} for g in guilds]
         out.append({"base_id": base_id, "char_name": names.get(base_id, base_id), "rows": rows})
     return out

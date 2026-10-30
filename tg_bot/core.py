@@ -44,6 +44,7 @@ class Callback:
     prefix: str
     handler: object
     tier: str = TIER_MEMBER
+    command_name: str | None = None
 
 
 COMMANDS: dict[str, Command] = {}
@@ -61,10 +62,10 @@ def command(name: str, description: str, tier: str = TIER_MEMBER, aliases: tuple
     return wrap
 
 
-def callback(prefix: str, tier: str = TIER_MEMBER):
+def callback(prefix: str, tier: str = TIER_MEMBER, command_name: str | None = None):
     """Кнопки: callback_data = "<prefix>|<данные>" (Telegram ограничивает 64 байтами)."""
     def wrap(fn):
-        CALLBACKS[prefix] = Callback(prefix, fn, tier)
+        CALLBACKS[prefix] = Callback(prefix, fn, tier, command_name)
         return fn
     return wrap
 
@@ -123,17 +124,35 @@ class Ctx:
         reply_to = None if self.callback_query is not None else self.message.get("message_id")
         return await self.api.send_message(self.chat_id, text, reply_to=reply_to, keyboard=keyboard, thread_id=self.thread_id)
 
-    async def reply_photo(self, png: bytes, filename: str, caption: str | None = None) -> dict:
+    async def reply_photo(self, png: bytes, filename: str, caption: str | None = None, keyboard: list | None = None,
+                          replace: bool = False) -> dict:
+        if replace and self.callback_query is not None and (self.message.get("photo") or self.message.get("document")):
+            async def edit_media(kind):
+                return await self.api.call("editMessageMedia", files={"image": (filename, png, "image/png")},
+                    chat_id=self.chat_id, message_id=self.message["message_id"],
+                    media={"type": kind, "media": "attach://image", "caption": (caption or "")[:1024], "parse_mode": "HTML"},
+                    reply_markup={"inline_keyboard": keyboard or []})
+            try:
+                return await edit_media("photo")
+            except TelegramError as e:
+                if "PHOTO_INVALID_DIMENSIONS" not in e.description and "PHOTO_SAVE_FILE_INVALID" not in e.description:
+                    raise
+                return await edit_media("document")
         reply_to = None if self.callback_query is not None else self.message.get("message_id")
         try:
-            return await self.api.send_photo(self.chat_id, png, filename, caption=caption, reply_to=reply_to, thread_id=self.thread_id)
+            return await self.api.send_photo(self.chat_id, png, filename, caption=caption, reply_to=reply_to, thread_id=self.thread_id, keyboard=keyboard)
         except TelegramError as e:
             # PHOTO_INVALID_DIMENSIONS и т.п. у очень вытянутых картинок — тогда файлом.
             print(f"⚠️ [TG] sendPhoto не прошёл ({e.description}), отправляю файлом")
             return await self.api.send_document(self.chat_id, png, filename, "image/png", caption=caption,
-                                                reply_to=reply_to, thread_id=self.thread_id)
+                                                reply_to=reply_to, thread_id=self.thread_id, keyboard=keyboard)
 
     async def edit(self, text: str, keyboard: list | None = None):
+        if self.message.get("photo") or self.message.get("document"):
+            await self.api.call("editMessageCaption", chat_id=self.chat_id, message_id=self.message["message_id"],
+                                caption=text[:1024], parse_mode="HTML",
+                                reply_markup={"inline_keyboard": keyboard or []})
+            return
         await self.api.edit_message_text(self.chat_id, self.message["message_id"], text, keyboard=keyboard)
 
     async def action(self, kind: str = "typing"):
@@ -263,6 +282,10 @@ async def _handle_message(app: App, message: dict):
     if denial:
         await ctx.reply(denial)
         return
+    from tg_bot import command_access
+    if command_access.denied(ctx, cmd.name):
+        await ctx.reply("Эта команда отключена офицером в этой теме. Используйте разрешённую тему или личку бота.")
+        return
     database.log_command_usage(f"tg:{cmd.name}", ctx.access["guild_id"])
     await cmd.handler(ctx)
 
@@ -276,6 +299,10 @@ async def _handle_callback(app: App, query: dict):
         await app.api.answer_callback(query["id"])
         return
     ctx = Ctx(app, message, query["from"], payload, callback_query=query)
+    from tg_bot import command_access
+    if command_access.denied(ctx, cb.command_name):
+        await app.api.answer_callback(query["id"], "Команда отключена в этой теме. Используйте другую тему или личку бота.", alert=True)
+        return
     denial = denied_text(cb.tier, ctx)
     if denial:
         await app.api.answer_callback(query["id"], "Нет доступа: " + ("привяжите аккаунт командой /reg" if ctx.access["tier"] is None else "только офицерам"), alert=True)

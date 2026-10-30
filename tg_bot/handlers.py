@@ -46,6 +46,7 @@ HELP_SECTIONS = (
     ("Чат гильдии (офицеры)", (
         ("/bind", "привязать эту группу к вашей гильдии — для оповещений"),
         ("/notify", "какие оповещения гильдии слать в группу (энка, задачи, омикроны)"),
+        ("/command_access", "разрешить или запретить команды в текущей теме или общем чате"),
         ("/unbind", "отвязать группу"),
     )),
 )
@@ -319,7 +320,7 @@ async def cmd_profile(ctx: Ctx):
         await _player_profile(ctx, ally_code)
 
 
-@callback("pf")
+@callback("pf", command_name="profile")
 async def cb_profile(ctx: Ctx, ally_code: str):
     code = guild_resolver.normalize_ally_code(ally_code)
     if code is None:
