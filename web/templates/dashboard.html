@@ -369,12 +369,12 @@
                         <p class="widget-empty">Дней рождения пока не сохранено.</p>
                     {% else %}
                         <div class="table-scroll">
-                            <table class="data">
+                            <table class="data cards-on-phone">
                                 <tbody>
                                     {% for row in widgets.birthdays %}
                                         <tr>
-                                            <td>{{ row.display_name }}</td>
-                                            <td class="num">{{ row.date_str }}</td>
+                                            <td data-label="Игрок">{{ row.display_name }}</td>
+                                            <td data-label="Дата" class="num">{{ row.date_str }}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>
@@ -415,7 +415,7 @@
                             <p class="widget-empty">Каталог датакронов ещё не загрузился.</p>
                         {% else %}
                             <div class="table-scroll">
-                                <table class="data">
+                                <table class="data cards-on-phone">
                                     <thead>
                                         <tr>
                                             <th>Сезон</th>
@@ -426,9 +426,9 @@
                                     <tbody>
                                         {% for s in widgets.datacron_seasons %}
                                             <tr>
-                                                <td><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
-                                                <td class="num">{{ s.base_count }}</td>
-                                                <td class="num">{{ s.focused_count }}</td>
+                                                <td data-label="Сезон"><a href="/datacrons/{{ s.set_id }}">{{ s.display_name }}</a> <span class="muted">[{{ s.set_id }}]</span></td>
+                                                <td data-label="Обычных" class="num">{{ s.base_count }}</td>
+                                                <td data-label="Спец." class="num">{{ s.focused_count }}</td>
                                             </tr>
                                         {% endfor %}
                                     </tbody>
@@ -559,7 +559,7 @@
                         <p class="widget-empty">История ВГ пока пуста.</p>
                     {% else %}
                         <div class="table-scroll">
-                            <table class="data">
+                            <table class="data cards-on-phone">
                                 <thead>
                                     <tr>
                                         <th>Дата</th>
@@ -571,10 +571,10 @@
                                 <tbody>
                                     {% for row in widgets.tw_rows %}
                                         <tr>
-                                            <td>{{ row.date_label }}</td>
-                                            <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
-                                            <td class="num nowrap">{{ ui.num(row.own_score) }} : {{ ui.num(row.opponent_score) }}</td>
-                                            <td>
+                                            <td data-label="Дата">{{ row.date_label }}</td>
+                                            <td data-label="Результат"><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
+                                            <td data-label="Счёт" class="num nowrap">{{ ui.num(row.own_score) }} : {{ ui.num(row.opponent_score) }}</td>
+                                            <td data-label="Соперник">
                                                 {% if row.opponent_url %}
                                                     <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
                                                 {% else %}

@@ -681,6 +681,7 @@ select { background: var(--page); }
 }
 .widget-secondary {
     grid-column: span 2;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 1em;
@@ -713,7 +714,7 @@ select { background: var(--page); }
     gap: 1em;
 }
 @media (max-width: 60em) {
-    .dashboard-grid { grid-template-columns: 1fr; }
+    .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
     .widget-secondary { grid-column: 1; }
     .widget-cols { grid-template-columns: 1fr; }
     .widget-cols-even { grid-template-columns: 1fr; }

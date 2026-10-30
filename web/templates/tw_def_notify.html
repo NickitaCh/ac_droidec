@@ -54,10 +54,12 @@
                         {% for row in rows %}
                             {% set ch = row.channels %}
                             <label class="notify-recipient-card" data-discord="{{ 1 if ch.discord else 0 }}" data-tg="{{ 1 if ch.tg else 0 }}">
+                                <span class="notify-recipient-top">
                                 <input type="checkbox" class="checkbox notify-check" name="ally_codes" value="{{ row.ally_code }}"
                                        {% if row.discord_id %}checked{% else %}disabled{% endif %}>
                                 <span class="notify-recipient-name">{{ row.name }}</span>
                                 <span class="badge badge-neutral">отрядов: {{ row.entries|length }}</span>
+                                </span>
                                 <span class="notify-recipient-channels">
                                     <span class="badge {% if ch.discord %}badge-ok{% else %}badge-neutral{% endif %}">Discord{% if not ch.discord %}: нет{% endif %}</span>
                                     <span class="badge {% if ch.tg %}badge-ok{% else %}badge-neutral{% endif %}">{{ ch.tg_name or "Telegram: нет лички" }}</span>
