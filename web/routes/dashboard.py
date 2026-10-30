@@ -180,6 +180,8 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         widgets = {
             "roster_rows": roster_rows,
             "registered_count": sum(1 for r in roster_rows if r.registered),
+            "discord_count": sum(1 for r in roster_rows if r.discord_registered),
+            "telegram_count": sum(1 for r in roster_rows if r.telegram_registered),
             "tb_report": tb_report,
             "tw_rows": dashboard_data.get_recent_tw_results(guild_id, limit=10),
             "tw_stats": dashboard_data.get_tw_stats(guild_id),

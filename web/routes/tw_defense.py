@@ -729,25 +729,32 @@ async def _notify_catalog():
 @router.get("/plans/{plan_id}/notify", response_class=HTMLResponse)
 async def plan_notify_page(plan_id: int, request: Request, user: dict = Depends(_require)):
     plan = _get_plan_or_404(user["guild_id"], plan_id)
-    rows = tw_def_notify.build_player_rows(user["guild_id"], plan, await _notify_catalog())
+    return templates.TemplateResponse(request, "tw_def_notify.html", _notify_context(user, plan, await _notify_catalog()))
+
+
+def _notify_context(user: dict, plan: dict, catalog, destinations=None, error=None):
+    rows = tw_def_notify.build_player_rows(user["guild_id"], plan, catalog)
     guild_name = (database.get_guild_config(user["guild_id"]) or {}).get("name") or "гильдия"
     preview = tw_def_notify.format_dm(guild_name, plan["name"], rows[:1]) if rows else []
-    return templates.TemplateResponse(request, "tw_def_notify.html", {
-        "user": user, "plan": plan, "rows": rows, "preview": "\n".join(preview), "report": None, "error": None,
-    })
+    return {"user": user, "plan": plan, "rows": rows, "preview": "\n".join(preview), "report": None, "error": error,
+            "destinations": destinations if destinations is not None else tw_def_notify.DESTINATIONS[tw_def_notify.guild_mode(user["guild_id"])]}
 
 
 @router.post("/plans/{plan_id}/notify", response_class=HTMLResponse)
 async def plan_notify_send(plan_id: int, request: Request, ally_codes: list[str] = Form([]),
+                           destinations: list[str] = Form([]),
                            user: dict = Depends(_require)):
     plan = _get_plan_or_404(user["guild_id"], plan_id)
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        return templates.TemplateResponse(request, "tw_def_notify.html", {
-            "user": user, "plan": plan, "rows": [], "preview": "", "report": None,
-            "error": "На сервере не задан токен бота — рассылка недоступна.",
-        })
-    report = await tw_def_notify.send_broadcast(token, user["guild_id"], plan, await _notify_catalog(), set(ally_codes))
+    mode = tw_def_notify.mode_for(destinations)
+    token = os.environ.get("DISCORD_TOKEN", "")
+    error = "Выберите хотя бы один канал: Discord или Telegram." if mode is None else \
+        "Отметьте хотя бы одного игрока." if not ally_codes else \
+        "На сервере не задан токен Discord-бота." if "discord" in destinations and not token else None
+    if error:
+        return templates.TemplateResponse(request, "tw_def_notify.html",
+            _notify_context(user, plan, datacron_catalog._cache, destinations, error), status_code=400)
+    database.update_guild_config(user["guild_id"], tw_def_dm_mode=mode)
+    report = await tw_def_notify.send_broadcast(token, user["guild_id"], plan, await _notify_catalog(), set(ally_codes), mode)
     return templates.TemplateResponse(request, "tw_def_notify.html", {
         "user": user, "plan": plan, "rows": [], "preview": "", "report": report, "error": None,
     })

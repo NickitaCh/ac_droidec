@@ -13,12 +13,13 @@
         <div class="panel">
             <div class="panel-title">
                 <span>Результат рассылки</span>
-                <span class="panel-hint">отправлено: {{ report|selectattr("status", "equalto", "sent")|list|length }} из {{ report|length }}</span>
+                <span class="panel-hint">полностью: {{ report|selectattr("status", "equalto", "sent")|list|length }} · частично: {{ report|selectattr("status", "equalto", "partial")|list|length }} из {{ report|length }}</span>
             </div>
             <ul class="platoon-slot-list">
                 {% for r in report %}
                     <li class="platoon-slot">
                         {% if r.status == "sent" %}<span class="badge badge-ok">✅ отправлено</span>
+                        {% elif r.status == "partial" %}<span class="badge badge-warn">⚠️ частично</span>
                         {% elif r.status == "skipped_no_discord" %}<span class="badge badge-neutral">⏭ пропущен</span>
                         {% else %}<span class="badge badge-danger">❌ ошибка</span>{% endif %}
                         {{ r.name }}
@@ -28,11 +29,18 @@
             </ul>
         </div>
         <p><a class="button" href="/tw/def/plans/{{ plan.id }}/notify">↻ Отправить ещё раз</a></p>
-    {% elif not error %}
+    {% else %}
         {% if not rows %}
             <p class="empty-state">В плане пока нет назначений.</p>
         {% else %}
-            <form method="post" action="/tw/def/plans/{{ plan.id }}/notify">
+            {% set destinations = destinations if destinations is defined else ["discord", "tg"] %}
+            <form method="post" action="/tw/def/plans/{{ plan.id }}/notify" id="tw-notify-form" style="max-width:none">
+                <div class="panel">
+                    <div class="panel-title"><span>Куда отправить</span></div>
+                    <label class="checkbox"><input type="checkbox" name="destinations" value="discord"{% if "discord" in destinations %} checked{% endif %}> Discord</label>
+                    <label class="checkbox"><input type="checkbox" name="destinations" value="tg"{% if "tg" in destinations %} checked{% endif %}> Telegram</label>
+                    <p class="muted">Обе галочки — каждый получит копию в обоих местах, если оба аккаунта подключены. Для лички Telegram нужно написать боту /start. Выбор запоминается для гильдии.</p>
+                </div>
                 <p class="platoon-export-actions">
                     <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = !c.disabled)">Отметить всех</button>
                     <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = false)">Снять все отметки</button>
@@ -44,11 +52,17 @@
                     </div>
                     <div class="notify-recipients-grid">
                         {% for row in rows %}
-                            <label class="notify-recipient-card{% if not row.discord_id %} notify-recipient-card-disabled{% endif %}">
+                            {% set ch = row.channels %}
+                            <label class="notify-recipient-card" data-discord="{{ 1 if ch.discord else 0 }}" data-tg="{{ 1 if ch.tg else 0 }}">
                                 <input type="checkbox" class="checkbox notify-check" name="ally_codes" value="{{ row.ally_code }}"
                                        {% if row.discord_id %}checked{% else %}disabled{% endif %}>
                                 <span class="notify-recipient-name">{{ row.name }}</span>
                                 <span class="badge badge-neutral">отрядов: {{ row.entries|length }}</span>
+                                <span class="notify-recipient-channels">
+                                    <span class="badge {% if ch.discord %}badge-ok{% else %}badge-neutral{% endif %}">Discord{% if not ch.discord %}: нет{% endif %}</span>
+                                    <span class="badge {% if ch.tg %}badge-ok{% else %}badge-neutral{% endif %}">{{ ch.tg_name or "Telegram: нет лички" }}</span>
+                                    <span data-goes class="notify-goes"></span>
+                                </span>
                                 {% if not row.discord_id %}<span class="badge badge-danger">нет регистрации</span>{% endif %}
                             </label>
                         {% endfor %}
@@ -62,6 +76,24 @@
                 {% endif %}
                 <p><button type="submit" class="button">📨 Отправить в личку отмеченным</button></p>
             </form>
+            <script>
+                (() => {
+                    const form = document.getElementById("tw-notify-form");
+                    const update = () => {
+                        const selected = new Set(Array.from(form.querySelectorAll('[name="destinations"]:checked'), e => e.value));
+                        form.querySelectorAll('.notify-recipient-card').forEach(card => {
+                            const channels = [];
+                            if (selected.has("discord") && card.dataset.discord === "1") channels.push("Discord");
+                            if (selected.has("tg") && card.dataset.tg === "1") channels.push("Telegram");
+                            card.querySelector('.notify-check').disabled = !channels.length;
+                            card.querySelector('[data-goes]').textContent = channels.length ? channels.join(" + ") : "нет доступного канала";
+                            card.classList.toggle('notify-recipient-card-disabled', !channels.length);
+                        });
+                    };
+                    form.addEventListener('change', update);
+                    update();
+                })();
+            </script>
         {% endif %}
     {% endif %}
 {% endblock %}

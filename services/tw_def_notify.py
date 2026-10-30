@@ -1,4 +1,4 @@
-"""Рассылка деф-плана ВГ игрокам в личку Discord (веб /tw/def/plans/<id>/notify) — по
+"""Рассылка деф-плана ВГ в личку Discord и/или Telegram (веб /tw/def/plans/<id>/notify) — по
 образцу рассылки взводов ТБ (tb_platoon_notify.py, оттуда же отправка через REST). Каждому
 игроку: зона, пак, какие персонажи ставить и какой именно его датакрон (сезон, уровень и
 бонусы 3/6/9 — чтобы найти его в игре). Запрос офицеров 2026-10-20 («рассылка по ВГ, где
@@ -14,6 +14,17 @@ import tb_platoon_notify
 import tw_def_engine as engine
 
 MESSAGE_LIMIT = 1900  # Discord режет сообщения на 2000 символах
+DESTINATIONS = {"discord_only": ("discord",), "tg_only": ("tg",), "both": ("discord", "tg")}
+
+
+def mode_for(destinations: list[str]) -> str | None:
+    selected = set(destinations)
+    return next((mode for mode, values in DESTINATIONS.items() if selected == set(values)), None)
+
+
+def guild_mode(guild_id: int) -> str:
+    mode = (database.get_guild_config(guild_id) or {}).get("tw_def_dm_mode")
+    return mode if mode in DESTINATIONS else "both"
 
 
 def _base_labels(season: dict) -> dict:
@@ -78,6 +89,8 @@ def build_player_rows(guild_id: int, plan: dict, catalog: dict | None) -> list[d
             "units": [unit_names.get(b, b) for b in a["units"]],
             "datacrons": dc_texts,
         })
+    for row in rows.values():
+        row["channels"] = tb_platoon_notify.channels(row["discord_id"])
     return sorted(rows.values(), key=lambda r: r["name"].lower())
 
 
@@ -105,25 +118,34 @@ def format_dm(guild_name: str, plan_name: str, player_rows: list[dict]) -> list[
     return chunks
 
 
-async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | None, ally_codes: set[str]) -> list[dict]:
-    """Отчёт: [{ally_code, name, status: sent|failed|skipped_no_discord, detail}]."""
+async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | None, ally_codes: set[str], mode: str = "both") -> list[dict]:
+    """Отчёт: [{ally_code, name, status: sent|partial|failed|skipped_no_discord, detail}]."""
+    if mode not in DESTINATIONS:
+        raise ValueError("Выберите Discord, Telegram или оба канала.")
     guild_name = (database.get_guild_config(guild_id) or {}).get("name") or "гильдия"
     rows = [r for r in build_player_rows(guild_id, plan, catalog) if r["ally_code"] in ally_codes]
     report, by_discord = [], {}
     for row in rows:
         if not row["discord_id"]:
             report.append({"ally_code": row["ally_code"], "name": row["name"], "status": "skipped_no_discord",
-                           "detail": "нет привязки Discord"})
+                           "detail": "нет регистрации"})
             continue
         by_discord.setdefault(row["discord_id"], []).append(row)
     async with httpx.AsyncClient(timeout=15.0) as client:
         for discord_id, player_rows in by_discord.items():
-            ok, detail = True, "ok"
-            for text in format_dm(guild_name, plan["name"], player_rows):
-                ok, detail = await tb_platoon_notify.send_dm(client, token, discord_id, text)
-                if not ok:
-                    break
+            deliveries = []
+            for channel in DESTINATIONS[mode]:
+                ok, detail = True, "ok"
+                for text in format_dm(guild_name, plan["name"], player_rows):
+                    ok, detail = await tb_platoon_notify.send_dm(client, token, discord_id, text,
+                        "discord_only" if channel == "discord" else "tg_only")
+                    if not ok:
+                        break
+                label = "Discord" if channel == "discord" else "Telegram"
+                deliveries.append((ok, f"{label}: " + (("отправлено" if channel == "discord" else "в очереди отправки") if ok else detail)))
+            count = sum(ok for ok, _ in deliveries)
+            status = "sent" if count == len(deliveries) else "partial" if count else "failed"
             for row in player_rows:
                 report.append({"ally_code": row["ally_code"], "name": row["name"],
-                               "status": "sent" if ok else "failed", "detail": detail})
+                               "status": status, "detail": "; ".join(detail for _, detail in deliveries)})
     return report

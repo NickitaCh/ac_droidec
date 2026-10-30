@@ -289,7 +289,7 @@ GUILD_CONFIG_COLUMNS = [
     "personal_units",
     "is_active",
     "subscription_expires_at", "subscription_source", "payment_customer_id",
-    "tb_platoon_dm_mode",
+    "tb_platoon_dm_mode", "tw_def_dm_mode",
 ]
 
 
@@ -393,6 +393,10 @@ def _ensure_guilds_table(cursor):
         cursor.execute("ALTER TABLE guilds ADD COLUMN tb_platoon_dm_mode TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN tw_def_dm_mode TEXT")
+    except sqlite3.OperationalError:
+        pass
 
 
 def _row_to_guild_dict(row, columns):

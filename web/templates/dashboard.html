@@ -177,7 +177,7 @@
                 </div>
                 <div class="hero-kpi">
                     <span class="hero-kpi-value">{{ widgets.registered_count }}<span class="hero-kpi-of">/{{ widgets.roster_rows|length }}</span></span>
-                    <span class="hero-kpi-label">привязали Discord</span>
+                    <span class="hero-kpi-label">зарегистрированы</span>
                 </div>
                 <a class="hero-kpi" href="/tb">
                     <span class="hero-kpi-value">{{ tb_last[3] if tb_last else "—" }}{% if tb_last and tb_last[5] %} <span class="hero-kpi-delta {{ tb_last[6] }}">{{ tb_last[5] }}</span>{% endif %}</span>
@@ -219,7 +219,7 @@
                 <div class="widget widget-roster">
                     <div class="widget-header">
                         <h2>Состав гильдии</h2>
-                        <span class="muted">{{ widgets.registered_count }}/{{ widgets.roster_rows|length }} игроков привязали Discord</span>
+                        <span class="muted">{{ widgets.registered_count }}/{{ widgets.roster_rows|length }} зарегистрированы · Discord: {{ widgets.discord_count }} · Telegram: {{ widgets.telegram_count }}</span>
                     </div>
                     {% if link_error %}
                         <p class="error">{{ link_error }}</p>
@@ -232,20 +232,27 @@
                     {% else %}
                         <div class="table-toolbar" style="margin-bottom: 0.6em;">
                             <input type="search" placeholder="Имя или код союзника…" data-table-search="dashboard-roster-table">
+                            <select data-table-filter="dashboard-roster-table" aria-label="Регистрация в мессенджерах">
+                                <option value="">Все игроки</option>
+                                <option value="tg">Есть Telegram</option>
+                                <option value="no-tg">Нет Telegram</option>
+                                <option value="discord">Есть Discord</option>
+                                <option value="unregistered">Нет регистрации</option>
+                            </select>
                         </div>
                         <div class="table-scroll">
-                            <table class="data" id="dashboard-roster-table">
+                            <table class="data cards-on-phone" id="dashboard-roster-table">
                                 <thead>
                                     <tr>
                                         <th data-sort="text">Игрок</th>
                                         <th data-sort="text">Ранг</th>
                                         <th data-sort="text">Код союзника</th>
-                                        <th data-sort="text">Discord</th>
+                                        <th data-sort="text">Регистрация</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in widgets.roster_rows %}
-                                        <tr data-search="{{ (row.ingame_name ~ ' ' ~ row.ally_code)|lower }}">
+                                        <tr data-search="{{ (row.ingame_name ~ ' ' ~ row.ally_code)|lower }}" data-mode="{{ 'tg' if row.telegram_registered else 'no-tg' }}{% if row.discord_registered %} discord{% endif %}{% if not row.registered %} unregistered{% endif %}">
                                             <td data-label="Игрок"><a href="/player/{{ row.ally_code }}">{{ row.ingame_name }}</a></td>
                                             <td data-label="Ранг">
                                                 {% if row.rank_label == "ГМ" %}
@@ -257,12 +264,13 @@
                                                 {% endif %}
                                             </td>
                                             <td data-label="Код союзника"><code>{{ row.ally_code }}</code></td>
-                                            <td data-label="Discord">
+                                            <td data-label="Регистрация">
                                                 {% if row.registered %}
-                                                    <span class="badge badge-ok">привязан</span>
+                                                    {% if row.discord_registered %}<span class="badge badge-ok">Discord</span>{% endif %}
+                                                    {% if row.telegram_registered %}<span class="badge badge-ok" title="{{ 'Личка доступна' if row.telegram_dm_open else 'Для лички нужно написать боту /start' }}">Telegram{% if not row.telegram_dm_open %} · нет лички{% endif %}</span>{% endif %}
                                                 {% else %}
                                                     <span class="badge badge-neutral badge-clickable" role="button" tabindex="0" data-register-link-btn
-                                                          data-ally-code="{{ row.ally_code }}" data-name="{{ row.ingame_name }}">не привязан</span>
+                                                          data-ally-code="{{ row.ally_code }}" data-name="{{ row.ingame_name }}">не зарегистрирован</span>
                                                 {% endif %}
                                             </td>
                                         </tr>

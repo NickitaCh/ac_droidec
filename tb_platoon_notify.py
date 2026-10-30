@@ -58,6 +58,9 @@ def channels(owner_id: str | None) -> dict:
 
 def route(ch: dict, mode: str) -> list[str]:
     """Каналы по порядку попытки: ["discord"], ["tg"], ["discord", "tg"]…"""
+    if mode in ("discord_only", "tg_only"):
+        channel = "discord" if mode == "discord_only" else "tg"
+        return [channel] if ch[channel] else []
     if mode == "both":
         return [c for c in ("discord", "tg") if ch[c]]
     order = ("tg", "discord") if mode == "tg_first" else ("discord", "tg")
@@ -177,6 +180,10 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
     ch = channels(discord_id)
     targets = route(ch, mode)
     if not targets:
+        if mode == "discord_only":
+            return False, "Discord не привязан"
+        if mode == "tg_only":
+            return False, "Telegram не подключён для лички: привяжите Telegram и напишите боту /start"
         if outbox.is_tg_owner(discord_id):
             username = database.get_bot_state("telegram_bot_username", guild_id=0)
             target = f"@{username}" if username else "бота"
@@ -190,7 +197,7 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
             ok = outbox.enqueue_dm(discord_id, text)
             detail = "Telegram" if ok else "Telegram недоступен"
         (sent if ok else problems).append(detail)
-    if not sent and "tg" not in targets and ch["tg"]:  # Discord не дошёл — запасной путь
+    if not sent and mode != "discord_only" and "tg" not in targets and ch["tg"]:  # Discord не дошёл — запасной путь
         if outbox.enqueue_dm(discord_id, text):
             return True, f"{problems[0]} → отправлено в Telegram"
     if sent:

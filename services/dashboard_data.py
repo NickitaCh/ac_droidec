@@ -71,17 +71,36 @@ class RosterRow:
     ingame_name: str
     registered: bool
     rank_label: str = "—"
+    discord_registered: bool = False
+    telegram_registered: bool = False
+    telegram_dm_open: bool = False
 
 
 def get_roster(guild_id: int) -> list[RosterRow]:
     mappings = database.get_all_user_mappings_with_rank(guild_id)  # (ally_code, ingame_name, member_level)
-    registered_codes = {ally_code for _, ally_code, _, _ in database.get_all_registrations(guild_id)}
+    from tg_bot import store
+    registrations = database.get_all_registrations(guild_id)
+    registered_codes = {ally_code for _, ally_code, _, _ in registrations}
+    platforms = {}
+    owners = {}
+    for owner_id, ally_code, _name, _main in registrations:
+        owner_id = str(owner_id)
+        if owner_id not in owners:
+            owners[owner_id] = store.tg_users_for_owner(owner_id)
+        users = owners[owner_id]
+        flags = platforms.setdefault(ally_code, {"discord": False, "tg": False, "dm": False})
+        flags["discord"] |= not owner_id.startswith("tg:")
+        flags["tg"] |= owner_id.startswith("tg:") or bool(users)
+        flags["dm"] |= any(u["dm_open"] for u in users)
     rows = [
         RosterRow(
             ally_code=ally_code,
             ingame_name=ingame_name or "?",
             registered=ally_code in registered_codes,
             rank_label=RANK_LABELS.get(member_level, "—"),
+            discord_registered=platforms.get(ally_code, {}).get("discord", False),
+            telegram_registered=platforms.get(ally_code, {}).get("tg", False),
+            telegram_dm_open=platforms.get(ally_code, {}).get("dm", False),
         )
         for ally_code, ingame_name, member_level in mappings
     ]
