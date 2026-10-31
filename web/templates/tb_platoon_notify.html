@@ -34,14 +34,16 @@
                     {% for r in report %}
                         <li>
                             {% if r.status == "sent" %}
-                                <span class="badge badge-ok">✅ {{ r.detail }}</span>
+                                <span class="badge badge-ok">✅ принято к отправке</span>
+                            {% elif r.status == "partial" %}
+                                <span class="badge badge-warn">⚠️ частично</span>
                             {% elif r.status == "skipped_no_discord" %}
                                 <span class="badge badge-neutral">⏭ пропущен</span>
                             {% else %}
                                 <span class="badge badge-danger">❌ не доставлено</span>
                             {% endif %}
                             <strong>{{ r.name }}</strong>
-                            {% if r.status != "sent" %}<span class="muted">— {{ r.detail }}</span>{% endif %}
+                            <span class="muted">— {{ r.detail }}</span>
                         </li>
                     {% endfor %}
                 </ul>
@@ -69,7 +71,7 @@
                             <span class="notify-dest notify-dest-none">не дойдёт: <b data-total="none">0</b></span>
                             <span class="muted">— по отмеченным игрокам</span>
                         </p>
-                        <p class="muted notify-hint">Telegram доступен тем, кто привязал его на сайте («Мой профиль» → «Привязать Telegram») или зарегистрировался через Telegram-бота и написал ему в личку. Если Discord не примет личку (закрыты сообщения), а Telegram привязан — бот отправит туда.</p>
+                        <p class="muted notify-hint">Telegram доступен тем, кто привязал его на сайте («Мой профиль» → «Привязать Telegram») или зарегистрировался через Telegram-бота и написал ему в личку. В режимах «Только» запасной канал не используется. В режиме с приоритетом Discord при закрытой личке бот попробует Telegram.</p>
                     </div>
 
                     <p class="platoon-export-actions">
@@ -114,6 +116,8 @@
                 const form = document.getElementById("notify-form");
                 if (!form || !form.querySelector(".notify-recipient-card")) return;
                 const routes = {
+                    discord_only: (d, t) => d ? ["discord"] : [],
+                    tg_only: (d, t) => t ? ["tg"] : [],
                     discord_first: (d, t) => d ? ["discord"] : t ? ["tg"] : [],
                     tg_first: (d, t) => t ? ["tg"] : d ? ["discord"] : [],
                     both: (d, t) => [d && "discord", t && "tg"].filter(Boolean),

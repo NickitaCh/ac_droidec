@@ -250,6 +250,8 @@ async def _handle_message(app: App, message: dict):
     if message.get("migrate_to_chat_id"):
         store.update_chat_id(message["chat"]["id"], message["migrate_to_chat_id"])
         return
+    from tg_bot import topics
+    topics.observe(message)
     user = message.get("from")
     if not user or (user.get("is_bot") and user["id"] != ANONYMOUS_ADMIN_ID):
         return
@@ -272,6 +274,9 @@ async def _handle_message(app: App, message: dict):
         )
         return
     ctx = Ctx(app, message, user, args)
+    from tg_bot import command_access
+    if command_access.denied(ctx, cmd.name):
+        return  # Keep forbidden topics free of denial-message spam as well.
     if cmd.where == "private" and not ctx.is_private:
         await ctx.reply(f"Эта команда работает в личке с ботом: @{esc(app.username)}")
         return
@@ -281,10 +286,6 @@ async def _handle_message(app: App, message: dict):
     denial = denied_text(cmd.tier, ctx)
     if denial:
         await ctx.reply(denial)
-        return
-    from tg_bot import command_access
-    if command_access.denied(ctx, cmd.name):
-        await ctx.reply("Эта команда отключена офицером в этой теме. Используйте разрешённую тему или личку бота.")
         return
     database.log_command_usage(f"tg:{cmd.name}", ctx.access["guild_id"])
     await cmd.handler(ctx)
@@ -299,6 +300,8 @@ async def _handle_callback(app: App, query: dict):
         await app.api.answer_callback(query["id"])
         return
     ctx = Ctx(app, message, query["from"], payload, callback_query=query)
+    from tg_bot import topics
+    topics.observe(message)
     from tg_bot import command_access
     if command_access.denied(ctx, cb.command_name):
         await app.api.answer_callback(query["id"], "Команда отключена в этой теме. Используйте другую тему или личку бота.", alert=True)

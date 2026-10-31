@@ -200,21 +200,20 @@ def enqueue_guild(guild_id: int, kind: str, text: str, attachments: list[dict] |
 
 
 def destinations(guild_id: int) -> list[dict]:
-    """Места, куда можно направить оповещение: общий чат каждой привязанной группы + ветки с
-    метками (/topic). {value: "chat_id:thread_id", chat_id, thread_id, label}."""
+    """Места, куда можно направить оповещение: общий чат каждой привязанной группы и известные боту темы. {value: "chat_id:thread_id", chat_id, thread_id, label}."""
     conn = _connect()
     chats = conn.execute("SELECT chat_id, title FROM tg_chats WHERE guild_id = ? ORDER BY bound_at",
                          (int(guild_id),)).fetchall()
     conn.close()
-    topics = guild_topics(guild_id)
+    from tg_bot import topics as forum_topics
     out = []
     for chat_id, title in chats:
         title = title or "чат"
-        out.append({"value": f"{chat_id}:", "chat_id": chat_id, "thread_id": None, "label": f"{title} — общий чат"})
-        for t in topics:
-            if t["chat_id"] == chat_id and t["thread_id"]:
-                out.append({"value": f"{chat_id}:{t['thread_id']}", "chat_id": chat_id, "thread_id": t["thread_id"],
-                            "label": f"{title} / {t['topic_title'] or 'ветка'} (метка {t['label']})"})
+        for topic in forum_topics.known(chat_id):
+            tid = topic["id"] or None
+            out.append({"value": f"{chat_id}:{tid or ''}", "chat_id": chat_id,
+                        "thread_id": tid, "label": f"{title} / {topic['title']}" +
+                        (" (закрыта)" if topic["closed"] else "")})
     return out
 
 

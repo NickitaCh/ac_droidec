@@ -220,7 +220,9 @@ def unbind_chat(chat_id: int):
     conn = _connect()
     conn.execute("DELETE FROM tg_chats WHERE chat_id = ?", (int(chat_id),))
     try:
-        conn.execute("DELETE FROM tg_command_blocks WHERE chat_id = ?", (int(chat_id),))
+        for table in ("tg_command_blocks", "tg_command_defaults", "tg_command_rules"):
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone():
+                conn.execute(f"DELETE FROM {table} WHERE chat_id = ?", (int(chat_id),))
     except sqlite3.OperationalError:
         pass  # command switches have not been configured yet
     conn.commit()
@@ -247,7 +249,7 @@ def update_chat_id(old_chat_id: int, new_chat_id: int):
     """Группа превратилась в супергруппу — у неё новый chat_id (migrate_to_chat_id)."""
     conn = _connect()
     conn.execute("UPDATE tg_chats SET chat_id = ? WHERE chat_id = ?", (int(new_chat_id), int(old_chat_id)))
-    for table in ("tg_topics", "tg_routes", "tg_command_blocks"):
+    for table in ("tg_topics", "tg_routes", "tg_command_blocks", "tg_command_defaults", "tg_command_rules", "tg_forum_topics"):
         try:
             conn.execute(f"UPDATE {table} SET chat_id = ? WHERE chat_id = ?", (int(new_chat_id), int(old_chat_id)))
         except sqlite3.OperationalError:

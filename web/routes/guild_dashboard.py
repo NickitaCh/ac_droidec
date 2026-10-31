@@ -2133,13 +2133,7 @@ async def tb_platoons_notify_send(
             "user": user, "plan": None, "round_num": round_num, "rows": [], "error": "План не найден.", "report": None,
         })
 
-    token = os.environ.get("DISCORD_TOKEN")
-    if not token:
-        return templates.TemplateResponse(request, "tb_platoon_notify.html", {
-            "user": user, "plan": plan, "round_num": round_num, "rows": [],
-            "error": "DISCORD_TOKEN не настроен на сервере — рассылка недоступна.", "report": None,
-        })
-
+    token = os.environ.get("DISCORD_TOKEN") or ""
     report = await tb_platoon_notify.send_broadcast(token, guild_id, plan, round_num, set(ally_codes), mode)
     return templates.TemplateResponse(request, "tb_platoon_notify.html", {
         "user": user, "plan": plan, "round_num": round_num, "rows": [], "error": None, "report": report,
