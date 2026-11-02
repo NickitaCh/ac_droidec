@@ -1,5 +1,6 @@
 """Персональная карта ВГ: только назначения выбранного игрового аккаунта."""
 import io
+from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image, ImageDraw
 
@@ -26,6 +27,16 @@ def _squad_lines(value):
 def render(guild_name: str, plan_name: str, player: dict) -> bytes:
     width, gap, card_w = 1440, 16, 340
     entries = player.get("entries", [])
+    leaders = {e["unit_ids"][0] for e in entries if e.get("unit_ids")}
+
+    def portrait(base_id):
+        try:
+            return base_id, _portrait(base_id, 72)
+        except Exception:
+            return base_id, None
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        portraits = dict(pool.map(portrait, leaders))
     grouped = {z["key"]: [e for e in entries if e.get("zone_key", e["zone"]) in (z["key"], z["label"])] for z in ZONES}
     # Высота общего ряда растёт вместе с числом назначений: ни один отряд не скрывается.
     heights = {r: max(150, max((64 + sum(96 + 23 * len(_squad_lines(e["squad"])) for e in grouped[z["key"]])
@@ -59,9 +70,9 @@ def render(guild_name: str, plan_name: str, player: dict) -> bytes:
             text(x + 14, cy, "Нет назначений", 18, "#8298ad")
         for entry in active:
             ids = entry.get("unit_ids", [])
-            portrait = _portrait(ids[0], 72) if ids else None
-            if portrait is not None:
-                img.paste(portrait, (x + 14, cy), portrait)
+            pic = portraits.get(ids[0]) if ids else None
+            if pic is not None:
+                img.paste(pic, (x + 14, cy), pic)
             else:
                 draw.ellipse((x + 14, cy, x + 86, cy + 72), fill="#36516b")
                 text(x + 37, cy + 18, "?", 28)
