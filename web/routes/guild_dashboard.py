@@ -1204,6 +1204,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
     ally_codes = [ally_code for _discord_id, ally_code, _name in mappings]
     player_name_by_ally = _player_labels(guild_id)
     base_ids = sorted({bid for bid in name_to_base_id.values() if bid})
+    platoon_unit_labels = database.get_game_unit_names(base_ids) if base_ids else {}
     # Корабли не имеют реликвии (см. tb_platoon_engine.SHIP_MIN_STARS) — донат-требование
     # для них 7★, не порог реликвии этапа.
     unit_types = database.get_unit_types(base_ids) if base_ids else {}
@@ -1307,7 +1308,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
                 assigned_round_num = assignment["round_num"] if assignment else None
                 slots.append({
                     "index": slot_index,
-                    "unit": unit_name,
+                    "unit": platoon_unit_labels.get(base_id) or unit_name,
                     "base_id": base_id,
                     "owners": slot_owners,
                     "unit_excluded": unit_excluded,
@@ -1339,6 +1340,8 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
         auto_held = bool(e["planet"] and planet_last_round.get(e["planet"], selected_round_num) > selected_round_num)
         planet_blocks.append({
             "name": e["planet"] or e["raw"],
+            "label": (tb_plan_reader.PLANET_NAME_TO_RU.get(e["planet"], "").capitalize()
+                      or e["planet"] or e["raw"]),
             "unresolved": e["planet"] is None,
             "no_platoons": bool(e.get("no_platoons")),
             "operations": operations,
@@ -1381,6 +1384,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
                 })
                 row["entries"].append({
                     "planet": pblock["name"],
+                    "planet_label": pblock["label"],
                     "operation": op["number"],
                     "unit": slot["unit"],
                     "base_id": slot["base_id"],

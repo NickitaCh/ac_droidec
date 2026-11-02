@@ -1157,6 +1157,39 @@ table.data tbody tr.omicron-subrow td { padding-top: 0.4em; padding-bottom: 0.4e
 .platoon-planet-block:not([open]) > .platoon-planet-name { margin-bottom: 0; }
 .platoon-planet-block[open] > .platoon-planet-name { margin-bottom: 0.7em; }
 .platoon-ops-scroll { overflow-x: auto; padding-bottom: 0.25em; }
+.platoon-layout-control { display: flex; align-items: center; gap: 0.6em; margin-bottom: 0.8em; }
+.platoon-layout-control select { width: auto; }
+#platoon-layout[data-layout="compact"] .platoon-ops-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.35rem;
+}
+#platoon-layout[data-layout="compact"] .platoon-op-card { padding: 0.4rem; border-radius: 6px; }
+#platoon-layout[data-layout="compact"] .platoon-op-card h4 { font-size: 0.8rem; margin-bottom: 0.4rem; }
+#platoon-layout[data-layout="compact"] .platoon-op-card ul { padding: 0; }
+#platoon-layout[data-layout="compact"] .platoon-slot { margin-bottom: 0.15rem; }
+#platoon-layout[data-layout="compact"] .platoon-slot summary {
+    flex-direction: row; gap: 0.25rem; padding: 0.15rem; min-height: 30px; font-size: 0.75rem;
+    text-align: left;
+}
+#platoon-layout[data-layout="compact"] .platoon-slot summary::before { display: none; }
+#platoon-layout[data-layout="compact"] .platoon-slot-unit { flex: 0 0 auto; text-decoration: none; }
+#platoon-layout[data-layout="compact"] .unit-portrait { width: 26px; height: 26px; }
+#platoon-layout[data-layout="compact"] .platoon-unit-label { display: none; }
+#platoon-layout[data-layout="compact"] .platoon-slot-unit:not(:has(.unit-portrait)) .platoon-unit-label { display: inline; }
+#platoon-layout[data-layout="compact"] .platoon-slot summary > .badge,
+#platoon-layout[data-layout="compact"] .platoon-slot-vacant {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: inherit; padding: 0.1rem 0.2rem;
+}
+#platoon-layout[data-layout="compact"] .platoon-slot details[open] > summary { flex-wrap: wrap; }
+#platoon-layout[data-layout="compact"] .platoon-slot details[open] .platoon-unit-label { display: inline; }
+#platoon-layout[data-layout="compact"] .platoon-slot-candidates { padding-left: 0; border: 0; font-size: 0.8rem; }
+#platoon-layout[data-layout="compact"] .platoon-op-clear { margin: 0 0 0.4rem; }
+@media (max-width: 1000px) {
+    #platoon-layout[data-layout="compact"] .platoon-ops-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+    #platoon-layout[data-layout="compact"] .platoon-ops-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .platoon-ops-grid {
     display: grid;
     grid-template-columns: repeat(6, minmax(12.5em, 1fr));

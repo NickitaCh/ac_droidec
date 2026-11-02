@@ -118,6 +118,10 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
         ally_code: discord_id for discord_id, ally_code, _name, _is_main in database.get_all_registrations(guild_id)
     }
 
+    unit_names = {name for e in round_entries for operation in range(1, 7)
+                  for name in tb_platoon_data.ROTE_PLATOON_SUGGESTIONS.get((e["planet"], operation), [])}
+    unit_ids = database.resolve_unit_display_names(sorted(unit_names))
+    ru_names = database.get_game_unit_names(sorted({bid for bid in unit_ids.values() if bid}))
     rows: dict[str, dict] = {}
     for e in round_entries:
         for operation in range(1, 7):
@@ -134,7 +138,8 @@ async def build_player_rows(guild_id: int, plan: dict, round_num: int) -> list[d
                     "channels": channels(discord_id_by_ally.get(ally_code)),
                     "entries": [],
                 })
-                row["entries"].append({"planet": e["planet"], "operation": operation, "unit": unit_name})
+                row["entries"].append({"planet": e["planet"], "operation": operation,
+                                       "unit": ru_names.get(unit_ids.get(unit_name)) or unit_name})
 
     for row in rows.values():
         row["entries"].sort(key=lambda i: (i["planet"], i["operation"]))
@@ -151,8 +156,15 @@ def format_dm_text(guild_name: str, plan_name: str, round_num: int, player_rows:
     for player_row in player_rows:
         if multi:
             lines.append(f"— {player_row['name']} —")
+        groups = {}
         for entry in player_row["entries"]:
-            lines.append(f"• {entry['planet']}, взвод {entry['operation']} — {entry['unit']}")
+            groups.setdefault((entry["planet"], entry["operation"]), []).append(entry["unit"])
+        for (planet, operation), units in groups.items():
+            planet_label = tb_plan_reader.PLANET_NAME_TO_RU.get(planet)
+            planet_label = planet_label.capitalize() if planet_label else planet
+            lines.append(f"{planet_label} · взвод {operation}")
+            lines.extend(f"• {unit}" for unit in units)
+            lines.append("")
         lines.append("")
     lines.append("Если уже задонатил(а) — просто игнорируй это сообщение.")
     return "\n".join(lines)

@@ -169,7 +169,7 @@
                         {% for item in pl.entries %}
                             <li class="platoon-slot{% if item.carried_over %} platoon-slot-carried{% endif %}">
                                 <a href="/tb/platoons?{{ "plan_id=" ~ plan.id if plan else "" }}&round={{ selected_round_num }}#{{ item.anchor }}">
-                                    <strong>{{ item.planet }}</strong> — операция {{ item.operation }} — <span class="unit-cell">{% if item.base_id %}{{ game.portrait(item.base_id, "xs") }}{% endif %}{{ item.unit }}</span>
+                                    <strong>{{ item.planet_label }}</strong> — взвод {{ item.operation }} — <span class="unit-cell">{% if item.base_id %}{{ game.portrait(item.base_id, "xs") }}{% endif %}{{ item.unit }}</span>
                                 </a>
                                 {% if item.carried_over %}
                                     <span class="badge badge-neutral" title="Назначено на этапе {{ item.assigned_round_num }}">🔒 этап {{ item.assigned_round_num }}</span>
@@ -183,7 +183,13 @@
     {% endif %}
 
     {% if planets and view == "planet" %}
-        <div class="panel platoon-planet-panel">
+        <div class="panel platoon-planet-panel" id="platoon-layout" data-layout="compact">
+            <label class="platoon-layout-control">Вид взводов
+                <select id="platoon-layout-select">
+                    <option value="compact">Компактно</option>
+                    <option value="detailed">Подробно</option>
+                </select>
+            </label>
             <div class="panel-title">
                 <span>Этап {{ selected_round_num }}</span>
                 <span class="panel-hint">планет: {{ planets|length }}</span>
@@ -194,7 +200,7 @@
             {% for p in planets %}
                 <details class="platoon-planet-block" open>
                     <summary class="platoon-planet-name">
-                        {{ p.name }}
+                        {{ p.label }}
                         {% if p.min_relic_label and not p.unresolved %}<span class="badge badge-relic">{{ p.min_relic_label }}</span>{% endif %}
                         {% if p.auto_held %}
                             <span class="badge badge-neutral">держим (переходит на след. этап)</span>
@@ -256,7 +262,7 @@
                                 {% for op in p.operations %}
                                     <div class="platoon-op-card">
                                         <h4>
-                                            Операция {{ op.number }}
+                                            Взвод {{ op.number }}
                                             <span class="platoon-op-count">{{ op.filled }}/{{ op.total }}</span>
                                         </h4>
                                         {% if plan and op.slots %}
@@ -276,12 +282,14 @@
                                                     <li id="{{ slot.anchor }}"
                                                         class="platoon-slot{% if slot.carried_over %} platoon-slot-carried{% elif not slot.assigned_ally_code %} platoon-slot-empty{% endif %}">
                                                         <details>
-                                                            <summary>
-                                                                <span class="platoon-slot-unit">{% if slot.base_id %}{{ game.portrait(slot.base_id, "xs") }}{% endif %}{{ slot.unit }}</span>
+                                                            <summary title="{{ slot.unit }} — {{ slot.assigned_name or 'Не назначено' }}" aria-label="{{ slot.unit }} — {{ slot.assigned_name or 'Не назначено' }}">
+                                                                <span class="platoon-slot-unit">{% if slot.base_id %}{{ game.portrait(slot.base_id, "xs") }}{% endif %}<span class="platoon-unit-label">{{ slot.unit }}</span></span>
                                                                 {% if slot.carried_over %}
                                                                     <span class="badge badge-neutral" title="Назначено на этапе {{ slot.assigned_round_num }} — уже учтено, менять здесь не нужно">🔒 {{ slot.assigned_name }}</span>
                                                                 {% elif slot.assigned_name %}
                                                                     <span class="badge badge-ok">{{ slot.assigned_name }}</span>
+                                                                {% else %}
+                                                                    <span class="platoon-slot-vacant">Не назначено</span>
                                                                 {% endif %}
                                                                 {% if slot.unit_excluded %}
                                                                     <span class="badge badge-neutral">исключён фильтром</span>

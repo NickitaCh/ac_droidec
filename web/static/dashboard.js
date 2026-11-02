@@ -745,6 +745,21 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    (() => {
+        const panel = document.getElementById("platoon-layout");
+        const select = document.getElementById("platoon-layout-select");
+        if (!panel || !select) return;
+        try {
+            const saved = localStorage.getItem("tb-platoon-layout");
+            if (saved === "compact" || saved === "detailed") select.value = saved;
+        } catch (_) { /* Browser storage may be unavailable. */ }
+        panel.dataset.layout = select.value;
+        select.addEventListener("change", () => {
+            panel.dataset.layout = select.value;
+            try { localStorage.setItem("tb-platoon-layout", select.value); } catch (_) {}
+        });
+    })();
+
     // ---- Попап выбора игрока на слот взвода ТБ (/tb/platoons) — по прямому запросу
     // пользователя 2026-09-14: список кандидатов раньше открывался инлайн в узкой
     // колонке .platoon-op-card (топ-20 по релику от get_player_unit_owners_bulk) — теперь
