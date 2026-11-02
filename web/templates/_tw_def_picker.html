@@ -17,9 +17,14 @@
                 <option value="used">Заняты в плане</option>
                 <option value="no">Не проходят</option>
             </select>
+            <select id="twdef-picker-sort" aria-label="Сортировка игроков">
+                <option value="gp">По ГМ отряда ↓</option>
+                <option value="name">По имени</option>
+            </select>
             <span class="muted" id="twdef-picker-counts"></span>
         </div>
         <p id="twdef-picker-warning" class="config-warning" hidden></p>
+        <p class="muted twdef-picker-legend">Дз — установленные дзеты · ОМ — установленные омикроны ВГ</p>
         <p id="twdef-picker-loading" class="muted">Загрузка…</p>
         <p id="twdef-picker-error" class="error" hidden></p>
         <ul id="twdef-picker-list" class="twdef-picker-list"></ul>

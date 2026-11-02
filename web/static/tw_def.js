@@ -136,6 +136,7 @@
         const sub = document.getElementById("twdef-picker-sub");
         const search = document.getElementById("twdef-picker-search");
         const filter = document.getElementById("twdef-picker-filter");
+        const sort = document.getElementById("twdef-picker-sort");
         const counts = document.getElementById("twdef-picker-counts");
         const loading = document.getElementById("twdef-picker-loading");
         const errorBox = document.getElementById("twdef-picker-error");
@@ -162,7 +163,10 @@
             const mode = filter.value;
             list.innerHTML = "";
             let shown = 0;
-            candidates.forEach((c) => {
+            const order = { ok: 0, used: 1, no: 2, excluded: 3 };
+            const sorted = [...candidates].sort((a, b) => (order[a.status] - order[b.status]) ||
+                (sort.value === "gp" ? (b.gp || 0) - (a.gp || 0) : 0) || a.name.localeCompare(b.name));
+            sorted.forEach((c) => {
                 if (mode !== "all" && c.status !== mode) return;
                 if (q && !c.name.toLowerCase().includes(q)) return;
                 shown += 1;
@@ -186,14 +190,17 @@
                     const strip = el("span", "twdef-units");
                     c.units.forEach((u) => {
                         const unit = el("span", "twdef-unit");
-                        unit.title = u.name + (u.badge ? ` · ${u.badge}` : "");
+                        unit.title = u.name + (u.badge ? ` · ${u.badge}` : "") +
+                            (!u.is_ship ? ` · Дзеты: ${u.zetas} · Омикроны ВГ: ${u.omicrons_tw} · Всего омикронов: ${u.omicrons}` : "");
                         unit.appendChild(portrait(u.base_id, "xs"));
                         if (u.badge) unit.appendChild(el("span", "twdef-unit-badge", u.badge));
+                        if (!u.is_ship) unit.appendChild(el("span", "twdef-unit-skills", `Дз ${u.zetas} · ОМ ${u.omicrons_tw}`));
                         strip.appendChild(unit);
                     });
                     li.appendChild(strip);
                 }
                 const meta = el("span", "twdef-cand-meta");
+                if (c.units && c.units.length) meta.appendChild(el("span", "muted", c.gp == null ? "ГМ: нет данных" : `ГМ ${c.gp.toLocaleString("ru-RU")}`));
                 if (c.status !== "ok") meta.appendChild(el("span", `badge ${c.status === "used" ? "badge-warn" : "badge-neutral"}`, STATUS_LABEL[c.status] || c.status));
                 if (c.assigned) meta.appendChild(el("span", "muted", `в плане: ${c.assigned}`));
                 if (c.status === "ok" && c.conflict) {
@@ -228,6 +235,7 @@
             footer.hidden = !selectable;
             search.value = "";
             filter.value = "ok";
+            sort.value = "gp";
             form.action = action || "";
             form.elements.zone.value = zone || "";
             form.elements.squad_id.value = squadId || "";
@@ -271,6 +279,7 @@
         });
         search.addEventListener("input", render);
         filter.addEventListener("change", render);
+        sort.addEventListener("change", render);
 
         document.querySelectorAll("[data-twdef-check]").forEach((btn) => {
             btn.addEventListener("click", () => open({ url: btn.dataset.twdefCheck, heading: btn.dataset.title }));

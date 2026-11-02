@@ -2425,6 +2425,11 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 .twdef-cand-name { font-weight: 500; min-width: 9em; }
 .twdef-cand-meta { display: inline-flex; flex-wrap: wrap; gap: 0.4em; align-items: center; font-size: 0.8em; margin-left: auto; }
 .twdef-cand-reason { flex-basis: 100%; font-size: 0.82em; color: var(--status-warning); }
+.twdef-picker-legend { font-size: 0.8em; margin: 0; }
+.twdef-picker .twdef-units { gap: 0.25em; }
+.twdef-picker .twdef-unit { flex-direction: column; align-items: center; padding-bottom: 1.15em; min-width: 3.2em; }
+.twdef-picker .twdef-unit-badge { bottom: 1.65em; right: 0.2em; }
+.twdef-unit-skills { position: absolute; bottom: 0; white-space: nowrap; font-size: 0.62em; color: var(--fg-secondary); }
 .twdef-picker-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 0.6em; }
 .twdef-picker-footer .muted { margin-right: auto; font-size: 0.88em; }
 

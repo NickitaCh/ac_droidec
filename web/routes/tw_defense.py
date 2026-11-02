@@ -3,6 +3,7 @@
 кандидатов или автоматически) и текст расстановки для Discord. Логика — tw_def_engine.py
 (её же потом использует бот), здесь только HTTP и шаблоны."""
 import asyncio
+import copy
 import json
 import os
 from pathlib import Path
@@ -323,9 +324,33 @@ async def units_search(q: str = "", type: str = "", user: dict = Depends(_requir
 
 
 def _candidate_json(roster: engine.Roster, squad: dict, candidates: list[dict], suggested: set[str]) -> list[dict]:
+    from services.player_profile import _skill_counts
+    from services import unit_forecast
+
+    calc = roster.stat_calc or stat_forecast.cached_stat_calc()
+    ship = squad["combat_type"] == "ship"
+    full_units = database.get_player_units_bulk(roster.ally_codes) if ship and calc else {}
     out = []
     for c in candidates:
         units = roster.units.get(c["ally_code"], {})
+        gp = 0 if c["units"] else None
+        unit_rows = []
+        for b in c["units"]:
+            unit = units.get(b) or {}
+            zetas, omicrons = _skill_counts(unit, roster.skills)
+            unit_rows.append({"base_id": b, "name": roster.unit_name(b),
+                              "badge": engine.unit_badge(unit, squad["combat_type"]),
+                              "zetas": zetas, "omicrons_tw": omicrons.count("ВГ"),
+                              "omicrons": len(omicrons), "is_ship": ship})
+            try:
+                if ship and calc:
+                    crew = unit_forecast.ship_crew(calc, list((full_units.get(c["ally_code"]) or {}).values()), b)
+                    value = unit_forecast._ship_snapshot(calc, unit, crew)["gp"]
+                else:
+                    value = unit.get("gp") or (calc.calc_char_gp(copy.deepcopy(unit)) if calc else None)
+                gp = gp + int(value) if gp is not None and value is not None else None
+            except Exception:
+                gp = None
         out.append({
             "ally_code": c["ally_code"],
             "name": c["name"],
@@ -334,13 +359,13 @@ def _candidate_json(roster: engine.Roster, squad: dict, candidates: list[dict], 
             "assigned": c["assigned"],
             "conflict": c["conflict"],
             "power": c["power"],
+            "gp": gp,
             "dc": c.get("dc"),
             "suggested": c["ally_code"] in suggested,
-            "units": [{"base_id": b, "name": roster.unit_name(b),
-                       "badge": engine.unit_badge(units.get(b), squad["combat_type"])} for b in c["units"]],
+            "units": unit_rows,
         })
     order = {"ok": 0, "used": 1, "no": 2, "excluded": 3}
-    out.sort(key=lambda c: (order.get(c["status"], 9), not c["suggested"], c["name"].lower()))
+    out.sort(key=lambda c: (order.get(c["status"], 9), -(c["gp"] or 0), c["name"].lower()))
     return out
 
 
