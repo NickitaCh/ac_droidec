@@ -23,7 +23,7 @@ from services import faction_image, guild_units, guild_units_image, omicron_prio
 from services import toon, toon_image, unit_forecast, unit_forecast_image
 from tg_bot import markup, search, store
 from tg_bot.checks import GUILD_WORDS, REFRESH_WORDS, SELF_ONLY, _feature_off, _self_only_error, _split_flags
-from tg_bot.core import TIER_OFFICER, Ctx, callback, command, esc, new_session, session_for_callback
+from tg_bot.core import TIER_OFFICER, TIER_REGISTERED, Ctx, callback, command, esc, new_session, session_for_callback
 from tg_bot.handlers import _resolve_target, _stat_calc
 
 CHOICES_MAX = 10
@@ -127,7 +127,7 @@ def find_button(text: str, query: str) -> list:
     return [[{"text": text, "switch_inline_query_current_chat": query}]]
 
 
-@command("unit", "Персонаж: статы, модули, зеты; прогноз и сравнение (как /юнит)", aliases=("юнит",))
+@command("unit", "Персонаж: статы, модули, зеты; прогноз и сравнение (как /юнит)", tier=TIER_REGISTERED, aliases=("юнит",))
 async def cmd_unit(ctx: Ctx):
     guild_id = ctx.access["guild_id"]
     what, who = _split_player(ctx.args)
@@ -158,7 +158,7 @@ async def cmd_unit(ctx: Ctx):
     await _unit_run(ctx, state, matches[0][0])
 
 
-@callback("un", command_name="unit")
+@callback("un", tier=TIER_REGISTERED, command_name="unit")
 async def cb_unit(ctx: Ctx, payload: str):
     token, _, base_id = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -168,7 +168,7 @@ async def cb_unit(ctx: Ctx, payload: str):
     await _unit_run(ctx, state, base_id)
 
 
-@callback("uw", command_name="unit")
+@callback("uw", tier=TIER_REGISTERED, command_name="unit")
 async def cb_unit_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -252,20 +252,24 @@ def _unit_compare_keyboard(ctx: Ctx, state: dict, base_id: str, codes: list[str]
         return
     state = {**state, "base_id": base_id, "codes": list(codes)}
     token = new_session(state)
-    row = [{"text": "➕ Игрок гильдии", "callback_data": f"ua|{token}|g"}]
+    row = ([{"text": "➕ Игрок гильдии", "callback_data": f"ua|{token}|g"}]
+           if ctx.access["guild_id"] is not None else [])
     own = _own_ally_code(ctx)
     if own and own not in codes:
         row.append({"text": "➕ Я", "callback_data": f"ua|{token}|{own}"})
-    return [row]
+    return [row] if row else None
 
 
-@callback("ua", command_name="unit")
+@callback("ua", tier=TIER_REGISTERED, command_name="unit")
 async def cb_unit_add(ctx: Ctx, payload: str):
     token, _, target = payload.partition("|")
     state = await session_for_callback(ctx, token)
     if state is None:
         return
     if target == "g":
+        if ctx.access["guild_id"] is None or ctx.access["guild_id"] != state["guild_id"]:
+            await ctx.reply("Выбор из состава доступен только участникам подключённой гильдии.")
+            return
         roster = sorted(((name, ac) for _d, ac, name in database.get_all_user_mappings(state["guild_id"])
                          if ac not in state["codes"]), key=lambda x: (x[0] or "").casefold())
         buttons = [{"text": (name or ac)[:30], "callback_data": f"ua|{token}|{ac}"} for name, ac in roster[:99]]
@@ -378,11 +382,14 @@ def _html_chunks(blocks: list[str], limit: int = 3900) -> list[str]:
 
 
 
-@command("ready", "Готовность к цели «Руководства» картинкой (как /готовность)", aliases=("готовность",))
+@command("ready", "Готовность к цели «Руководства» картинкой (как /готовность)", tier=TIER_REGISTERED, aliases=("готовность",))
 async def cmd_ready(ctx: Ctx):
     guild_id = ctx.access["guild_id"]
     what, who = _split_player(ctx.args)
     what, (guild_mode,) = _split_flags(what, GUILD_WORDS)
+    if guild_mode and guild_id is None:
+        await ctx.reply("Отчёт по гильдии доступен участникам подключённых гильдий. Личная проверка — без слова «гильдия».")
+        return
     if not what:
         await ctx.reply("Укажите цель: <code>/ready Лорд Вейдер</code>; гильдия — <code>/ready Лорд Вейдер гильдия</code>; "
                         "другой игрок — <code>/ready Лорд Вейдер | Ник</code>",
@@ -402,7 +409,7 @@ async def cmd_ready(ctx: Ctx):
     await _ready_run(ctx, state, matches[0]["base_id"])
 
 
-@callback("rd", command_name="ready")
+@callback("rd", tier=TIER_REGISTERED, command_name="ready")
 async def cb_ready(ctx: Ctx, payload: str):
     token, _, guide = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -412,7 +419,7 @@ async def cb_ready(ctx: Ctx, payload: str):
     await _ready_run(ctx, state, guide)
 
 
-@callback("rw", command_name="ready")
+@callback("rw", tier=TIER_REGISTERED, command_name="ready")
 async def cb_ready_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -426,6 +433,9 @@ async def _ready_run(ctx: Ctx, state: dict, guide: str):
     state["guide"] = guide
     guild_id = state["guild_id"]
     if state["guild_mode"]:
+        if ctx.access["guild_id"] is None or ctx.access["guild_id"] != guild_id:
+            await ctx.reply("Отчёт по гильдии доступен только участникам подключённой гильдии.")
+            return
         await ctx.action("upload_photo")
         r = await asyncio.to_thread(guild_units.readiness, guild_id, guide)
         if not r["players"]:

@@ -2747,6 +2747,20 @@ def get_all_registrations(guild_id: int = 1):
     return rows
 
 
+def get_ally_code_registrations(ally_code: str) -> list[tuple[int, str]]:
+    """Все владельцы кода, включая личные регистрации вне подключённых гильдий."""
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        cursor = conn.cursor()
+        _ensure_user_registration_table(cursor)
+        return cursor.execute(
+            "SELECT guild_id, discord_id FROM user_registration WHERE ally_code = ? ORDER BY guild_id",
+            (ally_code,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
 def find_ally_code_owner(ally_code: str, guild_id: int = 1):
     """Возвращает discord_id, уже привязанный к этому ally_code в этой гильдии
     (любой, основной или альт), либо None. Используется register_player'ом, чтобы

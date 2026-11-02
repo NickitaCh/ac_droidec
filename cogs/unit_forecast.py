@@ -263,7 +263,7 @@ class UnitForecastCog(commands.Cog):
         """([сырой игрок {name, rosterUnit} | None], [возраст кэша в секундах | None = из игры]).
         Игрок из кэша синка — без запроса в игру; «обновить» освежает кэш (кулдаун 30 с,
         общий с /статы), игрок не из кэша — всегда свежий get_player."""
-        names = database.get_player_names(guild_id)
+        names = database.get_player_names(guild_id) if guild_id is not None else {}
         profiles = database.get_player_profiles_bulk(ally_codes)
 
         async def one(code):

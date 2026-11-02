@@ -185,18 +185,20 @@ def extract_tb_order_block(messages: list, phase: str):
     return result
 
 
-def _tb_order_to_telegram(guild_id: int, order_id: int, phase: int, block: str) -> None:
-    """Автопост этапа заодно в Telegram-чаты гильдии с оповещением «Ордер ВИ» (tg_bot/outbox.py);
-    свой текст для Telegram (tb_order_store) главнее. Ошибка не мешает посту в Discord."""
+def _tb_order_to_telegram(guild_id: int, order_id: int | None, phase: int, block: str) -> bool:
+    """Независимый автопост в Telegram; True — сообщение поставлено в очередь."""
     try:
         from tg_bot import outbox
 
-        row = tb_order_store.get_phases(order_id).get(phase)
+        row = tb_order_store.get_phases(order_id).get(phase) if order_id else None
         text = tb_order_store.tg_text(row) if row and row["source"] in tb_order_store.SOURCES_OVER_THREAD else block
         if outbox.enqueue_guild(guild_id, "tb_order", text):
-            tb_order_store.mark_sent(order_id, phase, "tg")
+            if order_id:
+                tb_order_store.mark_sent(order_id, phase, "tg")
+            return True
     except Exception as e:
         print(f"⚠️ [TBOrder] Telegram: {e}")
+    return False
 
 
 def chunk_tb_order_message(text: str, limit: int = 2000):
@@ -417,25 +419,19 @@ class GuildEvents(commands.Cog):
             db_phase = tb_order_store.get_phases(active_plan["id"]).get(int(phase)) if active_plan else None
             db_override = db_phase["text"] if db_phase and db_phase["source"] in tb_order_store.SOURCES_OVER_THREAD else None
 
-            if not guild_cfg.get("tb_plan_channel_id") or not (source_channel_id or db_phase) \
-                    or not guild_cfg.get("tb_order_role_id"):
-                continue
-            if active_plan and tb_order_store.recently_sent(active_plan["id"], int(phase), "discord"):
-                # этап уже отправили вручную с сайта — не дублируем
-                self._tb_order_sent_key[gid] = current_key
-                print(f"ℹ️ [TBOrder] [{gname}] Этап {phase} уже отправлен с сайта — автопост пропущен")
+            if not (source_channel_id or db_phase):
                 continue
 
-            if current_key == self._tb_order_sent_key.get(gid):
-                continue
-
-            channel = self.bot.get_channel(int(guild_cfg["tb_plan_channel_id"]))
-            if channel is None:
-                print(f"❌ [TBOrder] [{gname}] Канал {guild_cfg['tb_plan_channel_id']} не найден")
-                continue
-            role = channel.guild.get_role(int(guild_cfg["tb_order_role_id"])) if channel.guild else None
-            if role is None:
-                print(f"❌ [TBOrder] [{gname}] Роль {guild_cfg['tb_order_role_id']} не найдена")
+            order_id = active_plan["id"] if active_plan else None
+            pending = {
+                where: self._tb_order_sent_key.get((gid, where)) != current_key
+                and not (order_id and tb_order_store.recently_sent(order_id, int(phase), where))
+                for where in ("discord", "tg")
+            }
+            pending["discord"] = pending["discord"] and bool(
+                guild_cfg.get("tb_plan_channel_id") and guild_cfg.get("tb_order_role_id")
+            )
+            if not any(pending.values()):
                 continue
 
             try:
@@ -453,6 +449,20 @@ class GuildEvents(commands.Cog):
                 if not block:
                     print(f"❌ [TBOrder] [{gname}] Не нашёл блок {phase} этапа в ветке-плане")
                     continue
+                # Telegram имеет свои настройки и отметку отправки. Отсутствие
+                # канала/роли или ошибка Discord не должны останавливать его.
+                if pending["tg"] and _tb_order_to_telegram(gid, order_id, int(phase), block):
+                    self._tb_order_sent_key[(gid, "tg")] = current_key
+                if not pending["discord"]:
+                    continue
+                channel = self.bot.get_channel(int(guild_cfg["tb_plan_channel_id"]))
+                if channel is None:
+                    print(f"❌ [TBOrder] [{gname}] Канал {guild_cfg['tb_plan_channel_id']} не найден")
+                    continue
+                role = channel.guild.get_role(int(guild_cfg["tb_order_role_id"])) if channel.guild else None
+                if role is None:
+                    print(f"❌ [TBOrder] [{gname}] Роль {guild_cfg['tb_order_role_id']} не найдена")
+                    continue
                 # Блок публикуется как есть — с сохранением исходного форматирования
                 # сообщения (см. extract_tb_order_block); никакой "## " больше не
                 # добавляем сами, т.к. это было завязано на старую логику, резавшую
@@ -460,11 +470,9 @@ class GuildEvents(commands.Cog):
                 message_text = f"{block}\n\n\n{role.mention}"
                 for chunk in chunk_tb_order_message(message_text):
                     await channel.send(chunk)
-                self._tb_order_sent_key[gid] = current_key
+                self._tb_order_sent_key[(gid, "discord")] = current_key
                 if active_plan and db_phase:
                     tb_order_store.mark_sent(active_plan["id"], int(phase), "discord")
-                if active_plan:
-                    _tb_order_to_telegram(gid, active_plan["id"], int(phase), block)
                 print(f"✅ [TBOrder] [{gname}] Ордер на {phase} этап отправлен в {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
             except Exception as e:
                 print(f"❌ [TBOrder] [{gname}] Ошибка отправки ордера: {e}")

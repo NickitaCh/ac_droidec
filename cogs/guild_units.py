@@ -16,6 +16,7 @@ import stat_engine
 from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from services import faction as faction_svc
 from services import faction_image, guild_units, guild_units_image, journey_guide, unit_aliases
+from services import public_checks
 
 FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
 MESSAGE_EMBED_LIMIT = 5800  # лимит Discord — 6000 символов на все эмбеды одного сообщения
@@ -129,11 +130,12 @@ class GuildUnitsCog(commands.Cog):
         участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="Вся гильдия одной таблицей вместо одного игрока"),
+        гильдия: bool = commands.Param(default=False, description="Только подключённая гильдия: вся гильдия одной таблицей"),
     ):
         await inter.response.defer()
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if гильдия and guild_id is None:
+            await inter.edit_original_response("❌ Отчёт по гильдии доступен участникам подключённых гильдий. Личная проверка — без параметра «гильдия».")
             return
         if not database.get_journey_guide_requirements(цель, guild_id):
             await inter.edit_original_response("❌ Цель не найдена или у неё нет требований — выберите её из списка.")
@@ -161,17 +163,15 @@ class GuildUnitsCog(commands.Cog):
         if error:
             await inter.edit_original_response(error)
             return None
-        if ally_code is None and альт:
-            alt = await guild_resolver.require_alt(inter, "unit_forecast")
-            if alt is None:
-                return None
-            ally_code = alt["ally_code"]
-        elif ally_code is None:
-            reg = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not reg:
+        if альт and (участник or аликод):
+            await inter.edit_original_response("❌ «альт» нельзя указывать вместе с другим игроком.")
+            return None
+        if ally_code is None:
+            account = public_checks.account(inter.author, alt=альт)
+            if not account:
                 await inter.edit_original_response("❌ Вы не зарегистрированы — используйте `/регистрация`, укажите участника или код союзника.")
                 return None
-            ally_code = reg[0]
+            ally_code = account["ally_code"]
 
         card_cog = self.bot.get_cog("UnitForecastCog")
         players, ages = await card_cog._card_players([str(ally_code)], guild_id, False)

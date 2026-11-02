@@ -20,6 +20,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
+from services import public_checks
 import stat_engine
 from cogs.unit_forecast import (
     LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit,
@@ -188,15 +189,10 @@ class UnitTestCog(commands.Cog):
         self.bot = bot
 
     def own_code(self, inter, guild_id: int, alt: bool) -> tuple[str | None, str | None]:
-        if alt:
-            account = guild_resolver.alt_account(inter.author)
-            if account is None:
-                return None, "❌ Второй аккаунт не найден — привяжите его через `/регистрация`."
-            return account["ally_code"], None
-        reg = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-        if not reg:
-            return None, "❌ Вы не зарегистрированы — используйте `/регистрация`."
-        return reg[0], None
+        account = public_checks.account(inter.author, alt=alt)
+        if account is None:
+            return None, "❌ Аккаунт не найден — привяжите его через `/регистрация`."
+        return account["ally_code"], None
 
     @commands.slash_command(name="юнит_тест" if LEGACY_UNIT_COMMANDS else "юнит",
                             description="Персонаж: статы, модули, зеты; прогноз на другую прокачку; сравнение игроков")
@@ -253,11 +249,7 @@ class UnitTestCog(commands.Cog):
             others.append(str(code))
         others = list(dict.fromkeys(others))
 
-        guild_id = None
-        if сравнение or not others:
-            guild_id = await guild_resolver.require_guild_id(inter)
-            if guild_id is None:
-                return
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
         if сравнение:
             view = CompareSetupView(self, inter, guild_id, params)
             view.codes = others

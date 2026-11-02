@@ -6,6 +6,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 from services.registration import CONSENT_NOTE, notified_note, register_player, unregister_player
+from services import public_checks
 
 
 async def autocomplete_own_registrations(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -14,10 +15,8 @@ async def autocomplete_own_registrations(inter: disnake.ApplicationCommandIntera
     сейчас выбирают (Discord не отдаёт filled_options для User-параметров),
     так что показываем аккаунты автора команды — для self-service (основной
     сценарий) этого достаточно."""
-    guild_id = guild_resolver.resolve_guild_id(inter.author)
-    if guild_id is None:
-        return []
-    accounts = database.get_user_registrations(str(inter.author.id), guild_id=guild_id)
+    accounts = [(code, name, main) for _gid, code, name, main in
+                database.get_all_registrations_for_discord_id(str(inter.author.id))]
     string = string.lower()
     return [
         f"{code} — {name}{' ⭐' if is_main else ''}"
@@ -42,8 +41,8 @@ class SelfRegistrationCog(commands.Cog):
         embed = disnake.Embed(
             title="🔗 Регистрация выполнена",
             description=(
-                f"Теперь команды, где можно не указывать игрока (например `/статы`), "
-                f"по умолчанию будут брать основной аккаунт {target_user.mention}."
+                f"В `/юнит` и `/готовность` можно не указывать игрока — бот возьмёт основной аккаунт {target_user.mention}."
+                + (" Гильдию подключать не нужно." if result.guild_id == public_checks.REGISTRATION_GUILD_ID else "")
             ),
             color=disnake.Color.green()
         )
@@ -137,8 +136,23 @@ class SelfRegistrationCog(commands.Cog):
         else:
             target_user = inter.author
 
-        guild_id = await guild_resolver.require_guild_id(inter)
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if not is_officer_action:
+            regs = database.get_all_registrations_for_discord_id(str(target_user.id))
+            if ally_code:
+                code = guild_resolver.normalize_ally_code(ally_code.split(" — ")[0])
+                match = next((r for r in regs if r[1] == code), None)
+                if not match:
+                    await inter.edit_original_response("❌ Этот код союзника к вам не привязан.")
+                    return
+                guild_id, ally_code = match[0], match[1]
+            elif len(regs) == 1:
+                guild_id, ally_code = regs[0][0], regs[0][1]
+            else:
+                await inter.edit_original_response("❌ Укажите код союзника аккаунта, который нужно отвязать.")
+                return
         if guild_id is None:
+            await inter.edit_original_response("❌ Не удалось определить гильдию.")
             return
 
         result = await unregister_player(str(target_user.id), guild_id, ally_code)

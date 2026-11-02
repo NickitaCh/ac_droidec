@@ -24,6 +24,7 @@ from tg_bot.api import TelegramAPI, TelegramError
 ANONYMOUS_ADMIN_ID = 1087968824
 
 TIER_ANY, TIER_MEMBER, TIER_OFFICER = "any", "member", "officer"
+TIER_REGISTERED = "registered"
 _TIER_RANK = {None: 0, "member": 1, "officer": 2}
 _REQUIRED_RANK = {TIER_ANY: 0, TIER_MEMBER: 1, TIER_OFFICER: 2}
 
@@ -202,6 +203,11 @@ def esc(text) -> str:
 
 
 def denied_text(tier_needed: str, ctx: Ctx) -> str | None:
+    if tier_needed == TIER_REGISTERED:
+        from services import public_checks
+        if ctx.access["tier"] in ("member", "officer") or public_checks.registered(ctx.owner_id):
+            return None
+        return "Сначала привяжите игровой аккаунт: <code>/reg 123456789</code>. Гильдию подключать не нужно."
     have = _TIER_RANK.get(ctx.access["tier"], 0)
     if have >= _REQUIRED_RANK[tier_needed]:
         return None

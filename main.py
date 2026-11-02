@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import database
 import guild_resolver
 import loop_watchdog
-from services import discord_invite, fun_features
+from services import discord_invite, fun_features, public_checks
 from swgoh_comlink import SwgohComlink
 
 # stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
@@ -400,10 +400,13 @@ def _check_access(author, command_name: str) -> bool:
     или ручной грант уровня officer). ALWAYS_ALLOWED_COMMANDS пропускает вообще
     всех (сейчас только "регистрация" — единственная "дверь" в систему прав, без
     неё новый участник никогда не получит tier). MEMBER_ACCESSIBLE_COMMANDS
-    дополнительно открыт tier="member" (рядовой участник)."""
+    дополнительно открыт tier="member" (рядовой участник). public_checks.COMMANDS
+    доступны по регистрации, без присвоения гильдейского tier."""
     if author.id in bot.allowed_user_ids or guild_resolver.is_super_admin(author):
         return True
     if command_name in ALWAYS_ALLOWED_COMMANDS:
+        return True
+    if command_name in public_checks.COMMANDS and public_checks.registered(author):
         return True
     tier = guild_resolver.resolve_tier(author)
     if command_name in MEMBER_ACCESSIBLE_COMMANDS:
@@ -470,6 +473,8 @@ def _access_denied_message(inter: disnake.ApplicationCommandInteraction, tier: s
     и что сделать дальше, а не просто отказывает. tier == "member" на команде,
     требующей officer — это разговор про игровой ранг, не про оплату, поэтому
     отдельная ветка, а не общий текст про подписку/регистрацию."""
+    if _invoked_command_name(inter) in public_checks.COMMANDS:
+        return "🛑 Сначала привяжите игровой аккаунт: `/регистрация <код союзника>`. Гильдию подключать не нужно."
     if tier == "member":
         return "🛑 Эта команда доступна только офицерам/лидеру гильдии."
 

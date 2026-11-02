@@ -3,9 +3,9 @@
 без форматирования ответа (embed в cog, HTML в web/routes/registration.py).
 
 Это единственная "дверь" в систему прав: гильдия определяется НЕ по Discord-роли
-вызывающего, а живым запросом к Comlink по самому ally_code (guildId игрока →
-сверка с guilds.swgoh_guild_id) — так что команда доступна вообще всем, включая
-пользователей без единого известного боту тега (main.py::ALWAYS_ALLOWED_COMMANDS)."""
+вызывающего, а живым запросом к Comlink по самому ally_code. Вне подключённых
+гильдий регистрация сохраняется в личной области guild_id=0 и открывает только
+бесплатные личные проверки, не выдавая tier или доступ к гильдейским данным."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -22,6 +22,7 @@ class RegistrationResult:
     is_main: bool = None
     accounts: list = field(default_factory=list)  # [(ally_code, ingame_name, is_main), ...]
     notified: bool | None = None  # чужая привязка: дошло ли сообщение игроку (None — привязал сам)
+    guild_id: int | None = None
 
 
 def _discord_conflict_error(existing_owner: str) -> str:
@@ -80,12 +81,9 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
         return RegistrationResult(ok=False, error=f"Не удалось проверить код из-за сбоя связи с сервером: {e}")
 
     swgoh_guild_id = player_data.get("guildId")
-    if not swgoh_guild_id:
-        return RegistrationResult(ok=False, error="Этот аккаунт не состоит ни в одной гильдии SWGOH.")
-    guild_cfg = database.get_guild_config_by_swgoh_id(str(swgoh_guild_id))
-    if not guild_cfg:
-        return RegistrationResult(ok=False, error="Эта SWGOH-гильдия не входит в число обслуживаемых ботом. Обратитесь к супер-админу за ручным доступом.")
-    guild_id = guild_cfg["id"]
+    from services.public_checks import REGISTRATION_GUILD_ID
+    guild_cfg = database.get_guild_config_by_swgoh_id(str(swgoh_guild_id)) if swgoh_guild_id else None
+    guild_id = guild_cfg["id"] if guild_cfg else REGISTRATION_GUILD_ID
     if officer_guild_id is not None and guild_id != officer_guild_id:
         return RegistrationResult(ok=False, error="Этот код союзника из другой гильдии — офицер регистрирует только игроков своей гильдии.")
     if officer_guild_id is not None and database.get_member_level(guild_id, clean_code) in _OFFICER_LEVELS:
@@ -95,16 +93,16 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
         ))
 
     # Один и тот же ally_code нельзя привязать сразу к нескольким Discord-аккаунтам
-    # в пределах гильдии — иначе статы/задания одного игрока будет видеть и
+    # в том числе в личной области — иначе статы/задания одного игрока будет видеть и
     # редактировать чужой Discord-пользователь. allow_reassign=True (officer-путь:
     # /регистрация участник:@X в боте, либо весь веб-дашборд — он и так officer-only)
     # снимает старую привязку и переносит код на нового владельца.
-    existing_owner = database.find_ally_code_owner(clean_code, guild_id=guild_id)
+    registrations = database.get_ally_code_registrations(clean_code)
+    existing_owner = next((owner for _gid, owner in registrations if owner != discord_id), None)
     moved_from = None
     if existing_owner and existing_owner != discord_id:
         if not allow_reassign:
             return RegistrationResult(ok=False, error=conflict_error(existing_owner))
-        database.delete_user_registration(existing_owner, clean_code, guild_id=guild_id)
         moved_from = existing_owner
 
     # Первая регистрация в этой гильдии всегда основная, даже если попросили
@@ -114,12 +112,15 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
 
     try:
         database.set_user_registration(discord_id, clean_code, ingame_name, is_main=is_main, guild_id=guild_id)
+        for old_gid, owner in registrations:
+            if old_gid != guild_id or owner != discord_id:
+                database.delete_user_registration(owner, clean_code, guild_id=old_gid)
     except Exception as e:
         return RegistrationResult(ok=False, error=f"Не удалось сохранить регистрацию: {e}")
 
     notified = None
     if registered_by:
-        guild_name = guild_cfg.get("name") or "гильдия"
+        guild_name = (guild_cfg or {}).get("name") or "личные проверки"
         notified = await _notify(discord_id, (
             f"🔗 {registered_by} привязал(а) к вам игровой аккаунт {ingame_name} (код союзника {clean_code}, {guild_name})"
             f"{'' if is_main else ' как альт'}. Теперь бот считает этот аккаунт вашим.\n"
@@ -134,7 +135,7 @@ async def register_player(comlink, discord_id: str, ally_code: str, is_alt: bool
 
     accounts = database.get_user_registrations(discord_id, guild_id=guild_id)
     return RegistrationResult(ok=True, ally_code=clean_code, ingame_name=ingame_name, is_main=is_main, accounts=accounts,
-                              notified=notified)
+                              notified=notified, guild_id=guild_id)
 
 
 def notified_note(result: RegistrationResult) -> str:

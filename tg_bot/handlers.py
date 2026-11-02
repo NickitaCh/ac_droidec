@@ -61,8 +61,9 @@ def _help_text(ctx: Ctx) -> str:
     lines.append(f"🔎 Подсказки имён: наберите <code>@{esc(ctx.app.username)} дарт джа</code> — бот покажет список; "
                  "в начале можно указать «гильдия», «готовность» или «фракция».")
     lines.append("")
-    if ctx.access["tier"] is None:
+    if ctx.access["tier"] is None and not database.discord_id_has_any_registration(ctx.owner_id):
         lines.append("Начните с привязки аккаунта: <code>/reg 123456789</code>")
+    lines.append("Бесплатно после регистрации: /unit и личная /ready. Гильдейские режимы требуют подключённой гильдии.")
     lines.append(f"Сайт с отчётами и настройками: {ctx.app.site_url}")
     return "\n".join(lines)
 
@@ -106,7 +107,7 @@ def _accounts_lines(owner_id: str) -> list[str]:
     lines = []
     for guild_id, ally_code, name, is_main in database.get_all_registrations_for_discord_id(owner_id):
         mark = "основной" if is_main else "альт"
-        lines.append(f"• {esc(name)} — <code>{ally_code}</code> ({mark}, {esc(guild_names.get(guild_id) or '?')})")
+        lines.append(f"• {esc(name)} — <code>{ally_code}</code> ({mark}, {esc(guild_names.get(guild_id) or 'личные проверки')})")
     return lines
 
 
@@ -146,7 +147,9 @@ async def cmd_reg(ctx: Ctx):
     access = guild_resolver.resolve_access(owner_id)
     kind = "основной" if result.is_main else "альт"
     lines = [f"✅ {whose} привязан: <b>{esc(result.ingame_name)}</b> (<code>{result.ally_code}</code>, {kind})."]
-    if access["tier"] is None:
+    if result.guild_id == 0:
+        lines.append("Доступны бесплатные /unit и /ready. Гильдию подключать не нужно.")
+    elif access["tier"] is None:
         lines.append("Права появятся, когда бот обновит состав гильдии (раз в час).")
     else:
         lines.append(f"Права: {TIER_LABELS[access['tier']]}. Список команд — /help")
@@ -241,7 +244,8 @@ async def _resolve_target(ctx: Ctx, guild_id: int, text: str, choice_prefix: str
         return reg[0]
 
     if not text:
-        reg = database.get_user_registration(ctx.owner_id, guild_id=guild_id)
+        reg = (database.get_user_registration(ctx.owner_id, guild_id=guild_id) if guild_id is not None
+               else database.get_any_main_registration(ctx.owner_id))
         if not reg:
             await ctx.reply("Ваш аккаунт не привязан — <code>/reg код</code>, или укажите ник/код игрока.")
             return None
@@ -259,6 +263,9 @@ async def _resolve_target(ctx: Ctx, guild_id: int, text: str, choice_prefix: str
             return None
         return reg[0]
 
+    if guild_id is None:
+        await ctx.reply("Укажите код союзника, @имя зарегистрированного игрока или ответьте на его сообщение.")
+        return None
     roster = [(name, ally_code) for _d, ally_code, name in database.get_all_user_mappings(guild_id) if name]
     needle = text.casefold()
     exact = [r for r in roster if r[0].casefold() == needle]
