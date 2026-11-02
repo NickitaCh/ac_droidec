@@ -1,3 +1,5 @@
+from services.sync_queue import serialized_sync
+
 import asyncio
 import io
 import json
@@ -2324,6 +2326,7 @@ async def activity(request: Request, user: dict = Depends(require_guild_access))
 
 
 @router.post("/activity/sync", response_class=HTMLResponse)
+@serialized_sync("ручное обновление активности")
 async def activity_sync(
     request: Request,
     player: str = Form(""),

@@ -1,6 +1,8 @@
 import disnake
 from disnake.ext import commands, tasks
 from datetime import datetime, timedelta
+from services.sync_queue import serialized_sync
+
 import asyncio
 import database
 import guild_resolver
@@ -101,6 +103,7 @@ class ViolationsCog(commands.Cog):
     # обновиться). См. также web/deps.py::_refresh_access — вторая половина
     # того же фикса, убирающая доверие к закэшированному в веб-сессии tier.
     @tasks.loop(minutes=15)
+    @serialized_sync("составы гильдий")
     async def update_roster_cache(self):
         guild_configs = database.get_all_guild_configs()
         if not guild_configs:

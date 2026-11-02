@@ -1,3 +1,5 @@
+from services.sync_queue import serialized_sync
+
 import asyncio
 from datetime import date, datetime
 from pathlib import Path
@@ -217,6 +219,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
 
 
 @router.post("/sync", response_class=HTMLResponse)
+@serialized_sync("ручное обновление гильдии")
 async def home_sync(user: dict = Depends(require_guild_access)):
     """"Обновить сейчас" на главной — тот же синк активности/статов игроков, что
     и на /activity (web/routes/guild_dashboard.py::activity_sync), просто

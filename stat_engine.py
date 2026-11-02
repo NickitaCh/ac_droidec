@@ -1,3 +1,5 @@
+from services.sync_queue import serialized_sync
+
 import asyncio
 import copy
 
@@ -20,6 +22,7 @@ if _orig_normalize_char is not None:
     StatCalc._normalize_char = _normalize_char_with_ultimate
 
 
+@serialized_sync("калькулятор статов")
 async def build_stat_calc(comlink) -> StatCalc:
     """Тянет statProgression/relicTierDefinition/equipment/... из Comlink и строит
     локальный калькулятор статов — тяжёлый блокирующий сетевой вызов, всегда через to_thread."""

@@ -5,6 +5,8 @@
 web/routes/registration.py::_get_comlink). Явный comlink-параметр вместо
 self.bot.comlink — единственное отличие от исходной версии в cogs/tasks.py."""
 
+from services.sync_queue import serialized_sync
+
 import asyncio
 import json
 
@@ -249,6 +251,7 @@ def _skill_tier_thresholds(skills_list: list, ability_names: dict) -> dict:
     return thresholds
 
 
+@serialized_sync("справочник персонажей")
 async def sync_units(comlink) -> int:
     game_data = await asyncio.to_thread(comlink.get_game_data, items=str(UNIT_DEFINITIONS_FLAG))
     units_list = game_data.get('units') or []

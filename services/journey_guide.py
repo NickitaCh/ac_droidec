@@ -22,6 +22,8 @@
 Логика проверки целей stars/relic/gear здесь же (unit_progress/unit_meets) — ей
 пользуются и cogs/tasks.py, и web/routes/tasks.py."""
 
+from services.sync_queue import serialized_sync
+
 import asyncio
 import json
 import re
@@ -196,6 +198,7 @@ def parse_guide_requirements(guides: list, requirements: list, challenges: list,
     return rows
 
 
+@serialized_sync("требования Руководства")
 async def sync_journey_guide(comlink) -> int:
     """Обновляет справочник. Возвращает число строк; при пустом разборе (изменился
     формат данных) старый справочник не трогает."""

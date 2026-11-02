@@ -1,3 +1,5 @@
+from services.sync_queue import serialized_sync
+
 import asyncio
 import contextvars
 import math
@@ -1558,6 +1560,7 @@ class StatRequirementsCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     @tasks.loop(hours=1)
+    @serialized_sync("ростеры игроков")
     async def player_units_sync_loop(self):
         # player_unit_cache — не per-guild (ключ ally_code глобально уникален), поэтому
         # синхронизируем объединённый ростер по всем зарегистрированным гильдиям сразу.

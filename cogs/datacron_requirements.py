@@ -1,3 +1,5 @@
+from services.sync_queue import serialized_sync
+
 import asyncio
 import json
 import re
@@ -417,6 +419,7 @@ def refresh_catalog_shorts(catalog):
     return catalog
 
 
+@serialized_sync("каталог датакронов")
 async def _fetch_datacron_cache(comlink) -> dict:
     game_data = await asyncio.to_thread(comlink.get_game_data, items=DATACRON_GAME_DATA_ITEMS)
     loc = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
@@ -633,6 +636,7 @@ def _build_translation_export(game_data: dict, loc_en_kv: dict, loc_ru_kv: dict)
     return result
 
 
+@serialized_sync("переводы датакронов")
 async def _fetch_and_write_translation_export(comlink) -> int:
     # Отдельные вызовы get_game_data/get_localization, а не переиспользование того,
     # что уже дёрнула _fetch_datacron_cache — она вызывается независимо и только с RU;

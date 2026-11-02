@@ -24,6 +24,8 @@ Aeromagnifier, Bronzium Wiring и т.п.) в принципе не фармит�
 scavengerConversionSet, см. sync_equipment) в game_scavenger_recipes.
 """
 
+from services.sync_queue import serialized_sync
+
 import asyncio
 import re
 
@@ -223,6 +225,7 @@ def _process_item_list(items: list, loc_ru_kv: dict, loc_en_kv: dict, mission_in
     return item_to_db, locations_by_base_id
 
 
+@serialized_sync("справочник снаряжения")
 async def sync_equipment(comlink) -> int:
     """Возвращает число деталей+материалов в обновлённом справочнике. Раздельные запросы
     (не побитовое ИЛИ) — та же причина, что и раздельные запросы в units_sync.py: CAMPAIGN —
