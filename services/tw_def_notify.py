@@ -7,6 +7,11 @@
 Кому отправлять — решает офицер галочками; мейн и альт одного Discord получают одно
 сообщение с разбивкой по аккаунтам."""
 
+import asyncio
+import base64
+import json
+import re
+
 import httpx
 
 import database
@@ -84,6 +89,8 @@ def build_player_rows(guild_id: int, plan: dict, catalog: dict | None) -> list[d
                 dc = own.get(dc_id)
                 dc_texts.append(describe_datacron(dc, catalog) if dc else "ДК больше не найден у игрока — уточните у офицеров")
         row["entries"].append({
+            "zone_key": a["zone"],
+            "unit_ids": list(a["units"]),
             "zone": engine.ZONES_BY_KEY.get(a["zone"], {}).get("label", a["zone"]),
             "squad": a["squad_name"],
             "units": [unit_names.get(b, b) for b in a["units"]],
@@ -100,11 +107,19 @@ def format_dm(guild_name: str, plan_name: str, player_rows: list[dict]) -> list[
     multi = len(player_rows) > 1
     for row in player_rows:
         if multi:
-            lines.append(f"— {row['name']} —")
+            lines.append(f"**Аккаунт: {row['name']}**")
         for e in row["entries"]:
-            lines.append(f"**{e['zone']}** — {e['squad']}: {', '.join(e['units'])}")
-            for dc in e["datacrons"]:
-                lines.append(f"   Датакрон: {dc}")
+            lines.append(f"**{e['zone']} — {e['squad']}: {', '.join(e['units'])}**")
+            multiple_dc = len(e["datacrons"]) > 1
+            for index, dc in enumerate(e["datacrons"], 1):
+                title, separator, bonuses = dc.partition(" — 3: ")
+                label = f"Датакрон {index}" if multiple_dc else "Датакрон"
+                lines.append(f"{label}: {title}")
+                if separator:
+                    for bonus in re.split(r"; (?=[69]: )", "3: " + bonuses):
+                        level, _, text = bonus.partition(": ")
+                        lines.append(f"• {level} ур.: {text}")
+            lines.append("")
         lines.append("")
     lines.append("Ставьте отряды в указанные зоны в этом составе. Вопросы — офицерам.")
     chunks, cur = [], ""
@@ -116,6 +131,32 @@ def format_dm(guild_name: str, plan_name: str, player_rows: list[dict]) -> list[
     if cur.strip():
         chunks.append(cur.rstrip())
     return chunks
+
+
+async def send_maps(client, token: str, owner_id: str, maps: list[tuple[str, bytes]], channel: str) -> tuple[bool, str]:
+    """Вложения Telegram хранятся в очереди, без публичных ссылок и временных файлов."""
+    if channel == "tg":
+        from tg_bot import outbox
+        attachments = [{"filename": name, "content_type": "image/png",
+                        "data_base64": base64.b64encode(data).decode("ascii")} for name, data in maps]
+        ok = await asyncio.to_thread(outbox.enqueue_dm, owner_id, "", attachments)
+        return ok, "карта в очереди" if ok else "Telegram: нет доступной лички"
+    if not token or str(owner_id).startswith("tg:"):
+        return False, "Discord: нет доступной лички"
+    headers = {"Authorization": f"Bot {token}"}
+    response = await client.post(f"{tb_platoon_notify.DISCORD_API_BASE}/users/@me/channels",
+                                 headers=headers, json={"recipient_id": owner_id})
+    if response.status_code != 200:
+        return False, f"Discord не открыл личку ({response.status_code})"
+    channel_id = response.json()["id"]
+    # По одной карте: число альтов не ограничено лимитом вложений Discord.
+    for name, data in maps:
+        response = await client.post(f"{tb_platoon_notify.DISCORD_API_BASE}/channels/{channel_id}/messages",
+            headers=headers, data={"payload_json": json.dumps({"allowed_mentions": {"parse": []}})},
+            files={"files[0]": (name, data, "image/png")})
+        if response.status_code not in (200, 201):
+            return False, f"Discord не принял карту ({response.status_code})"
+    return True, "карта отправлена"
 
 
 async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | None, ally_codes: set[str], mode: str = "both") -> list[dict]:
@@ -133,9 +174,27 @@ async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | 
         by_discord.setdefault(row["discord_id"], []).append(row)
     async with httpx.AsyncClient(timeout=15.0) as client:
         for discord_id, player_rows in by_discord.items():
+            from services import tw_def_image
+            maps, map_errors = [], []
+            for row in player_rows:
+                if not row["entries"]:
+                    continue
+                try:
+                    png = await asyncio.to_thread(tw_def_image.render, guild_name, plan["name"], row)
+                    maps.append((f"tw-defense-{row['ally_code']}.png", png))
+                except Exception:
+                    map_errors.append(f"не удалось построить карту: {row['name']}")
             deliveries = []
             for channel in DESTINATIONS[mode]:
                 ok, detail = True, "ok"
+                map_ok, map_detail = not map_errors, "; ".join(map_errors)
+                if maps:
+                    try:
+                        sent, info = await send_maps(client, token, discord_id, maps, channel)
+                        map_ok = map_ok and sent
+                        map_detail = "; ".join(filter(None, (map_detail, info)))
+                    except Exception:
+                        map_ok, map_detail = False, "ошибка доставки карты"
                 for text in format_dm(guild_name, plan["name"], player_rows):
                     ok, detail = await tb_platoon_notify.send_dm(client, token, discord_id, text,
                         "discord_only" if channel == "discord" else "tg_only")
@@ -143,6 +202,8 @@ async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | 
                         break
                 label = "Discord" if channel == "discord" else "Telegram"
                 deliveries.append((ok, f"{label}: " + (("отправлено" if channel == "discord" else "в очереди отправки") if ok else detail)))
+                if not map_ok:
+                    deliveries.append((False, f"{label}: {map_detail}"))
             count = sum(ok for ok, _ in deliveries)
             status = "sent" if count == len(deliveries) else "partial" if count else "failed"
             for row in player_rows:

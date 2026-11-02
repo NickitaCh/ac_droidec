@@ -73,6 +73,8 @@
                 {% if preview %}
                     <div class="panel">
                         <div class="panel-title"><span>Пример сообщения</span><span class="panel-hint">{{ rows[0].name }}</span></div>
+                        <p class="muted">Каждому игровому аккаунту — своя карта с лидерами отрядов по зонам, затем составы и бонусы датакронов текстом.</p>
+                        <img src="/tw/def/plans/{{ plan.id }}/notify/map/{{ rows[0].ally_code }}.png" alt="Персональная карта защиты: {{ rows[0].name }}" loading="lazy" style="width:100%;height:auto;border-radius:12px">
                         <textarea class="twdef-text" readonly rows="10">{{ preview }}</textarea>
                     </div>
                 {% endif %}

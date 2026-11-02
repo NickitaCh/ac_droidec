@@ -3,6 +3,7 @@
 в этот чат, и /topic — метка ветки для /тг и зеркал каналов."""
 
 import asyncio
+import base64
 import html
 import re
 import time
@@ -52,10 +53,14 @@ ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
 
 
 async def _send_attachment(app: App, chat_id: int, thread_id, att: dict):
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        resp = await client.get(att["url"])
-    resp.raise_for_status()
-    data, filename = resp.content, att.get("filename") or "file"
+    if "data_base64" in att:
+        data = base64.b64decode(att["data_base64"], validate=True)
+    else:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            resp = await client.get(att["url"])
+        resp.raise_for_status()
+        data = resp.content
+    filename = att.get("filename") or "file"
     mime = att.get("content_type") or "application/octet-stream"
     # Серверный эмодзи Discord (сообщение из одних эмодзи, cogs/tg_relay.py): статичный — стикером,
     # анимированный — GIF-анимацией; не принял Telegram — обычной картинкой ниже.

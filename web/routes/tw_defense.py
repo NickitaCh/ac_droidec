@@ -757,6 +757,19 @@ async def plan_notify_page(plan_id: int, request: Request, user: dict = Depends(
     return templates.TemplateResponse(request, "tw_def_notify.html", _notify_context(user, plan, await _notify_catalog()))
 
 
+@router.get("/plans/{plan_id}/notify/map/{ally_code}.png")
+async def plan_notify_map(plan_id: int, ally_code: str, user: dict = Depends(_require)):
+    from services import tw_def_image
+    plan = _get_plan_or_404(user["guild_id"], plan_id)
+    rows = await asyncio.to_thread(tw_def_notify.build_player_rows, user["guild_id"], plan, None)
+    row = next((r for r in rows if r["ally_code"] == ally_code), None)
+    if row is None:
+        raise HTTPException(404, "У игрока нет назначений в этом плане")
+    guild_name = (database.get_guild_config(user["guild_id"]) or {}).get("name") or "гильдия"
+    png = await asyncio.to_thread(tw_def_image.render, guild_name, plan["name"], row)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+
 def _notify_context(user: dict, plan: dict, catalog, destinations=None, error=None):
     rows = tw_def_notify.build_player_rows(user["guild_id"], plan, catalog)
     guild_name = (database.get_guild_config(user["guild_id"]) or {}).get("name") or "гильдия"

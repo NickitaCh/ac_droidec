@@ -235,13 +235,13 @@ def can_dm(owner_id: str) -> bool:
     return row is not None
 
 
-def enqueue_dm(owner_id: str, text: str) -> bool:
+def enqueue_dm(owner_id: str, text: str, attachments: list[dict] | None = None) -> bool:
     if not can_dm(owner_id):
         return False
     conn = _connect()
     conn.execute(
-        "INSERT INTO tg_outbox (owner_id, kind, text, created_at) VALUES (?, 'dm', ?, ?)",
-        (str(owner_id), text, time.time()),
+        "INSERT INTO tg_outbox (owner_id, kind, text, created_at, attachments) VALUES (?, 'dm', ?, ?, ?)",
+        (str(owner_id), text, time.time(), json.dumps(attachments) if attachments else None),
     )
     conn.commit()
     conn.close()
