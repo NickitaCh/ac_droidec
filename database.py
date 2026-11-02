@@ -8131,7 +8131,8 @@ def get_donations(limit: int = 500) -> list[dict]:
     ]
 
 
-def get_confirmed_donation_total(since: str | None = None, until: str | None = None) -> int:
+def get_confirmed_donation_total(since: str | None = None, until: str | None = None,
+                                 include_ids: list[int] | None = None) -> int:
     """Подтверждённые пожертвования; необязательные границы paid_at в UTC [since, until)."""
     conn = sqlite3.connect(DB_NAME)
     try:
@@ -8139,12 +8140,19 @@ def get_confirmed_donation_total(since: str | None = None, until: str | None = N
         _ensure_donations_table(cursor)
         sql = "SELECT COALESCE(SUM(amount), 0) FROM donations WHERE status = 'succeeded'"
         params = []
+        period = []
         if since is not None:
-            sql += " AND paid_at >= ?"
+            period.append("paid_at >= ?")
             params.append(since)
         if until is not None:
-            sql += " AND paid_at < ?"
+            period.append("paid_at < ?")
             params.append(until)
+        if period:
+            condition = "(" + " AND ".join(period) + ")"
+            if include_ids:
+                condition += " OR id IN (" + ",".join("?" for _ in include_ids) + ")"
+                params.extend(include_ids)
+            sql += " AND (" + condition + ")"
         cursor.execute(sql, params)
         return int(cursor.fetchone()[0])
     finally:

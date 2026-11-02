@@ -40,6 +40,23 @@ class SupportTests(unittest.TestCase):
         self.assertEqual(dm.call_args.args[0], "276671902733434880")
         all_admins.assert_not_awaited()
 
+    def test_carry_counts_only_confirmed_once_and_only_in_selected_month(self):
+        for key, amount in [("old", 6000), ("pending", 900), ("new", 100)]:
+            database.record_donation(key, amount, None, None, None, None)
+            if key != "pending":
+                database.mark_donation_succeeded(key)
+        conn = sqlite3.connect(database.DB_NAME)
+        conn.execute("UPDATE donations SET paid_at='2026-10-31 17:00:00' WHERE order_id='old'")
+        conn.execute("UPDATE donations SET paid_at='2026-11-02 12:00:00' WHERE order_id='new'")
+        ids = [r[0] for r in conn.execute("SELECT id FROM donations")]
+        conn.commit()
+        conn.close()
+        import json
+        database.set_bot_state("donation_goal_carry:2026-11", json.dumps(ids), guild_id=0)
+        self.assertEqual(donation_progress.current(datetime(2026, 11, 2, tzinfo=timezone.utc))["total"], 6100)
+        self.assertEqual(donation_progress.current(datetime(2026, 12, 1, tzinfo=timezone.utc))["total"], 0)
+        self.assertEqual(database.get_confirmed_donation_total(), 6100)
+
     def test_monthly_goal_resets_at_midnight_moscow_and_keeps_history(self):
         rows = [("before", 100, "2026-10-31 20:59:59", True),
                 ("start", 200, "2026-10-31 21:00:00", True),
