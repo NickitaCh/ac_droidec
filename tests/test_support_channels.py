@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -38,6 +39,29 @@ class SupportTests(unittest.TestCase):
         dm.assert_awaited_once()
         self.assertEqual(dm.call_args.args[0], "276671902733434880")
         all_admins.assert_not_awaited()
+
+    def test_monthly_goal_resets_at_midnight_moscow_and_keeps_history(self):
+        rows = [("before", 100, "2026-10-31 20:59:59", True),
+                ("start", 200, "2026-10-31 21:00:00", True),
+                ("last", 300, "2026-11-30 20:59:59", True),
+                ("next", 400, "2026-11-30 21:00:00", True),
+                ("pending", 900, "2026-11-15 12:00:00", False)]
+        for key, amount, paid_at, confirmed in rows:
+            database.record_donation(key, amount, None, None, None, None)
+            if confirmed:
+                database.mark_donation_succeeded(key)
+            conn = sqlite3.connect(database.DB_NAME)
+            conn.execute("UPDATE donations SET paid_at=? WHERE order_id=?", (paid_at, key))
+            conn.commit()
+            conn.close()
+        november = donation_progress.current(datetime(2026, 11, 1, tzinfo=timezone.utc))
+        december = donation_progress.current(datetime(2026, 12, 1, tzinfo=timezone.utc))
+        january = donation_progress.current(datetime(2027, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual(november["total"], 500)
+        self.assertEqual(december["total"], 400)
+        self.assertEqual(january["total"], 0)
+        self.assertEqual(database.get_confirmed_donation_total(), 1000)
+        self.assertEqual(len(database.get_donations()), 5)
 
     def test_feedback_saved_and_rate_limited(self):
         for i in range(10):
