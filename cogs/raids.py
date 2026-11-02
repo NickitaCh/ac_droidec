@@ -13,7 +13,7 @@ from disnake.ext import commands, tasks
 
 import database
 import guild_resolver
-from services import feature_flags, guild_compare
+from services import feature_flags, guild_compare, public_checks
 from services import raids as rs
 from services import guild_units, guild_units_image, raids_image
 
@@ -59,9 +59,7 @@ async def autocomplete_raid_teams(inter: disnake.ApplicationCommandInteraction, 
     if raid:
         raid = rs.resolve_raid_kind(raid) or raid
     else:
-        guild_id = guild_resolver.resolve_guild_id(inter.author)
-        last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
-        raid = last[0]["raid_id"] if last else "order66"
+        raid = rs.default_readiness_raid(guild_resolver.resolve_guild_id(inter.author))
     entry = rs.raid_entry_units(raid) or {"units": []}
     teams = rs.raid_teams(raid, entry["units"], database.get_game_unit_names(entry["units"]))
     return [disnake.OptionChoice(name=f"{name} ({len(ids)})"[:100], value=name) for name, ids in teams
@@ -158,7 +156,7 @@ class RaidsCog(commands.Cog):
     async def before_raids(self):
         await self.bot.wait_until_ready()
 
-    @commands.slash_command(name="рейд", description="Очки гильдии в рейдах")
+    @commands.slash_command(name="рейд", description="Личная готовность к рейдам и отчёты гильдии")
     async def raid_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -198,38 +196,37 @@ class RaidsCog(commands.Cog):
         await inter.edit_original_response(content="\n".join(lines)[:2000],
                                            file=disnake.File(io.BytesIO(png), filename=f"raid_{raid['raid_id']}.png"))
 
-    @raid_group.sub_command(name="готовность", description="Кто в гильдии готов к рейду: допущенные персонажи на нужной реликвии")
+    @raid_group.sub_command(name="готовность", description="Личная готовность к рейду; вся гильдия — только офицерам")
     async def raid_readiness(
         self,
         inter: disnake.ApplicationCommandInteraction,
         реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
-        рейд: str = commands.Param(default=None, description="Рейд (пусто → текущий)", autocomplete=autocomplete_raid_kinds),
+        рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний гильдии или первый доступный)", autocomplete=autocomplete_raid_kinds),
         отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
+        альт: bool = commands.Param(default=False, description="Личная проверка второго привязанного аккаунта"),
+        гильдия: bool = commands.Param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),
     ):
         await inter.response.defer()
-        guild_id = await guild_resolver.require_feature(inter, "raids")
-        if guild_id is None:
-            return
-        if рейд is None:
-            last = database.get_raid_results(guild_id, limit=1)
-            рейд = last[0]["raid_id"] if last else "order66"
-        else:
-            рейд = rs.resolve_raid_kind(рейд) or рейд
-        entry = rs.raid_entry_units(рейд)
-        if not entry:
-            await inter.edit_original_response("❌ Рейд не найден или его состав ещё не загружен из игры — выберите рейд из списка.")
-            return
-        target = ("relic", str(реликвия)) if реликвия > 0 else ("gear", "13")
-        names = {**(entry.get("names") or {}), **database.get_game_unit_names(entry["units"])}
-        teams = rs.raid_teams(рейд, entry["units"], names)
-        if отряд:
-            needle = отряд.strip().lower()
-            exact = [t for t in teams if t[0].lower() == needle]
-            teams = exact or [t for t in teams if needle in t[0].lower()][:1]
-            if not teams:
-                await inter.edit_original_response("❌ Такого отряда в этом рейде нет — выберите из списка.")
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if гильдия:
+            if альт:
+                await guild_resolver.send_denied(inter, "❌ «альт» — личная проверка; не указывайте вместе с «гильдия».")
                 return
-        grouped = {u: [target] for _name, ids in teams for u in ids}
+            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
+                return
+            guild_id = await guild_resolver.require_feature(inter, "raids")
+            if guild_id is None:
+                return
+        try:
+            plan = rs.readiness_requirements(рейд, реликвия, отряд, guild_id)
+        except ValueError as error:
+            await inter.edit_original_response(f"❌ {error}")
+            return
+        if not гильдия:
+            await self._personal_readiness(inter, plan, guild_id, альт)
+            return
+        рейд, entry, names, teams, grouped = (plan[k] for k in ("raid_id", "entry", "names", "teams", "requirements"))
         r = await asyncio.to_thread(guild_units.readiness_grid, guild_id, grouped)
         r["groups"] = [(name, len(ids)) for name, ids in teams]
         for u in r["units"]:  # ещё не вышедшие юниты анонса — имени в game_units нет
@@ -255,6 +252,35 @@ class RaidsCog(commands.Cog):
             content=content,
             file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{рейд}.png"),
         )
+
+    async def _personal_readiness(self, inter, plan: dict, guild_id: int | None, alt: bool):
+        account = public_checks.account(inter.author, alt=alt)
+        if not account:
+            await inter.edit_original_response("❌ Аккаунт не найден — привяжите его через `/регистрация` (второй — с «альт: True»).")
+            return
+        code = account["ally_code"]
+        card_cog = self.bot.get_cog("UnitForecastCog")
+        players, ages = await card_cog._card_players([code], guild_id, False)
+        player = players[0]
+        if not player or not player.get("rosterUnit"):
+            await inter.edit_original_response(f"❌ Не удалось получить игрока с кодом {code} из игры.")
+            return
+        roster = {guild_units.unit_base_id(u): u for u in player["rosterUnit"]}
+        report = await asyncio.to_thread(rs.personal_readiness, plan, roster)
+        name = player.get("name") or account["name"] or code
+        note = (f"данные обновления, {max(1, int(ages[0]) // 60)} мин назад" if ages[0] is not None
+                else "данные из игры на момент запроса")
+        entry = plan["entry"]
+        if entry.get("preview"):
+            note += f" · предварительно: {entry['preview']}"
+        png = await asyncio.to_thread(guild_units_image.render_player, report, name, note)
+        met = sum(u["status"] == "met" for u in report["units"])
+        content = f"**{name}** — {plan['title']}: подготовлено {met} из {len(report['units'])} персонажей."
+        if entry.get("tiers"):
+            content += f"\n-# Уровни рейда: {rs.tiers_text(entry)}"
+        if entry.get("preview"):
+            content += f"\n-# 🔮 Предварительно — {entry['preview']}."
+        await inter.edit_original_response(content=content, file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{code}.png"))
 
     @raid_group.sub_command(name="игрок", description="История очков игрока в рейдах")
     async def raid_player(

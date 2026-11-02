@@ -142,8 +142,15 @@ def player_readiness(guild_id: int, guide_base_id: str, roster: dict) -> dict:
     юниту — текущая прокачка и статус: met (выполнено), short (звёзды есть, не хватает
     реликвии/гира) или missing (юнита нет или не хватает звёзд). roster — {base_id: rosterUnit}."""
     grouped = journey_guide.group_by_unit(database.get_journey_guide_requirements(guide_base_id, guild_id))
-    names = database.get_game_unit_names(list(grouped) + [guide_base_id])
-    types = database.get_unit_types(list(grouped) + [guide_base_id])
+    return player_requirements(grouped, roster, guide_base_id=guide_base_id)
+
+
+def player_requirements(grouped: dict, roster: dict, guide_base_id: str | None = None,
+                        title: str | None = None) -> dict:
+    """Личная готовность по требованиям игры: Руководство или выбранный рейд."""
+    ids = list(grouped) + ([guide_base_id] if guide_base_id else [])
+    names = database.get_game_unit_names(ids)
+    types = database.get_unit_types(ids)
     units, fractions = [], []
     for unit_id, targets in grouped.items():
         unit = roster.get(unit_id)
@@ -164,7 +171,7 @@ def player_readiness(guild_id: int, guide_base_id: str, roster: dict) -> dict:
         })
     guide_unit = roster.get(guide_base_id)
     return {
-        "guide": {"base_id": guide_base_id, "name": names.get(guide_base_id, guide_base_id)},
+        "guide": {"base_id": guide_base_id, "name": title or names.get(guide_base_id, guide_base_id)},
         "guide_level": level_of(guide_unit) if guide_unit is not None else None,
         "units": units,
         "pct": sum(fractions) / len(fractions) * 100 if fractions else 0,

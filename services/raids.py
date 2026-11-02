@@ -228,6 +228,52 @@ def raid_kinds() -> list[str]:
     return sorted(_raid_units_data())
 
 
+def default_readiness_raid(guild_id: int | None = None) -> str:
+    import database
+    last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
+    if last:
+        return last[0]["raid_id"]
+    kinds = raid_kinds()
+    return "order66" if "order66" in kinds else (kinds[0] if kinds else "order66")
+
+
+def readiness_requirements(raid: str | None = None, relic: int = 7, team: str | None = None,
+                           guild_id: int | None = None) -> dict:
+    """Общие требования личной/гильдейской проверки, без чтения ростеров игроков."""
+    import database
+    if not 0 <= relic <= 10:
+        raise ValueError("Порог реликвии — от 0 до 10 (0 — G13).")
+    raid = (resolve_raid_kind(raid) or raid) if raid else default_readiness_raid(guild_id)
+    entry = raid_entry_units(raid)
+    if not entry or not entry.get("units"):
+        raise ValueError("Рейд не найден или его состав ещё не загружен из игры — выберите рейд из списка.")
+    names = {**(entry.get("names") or {}), **database.get_game_unit_names(entry["units"])}
+    teams = raid_teams(raid, entry["units"], names)
+    if team:
+        needle = team.strip().lower()
+        exact = [t for t in teams if t[0].lower() == needle]
+        hits = exact or [t for t in teams if needle in t[0].lower()]
+        if len(hits) != 1:
+            raise ValueError("Отряд не найден или название неоднозначно — выберите отряд из списка.")
+        teams = hits
+    target = ("relic", str(relic)) if relic > 0 else ("gear", "13")
+    # Для G13/реликвий нужны 7★, даже если минимальный вход в сам рейд ниже.
+    targets = [("stars", str(max(7, entry["min_stars"]))), target]
+    grouped = {u: targets for _name, ids in teams for u in ids}
+    level = f"R{relic}" if relic else "G13"
+    title = raid_name(raid) + (f", {teams[0][0]}" if team else "") + f" ({level})"
+    return {"raid_id": raid, "entry": entry, "names": names, "teams": teams,
+            "requirements": grouped, "level": level, "title": title}
+
+
+def personal_readiness(plan: dict, roster: dict) -> dict:
+    from services import guild_units
+    report = guild_units.player_requirements(plan["requirements"], roster, title=plan["title"])
+    for unit in report["units"]:
+        unit["name"] = plan["names"].get(unit["base_id"], unit["name"])
+    return report
+
+
 def tiers_text(entry: dict) -> str:
     """«T0 4★ 0,3 млн · … · T7 R10 3,6 млн» — уровни сложности рейда, если известны."""
     return " · ".join(f"T{i} {gate} {millions(points)}" for i, (gate, points) in enumerate(entry.get("tiers") or []))

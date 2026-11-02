@@ -21,6 +21,7 @@ from cogs.unit_test import current_levels_text, level_label, projected_player
 from services import faction as faction_svc
 from services import faction_image, guild_units, guild_units_image, omicron_priority
 from services import toon, toon_image, unit_forecast, unit_forecast_image
+from services import raids as raids_svc, public_checks
 from tg_bot import markup, search, store
 from tg_bot.checks import GUILD_WORDS, REFRESH_WORDS, SELF_ONLY, _feature_off, _self_only_error, _split_flags
 from tg_bot.core import TIER_OFFICER, TIER_REGISTERED, Ctx, callback, command, esc, new_session, session_for_callback
@@ -478,6 +479,56 @@ async def _ready_player(ctx: Ctx, state: dict, code: str):
 
 
 # ======================================================================== /faction
+
+@command("raidready", "Личная готовность к рейду: персонажи и нужная прокачка", tier=TIER_REGISTERED,
+         aliases=("рейд_готовность",))
+async def cmd_raidready(ctx: Ctx):
+    """/raidready Приказ 66 r7 [альт] | Пираты — без гильдейских режимов."""
+    from tg_bot.handlers import ALT_WORDS
+    query, _, team = ctx.args.partition("|")
+    if any(word.lower() in GUILD_WORDS for word in query.split()):
+        await ctx.reply("/raidready проверяет ваш аккаунт. Таблица гильдии доступна офицерам в Discord: /рейд готовность гильдия:True.")
+        return
+    relic, alt, words, levels = 7, False, [], []
+    for word in query.split():
+        if word.lower() in ALT_WORDS:
+            alt = True
+        elif re.fullmatch(r"[rр]\d{1,2}", word, re.I):
+            levels.append(int(word[1:]))
+        else:
+            words.append(word)
+    if len(levels) > 1:
+        await ctx.reply("Укажите один порог реликвии: r0–r10 (r0 — G13).")
+        return
+    if levels:
+        relic = levels[0]
+    try:
+        plan = raids_svc.readiness_requirements(" ".join(words) or None, relic, team.strip() or None,
+                                                ctx.access["guild_id"])
+    except ValueError as error:
+        await ctx.reply(f"❌ {esc(error)}\nПример: <code>/raidready Приказ 66 r7</code>; отряд — после |, второй аккаунт — «альт».")
+        return
+    account = public_checks.account(ctx.owner_id, alt=alt)
+    if account is None:
+        await ctx.reply("Аккаунт не найден — /reg код (второй аккаунт — /reg код альт).")
+        return
+    code = account["ally_code"]
+    await ctx.action("upload_photo")
+    got = await _player_roster(ctx, ctx.access["guild_id"], code)
+    if got is None:
+        return
+    player, roster, note = got
+    report = await asyncio.to_thread(raids_svc.personal_readiness, plan, roster)
+    if plan["entry"].get("preview"):
+        note += f" · предварительно: {plan['entry']['preview']}"
+    name = player.get("name") or account["name"] or code
+    png = await asyncio.to_thread(guild_units_image.render_player, report, name, note)
+    met = sum(u["status"] == "met" for u in report["units"])
+    text = f"<b>{esc(name)}</b> — {esc(plan['title'])}: подготовлено {met} из {len(report['units'])} персонажей."
+    if plan["entry"].get("preview"):
+        text += f"\n🔮 Предварительно — {esc(plan['entry']['preview'])}."
+    await ctx.reply_photo(png, f"raid_ready_{code}.png", caption=text[:1024])
+
 
 @command("faction", "Все персонажи фракции у игрока картинкой (как /фракция)", tier=TIER_REGISTERED, aliases=("фракция",))
 async def cmd_faction(ctx: Ctx):

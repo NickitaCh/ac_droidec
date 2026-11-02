@@ -90,9 +90,9 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(commands.CheckFailure):
             check(self.author, "юнит")
         await self.register()
-        for cmd in ("юнит", "готовность", "фракция", "профиль", "регистрация_отмена"):
+        for cmd in ("юнит", "готовность", "фракция", "профиль", "рейд готовность", "регистрация_отмена"):
             self.assertTrue(check(self.author, cmd))
-        for cmd in ("юнит_гильдия", "статы", "нарушения", "тб_отчет", "рейд готовность"):
+        for cmd in ("юнит_гильдия", "статы", "нарушения", "тб_отчет", "тб оз_готовность", "рейд итоги", "рейд игрок"):
             with self.assertRaises(commands.CheckFailure, msg=cmd):
                 check(self.author, cmd)
 
@@ -149,7 +149,7 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(core.denied_text(core.TIER_REGISTERED, ctx))
         self.assertIsNotNone(core.denied_text(core.TIER_MEMBER, ctx))
         self.assertEqual(await handlers._resolve_target(ctx, None, "", "test"), "123456789")
-        for name in ("unit", "ready", "faction", "profile"):
+        for name in ("unit", "ready", "faction", "profile", "raidready"):
             self.assertEqual(core.COMMANDS[name].tier, core.TIER_REGISTERED)
         for prefix in ("un", "uw", "ua", "rd", "rw", "fc", "fw", "pf"):
             self.assertEqual(core.CALLBACKS[prefix].tier, core.TIER_REGISTERED)

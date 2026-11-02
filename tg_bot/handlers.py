@@ -32,6 +32,7 @@ HELP_SECTIONS = (
         ("/guildunit Рей", "у кого в гильдии есть юнит"),
         ("/ready Лорд Вейдер [гильдия] [| Ник]", "готовность к цели «Руководства»"),
         ("/faction Империя [| Ник]", "персонажи фракции у игрока"),
+        ("/raidready Приказ 66 [r7] [альт] [| Отряд]", "личная готовность к рейду; r0 — G13"),
     )),
     ("Проверки (участник — себя, офицер — любого)", (
         ("/stats [плейт] [игрок] [кресты] [обновить]", "статы по плейту, как /статы"),
@@ -63,7 +64,7 @@ def _help_text(ctx: Ctx) -> str:
     lines.append("")
     if ctx.access["tier"] is None and not database.discord_id_has_any_registration(ctx.owner_id):
         lines.append("Начните с привязки аккаунта: <code>/reg 123456789</code>")
-    lines.append("Бесплатно после регистрации: /unit, /ready, /faction и /profile. Гильдейские режимы требуют подключённой гильдии.")
+    lines.append("Бесплатно после регистрации: /unit, /ready, /faction, /profile и /raidready. Гильдейские режимы требуют подключённой гильдии.")
     lines.append(f"Сайт с отчётами и настройками: {ctx.app.site_url}")
     return "\n".join(lines)
 
@@ -148,7 +149,7 @@ async def cmd_reg(ctx: Ctx):
     kind = "основной" if result.is_main else "альт"
     lines = [f"✅ {whose} привязан: <b>{esc(result.ingame_name)}</b> (<code>{result.ally_code}</code>, {kind})."]
     if result.guild_id == 0:
-        lines.append("Доступны бесплатные /unit, /ready, /faction и /profile. Гильдию подключать не нужно.")
+        lines.append("Доступны бесплатные /unit, /ready, /faction, /profile и /raidready. Гильдию подключать не нужно.")
     elif access["tier"] is None:
         lines.append("Права появятся, когда бот обновит состав гильдии (раз в час).")
     else:
