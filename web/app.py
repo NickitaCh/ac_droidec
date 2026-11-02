@@ -31,7 +31,10 @@ BASE_DIR = Path(__file__).resolve().parent
 # Демо-режим: база demo.db для демо-сессий (только в веб-процессе, см. services/demo_mode.py).
 demo_mode.install()
 
+from services.donation_progress import current as donation_progress
+
 app = FastAPI(title="AC Droidec", dependencies=[Depends(audit.capture_request)])
+app.state.donation_progress = donation_progress
 
 
 @app.exception_handler(StarletteHTTPException)

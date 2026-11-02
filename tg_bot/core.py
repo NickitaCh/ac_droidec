@@ -257,6 +257,9 @@ async def _handle_message(app: App, message: dict):
         return
     parsed = _parse_command(message.get("text") or "", app.username)
     if parsed is None:
+        from tg_bot.feedback import handle_reply
+        if await handle_reply(app, message):
+            return
         if message["chat"].get("type") in ("group", "supergroup") and GROUP_MESSAGE_HANDLER["handler"]:
             await GROUP_MESSAGE_HANDLER["handler"](app, message)
         return

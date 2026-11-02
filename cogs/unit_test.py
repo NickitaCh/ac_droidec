@@ -208,6 +208,8 @@ class UnitTestCog(commands.Cog):
         аликод: str = commands.Param(default=None, description="Чужой игрок: код союзника (9 цифр)"),
         юнит2: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         юнит3: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        юнит4: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
+        юнит5: str = commands.Param(default=None, description="Ещё персонаж", autocomplete=autocomplete_character_unit),
         сравнение: bool = commands.Param(default=False, description="Панель выбора игроков для сравнения (до 4, вы — по кнопке «С собой»)"),
         звёзды: int = commands.Param(default=None, ge=1, le=7, description="Пересчитать на звёзды (1–7)"),
         гир: int = commands.Param(default=None, ge=1, le=13, description="Пересчитать на гир (1–13)"),
@@ -216,7 +218,7 @@ class UnitTestCog(commands.Cog):
         обновить: bool = commands.Param(default=False, description="Свежие данные из игры вместо ежечасного обновления"),
     ):
         await inter.response.defer(ephemeral=сравнение)
-        base_ids = list(dict.fromkeys(_parse_bracket_id(u) for u in (юнит, юнит2, юнит3) if u))
+        base_ids = list(dict.fromkeys(_parse_bracket_id(u) for u in (юнит, юнит2, юнит3, юнит4, юнит5) if u))
         types = database.get_unit_types(base_ids)
         for base_id in base_ids:
             if not database.get_game_unit_name(base_id):

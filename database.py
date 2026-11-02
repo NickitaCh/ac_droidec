@@ -8127,6 +8127,18 @@ def get_donations(limit: int = 500) -> list[dict]:
     ]
 
 
+def get_confirmed_donation_total() -> int:
+    """Все подтверждённые пожертвования, без ограничения числа платежей."""
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        cursor = conn.cursor()
+        _ensure_donations_table(cursor)
+        cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM donations WHERE status = 'succeeded'")
+        return int(cursor.fetchone()[0])
+    finally:
+        conn.close()
+
+
 def get_donation_supporters(limit: int = 30) -> list[str]:
     """Имена оплативших, кто согласился показать имя на /donate — новые первыми, без повторов."""
     conn = sqlite3.connect(DB_NAME)

@@ -2807,6 +2807,10 @@ dialog.feedback-dialog > form { max-width: none; }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sidebar nav a.nav-donate-widget:hover { border-color: var(--accent); }
+.sidebar nav a.nav-donate-widget { display: flex; flex-direction: column; gap: 0.35em; text-align: center; white-space: normal; }
+.nav-donate-widget progress { display: block; width: 100%; height: 0.55em; accent-color: var(--accent); }
+.nav-donate-amount { font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.nav-donate-action { color: var(--accent); font-weight: 600; }
 @media (min-width: 56.01em) {
     html[data-sidebar="collapsed"] .sidebar nav a.nav-donate-widget { display: none; }
 }

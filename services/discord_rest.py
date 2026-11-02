@@ -7,6 +7,7 @@ import os
 import httpx
 
 DISCORD_API = "https://discord.com/api/v10"
+PROJECT_OWNER_ID = "276671902733434880"  # Nod; проверен через Discord API.
 # Типы каналов, куда бот может писать: текстовый, новостной, форум (для гайдов ВГ).
 TEXT_CHANNEL_TYPES = {0: "text", 5: "news", 15: "forum"}
 
@@ -152,3 +153,11 @@ async def notify_super_admins(content: str) -> None:
             await send_dm(admin["discord_id"], content)
         except Exception as e:
             print(f"⚠️ [Уведомление] не отправлено {admin['discord_id']}: {e!r}")
+
+
+async def notify_project_owner(content: str) -> None:
+    """Донаты и обращения — лично Nod, без рассылки другим администраторам."""
+    try:
+        await send_dm(PROJECT_OWNER_ID, content)
+    except Exception as e:
+        print(f"⚠️ [Уведомление владельцу] {e!r}")

@@ -9,7 +9,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261102platoons">
+    <link rel="stylesheet" href="/static/style.css?v=20261102support">
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -203,7 +203,13 @@
                     {% endif %}
                 </div>
             {% endif %}
-            <a class="nav-donate-widget" href="/donate" title="Поддержать проект">💛 Поддержать проект</a>
+            {% set fund = request.app.state.donation_progress() if request.scope.get('app') and request.app.state.donation_progress is defined else {'total': 0, 'goal': 5000, 'value': 0} %}
+            <a class="nav-donate-widget" href="/donate" title="Пожертвовать на обслуживание сервера">
+                <span>На обслуживание сервера</span>
+                <progress value="{{ fund.value }}" max="{{ fund.goal }}" aria-label="Собрано на обслуживание сервера"></progress>
+                <span class="nav-donate-amount">{{ '{:,}'.format(fund.total).replace(',', ' ') }} из 5 000 ₽</span>
+                <span class="nav-donate-action">Пожертвовать</span>
+            </a>
         </nav>
         <script>
             // Группа с текущей страницей открыта в развёрнутом меню; в свёрнутом

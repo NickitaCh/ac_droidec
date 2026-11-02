@@ -158,7 +158,7 @@ async def _handle_donation(order_id: str) -> "WebhookResult":
     text = f"💛 Донат {donation['amount']} ₽ от {who}"
     if donation["comment"]:
         text += f"\n> {donation['comment']}"
-    await discord_rest.notify_super_admins(text)
+    await discord_rest.notify_project_owner(text)
     return WebhookResult(ok=True)
 
 

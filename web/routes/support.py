@@ -176,7 +176,7 @@ async def feedback_submit(
         extras.append("журнал")
     if file_name:
         extras.append(f"файл {file_name}")
-    _background(discord_rest.notify_super_admins(
+    _background(discord_rest.notify_project_owner(
         f"📨 Обращение №{report_id} · {FEEDBACK_KINDS[kind]} · {user.get('username') or discord_id}\n"
         f"{page_url[:200]}\n> " + preview.replace("\n", "\n> ")
         + (f"\n({', '.join(extras)})" if extras else "")
@@ -216,7 +216,6 @@ async def admin_feedback_update(
     if report is None or status not in FEEDBACK_STATUSES:
         return RedirectResponse("/admin/feedback", status_code=303)
     reply = reply.strip()[:2000]
-    database.update_bug_report(report_id, status, reply or None)
     status_changed = status != report["status"]
     reply_changed = reply and reply != (report["reply"] or "")
     if report["discord_id"] and (reply_changed or (status_changed and status in ("done", "rejected"))):
@@ -224,7 +223,14 @@ async def admin_feedback_update(
         if reply:
             text += f"\n> " + reply.replace("\n", "\n> ")
         text += f"\n{SITE_URL}/feedback"
-        _background(discord_rest.send_dm(report["discord_id"], text))
+        blob = database.get_bug_report_blob(report_id)
+        if blob and blob.get("user_agent") == "Telegram":
+            from tg_bot import outbox
+            if not outbox.enqueue_dm(report["discord_id"], text):
+                raise RuntimeError("Не удалось поставить ответ в очередь Telegram")
+        else:
+            _background(discord_rest.send_dm(report["discord_id"], text))
+    database.update_bug_report(report_id, status, reply or None)
     return RedirectResponse(f"/admin/feedback?status={back}#report-{report_id}", status_code=303)
 
 
