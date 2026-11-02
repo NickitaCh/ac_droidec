@@ -361,6 +361,8 @@ def pick_datacron(roster: Roster, ally_code: str, dc: dict | None, used=frozense
     "unknown" (датакроны игрока ещё не синкались), "gone" (требование удалили в /datacrons)."""
     if not dc:
         return None, None
+    if not dc.get("required"):
+        return None, None
     row = roster.dc_reqs.get((dc.get("kind"), dc.get("req_id")))
     if row is None:
         return "gone", None

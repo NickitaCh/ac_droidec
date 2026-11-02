@@ -63,9 +63,37 @@ def describe_datacron(dc: dict, catalog: dict | None) -> str:
     return text + (" — " + "; ".join(bonuses) if bonuses else "")
 
 
+def describe_recommendation(dc: dict, requirements: dict, catalog: dict | None, guild_id: int) -> str:
+    """Рекомендация отряда, независимо от коллекции игрока и количества ДК."""
+    from cogs.datacron_requirements import _focused_char_label, _level_label, DATACRON_NONE, DATACRON_ANY, DATACRON_STAT_LABELS
+    row = requirements.get((dc.get("kind"), dc.get("req_id")))
+    if row is None:
+        return "Рекомендация удалена — уточните у офицеров"
+    set_id = row[1]
+    season = ((catalog or {}).get("seasons") or {}).get(set_id) or {}
+    name = season.get("display_name") or f"сезон {set_id}"
+    if dc.get("kind") == "focused":
+        char = _focused_char_label(catalog, set_id, row[3]) if catalog else row[3]
+        return f"персональный ДК «{char}», ур. {row[4]} ({name}) (рекомендуется)"
+    bonuses = []
+    for level, value in zip((3, 6, 9), row[3:6]):
+        if value and value not in (DATACRON_NONE, DATACRON_ANY):
+            bonuses.append(f"{level}: {_level_label(season.get(f'level{level}') or [], value)}")
+    stats = row[10] if len(row) > 10 else None
+    thresholds = database.get_datacron_requirement_stats(row[0], guild_id=guild_id)
+    details = [str(stats)] if stats else []
+    details.extend(f"{DATACRON_STAT_LABELS.get(stat_id, str(stat_id))} ≥ {minimum:g}%"
+                   for stat_id, minimum in thresholds)
+    title = f"ДК {name} (рекомендуется)" + (f" · {', '.join(details)}" if details else "")
+    return title + (" — " + "; ".join(bonuses) if bonuses else "")
+
+
 def build_player_rows(guild_id: int, plan: dict, catalog: dict | None) -> list[dict]:
     """[{ally_code, name, discord_id, entries: [{zone, squad, units: [имя], datacrons: [описание]}]}]."""
     assignments = database.get_tw_def_assignments(guild_id, plan["id"])
+    squads = {s["id"]: s for s in database.list_tw_def_squads(guild_id)}
+    requirements = {("base", r[0]): r for r in database.get_all_datacron_requirements(guild_id)}
+    requirements.update({("focused", r[0]): r for r in database.get_all_datacron_focused_requirements(guild_id)})
     names = database.get_player_names(guild_id)
     for _discord_id, ally_code, ingame_name in database.get_all_user_mappings(guild_id):
         if ingame_name:
@@ -83,7 +111,10 @@ def build_player_rows(guild_id: int, plan: dict, catalog: dict | None) -> list[d
             "discord_id": discord_by_ally.get(a["ally_code"]), "entries": [],
         })
         dc_texts = []
-        if a.get("datacron_id"):
+        dc_setting = (squads.get(a.get("squad_id")) or {}).get("datacron")
+        if dc_setting and not dc_setting.get("required"):
+            dc_texts.append(describe_recommendation(dc_setting, requirements, catalog, guild_id))
+        elif a.get("datacron_id"):
             own = {str(d.get("id")): d for d in datacrons.get(a["ally_code"]) or []}
             for dc_id in a["datacron_id"].split(","):
                 dc = own.get(dc_id)
@@ -112,11 +143,12 @@ def format_dm(guild_name: str, plan_name: str, player_rows: list[dict]) -> list[
             lines.append(f"**{e['zone']} — {e['squad']}: {', '.join(e['units'])}**")
             multiple_dc = len(e["datacrons"]) > 1
             for index, dc in enumerate(e["datacrons"], 1):
-                title, separator, bonuses = dc.partition(" — 3: ")
+                parts = re.split(r" — (?=[369]: )", dc, maxsplit=1)
+                title, separator, bonuses = parts[0], len(parts) > 1, parts[-1]
                 label = f"Датакрон {index}" if multiple_dc else "Датакрон"
                 lines.append(f"{label}: {title}")
                 if separator:
-                    for bonus in re.split(r"; (?=[69]: )", "3: " + bonuses):
+                    for bonus in re.split(r"; (?=[369]: )", bonuses):
                         level, _, text = bonus.partition(": ")
                         lines.append(f"• {level} ур.: {text}")
             lines.append("")

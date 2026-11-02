@@ -7607,9 +7607,13 @@ def get_tw_def_assignments(guild_id: int, plan_id: int) -> list[dict]:
                    "WHERE guild_id = ? AND plan_id = ? ORDER BY id", (guild_id, plan_id))
     rows = cursor.fetchall()
     conn.close()
+    squads = {s["id"]: s for s in list_tw_def_squads(guild_id)}
     result = []
     for row in rows:
         d = dict(zip(_TW_DEF_ASSIGN_KEYS, row))
+        dc = (squads.get(d.get("squad_id")) or {}).get("datacron")
+        if dc and not dc.get("required"):
+            d["datacron_id"] = None
         try:
             d["units"] = json.loads(d.pop("units_json") or "[]")
         except ValueError:
