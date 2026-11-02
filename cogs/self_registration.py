@@ -41,7 +41,7 @@ class SelfRegistrationCog(commands.Cog):
         embed = disnake.Embed(
             title="🔗 Регистрация выполнена",
             description=(
-                f"В `/юнит` и `/готовность` можно не указывать игрока — бот возьмёт основной аккаунт {target_user.mention}."
+                f"В `/юнит`, `/готовность`, `/фракция` и `/профиль` можно не указывать игрока — бот возьмёт основной аккаунт {target_user.mention}."
                 + (" Гильдию подключать не нужно." if result.guild_id == public_checks.REGISTRATION_GUILD_ID else "")
             ),
             color=disnake.Color.green()

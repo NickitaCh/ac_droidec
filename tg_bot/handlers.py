@@ -8,7 +8,7 @@ import guild_resolver
 from services import player_profile as pp
 from services import profile_image, registration, stat_forecast
 from tg_bot import store
-from tg_bot.core import TIER_ANY, TIER_MEMBER, TIER_OFFICER, Ctx, callback, command, esc
+from tg_bot.core import TIER_ANY, TIER_MEMBER, TIER_OFFICER, TIER_REGISTERED, Ctx, callback, command, esc
 
 TIER_LABELS = {"officer": "офицер", "member": "участник", None: "нет доступа"}
 GUILD_WORDS = {"гильдия", "guild", "г"}
@@ -63,7 +63,7 @@ def _help_text(ctx: Ctx) -> str:
     lines.append("")
     if ctx.access["tier"] is None and not database.discord_id_has_any_registration(ctx.owner_id):
         lines.append("Начните с привязки аккаунта: <code>/reg 123456789</code>")
-    lines.append("Бесплатно после регистрации: /unit и личная /ready. Гильдейские режимы требуют подключённой гильдии.")
+    lines.append("Бесплатно после регистрации: /unit, /ready, /faction и /profile. Гильдейские режимы требуют подключённой гильдии.")
     lines.append(f"Сайт с отчётами и настройками: {ctx.app.site_url}")
     return "\n".join(lines)
 
@@ -148,7 +148,7 @@ async def cmd_reg(ctx: Ctx):
     kind = "основной" if result.is_main else "альт"
     lines = [f"✅ {whose} привязан: <b>{esc(result.ingame_name)}</b> (<code>{result.ally_code}</code>, {kind})."]
     if result.guild_id == 0:
-        lines.append("Доступны бесплатные /unit и /ready. Гильдию подключать не нужно.")
+        lines.append("Доступны бесплатные /unit, /ready, /faction и /profile. Гильдию подключать не нужно.")
     elif access["tier"] is None:
         lines.append("Права появятся, когда бот обновит состав гильдии (раз в час).")
     else:
@@ -316,10 +316,13 @@ async def _stat_calc(ctx: Ctx, timeout: float = 240):
     return calc
 
 
-@command("profile", "Профиль игрока или гильдии картинкой", aliases=("профиль",))
+@command("profile", "Профиль игрока или гильдии картинкой", tier=TIER_REGISTERED, aliases=("профиль",))
 async def cmd_profile(ctx: Ctx):
     guild_id = ctx.access["guild_id"]
     if ctx.args.lower() in GUILD_WORDS:
+        if guild_id is None:
+            await ctx.reply("Сводка по гильдии доступна участникам подключённых гильдий. Личный профиль — /profile без слова «гильдия».")
+            return
         await _guild_profile(ctx, guild_id)
         return
     ally_code = await _resolve_target(ctx, guild_id, ctx.args, "pf")
@@ -327,7 +330,7 @@ async def cmd_profile(ctx: Ctx):
         await _player_profile(ctx, ally_code)
 
 
-@callback("pf", command_name="profile")
+@callback("pf", tier=TIER_REGISTERED, command_name="profile")
 async def cb_profile(ctx: Ctx, ally_code: str):
     code = guild_resolver.normalize_ally_code(ally_code)
     if code is None:

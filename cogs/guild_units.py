@@ -195,9 +195,7 @@ class GuildUnitsCog(commands.Cog):
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
         faction_id = faction_svc.resolve(фракция)
         if faction_id is None:
             await inter.edit_original_response("❌ Фракция не найдена — выберите её из списка.")

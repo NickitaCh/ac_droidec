@@ -11,6 +11,7 @@ import database
 import guild_resolver
 from cogs.guild_units import GuildUnitsCog
 from cogs.unit_test import UnitTestCog
+from cogs.profile import ProfileCog
 from services import public_checks, registration
 from tg_bot import core, handlers, more
 
@@ -89,9 +90,9 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(commands.CheckFailure):
             check(self.author, "юнит")
         await self.register()
-        for cmd in ("юнит", "готовность", "регистрация_отмена"):
+        for cmd in ("юнит", "готовность", "фракция", "профиль", "регистрация_отмена"):
             self.assertTrue(check(self.author, cmd))
-        for cmd in ("юнит_гильдия", "статы", "профиль", "нарушения", "тб_отчет", "рейд готовность"):
+        for cmd in ("юнит_гильдия", "статы", "нарушения", "тб_отчет", "рейд готовность"):
             with self.assertRaises(commands.CheckFailure, msg=cmd):
                 check(self.author, cmd)
 
@@ -148,10 +149,73 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(core.denied_text(core.TIER_REGISTERED, ctx))
         self.assertIsNotNone(core.denied_text(core.TIER_MEMBER, ctx))
         self.assertEqual(await handlers._resolve_target(ctx, None, "", "test"), "123456789")
-        for name in ("unit", "ready"):
+        for name in ("unit", "ready", "faction", "profile"):
             self.assertEqual(core.COMMANDS[name].tier, core.TIER_REGISTERED)
-        for prefix in ("un", "uw", "ua", "rd", "rw"):
+        for prefix in ("un", "uw", "ua", "rd", "rw", "fc", "fw", "pf"):
             self.assertEqual(core.CALLBACKS[prefix].tier, core.TIER_REGISTERED)
+
+    async def test_discord_public_faction_renders_without_a_guild(self):
+        await self.register()
+        inter = SimpleNamespace(author=self.author, response=SimpleNamespace(defer=AsyncMock()),
+                                edit_original_response=AsyncMock())
+        cog = GuildUnitsCog(None)
+        with patch.object(cog, "_player_roster", AsyncMock(return_value=({"name": "Player"}, {}, "fresh"))) as roster, \
+             patch("services.faction.resolve", return_value="empire"), \
+             patch("services.faction.build", return_value={"name": "Империя", "owned": 1, "total": 2}), \
+             patch("services.faction_image.render", return_value=b"png"):
+            await GuildUnitsCog.faction.callback(cog, inter, "empire", None, None, False)
+        self.assertIsNone(roster.call_args.args[1])
+        self.assertIn("открыто 1 из 2", inter.edit_original_response.call_args.kwargs["content"])
+
+    async def test_discord_public_profile_renders_own_and_explicit_player(self):
+        await self.register()
+        self.comlink.get_player.return_value = {"name": "Player", "rosterUnit": [{"definitionId": "UNIT"}]}
+        cog = ProfileCog(SimpleNamespace(comlink=self.comlink, stat_calc=object()))
+        inter = SimpleNamespace(author=self.author, response=SimpleNamespace(defer=AsyncMock()),
+                                edit_original_response=AsyncMock())
+        with patch("stat_engine.wait_stat_calc", AsyncMock(return_value=True)), \
+             patch("services.player_profile.load_context", return_value={}), \
+             patch("services.player_profile.player_meta", return_value={}), \
+             patch("services.player_profile.summarize", return_value={}), \
+             patch("services.profile_image.render_player", return_value=b"png"):
+            for code, expected in ((None, "123456789"), ("987654321", "987654321")):
+                await ProfileCog.profile.callback(cog, inter, None, code, False)
+                self.assertEqual(self.comlink.get_player.call_args.kwargs, {"allycode": expected})
+                self.assertEqual(inter.edit_original_response.call_args.kwargs["file"].filename, f"profile_{expected}.png")
+
+    async def test_discord_profile_guild_mode_denied_before_statcalc(self):
+        await self.register()
+        inter = SimpleNamespace(author=self.author, response=SimpleNamespace(defer=AsyncMock()),
+                                edit_original_response=AsyncMock())
+        with patch("stat_engine.wait_stat_calc", AsyncMock()) as calc:
+            await ProfileCog.profile.callback(ProfileCog(None), inter, None, None, True)
+        calc.assert_not_awaited()
+        self.assertIn("подключённых", inter.edit_original_response.call_args.args[0])
+
+    async def test_connected_guild_profile_keeps_existing_access(self):
+        cog = ProfileCog(SimpleNamespace())
+        inter = SimpleNamespace(author=self.author, response=SimpleNamespace(defer=AsyncMock()),
+                                edit_original_response=AsyncMock())
+        with patch.object(guild_resolver, "resolve_guild_id", return_value=5), \
+             patch("stat_engine.wait_stat_calc", AsyncMock(return_value=True)), \
+             patch("services.player_profile.load_context", return_value={}), \
+             patch.object(cog, "_guild_profile", AsyncMock()) as guild:
+            await ProfileCog.profile.callback(cog, inter, None, None, True)
+        guild.assert_awaited_once_with(inter, 5, {})
+
+    async def test_telegram_public_profile_own_target_and_guild_rejection(self):
+        await self.register()
+        ctx = SimpleNamespace(owner_id="123", access={"tier": None, "guild_id": None}, args="", reply_user=None,
+                              reply=AsyncMock())
+        with patch.object(handlers, "_player_profile", AsyncMock()) as player, \
+             patch.object(handlers, "_guild_profile", AsyncMock()) as guild:
+            await handlers.cmd_profile(ctx)
+            player.assert_awaited_once_with(ctx, "123456789")
+            for arg in ("гильдия", "guild", "г"):
+                ctx.args = arg
+                await handlers.cmd_profile(ctx)
+            guild.assert_not_awaited()
+        self.assertIn("подключённых", ctx.reply.call_args.args[0])
 
     async def test_telegram_guild_readiness_and_guild_picker_are_closed(self):
         await self.register()

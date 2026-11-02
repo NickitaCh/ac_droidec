@@ -14,7 +14,7 @@ import database
 import stat_engine
 import guild_resolver
 from services import player_profile as pp
-from services import profile_image
+from services import profile_image, public_checks
 
 
 def _guild_payload(resp: dict) -> dict:
@@ -41,11 +41,12 @@ class ProfileCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="Сводка по всей гильдии: итоги, средний игрок, средние статы ГЛ и меты"),
+        гильдия: bool = commands.Param(default=False, description="Только подключённая гильдия: итоги, средний игрок, статы ГЛ и меты"),
     ):
         await inter.response.defer()
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if гильдия and guild_id is None:
+            await inter.edit_original_response("❌ Сводка по гильдии доступна участникам подключённых гильдий. Личный профиль — без параметра «гильдия».")
             return
         if not await stat_engine.wait_stat_calc(self.bot, inter):
             await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
@@ -60,13 +61,13 @@ class ProfileCog(commands.Cog):
             await inter.edit_original_response(error)
             return
         if ally_code is None:
-            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not registration:
+            account = public_checks.account(inter.author)
+            if not account:
                 await inter.edit_original_response(
                     "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите участника или код союзника."
                 )
                 return
-            ally_code = registration[0]
+            ally_code = account["ally_code"]
 
         try:
             player = await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(ally_code))

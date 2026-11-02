@@ -479,7 +479,7 @@ async def _ready_player(ctx: Ctx, state: dict, code: str):
 
 # ======================================================================== /faction
 
-@command("faction", "Все персонажи фракции у игрока картинкой (как /фракция)", aliases=("фракция",))
+@command("faction", "Все персонажи фракции у игрока картинкой (как /фракция)", tier=TIER_REGISTERED, aliases=("фракция",))
 async def cmd_faction(ctx: Ctx):
     what, who = _split_player(ctx.args)
     if not what:
@@ -499,7 +499,7 @@ async def cmd_faction(ctx: Ctx):
     await _faction_run(ctx, state, hits[0][0])
 
 
-@callback("fc", command_name="faction")
+@callback("fc", tier=TIER_REGISTERED, command_name="faction")
 async def cb_faction(ctx: Ctx, payload: str):
     token, _, cid = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -509,7 +509,7 @@ async def cb_faction(ctx: Ctx, payload: str):
     await _faction_run(ctx, state, cid)
 
 
-@callback("fw", command_name="faction")
+@callback("fw", tier=TIER_REGISTERED, command_name="faction")
 async def cb_faction_who(ctx: Ctx, payload: str):
     token, _, code = payload.partition("|")
     state = await session_for_callback(ctx, token)
