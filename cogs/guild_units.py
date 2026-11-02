@@ -61,9 +61,7 @@ class GuildUnitsCog(commands.Cog):
         юнит: str = commands.Param(description="Персонаж или корабль 🚀", autocomplete=autocomplete_character_unit),
     ):
         await inter.response.defer()
-        guild_id = await guild_resolver.require_guild_id(inter)
-        if guild_id is None:
-            return
+        guild_id = guild_resolver.resolve_guild_id(inter.author)
         base_id = _parse_bracket_id(юнит)
         if not database.get_game_unit_name(base_id):
             await inter.edit_original_response("❌ Юнит не найден — выберите его из списка.")
@@ -71,12 +69,20 @@ class GuildUnitsCog(commands.Cog):
         if not await stat_engine.wait_stat_calc(self.bot, inter):
             await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
-        r = await asyncio.to_thread(guild_units.unit_report, guild_id, base_id, self.bot.stat_calc)
+        try:
+            if guild_id:
+                r = await asyncio.to_thread(guild_units.unit_report, guild_id, base_id, self.bot.stat_calc)
+            else:
+                r = await guild_units.public_unit_report(self.bot.comlink, inter.author, base_id, self.bot.stat_calc)
+        except ValueError as exc:
+            await inter.edit_original_response(str(exc))
+            return
         if not r["members"]:
             await inter.edit_original_response("❌ Нет данных по составу гильдии — дождитесь ежечасного обновления.")
             return
 
-        cfg = database.get_guild_config(guild_id) or {}
+        cfg = database.get_guild_config(guild_id) if guild_id else {}
+        cfg = dict(cfg or {}, name=r.get("guild_name") or (cfg or {}).get("name"))
         head = " ГМ    : ур.    : " + ("" if r["is_ship"] else "з/о    : ") + "Игрок"
         groups: dict[int, list] = {}
         for o in r["owners"]:
@@ -109,7 +115,7 @@ class GuildUnitsCog(commands.Cog):
             embed.add_field(name=name, value=value, inline=False)
         if not embeds:
             embeds = [disnake.Embed(title=cfg.get("name") or "Гильдия", description=f"**{r['name']}** — ни у кого нет.")]
-        embeds[-1].set_footer(text="Данные ежечасного обновления составов")
+        embeds[-1].set_footer(text=r.get("note") or "Данные ежечасного обновления составов")
         # В одном сообщении — не больше 10 эмбедов и 6000 символов на все; остальное — следующими сообщениями.
         messages, current = [], []
         for e in embeds:

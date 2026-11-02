@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,9 +91,9 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(commands.CheckFailure):
             check(self.author, "юнит")
         await self.register()
-        for cmd in ("юнит", "готовность", "фракция", "профиль", "рейд готовность", "регистрация_отмена"):
+        for cmd in ("юнит", "юнит_гильдия", "готовность", "фракция", "профиль", "рейд готовность", "регистрация_отмена"):
             self.assertTrue(check(self.author, cmd))
-        for cmd in ("юнит_гильдия", "статы", "нарушения", "тб_отчет", "тб оз_готовность", "рейд итоги", "рейд игрок"):
+        for cmd in ("статы", "нарушения", "тб_отчет", "тб оз_готовность", "рейд итоги", "рейд игрок"):
             with self.assertRaises(commands.CheckFailure, msg=cmd):
                 check(self.author, cmd)
 
@@ -105,6 +106,34 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
                                                    None, None, False, True)
         reqs.assert_not_called()
         self.assertIn("подключённых", inter.edit_original_response.call_args.args[0])
+
+    async def test_public_guildunit_skips_failed_players_and_caches_report(self):
+        from services import guild_units, steal_build
+        await self.register()
+        guild_units._public_reports.clear()
+        guild_units._public_lock = asyncio.Lock()
+        comlink = SimpleNamespace(get_player=Mock(
+            side_effect=[{"name": "Loaded", "rosterUnit": [{"definitionId": "UNIT:SEVEN_STAR"}]},
+                         RuntimeError("offline")]))
+        lookup = SimpleNamespace(ok=True, swgoh_guild_id="external", guild_name="External",
+                                 members=[("p1", "Loaded"), ("p2", "Failed")])
+        with patch.object(steal_build, "resolve_guild", AsyncMock(return_value=lookup)), \
+             patch.object(guild_units, "unit_report", return_value={"members": 1}) as build:
+            report = await guild_units.public_unit_report(comlink, self.author, "UNIT", None)
+            again = await guild_units.public_unit_report(comlink, self.author, "UNIT", None)
+        self.assertEqual(report, again)
+        self.assertEqual(comlink.get_player.call_count, 2)
+        self.assertEqual(build.call_args.kwargs["members"], [("p1", "Loaded")])
+        self.assertIn("не загружено: 1", report["note"])
+        self.assertEqual(report["guild_name"], "External")
+        guild_units._public_reports.clear()
+
+    async def test_public_guildunit_without_registration_does_not_fetch(self):
+        from services import guild_units, steal_build
+        with patch.object(steal_build, "resolve_guild", AsyncMock()) as fetch:
+            with self.assertRaises(ValueError):
+                await guild_units.public_unit_report(None, self.author, "UNIT", None)
+        fetch.assert_not_called()
 
     async def test_discord_personal_roster_resolves_public_main_and_alt(self):
         await self.register()
@@ -149,9 +178,9 @@ class PublicChecksTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(core.denied_text(core.TIER_REGISTERED, ctx))
         self.assertIsNotNone(core.denied_text(core.TIER_MEMBER, ctx))
         self.assertEqual(await handlers._resolve_target(ctx, None, "", "test"), "123456789")
-        for name in ("unit", "ready", "faction", "profile", "raidready"):
+        for name in ("unit", "ready", "faction", "profile", "raidready", "guildunit"):
             self.assertEqual(core.COMMANDS[name].tier, core.TIER_REGISTERED)
-        for prefix in ("un", "uw", "ua", "rd", "rw", "fc", "fw", "pf"):
+        for prefix in ("un", "uw", "ua", "rd", "rw", "fc", "fw", "pf", "gu"):
             self.assertEqual(core.CALLBACKS[prefix].tier, core.TIER_REGISTERED)
 
     async def test_discord_public_faction_renders_without_a_guild(self):

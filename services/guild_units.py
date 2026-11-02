@@ -10,6 +10,8 @@
 services/guild_units_image.py."""
 
 import copy
+import asyncio
+import time
 
 import database
 from services import journey_guide, unit_forecast
@@ -39,11 +41,11 @@ def level_text(level: dict, is_ship: bool = False, with_stars: bool = False) -> 
     return core
 
 
-def unit_report(guild_id: int, base_id: str, stat_calc) -> dict:
+def unit_report(guild_id: int, base_id: str, stat_calc, *, members=None, units=None) -> dict:
     """{name, is_ship, members, owners: [{name, ally_code, stars, gear, relic, gp, zetas,
     omicrons, ultimate}], missing: [имя]} — владельцы по убыванию прокачки и ГМ."""
-    members = _members(guild_id)
-    units = database.get_player_units_bulk([c for c, _ in members])
+    members = _members(guild_id) if members is None else members
+    units = database.get_player_units_bulk([c for c, _ in members]) if units is None else units
     is_ship = database.get_unit_types([base_id]).get(base_id) == "ship"
     skills = database.get_all_skill_tier_info()
     owners, missing = [], []
@@ -68,6 +70,51 @@ def unit_report(guild_id: int, base_id: str, stat_calc) -> dict:
     missing.sort(key=str.lower)
     return {"name": database.get_game_unit_name(base_id) or base_id, "is_ship": is_ship,
             "members": len(members), "owners": owners, "missing": missing}
+
+
+_public_reports = {}
+_public_lock = asyncio.Lock()
+
+
+async def public_unit_report(comlink, author, base_id, stat_calc):
+    """Только публичные ростеры своей игровой гильдии, без выдачи доступа к ней."""
+    from services import public_checks, steal_build
+    account = public_checks.account(author)
+    if not account:
+        raise ValueError("Сначала используйте /регистрация.")
+    async with _public_lock:
+        lookup = await steal_build.resolve_guild(comlink, account["ally_code"])
+        if not lookup.ok:
+            raise ValueError(lookup.error)
+        key = (lookup.swgoh_guild_id, base_id)
+        cached = _public_reports.get(key)
+        if cached and time.monotonic() - cached[0] < 1800:
+            return cached[1]
+        members, units = [], {}
+        # Ограниченная параллельность, полный ростер хранится только на время запроса.
+        semaphore = asyncio.Semaphore(3)
+        async def fetch(player_id, name):
+            async with semaphore:
+                try:
+                    player = await asyncio.to_thread(comlink.get_player, player_id=player_id)
+                    roster = player.get("rosterUnit")
+                    if not isinstance(roster, list) or not roster:
+                        return
+                    members.append((player_id, name or player.get("name") or player_id))
+                    units[player_id] = {unit_base_id(u): u for u in roster}
+                except Exception:
+                    return
+        await asyncio.gather(*(fetch(pid, name) for pid, name in lookup.members))
+        if not members:
+            raise ValueError("Не удалось загрузить ростеры гильдии — попробуйте позже.")
+        report = await asyncio.to_thread(unit_report, None, base_id, stat_calc, members=members, units=units)
+        report.update(guild_name=lookup.guild_name,
+                      note="Данные из игры · кэш до 30 минут" +
+                      (f" · не загружено: {len(lookup.members) - len(members)}" if len(members) < len(lookup.members) else ""))
+        if len(_public_reports) >= 128:
+            _public_reports.clear()
+        _public_reports[key] = (time.monotonic(), report)
+        return report
 
 
 # ---------------------------------------------------------------- готовность к «Руководству»

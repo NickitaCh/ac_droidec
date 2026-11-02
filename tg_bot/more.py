@@ -308,7 +308,7 @@ async def _ship_forecast(ctx: Ctx, stat_calc, ally_code: str, base_id: str, star
 
 # ======================================================================== /guildunit
 
-@command("guildunit", "У кого в гильдии есть юнит и на какой прокачке", aliases=("юнит_гильдия",))
+@command("guildunit", "У кого в гильдии есть юнит и на какой прокачке", tier=TIER_REGISTERED, aliases=("юнит_гильдия",))
 async def cmd_guildunit(ctx: Ctx):
     query = ctx.args.strip()
     if not query:
@@ -327,7 +327,7 @@ async def cmd_guildunit(ctx: Ctx):
     await _guildunit_run(ctx, state, matches[0][0])
 
 
-@callback("gu", command_name="guildunit")
+@callback("gu", tier=TIER_REGISTERED, command_name="guildunit")
 async def cb_guildunit(ctx: Ctx, payload: str):
     token, _, base_id = payload.partition("|")
     state = await session_for_callback(ctx, token)
@@ -342,7 +342,14 @@ async def _guildunit_run(ctx: Ctx, state: dict, base_id: str):
     stat_calc = await _stat_calc(ctx)
     if stat_calc is None:
         return
-    r = await asyncio.to_thread(guild_units.unit_report, state["guild_id"], base_id, stat_calc)
+    try:
+        if state["guild_id"]:
+            r = await asyncio.to_thread(guild_units.unit_report, state["guild_id"], base_id, stat_calc)
+        else:
+            r = await guild_units.public_unit_report(ctx.app.comlink, ctx.owner_id, base_id, stat_calc)
+    except ValueError as exc:
+        await ctx.reply(esc(str(exc)))
+        return
     if not r["members"]:
         await ctx.reply("❌ Нет данных по составу гильдии — дождитесь ежечасного обновления.")
         return
@@ -362,6 +369,7 @@ async def _guildunit_run(ctx: Ctx, state: dict, base_id: str):
         lines.append(f"\n<b>{stars}★ ({len(rows)})</b>\n<pre>" + esc("\n".join(rows)) + "</pre>")
     if r["missing"]:
         lines.append(f"\n<b>Нет у ({len(r['missing'])})</b>: " + esc(", ".join(r["missing"])))
+    lines.append(esc(r.get("note") or "Данные ежечасного обновления составов"))
     for chunk in _html_chunks(lines):
         await ctx.reply(chunk)
 
