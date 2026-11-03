@@ -19,8 +19,8 @@
         Сделать это может любой офицер гильдии:
     </p>
     <ol>
-        <li><strong>Пригласите бота на Discord-сервер гильдии</strong> — кнопкой «Пригласить бота» на <a href="/">главной</a>
-            или командой <code>/пригласить</code>. Если боту не хватит прав, он сам напишет каких.</li>
+        <li><strong>Пригласите бота на Discord-сервер гильдии</strong> — {% if public_discord_invite_url() %}<a href="{{ public_discord_invite_url() }}" target="_blank" rel="noopener">добавить Дроидца</a>{% else %}командой <code>/пригласить</code>{% endif %}.
+            Если боту не хватит прав, он сам напишет каких.</li>
         <li><strong>Подайте заявку и оплатите</strong> на странице <a href="/subscribe">Подписка</a> (вход через Discord):
             код союзника любого участника и ID Discord-сервера. Команда <code>/подписка</code> на сервере гильдии даёт ссылку,
             где ID сервера уже подставлен. Бот проверит код через игру и даст ссылку на оплату.</li>
@@ -94,8 +94,8 @@
     <ul>
         <li><strong>Личные команды</strong> — профиль, статы, датакроны, задачи и т.д. — доступны в личных
             сообщениях бота: откройте
-            {% if telegram_bot_username() %}
-                <a href="https://t.me/{{ telegram_bot_username() }}" target="_blank" rel="noopener">@{{ telegram_bot_username() }}</a>
+            {% if public_telegram_bot_username() %}
+                <a href="https://t.me/{{ public_telegram_bot_username() }}" target="_blank" rel="noopener">@{{ public_telegram_bot_username() }}</a>
             {% else %}
                 бота в Telegram
             {% endif %}

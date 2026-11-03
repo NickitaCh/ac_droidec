@@ -19,7 +19,7 @@ class BotInviteCog(commands.Cog):
         description="Получить ссылку, чтобы добавить бота на свой Discord-сервер",
     )
     async def invite(self, inter: disnake.ApplicationCommandInteraction):
-        url = discord_invite.build_invite_url()
+        url = discord_invite.build_invite_url("prod")
         if not url:
             await inter.response.send_message(
                 "❌ Приглашение сейчас недоступно (не настроен DISCORD_CLIENT_ID на сервере бота).",
@@ -28,10 +28,10 @@ class BotInviteCog(commands.Cog):
             return
 
         embed = disnake.Embed(
-            title="🤖 Добавить AC Droidec на сервер",
+            title="🤖 Добавить Дроидца на сервер",
             description=(
                 "Бот сразу запросит нужные права (роль на день рождения, "
-                "антиспам-модерация, вложения и т.п.) — Discord создаст под них "
+                "сообщения, ветки и вложения) — Discord создаст под них "
                 "отдельную роль автоматически.\n\n"
                 "Пригласить можно в любой момент — до оплаты подписки на гильдию или после."
             ),

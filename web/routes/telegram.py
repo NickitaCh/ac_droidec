@@ -4,6 +4,7 @@
 и есть доказательство, что Discord-аккаунт свой."""
 
 from urllib.parse import urlencode
+import os
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
@@ -21,7 +22,13 @@ BOT_USERNAME_STATE_KEY = "telegram_bot_username"
 
 
 def bot_username(profile: str | None = None) -> str | None:
-    return database.get_bot_state(bot_profiles.state_key(BOT_USERNAME_STATE_KEY, profile), guild_id=0)
+    profile = profile or bot_profiles.current_profile()
+    username = database.get_bot_state(bot_profiles.state_key(BOT_USERNAME_STATE_KEY, profile), guild_id=0)
+    return username or (os.getenv("PROD_TELEGRAM_BOT_USERNAME") if profile == "prod" else None)
+
+
+def public_bot_username() -> str | None:
+    return bot_username("prod")
 
 
 # Кнопка «Привязать Telegram» (player_card.html) и упоминания бота на публичных
@@ -29,6 +36,7 @@ def bot_username(profile: str | None = None) -> str | None:
 # у каждого роута свой Jinja2Templates, поэтому регистрируем тут на обоих.
 guild_dashboard.templates.env.globals["telegram_bot_username"] = bot_username
 dashboard.templates.env.globals["telegram_bot_username"] = bot_username
+dashboard.templates.env.globals["public_telegram_bot_username"] = public_bot_username
 
 
 @router.get("/me/telegram")

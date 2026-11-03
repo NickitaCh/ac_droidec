@@ -102,6 +102,7 @@
                     <p class="muted">
                         Бот работает и в Telegram — тот же бот, те же данные и права, групповой чат привязывается
                         отдельно командой <code>/bind</code>. Подробнее — на странице <a href="/start">Начало работы</a>.
+                        {% if public_telegram_bot_username is defined and public_telegram_bot_username() %}<a href="https://t.me/{{ public_telegram_bot_username() }}" target="_blank" rel="noopener">Открыть @{{ public_telegram_bot_username() }}</a>.{% endif %}
                     </p>
                     <ul class="lp-meta">
                         <li><a href="/oferta">Публичная оферта</a> · <a href="/privacy">Обработка данных</a> · Подробно: <a href="/start">Начало работы</a> · <a href="/commands">Документация</a></li>

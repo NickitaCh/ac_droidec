@@ -23,6 +23,7 @@ MSK = ZoneInfo("Europe/Moscow")
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+templates.env.globals["public_discord_invite_url"] = lambda: discord_invite.build_invite_url("prod")
 
 
 def _get_comlink():
@@ -209,7 +210,7 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
         "link_error": request.query_params.get("link_error"),
         "linked_name": request.query_params.get("linked_name"),
         "access_status_message": dashboard_data.access_status_message(user) if user and user.get("tier") != "officer" else None,
-        "bot_invite_url": discord_invite.build_invite_url() if not user else None,
+        "bot_invite_url": discord_invite.build_invite_url("prod") if not user else None,
         # Реквизиты/тарифы/оферта Prodamus нужны только на публичной посадочной
         # странице для неавторизованных (это она проходит проверку Prodamus) —
         # на остальных страницах сайта (в т.ч. этой же для авторизованных)

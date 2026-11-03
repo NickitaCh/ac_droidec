@@ -66,7 +66,7 @@ async def _verify_bot_in_guild(discord_guild_id: str) -> tuple[bool, str | None]
     При отсутствии DISCORD_TOKEN в окружении (не должно случаться на проде,
     см. CLAUDE.md) не блокируем заявку — тот же fallback, что в guild_dashboard.py."""
     from services import bot_profiles
-    token = bot_profiles.token("discord")
+    token = bot_profiles.token("discord", "prod")
     if not token:
         return True, None
     try:
@@ -79,7 +79,7 @@ async def _verify_bot_in_guild(discord_guild_id: str) -> tuple[bool, str | None]
         return True, None  # сбой связи с Discord — не блокируем заявку из-за инфраструктуры
     if resp.status_code == 200:
         return True, None
-    invite_url = discord_invite.build_invite_url()
+    invite_url = discord_invite.build_invite_url("prod")
     invite_hint = f" Пригласить бота: {invite_url}" if invite_url else ""
     return False, f"Бот не найден на Discord-сервере с ID {discord_guild_id} — проверьте ID или сначала пригласите туда бота.{invite_hint}"
 
@@ -172,7 +172,7 @@ async def subscribe_submit(
                 return templates.TemplateResponse(request, "subscribe.html", context)
 
         comlink = _get_comlink()
-        add_result = await add_guild(comlink, clean_code, clean_discord_id, is_active=False)
+        add_result = await add_guild(comlink, clean_code, clean_discord_id, is_active=False, bot_profile="prod")
         if not add_result.ok:
             context["error"] = add_result.error
             return templates.TemplateResponse(request, "subscribe.html", context)
