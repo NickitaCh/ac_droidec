@@ -86,7 +86,8 @@ async def fetch_messages(link: str, token: str | None = None) -> list[dict]:
     """Первое сообщение HotBot по ссылке + его продолжения (ответы на него от того же
     автора) — эмбеды всех по порядку."""
     channel_id, message_id = parse_link(link)
-    token = token or os.environ.get("DISCORD_TOKEN")
+    from services import bot_profiles
+    token = token or bot_profiles.token("discord")
     if not token:
         raise HotbotImportError("DISCORD_TOKEN не настроен на сервере.")
     headers = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}

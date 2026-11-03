@@ -58,7 +58,9 @@ class _DbPath(os.PathLike):
 
 
 def demo_user() -> dict:
+    from services import bot_profiles
     return {
+        "bot_profile": bot_profiles.public_profile(),
         "discord_id": DEMO_DISCORD_ID,
         "username": "Гость (демо)",
         "guild_id": DEMO_GUILD_ID,

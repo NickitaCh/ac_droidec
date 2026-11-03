@@ -90,12 +90,18 @@ def get_current_user(request: Request) -> dict:
     if not user and request.session.get("demo"):
         # Демо-режим (services/demo_mode.py): офицер выдуманной гильдии, база — demo.db.
         from services import demo_mode
-        return demo_mode.demo_user()
+        from services import bot_profiles
+        result = demo_mode.demo_user()
+        if not bot_profiles.path_available(request.url.path, result["bot_profile"]):
+            raise HTTPException(status_code=404, detail="Раздел недоступен.")
+        return result
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
     result = _apply_guild_switch(request, _refresh_access(user))
     from services import bot_profiles
-    profile = result.get("bot_profile") or bot_profiles.guild_profile(result.get("guild_id"))
+    profile = result.get("bot_profile")
+    if profile not in bot_profiles.PROFILES:
+        profile = bot_profiles.guild_profile(result["guild_id"]) if result.get("guild_id") is not None else request.session.get("login_bot_profile", bot_profiles.public_profile())
     result["bot_profile"] = profile
     result["prod_disabled_features"] = bot_profiles.PROD_DISABLED if profile == "prod" else ()
     if result.get("real_super_admin") and result.get("guild_id") is None and not request.url.path.startswith("/admin/") and request.url.path != "/logout":

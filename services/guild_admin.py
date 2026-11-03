@@ -26,7 +26,7 @@ class GrantResult:
     ingame_name: str = None
 
 
-async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: bool = True) -> GuildAddResult:
+async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: bool = True, *, bot_profile: str | None = None) -> GuildAddResult:
     """Заводит новую участвующую SWGOH-гильдию по аллай-коду ЛЮБОГО её участника —
     имя и игровой ID гильдии подтягиваются из Comlink, вручную вводить не нужно.
 
@@ -83,7 +83,12 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: b
     name = profile.get("name") or f"Гильдия {swgoh_guild_id}"
     member_count = profile.get("memberCount")
 
+    from services import bot_profiles
+    selected_profile = bot_profiles.validate(bot_profile or bot_profiles.current_profile())
+    if selected_profile == "prod" and not bot_profiles.production_ready():
+        return GuildAddResult(ok=False, error="Подключение публичных ботов пока недоступно.")
     new_id = database.create_guild(
+        bot_profile=selected_profile,
         name=name,
         ally_code=clean_code,
         swgoh_guild_id=str(swgoh_guild_id),

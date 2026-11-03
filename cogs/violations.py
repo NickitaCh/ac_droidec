@@ -103,8 +103,21 @@ class ViolationsCog(commands.Cog):
     # обновиться). См. также web/deps.py::_refresh_access — вторая половина
     # того же фикса, убирающая доверие к закэшированному в веб-сессии tier.
     @tasks.loop(minutes=15)
-    @serialized_sync("составы гильдий")
     async def update_roster_cache(self):
+        from services import bot_profiles
+        if (bot_profiles.worker_profile() or bot_profiles.runtime_profile()) == "prod":
+            # The shared worker refreshes the database once. This gateway only
+            # hydrates its local autocomplete cache, without calling Comlink.
+            caches = {}
+            for cfg in bot_profiles.served_guilds():
+                rows = database.get_all_user_mappings(cfg["id"])
+                caches[cfg["id"]] = HybridCache({name: code for _, code, name in rows})
+            self.bot.guild_roster_caches = caches
+            return
+        await self._sync_rosters()
+
+    @serialized_sync("составы гильдий")
+    async def _sync_rosters(self):
         guild_configs = database.get_all_guild_configs()
         if not guild_configs:
             print("⚠️ [Ростер] В реестре guilds нет ни одной гильдии — нечего обновлять")
@@ -343,7 +356,7 @@ class ViolationsPanel(disnake.ui.View):
         self.page = 0
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def _name(self) -> str | None:
         return next((n for n, c in self.players if c == self.ally_code), None)
@@ -468,6 +481,8 @@ class AddViolationModal(disnake.ui.Modal):
         super().__init__(title=f"Нарушение: {panel._name()}"[:45], components=components)
 
     async def callback(self, interaction: disnake.ModalInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.panel.guild_id):
+            return
         panel = self.panel
         date = interaction.text_values["date"].strip()
         final_date = f"{date}.{datetime.now().year}" if len(date) <= 5 else date

@@ -2,6 +2,7 @@
 {% block title %}Начало работы — AC Droidec{% endblock %}
 {% block main_class %}wide docs-page{% endblock %}
 {% block content %}
+    {% set product_profile = user.bot_profile if user else request.app.state.public_bot_profile() if request.scope.get('app') and request.app.state.public_bot_profile is defined else 'test' %}
     <section class="page-hero">
         <div class="page-hero-top">
             <div>
@@ -57,7 +58,7 @@
 
     <h2>3. Офицер или лидер — войдите на сайт</h2>
     <p>
-        Веб-дашборд (состав гильдии, отчёты по ТБ/ВГ, задачи, датакроны, плейты и настройки каналов/ролей)
+        Веб-дашборд (состав гильдии, отчёты по ТБ{% if product_profile != 'prod' %}/ВГ{% endif %}, задачи, датакроны, плейты и настройки каналов/ролей)
         доступен только офицерам и лидеру гильдии.
     </p>
     {% if not user %}

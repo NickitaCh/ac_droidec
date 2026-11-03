@@ -13,7 +13,8 @@ from services import mod_progress
 class ModProgressCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.mod_progress_loop.start()
+        from services import bot_profiles
+        bot_profiles.start_shared_loop(self.mod_progress_loop)
 
     def cog_unload(self):
         self.mod_progress_loop.cancel()

@@ -174,7 +174,8 @@ class RaidTicketsCog(commands.Cog):
     @tasks.loop(seconds=60)
     async def raid_tickets_loop(self):
         now = int(time.time())
-        for cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for cfg in bot_profiles.served_guilds():
             if not cfg.get("swgoh_guild_id"):
                 continue
             if not (cfg.get("raid_tickets_channel_id") or outbox.guild_wants(cfg["id"], "raid_tickets")):

@@ -64,7 +64,8 @@ def _scan_field(lines: list, start_i: int, field_ru: str, max_lines: int = 6):
 async def _thread_rounds(plan: dict) -> tuple[dict, str | None]:
     """{этап: текст} из треда ордера по заголовку «Восход Империи — N этап» (новейшее сообщение
     на этап — при повторной публикации с "принудительно: True") + ошибка чтения."""
-    token = os.environ.get("DISCORD_TOKEN")
+    from services import bot_profiles
+    token = bot_profiles.token("discord")
     if not token:
         return {}, "DISCORD_TOKEN не настроен — не могу прочитать тред плана."
     try:

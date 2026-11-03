@@ -22,6 +22,7 @@ import sqlite3
 import time
 
 import database
+from services import bot_profiles
 
 # Виды оповещений гильдии. Куда уходит каждый — маршрут гильдии (tg_routes: один чат или
 # ветка на вид, можно в другую группу — например, офицерскую), задаётся на сайте
@@ -79,7 +80,7 @@ def ensure_tables(cursor):
     except sqlite3.OperationalError:
         pass  # колонка уже есть
     # Пересылка в ветку по метке: адресат задан прямо в строке очереди.
-    for column in ("chat_id INTEGER", "thread_id INTEGER", "attachments TEXT"):
+    for column in ("chat_id INTEGER", "thread_id INTEGER", "attachments TEXT", "bot_profile TEXT NOT NULL DEFAULT 'test'"):
         try:
             cursor.execute(f"ALTER TABLE tg_outbox ADD COLUMN {column}")
         except sqlite3.OperationalError:
@@ -225,23 +226,19 @@ def parse_destination(value: str) -> tuple[int, int | None] | None:
         return None
 
 
-def can_dm(owner_id: str) -> bool:
-    conn = _connect()
-    try:
-        row = conn.execute("SELECT 1 FROM tg_users WHERE owner_id = ? AND dm_open = 1 LIMIT 1", (str(owner_id),)).fetchone()
-    except sqlite3.OperationalError:
-        row = None  # Telegram-бот ещё ни разу не запускался
-    conn.close()
-    return row is not None
+def can_dm(owner_id: str, profile: str | None = None) -> bool:
+    from tg_bot import store
+    return any(u["dm_open"] for u in store.tg_users_for_owner(str(owner_id), profile=profile))
 
 
-def enqueue_dm(owner_id: str, text: str, attachments: list[dict] | None = None) -> bool:
-    if not can_dm(owner_id):
+def enqueue_dm(owner_id: str, text: str, attachments: list[dict] | None = None, *, profile: str | None = None, guild_id: int | None = None) -> bool:
+    profile = bot_profiles.validate(profile or (bot_profiles.guild_profile(guild_id) if guild_id is not None else bot_profiles.current_profile()))
+    if not can_dm(owner_id, profile=profile):
         return False
     conn = _connect()
     conn.execute(
-        "INSERT INTO tg_outbox (owner_id, kind, text, created_at, attachments) VALUES (?, 'dm', ?, ?, ?)",
-        (str(owner_id), text, time.time(), json.dumps(attachments) if attachments else None),
+        "INSERT INTO tg_outbox (owner_id, kind, text, created_at, attachments, bot_profile, guild_id) VALUES (?, 'dm', ?, ?, ?, ?, ?)",
+        (str(owner_id), text, time.time(), json.dumps(attachments) if attachments else None, profile, guild_id),
     )
     conn.commit()
     conn.close()
@@ -269,12 +266,16 @@ def is_tg_owner(owner_id) -> bool:
 
 # ---- для tg_bot/notifier.py ----
 
-def pending(limit: int = 20) -> list[dict]:
+def pending(limit: int = 20, *, profile: str | None = None) -> list[dict]:
+    profile = bot_profiles.validate(profile or bot_profiles.worker_profile() or bot_profiles.runtime_profile())
+    # Initialize the guild schema before joining, including on a fresh install.
+    database.get_all_guild_configs(active_only=False)
     conn = _connect()
     rows = conn.execute(
-        "SELECT id, guild_id, kind, owner_id, text, created_at, chat_id, thread_id, attachments"
-        " FROM tg_outbox WHERE sent_at IS NULL ORDER BY id LIMIT ?",
-        (limit,),
+        "SELECT o.id, o.guild_id, o.kind, o.owner_id, o.text, o.created_at, o.chat_id, o.thread_id, o.attachments"
+        " FROM tg_outbox o LEFT JOIN guilds g ON g.id=o.guild_id"
+        " WHERE o.sent_at IS NULL AND COALESCE(g.bot_profile, o.bot_profile)=? ORDER BY o.id LIMIT ?",
+        (profile, limit),
     ).fetchall()
     conn.close()
     keys = ("id", "guild_id", "kind", "owner_id", "text", "created_at", "chat_id", "thread_id", "attachments")

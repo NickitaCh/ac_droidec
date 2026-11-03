@@ -784,7 +784,8 @@ async def plan_notify_send(plan_id: int, request: Request, ally_codes: list[str]
                            user: dict = Depends(_require)):
     plan = _get_plan_or_404(user["guild_id"], plan_id)
     mode = tw_def_notify.mode_for(destinations)
-    token = os.environ.get("DISCORD_TOKEN", "")
+    from services import bot_profiles
+    token = bot_profiles.token("discord", bot_profiles.guild_profile(user["guild_id"])) or ""
     error = "Выберите хотя бы один канал: Discord или Telegram." if mode is None else \
         "Отметьте хотя бы одного игрока." if not ally_codes else \
         "На сервере не задан токен Discord-бота." if "discord" in destinations and not token else None

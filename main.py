@@ -5,10 +5,11 @@ import traceback
 import disnake
 from disnake.ext import commands
 from dotenv import load_dotenv
+load_dotenv()
 import database
 import guild_resolver
 import loop_watchdog
-from services import discord_invite, fun_features, public_checks
+from services import bot_profiles, discord_invite, fun_features, public_checks
 from swgoh_comlink import SwgohComlink
 
 # stdout в докер-контейнере без TTY по умолчанию полностью буферизован — print()
@@ -17,11 +18,11 @@ from swgoh_comlink import SwgohComlink
 # Форсируем построчный флаш, чтобы логи отражали реальное текущее состояние бота.
 sys.stdout.reconfigure(line_buffering=True)
 
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+PROFILE = bot_profiles.activate_worker()
+TOKEN = bot_profiles.token("discord", PROFILE)
 
 if not TOKEN:
-    raise ValueError("❌ Ошибка: Переменная DISCORD_TOKEN не найдена в файле .env!")
+    raise ValueError(f"Не настроен Discord-токен версии {PROFILE}.")
 
 # Ключ для Gemini API — не используется сейчас (бесплатный тариф Google блокирует
 # запросы с датацентр-IP VPS, см. CLAUDE.md/память), но оставлен в .env на будущее.
@@ -312,6 +313,16 @@ class GuildManagerBot(commands.Bot):
 
     async def process_application_commands(self, interaction: disnake.ApplicationCommandInteraction) -> None:
         cmd_name = interaction.data.name if interaction.data else None
+        if cmd_name and _invoked_command_name(interaction) not in ALWAYS_ALLOWED_COMMANDS:
+            access_gid = guild_resolver.resolve_guild_id(interaction.author)
+            if interaction.filled_options.get("альт"):
+                alt = guild_resolver.alt_account(interaction.author)
+                if alt:
+                    access_gid = alt["guild_id"]
+            mismatch = bot_profiles.mismatch_message(access_gid, "discord")
+            if mismatch:
+                await interaction.response.send_message(mismatch, ephemeral=True)
+                return
         if (
             cmd_name
             and cmd_name not in FUN_EXEMPT_COMMANDS
@@ -339,6 +350,18 @@ async def on_ready():
 
     # Сид первой (текущей) гильдии в реестр мультитенантности — не трогает
     # существующие строки, отрабатывает один раз, пока таблица guilds пуста.
+    if PROFILE == "test":
+        _seed_legacy_guild()
+
+    database.seed_bot_admin(str(ALLOWED_USER_IDS[0]), added_by="startup-seed")
+    database.set_bot_state(bot_profiles.state_key("discord_bot_id", PROFILE), str(bot.user.id), guild_id=0)
+    await bot.change_presence(status=disnake.Status.online, activity=disnake.Activity(
+        type=disnake.ActivityType.watching,
+        name="Следит за игроками AC" if PROFILE == "test" else "Помогает гильдиям SWGOH"))
+    print(f"🤖 Бот {bot.user} запущен: {PROFILE}")
+
+
+def _seed_legacy_guild():
     database.seed_default_guild(
         name="AbsoluteChaos",
         ally_code=ALLY_CODE,
@@ -356,18 +379,6 @@ async def on_ready():
         tb_order_source_channel_id=str(TB_ORDER_SOURCE_CHANNEL_ID),
         tb_order_role_id=str(TB_ORDER_ROLE_ID),
     )
-
-    # Сид первого супер-админа (текущий владелец бота) — идемпотентно (INSERT OR
-    # IGNORE), безопасно на каждом старте. Супер-админы управляют гильдиями и
-    # выдают доступ другим (см. guild_resolver.resolve_access, cogs/admin_management.py).
-    database.seed_bot_admin(str(ALLOWED_USER_IDS[0]), added_by="startup-seed")
-
-    # 2. Установка статуса бота
-    await bot.change_presence(
-        status=disnake.Status.online,
-        activity=disnake.Activity(type=disnake.ActivityType.watching, name="Следит за игроками AC")
-    )
-    print(f"🤖 Бот {bot.user} успешно запущен в мультисерверном режиме!")
 
 # Права запрашиваются заранее через сам инвайт-линк (services/discord_invite.py,
 # permissions в ссылке -> Discord сам создаёт роль бота с этими правами при
@@ -543,11 +554,19 @@ async def on_slash_command_error(inter: disnake.ApplicationCommandInteraction, e
         except Exception as reply_err:
             print(f"⚠️ Не удалось ответить об ошибке: {reply_err!r}")
 
-if __name__ == "__main__":
+def _run_discord():
     if not os.path.exists("cogs"):
         os.makedirs("cogs")
     for filename in os.listdir("./cogs"):
         if filename.endswith(".py") and not filename.startswith("__"):
+            if not bot_profiles.extension_available(filename[:-3]):
+                continue
             bot.load_extension(f"cogs.{filename[:-3]}")
             print(f"📦 Модуль {filename} успешно подключен к боту")
     bot.run(TOKEN)
+
+
+if __name__ == "__main__":
+    from services.bot_worker_lock import worker_instance
+    with worker_instance("discord", PROFILE):
+        _run_discord()

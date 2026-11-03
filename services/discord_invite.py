@@ -13,6 +13,7 @@
 import os
 
 import disnake
+from services import bot_profiles
 
 # Читается ЛЕНИВО (внутри build_invite_url, не как модульная константа) —
 # main.py импортирует этот модуль ДО своего load_dotenv(), так что константа,
@@ -43,13 +44,14 @@ REQUIRED_PERMISSIONS = disnake.Permissions(
 )
 
 
-def build_invite_url() -> str | None:
-    client_id = os.getenv("DISCORD_CLIENT_ID")
+def build_invite_url(profile: str | None = None) -> str | None:
+    profile = profile or bot_profiles.current_profile()
+    client_id = os.getenv("PROD_DISCORD_CLIENT_ID" if profile == "prod" else "DISCORD_CLIENT_ID")
     if not client_id:
         return None
     return disnake.utils.oauth_url(
         client_id,
-        permissions=REQUIRED_PERMISSIONS,
+        permissions=required_permissions(profile),
         scopes=("bot", "applications.commands"),
     )
 
@@ -58,5 +60,13 @@ def missing_permissions(granted: disnake.Permissions) -> list[str]:
     """Человекочитаемые названия прав из REQUIRED_PERMISSIONS, которых нет в
     granted — используется main.py::on_guild_join, чтобы попросить конкретно
     недостающее, а не весь список заново."""
-    missing = disnake.Permissions(REQUIRED_PERMISSIONS.value & ~granted.value)
+    missing = disnake.Permissions(required_permissions().value & ~granted.value)
     return [name.replace("_", " ") for name, value in missing if value]
+
+
+def required_permissions(profile=None):
+    permissions = disnake.Permissions(REQUIRED_PERMISSIONS.value)
+    if (profile or bot_profiles.current_profile()) == "prod":
+        permissions.manage_messages = False
+        permissions.moderate_members = False
+    return permissions

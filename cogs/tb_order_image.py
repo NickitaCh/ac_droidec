@@ -100,7 +100,7 @@ class TBPlanPanel(disnake.ui.View):
         return next((p for p in self.plans if p["id"] == self.plan_id), None)
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def render(self) -> str:
         if not self.plans:
@@ -230,6 +230,8 @@ class SaveTBPlanModal(disnake.ui.Modal):
         ])
 
     async def callback(self, interaction: disnake.ModalInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.panel.guild_id):
+            return
         await interaction.response.defer(ephemeral=True)
         values = interaction.text_values
         stars_raw = values["stars"].strip()
@@ -301,7 +303,8 @@ class PlatoonNotifyView(disnake.ui.View):
             item.disabled = True
         await interaction.response.edit_message(content="⏳ Рассылаю...", view=self)
 
-        token = os.environ.get("DISCORD_TOKEN")
+        from services import bot_profiles
+        token = bot_profiles.token("discord", bot_profiles.guild_profile(self.guild_id))
         report = await tb_platoon_notify.send_broadcast(token, self.guild_id, self.plan, self.round_num, send_to)
         sent = sum(1 for r in report if r["status"] == "sent")
         failed = [r for r in report if r["status"] == "failed"]

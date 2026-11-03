@@ -158,11 +158,13 @@ class SettingsPanel(disnake.ui.View):
         self.inter = inter
         self.author_id = inter.author.id
         self.is_super_admin = guild_resolver.is_super_admin(inter.author)
-        self.sections = [s for s in SETTINGS_SECTIONS if self.is_super_admin or not s[3]]
+        from services import bot_profiles
+        self.sections = [s for s in SETTINGS_SECTIONS if (self.is_super_admin or not s[3])
+                         and (bot_profiles.guild_profile(guild_id) != "prod" or s[0] not in {"tw", "antispam"})]
         self.section_key = self.sections[0][0]
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def _section(self):
         return next(s for s in self.sections if s[0] == self.section_key)
@@ -285,6 +287,8 @@ class AntispamModal(disnake.ui.Modal):
         ])
 
     async def callback(self, interaction: disnake.ModalInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.panel.guild_id):
+            return
         raw = interaction.text_values["timeout"].strip()
         if not raw.isdigit() or not 1 <= int(raw) <= 40320:
             await interaction.response.send_message("❌ Тайм-аут — целое число минут от 1 до 40320.", ephemeral=True)

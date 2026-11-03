@@ -75,8 +75,9 @@ class AntiSpamCog(commands.Cog):
         self._recent: dict[tuple[int, int], dict[tuple, list[tuple[int, disnake.Message, float]]]] = defaultdict(dict)
 
     def _guild_cfg(self, discord_guild_id: int) -> dict | None:
+        from services import bot_profiles
         return next(
-            (cfg for cfg in database.get_all_guild_configs()
+            (cfg for cfg in bot_profiles.served_guilds()
              if cfg.get("discord_guild_id") and str(cfg["discord_guild_id"]) == str(discord_guild_id)),
             None,
         )

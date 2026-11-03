@@ -12,7 +12,7 @@ import time
 import weakref
 from pathlib import Path
 
-LOCK_PATH = Path(__file__).resolve().parents[1] / "cache" / "heavy-sync.lock"
+LOCK_PATH = Path(os.getenv("SHARED_CACHE_DIR", str(Path(__file__).resolve().parents[1] / "cache"))) / "heavy-sync.lock"
 _locks = weakref.WeakKeyDictionary()
 _owners = weakref.WeakSet()
 

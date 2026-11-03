@@ -224,12 +224,14 @@ async def admin_feedback_update(
             text += f"\n> " + reply.replace("\n", "\n> ")
         text += f"\n{SITE_URL}/feedback"
         blob = database.get_bug_report_blob(report_id)
-        if blob and blob.get("user_agent") == "Telegram":
-            from tg_bot import outbox
-            if not outbox.enqueue_dm(report["discord_id"], text):
-                raise RuntimeError("Не удалось поставить ответ в очередь Telegram")
-        else:
-            _background(discord_rest.send_dm(report["discord_id"], text))
+        from services import bot_profiles
+        with bot_profiles.delivery_context(report.get("bot_profile") or "test"):
+            if blob and blob.get("user_agent") == "Telegram":
+                from tg_bot import outbox
+                if not outbox.enqueue_dm(report["discord_id"], text):
+                    raise RuntimeError("Не удалось поставить ответ в очередь Telegram")
+            else:
+                _background(discord_rest.send_dm(report["discord_id"], text))
     database.update_bug_report(report_id, status, reply or None)
     return RedirectResponse(f"/admin/feedback?status={back}#report-{report_id}", status_code=303)
 

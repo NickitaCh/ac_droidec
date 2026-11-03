@@ -9,6 +9,7 @@ import io
 import json
 import re
 import database
+from services import bot_profiles
 import guild_resolver
 from services import feature_flags, tb_order_store, tb_schedule
 import tempfile
@@ -296,7 +297,7 @@ class GuildEvents(commands.Cog):
             return
         # Канал анонсов — per-guild конфиг, ищем, какой гильдии принадлежит этот канал.
         guild_cfg = next(
-            (cfg for cfg in database.get_all_guild_configs()
+            (cfg for cfg in bot_profiles.served_guilds()
              if cfg.get("tb_plan_channel_id") and str(message.channel.id) == str(cfg["tb_plan_channel_id"])),
             None
         )
@@ -398,7 +399,8 @@ class GuildEvents(commands.Cog):
 
         current_key = now_msk.strftime("%Y%m%d%H%M")
 
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             if not feature_flags.is_enabled(gid, "tb_plan_order"):
@@ -510,7 +512,8 @@ class GuildEvents(commands.Cog):
     async def monitor_loop(self):
         await self.bot.wait_until_ready()
 
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             swgoh_guild_id = guild_cfg.get("swgoh_guild_id")
@@ -1168,7 +1171,7 @@ class TBReportPanel(disnake.ui.View):
                 "Отчёт придёт сюда же файлом; «Показать всем» — опубликовать его в канал.")
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def _needs_event(self):
         return self.kind in ("event", "player", "covert", "strikes")

@@ -20,6 +20,7 @@ DM + отправить" не требует gateway, только токен �
 import httpx
 
 import database
+from services import bot_profiles
 import tb_plan_reader
 import tb_platoon_data
 
@@ -201,7 +202,8 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
         if mode == "tg_only":
             return False, "Telegram не подключён для лички: привяжите Telegram и напишите боту /start"
         if outbox.is_tg_owner(discord_id):
-            username = database.get_bot_state("telegram_bot_username", guild_id=0)
+            from services import bot_profiles
+            username = database.get_bot_state(bot_profiles.state_key("telegram_bot_username"), guild_id=0)
             target = f"@{username}" if username else "бота"
             return False, f"Telegram: игроку нужно открыть {target} в личке и нажать /start, затем повторить рассылку"
         return False, "нет ни Discord, ни Telegram"
@@ -221,6 +223,7 @@ async def send_dm(client: httpx.AsyncClient, token: str, discord_id: str, text: 
     return False, "; ".join(problems)
 
 
+@bot_profiles.guild_delivery
 async def send_broadcast(
     token: str, guild_id: int, plan: dict, round_num: int, ally_codes: set[str], mode: str | None = None,
 ) -> list[dict]:

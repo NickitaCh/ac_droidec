@@ -44,7 +44,7 @@ class GrantPanel(disnake.ui.View):
         self.confirm_remove = False
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def render(self) -> str:
         grants = list_grants_for_guild(self.guild_id)
@@ -116,6 +116,8 @@ class GrantAllyCodeModal(disnake.ui.Modal):
         ])
 
     async def callback(self, interaction: disnake.ModalInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.panel.guild_id):
+            return
         await interaction.response.defer(ephemeral=True)
         panel = self.panel
         result = await add_guild_scoped_grant(panel.cog.bot.comlink, str(panel.user.id), interaction.text_values["ally_code"],

@@ -1,0 +1,43 @@
+# Only the new pair. Existing bot/web/tg containers remain managed separately.
+# Build from a separate stable checkout to release public code independently.
+name: droidec-public
+services:
+  discord-public:
+    profiles: [public]
+    image: droidec-public:${PUBLIC_BOT_RELEASE:-local}
+    build:
+      context: ${PUBLIC_BOT_CODE_DIR:-.}
+      dockerfile: Dockerfile.bots
+    env_file: ${BOT_ENV_FILE:-/opt/bot/.env}
+    environment:
+      BOT_PROFILE: prod
+      DATABASE_PATH: /data/guild_management.db
+      SHARED_CACHE_DIR: /data/cache
+    volumes:
+      - ${BOT_SHARED_DATA_DIR:-/opt/bot}:/data
+      - ${BOT_SHARED_DATA_DIR:-/opt/bot}/cache:/app/cache
+    network_mode: host
+    restart: unless-stopped
+    mem_limit: ${PUBLIC_BOT_MEMORY_LIMIT:-1536m}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    command: [sh, -c, "python scripts/check_bot_profiles.py --require-prod && python main.py"]
+  telegram-public:
+    profiles: [public]
+    image: droidec-public:${PUBLIC_BOT_RELEASE:-local}
+    env_file: ${BOT_ENV_FILE:-/opt/bot/.env}
+    environment:
+      BOT_PROFILE: prod
+      DATABASE_PATH: /data/guild_management.db
+      SHARED_CACHE_DIR: /data/cache
+    volumes:
+      - ${BOT_SHARED_DATA_DIR:-/opt/bot}:/data
+      - ${BOT_SHARED_DATA_DIR:-/opt/bot}/cache:/app/cache
+    network_mode: host
+    restart: unless-stopped
+    mem_limit: ${PUBLIC_BOT_MEMORY_LIMIT:-1536m}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    command: [sh, -c, "python scripts/check_bot_profiles.py --require-prod && python -m tg_bot"]

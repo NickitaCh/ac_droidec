@@ -1,10 +1,10 @@
 """Discord REST от имени бота для веб-процесса (у веба нет шлюза disnake): отправка
-сообщения в канал и список текстовых каналов сервера. Токен — DISCORD_TOKEN из .env."""
+сообщения в канал и список текстовых каналов сервера. Токен выбирается по профилю."""
 
 import json
-import os
 
 import httpx
+from services import bot_profiles
 
 DISCORD_API = "https://discord.com/api/v10"
 PROJECT_OWNER_ID = "276671902733434880"  # Nod; проверен через Discord API.
@@ -16,10 +16,10 @@ class DiscordRestError(Exception):
     pass
 
 
-def _headers() -> dict:
-    token = os.environ.get("DISCORD_TOKEN")
+def _headers(profile=None) -> dict:
+    token = bot_profiles.token("discord", profile)
     if not token:
-        raise DiscordRestError("DISCORD_TOKEN не настроен на сервере.")
+        raise DiscordRestError("Не настроен токен нужного Discord-бота.")
     return {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}
 
 
@@ -36,10 +36,10 @@ def chunk_lines(header: str, lines: list[str], limit: int = 1900) -> list[str]:
     return chunks
 
 
-async def send_message(channel_id: str, content: str, mention_user_ids: list[str] | None = None) -> None:
+async def send_message(channel_id: str, content: str, mention_user_ids: list[str] | None = None, *, profile=None) -> None:
     payload = {"content": content, "allowed_mentions": {"parse": [], "users": list(mention_user_ids or [])[:100]}}
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(f"{DISCORD_API}/channels/{channel_id}/messages", headers=_headers(), json=payload)
+        resp = await client.post(f"{DISCORD_API}/channels/{channel_id}/messages", headers=_headers(profile), json=payload)
     from services import channel_health
     if resp.status_code >= 400:
         await channel_health.report_failure(channel_id, resp.status_code)
@@ -63,13 +63,13 @@ async def send_message_files(channel_id: str, content: str, files: list[tuple[st
     channel_health.report_success(channel_id)
 
 
-async def list_bot_guilds() -> dict:
+async def list_bot_guilds(*, profile=None) -> dict:
     """{discord_guild_id: имя} — все серверы, где сейчас состоит бот (/users/@me/guilds, по 200)."""
     out, after = {}, None
     async with httpx.AsyncClient(timeout=15) as client:
         for _ in range(10):
             params = {"limit": 200, **({"after": after} if after else {})}
-            resp = await client.get(f"{DISCORD_API}/users/@me/guilds", headers=_headers(), params=params)
+            resp = await client.get(f"{DISCORD_API}/users/@me/guilds", headers=_headers(profile), params=params)
             if resp.status_code >= 400:
                 raise DiscordRestError(f"Discord ответил {resp.status_code}: {resp.text[:200]}")
             page = resp.json()

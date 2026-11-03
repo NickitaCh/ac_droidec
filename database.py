@@ -8,7 +8,7 @@ import sqlite3
 from services import unit_aliases
 from services.alliance_access import guard_edit, refresh_before
 
-DB_NAME = "guild_management.db"
+DB_NAME = os.getenv("DATABASE_PATH", "guild_management.db")
 
 # Раз во сколько часов фоново обновлять кэш полного ростера юнитов игроков (см.
 # cogs/stat_requirements.py::player_units_sync_loop) — живёт здесь (не в main.py, как
@@ -8264,6 +8264,10 @@ def _ensure_bug_reports_table(cursor):
             replied_at TEXT
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE bug_reports ADD COLUMN bot_profile TEXT NOT NULL DEFAULT 'test'")
+    except sqlite3.OperationalError:
+        pass
 
 
 def _ensure_web_errors_table(cursor):
@@ -8282,15 +8286,17 @@ def _ensure_web_errors_table(cursor):
 def create_bug_report(discord_id: str, username: str, guild_id: int | None, kind: str, page_url: str,
                       message: str, log_text: str | None, user_agent: str | None,
                       attachment_name: str | None = None, attachment_type: str | None = None,
-                      attachment: bytes | None = None) -> int:
+                      attachment: bytes | None = None, bot_profile: str | None = None) -> int:
+    from services import bot_profiles
+    profile = bot_profiles.validate(bot_profile or bot_profiles.current_profile())
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_bug_reports_table(cursor)
     cursor.execute(
         "INSERT INTO bug_reports (created_at, discord_id, username, guild_id, kind, page_url, message, log_text, "
-        "user_agent, attachment_name, attachment_type, attachment) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "user_agent, attachment_name, attachment_type, attachment, bot_profile) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (str(discord_id), username, guild_id, kind, page_url, message, log_text, user_agent,
-         attachment_name, attachment_type, attachment),
+         attachment_name, attachment_type, attachment, profile),
     )
     report_id = cursor.lastrowid
     conn.commit()
@@ -8314,7 +8320,7 @@ def count_recent_bug_reports(discord_id: str, hours: int = 1) -> int:
 _BUG_REPORT_COLUMNS = (
     "b.id, datetime(b.created_at, '+3 hours'), b.discord_id, b.username, b.guild_id, g.name, b.kind, b.page_url, "
     "b.message, b.log_text IS NOT NULL AND b.log_text != '', b.attachment_name, b.status, b.reply, "
-    "datetime(b.replied_at, '+3 hours')"
+    "datetime(b.replied_at, '+3 hours'), b.bot_profile"
 )
 
 
@@ -8322,7 +8328,7 @@ def _bug_report_row(r) -> dict:
     return {
         "id": r[0], "created_at_msk": r[1], "discord_id": r[2], "username": r[3], "guild_id": r[4],
         "guild_name": r[5], "kind": r[6], "page_url": r[7], "message": r[8], "has_log": bool(r[9]),
-        "attachment_name": r[10], "status": r[11], "reply": r[12], "replied_at_msk": r[13],
+        "attachment_name": r[10], "status": r[11], "reply": r[12], "replied_at_msk": r[13], "bot_profile": r[14],
     }
 
 

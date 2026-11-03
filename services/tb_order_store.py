@@ -25,6 +25,7 @@ from datetime import datetime
 import httpx
 
 import database
+from services import bot_profiles
 
 SOURCES_OVER_THREAD = ("generated", "image", "message", "edited")
 SOURCE_LABELS = {"thread": "перенесён из треда", "generated": "из плана", "image": "из картинки", "message": "из сообщения",
@@ -224,7 +225,8 @@ def tg_text(row: dict) -> str:
 # ------------------------------------------------------------------ Discord REST
 
 def _headers() -> dict:
-    token = os.environ.get("DISCORD_TOKEN")
+    from services import bot_profiles
+    token = bot_profiles.token("discord")
     if not token:
         raise RuntimeError("DISCORD_TOKEN не настроен на сервере.")
     return {"Authorization": f"Bot {token}", "User-Agent": USER_AGENT}
@@ -350,6 +352,7 @@ def discord_chunks(text: str, role_id: str | None) -> list[str]:
     return chunk_tb_order_message(full, DISCORD_LIMIT)
 
 
+@bot_profiles.guild_delivery
 async def send_discord(guild_id: int, order_id: int, phase: int) -> str:
     cfg = database.get_guild_config(guild_id) or {}
     channel_id, role_id = cfg.get("tb_plan_channel_id"), cfg.get("tb_order_role_id")

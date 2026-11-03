@@ -5,12 +5,13 @@
 from disnake.ext import commands, tasks
 
 import database
+from services import bot_profiles
 
 
 class AdminManagementCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.subscription_expiry_loop.start()
+        bot_profiles.start_shared_loop(self.subscription_expiry_loop)
 
     def cog_unload(self):
         self.subscription_expiry_loop.cancel()

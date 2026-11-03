@@ -43,7 +43,8 @@ class RotationPing(commands.Cog):
         if not self._is_ping_week(today_msk):
             return
 
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             if not guild_cfg.get("ping_channel_id") or not guild_cfg.get("ping_role_id") or \

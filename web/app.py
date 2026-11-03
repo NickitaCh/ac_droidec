@@ -33,8 +33,10 @@ demo_mode.install()
 
 from services.donation_progress import current as donation_progress
 
-app = FastAPI(title="AC Droidec", dependencies=[Depends(audit.capture_request)])
+app = FastAPI(title="Droidec", dependencies=[Depends(audit.capture_request)])
 app.state.donation_progress = donation_progress
+from services.bot_profiles import public_profile
+app.state.public_bot_profile = public_profile
 
 
 from services.alliances import AllianceError, read_only_context, pending_count
@@ -94,7 +96,7 @@ async def _log_server_error(request: Request, exc: Exception):
 
 
 _ERROR_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Ошибка — AC Droidec</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Ошибка — Droidec</title>
 <link rel="stylesheet" href="/static/style.css"></head>
 <body><main class="error-page"><h1>Что-то пошло не так</h1>
 <p>На сервере произошла ошибка{number}. Она уже записана в журнал.</p>

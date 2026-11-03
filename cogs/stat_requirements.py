@@ -1518,6 +1518,8 @@ async def _check_stats_pager_access(inter: disnake.MessageInteraction, token: st
     if inter.author.id not in state["allowed_ids"]:
         await inter.response.send_message("Листать могут только вызвавший команду и проверяемый игрок — вызовите /статы сами.", ephemeral=True)
         return None
+    if not await guild_resolver.check_bot_profile(inter, state.get("guild_id")):
+        return None
     return state
 
 
@@ -1539,9 +1541,10 @@ class StatRequirementsCog(commands.Cog):
         self.bot = bot
         if not hasattr(bot, "stat_calc"):
             bot.stat_calc = None
-        self.stat_calc_loop.start()
+        from services import bot_profiles
+        bot_profiles.start_shared_loop(self.stat_calc_loop)
         self.player_units_sync_loop.change_interval(hours=bot.PLAYER_STATS_SYNC_HOURS)
-        self.player_units_sync_loop.start()
+        bot_profiles.start_shared_loop(self.player_units_sync_loop)
 
     def cog_unload(self):
         self.stat_calc_loop.cancel()
@@ -1710,7 +1713,16 @@ class StatRequirementsCog(commands.Cog):
             channel_id = int(channel_id)
             guild_by_channel[channel_id] = guild_id
             if channel_id not in channels_by_id:
-                channel = self.bot.get_channel(channel_id)
+                from services import bot_profiles, discord_rest
+                from functools import partial
+                from types import SimpleNamespace
+                if not bot_profiles.serves(guild_id):
+                    # Shared roster sync discovers upgrades for both profiles.
+                    # Deliver public announcements with the public token.
+                    channel = SimpleNamespace(guild=None, send=partial(
+                        discord_rest.send_message, str(channel_id), profile=bot_profiles.guild_profile(guild_id)))
+                else:
+                    channel = self.bot.get_channel(channel_id)
                 if channel is None:
                     # get_channel — только кеш шлюза, иногда промахивается даже при достаточных
                     # правах (см. тот же фикс и подробности в cogs/antispam.py).
@@ -1765,7 +1777,8 @@ class StatRequirementsCog(commands.Cog):
         if omicron_mode:
             line += f" для {omicron_mode}"
         line += f" на **{_unit_display_name(base_id)}**."
-        phrase = database.get_omicron_phrase(base_id, skill_id, guild_id=guild_id)
+        from services import bot_profiles
+        phrase = database.get_omicron_phrase(base_id, skill_id, guild_id=guild_id) if bot_profiles.feature_for_guild("omicron_phrases", guild_id) else None
         if phrase:
             line += f" {_resolve_emoji_shortcodes(phrase, discord_guild)}"
         return line
@@ -2117,7 +2130,7 @@ class StatRequirementsCog(commands.Cog):
             allowed_ids.add(int(target_discord_id))
         pages, picks = _build_stats_pages(title, summary, picks, char_pages)
         state = {
-            "token": token, "allowed_ids": allowed_ids, "index": 0, "color": color, "footer": footer,
+            "token": token, "allowed_ids": allowed_ids, "index": 0, "color": color, "footer": footer, "guild_id": guild_id,
             "pages": pages, "picks": picks, "message": None,
         }
         _stats_pagers[str(token)] = state

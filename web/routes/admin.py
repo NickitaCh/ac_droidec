@@ -97,7 +97,7 @@ async def guild_profile_change(guild_id: int, request: Request, profile: str = F
     _trusted_profile_request(request)
     from services import bot_profiles
     try:
-        bot_profiles.assign_guild(guild_id, profile)
+        await bot_profiles.transfer_guild(guild_id, profile)
     except ValueError as exc:
         return RedirectResponse("/admin/guilds?" + urlencode({"error": str(exc)}), status_code=303)
     return RedirectResponse("/admin/guilds", status_code=303)
@@ -129,11 +129,9 @@ async def guilds_add(
     if user.get("bot_profile") == "prod" and not bot_profiles.production_ready():
         return RedirectResponse("/admin/guilds?" + urlencode({"error": "Публичные боты ещё не запущены."}), status_code=303)
     comlink = _get_comlink()
-    result = await add_guild(comlink, ally_code, discord_guild_id)
+    result = await add_guild(comlink, ally_code, discord_guild_id, bot_profile=user.get("bot_profile", "test"))
     if not result.ok:
         return RedirectResponse(f"/admin/guilds?{urlencode({'error': result.error})}", status_code=303)
-    if user.get("bot_profile") == "prod":
-        bot_profiles.assign_guild(result.guild_id, "prod")
     return RedirectResponse("/admin/guilds", status_code=303)
 
 

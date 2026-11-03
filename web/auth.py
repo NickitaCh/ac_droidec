@@ -1,5 +1,5 @@
-"""Discord OAuth2 (authorization code flow) — переиспользует то же Discord-приложение,
-что и сам бот (тот же DISCORD_TOKEN из .env), никакого отдельного бота не заводим.
+"""Discord OAuth2: отдельные приложения test/prod, общая идентичность Discord ID.
+Приложение, выбранное при входе, закрепляется за OAuth state до callback.
 
 Права доступа резолвятся НЕ по Discord-ролям, а по discord_id напрямую через
 guild_resolver.resolve_access (игровой ранг из Comlink, закэшированный в БД, +
@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 import guild_resolver
+from services import bot_profiles
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -26,6 +27,12 @@ DISCORD_API = "https://discord.com/api/v10"
 
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+
+
+def _oauth_credentials(profile):
+    if profile == "prod":
+        return os.getenv("PROD_DISCORD_CLIENT_ID"), os.getenv("PROD_DISCORD_CLIENT_SECRET")
+    return DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET
 
 
 def _safe_next(value: str | None) -> str:
@@ -51,14 +58,19 @@ def _redirect_uri(request: Request) -> str:
 
 @router.get("/login")
 async def login(request: Request):
-    if not DISCORD_CLIENT_ID:
+    profile = request.query_params.get("bot_profile", bot_profiles.public_profile())
+    if profile not in bot_profiles.PROFILES:
+        return HTMLResponse("Неизвестная версия бота.", status_code=400)
+    client_id, client_secret = _oauth_credentials(profile)
+    if not client_id or not client_secret:
         return HTMLResponse(OAUTH_NOT_CONFIGURED_HTML, status_code=503)
 
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
+    request.session["oauth_bot_profile"] = profile
     request.session["post_login_redirect"] = _safe_next(request.query_params.get("next"))
     params = {
-        "client_id": DISCORD_CLIENT_ID,
+        "client_id": client_id,
         "redirect_uri": _redirect_uri(request),
         "response_type": "code",
         "scope": "identify",
@@ -69,7 +81,9 @@ async def login(request: Request):
 
 @router.get("/callback", name="auth_callback")
 async def callback(request: Request):
-    if not DISCORD_CLIENT_ID or not DISCORD_CLIENT_SECRET:
+    profile = request.session.get("oauth_bot_profile", "test")
+    client_id, client_secret = _oauth_credentials(profile)
+    if not client_id or not client_secret:
         return HTMLResponse(OAUTH_NOT_CONFIGURED_HTML, status_code=503)
 
     code = request.query_params.get("code")
@@ -77,13 +91,14 @@ async def callback(request: Request):
     if not code or not state or state != request.session.get("oauth_state"):
         return RedirectResponse("/?error=oauth_state")
     request.session.pop("oauth_state", None)
+    request.session.pop("oauth_bot_profile", None)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         token_resp = await client.post(
             f"{DISCORD_API}/oauth2/token",
             data={
-                "client_id": DISCORD_CLIENT_ID,
-                "client_secret": DISCORD_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": _redirect_uri(request),
@@ -108,6 +123,7 @@ async def callback(request: Request):
     database.log_web_access(discord_id, username, access["guild_id"], access["tier"], access["is_super_admin"])
 
     request.session.pop("demo", None)
+    request.session["login_bot_profile"] = profile
     request.session["user"] = {
         "discord_id": discord_id,
         "username": username,

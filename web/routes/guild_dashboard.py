@@ -2139,7 +2139,8 @@ async def tb_platoons_notify_send(
             "user": user, "plan": None, "round_num": round_num, "rows": [], "error": "План не найден.", "report": None,
         })
 
-    token = os.environ.get("DISCORD_TOKEN") or ""
+    from services import bot_profiles
+    token = bot_profiles.token("discord", bot_profiles.guild_profile(guild_id)) or ""
     report = await tb_platoon_notify.send_broadcast(token, guild_id, plan, round_num, set(ally_codes), mode)
     return templates.TemplateResponse(request, "tb_platoon_notify.html", {
         "user": user, "plan": plan, "round_num": round_num, "rows": [], "error": None, "report": report,
@@ -3173,7 +3174,8 @@ async def _fetch_discord_channel(channel_id: str) -> dict | None:
     /settings), и для авто-регистрации канала, когда его ID вписали вручную
     вместо выбора из списка (POST /settings, см. ниже)."""
     from services import demo_mode
-    token = os.environ.get("DISCORD_TOKEN")
+    from services import bot_profiles
+    token = bot_profiles.token("discord")
     if not token or demo_mode.active():
         return None
     try:
@@ -3315,6 +3317,8 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
 
     groups = []
     for group in GUILD_SETTINGS_GROUPS:
+        if user.get("bot_profile") == "prod" and group["tab"] == "ВГ":
+            continue
         rows = []
         for field, label, kind in group["fields"]:
             # "flag" — не колонка guilds, а services.feature_flags (тот же bot_state,
@@ -3466,6 +3470,8 @@ async def guild_settings_save(request: Request, user: dict = Depends(require_gui
     cleaned = {}
 
     for group in GUILD_SETTINGS_GROUPS:
+        if user.get("bot_profile") == "prod" and group["tab"] == "ВГ":
+            continue
         for field, _label, kind in group["fields"]:
             if kind == "time":
                 continue  # tasks_notify_time — отдельно, ниже

@@ -420,7 +420,8 @@ class TWCounters(commands.Cog):
     async def web_sync_requests_loop(self):
         """Кнопка «Синхронизировать» на сайте (/tw) пишет в bot_state tw_sync_request
         метку времени — веб не видит шлюз Discord, поэтому сам синк делает бот."""
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             request = database.get_bot_state("tw_sync_request", guild_id=gid)
             if not request or request == database.get_bot_state("tw_sync_request_done", guild_id=gid):
@@ -446,7 +447,8 @@ class TWCounters(commands.Cog):
 
     @tasks.loop(hours=6)
     async def sync_loop(self):
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             if not guild_cfg.get("tw_guide_forum_channel_id"):
                 continue
             if not feature_flags.is_enabled(guild_cfg["id"], "tw_order"):

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 
 import database
+from services import bot_profiles
 from tg_bot import store
 from web.deps import own_accounts, require_member_access
 from web.routes import dashboard, guild_dashboard
@@ -19,8 +20,8 @@ router = APIRouter()
 BOT_USERNAME_STATE_KEY = "telegram_bot_username"
 
 
-def bot_username() -> str | None:
-    return database.get_bot_state(BOT_USERNAME_STATE_KEY, guild_id=0)
+def bot_username(profile: str | None = None) -> str | None:
+    return database.get_bot_state(bot_profiles.state_key(BOT_USERNAME_STATE_KEY, profile), guild_id=0)
 
 
 # Кнопка «Привязать Telegram» (player_card.html) и упоминания бота на публичных
@@ -32,10 +33,11 @@ dashboard.templates.env.globals["telegram_bot_username"] = bot_username
 
 @router.get("/me/telegram")
 async def link_telegram(user: dict = Depends(require_member_access)):
-    username = bot_username()
+    profile = bot_profiles.guild_profile(user.get("guild_id"))
+    username = bot_username(profile)
     if not username:
         accounts = own_accounts(user)
         back = f"/player/{accounts[0][0]}" if accounts else "/me"
         return RedirectResponse(f"{back}?{urlencode({'alt_error': 'Telegram-бот пока не запущен.'})}", status_code=303)
-    token = store.create_link_token(str(user["discord_id"]))
+    token = store.create_link_token(str(user["discord_id"]), profile=profile)
     return RedirectResponse(f"https://t.me/{username}?start=link_{token}", status_code=303)

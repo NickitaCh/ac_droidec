@@ -68,7 +68,8 @@ class Birthday(commands.Cog):
 
         # Без интеракции резолвить гильдию по роли нечем — идём по всем
         # зарегистрированным гильдиям на каждом тике (как в rotation_ping.py).
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             if not guild_cfg.get("birthday_channel_id") or not guild_cfg.get("birthday_role_id"):
                 continue
             if not feature_flags.is_enabled(guild_cfg["id"], "birthdays"):
@@ -171,7 +172,8 @@ class Birthday(commands.Cog):
         от birthday-конфига — ДР можно добавить любому участнику через /др добавить."""
         members = []
         seen_guild_ids = set()
-        for guild_cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for guild_cfg in bot_profiles.served_guilds():
             discord_guild_id = guild_cfg.get("discord_guild_id")
             if not discord_guild_id or discord_guild_id in seen_guild_ids:
                 continue
@@ -231,7 +233,7 @@ class BirthdayPanel(disnake.ui.View):
         self.confirm_remove = False
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
-        return interaction.author.id == self.author_id
+        return interaction.author.id == self.author_id and await guild_resolver.check_bot_profile(interaction, self.guild_id)
 
     def _current(self):
         if self.user is None:
@@ -302,6 +304,8 @@ class BirthdayDateModal(disnake.ui.Modal):
         ])
 
     async def callback(self, interaction: disnake.ModalInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.panel.guild_id):
+            return
         try:
             day, month, year = parse_birthday(interaction.text_values["date"].strip())
         except ValueError as e:

@@ -15,6 +15,7 @@ import sqlite3
 import time
 
 import database
+from services import bot_profiles
 
 TG_PREFIX = "tg:"
 LINK_TOKEN_TTL = 15 * 60
@@ -40,6 +41,20 @@ def _ensure_tables(cursor):
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tg_users_owner ON tg_users(owner_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tg_users_username ON tg_users(username COLLATE NOCASE)")
+    migrate_bot_users = cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tg_bot_users'").fetchone() is None
+    if migrate_bot_users:
+        cursor.execute("BEGIN IMMEDIATE")
+        migrate_bot_users = cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tg_bot_users'").fetchone() is None
+    cursor.execute("""CREATE TABLE IF NOT EXISTS tg_bot_users (
+        bot_profile TEXT NOT NULL, tg_user_id INTEGER NOT NULL,
+        dm_open INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(bot_profile, tg_user_id))""")
+    # Legacy conversations belong to the original bot only. Never infer that
+    # the public bot can DM somebody merely because the test bot could.
+    if migrate_bot_users:
+        cursor.execute("""INSERT OR IGNORE INTO tg_bot_users(bot_profile, tg_user_id, dm_open)
+                          SELECT 'test', tg_user_id, dm_open FROM tg_users""")
+    cursor.connection.commit()
     # Чаты (группы/каналы), привязанные к гильдии — куда слать рассылки гильдии.
     # Одна гильдия может иметь несколько чатов (общий + офицерский + канал).
     cursor.execute("""
@@ -60,6 +75,10 @@ def _ensure_tables(cursor):
             expires_at REAL NOT NULL
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE tg_link_tokens ADD COLUMN bot_profile TEXT NOT NULL DEFAULT 'test'")
+    except sqlite3.OperationalError:
+        pass
 
 
 def tg_owner_id(tg_user_id: int) -> str:
@@ -70,7 +89,7 @@ def is_tg_owner(owner_id: str | None) -> bool:
     return bool(owner_id) and str(owner_id).startswith(TG_PREFIX)
 
 
-def touch_user(tg_user: dict, dm_open: bool = False) -> str:
+def touch_user(tg_user: dict, dm_open: bool = False, profile: str | None = None) -> str:
     """Запоминает (или обновляет имя) Telegram-пользователя и возвращает его owner_id.
     dm_open=True — пользователь писал боту в личку, значит бот может писать ему сам."""
     tg_id = int(tg_user["id"])
@@ -93,6 +112,9 @@ def touch_user(tg_user: dict, dm_open: bool = False) -> str:
             "INSERT INTO tg_users (tg_user_id, owner_id, username, full_name, dm_open, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
             (tg_id, owner_id, username, full_name, 1 if dm_open else 0, now),
         )
+    cur.execute("""INSERT INTO tg_bot_users(bot_profile, tg_user_id, dm_open) VALUES (?, ?, ?)
+                   ON CONFLICT(bot_profile, tg_user_id) DO UPDATE SET dm_open=MAX(dm_open, excluded.dm_open)""",
+                (bot_profiles.validate(profile or bot_profiles.current_profile()), tg_id, int(dm_open)))
     conn.commit()
     conn.close()
     return owner_id
@@ -115,11 +137,13 @@ def find_by_username(username: str) -> dict | None:
     return {"tg_user_id": row[0], "owner_id": row[1], "full_name": row[2]} if row else None
 
 
-def tg_users_for_owner(owner_id: str) -> list[dict]:
+def tg_users_for_owner(owner_id: str, profile: str | None = None) -> list[dict]:
     """Telegram-аккаунты игрока — для личных оповещений и подписи «@ник» в списках."""
     conn = _connect()
     rows = conn.execute(
-        "SELECT tg_user_id, username, full_name, dm_open FROM tg_users WHERE owner_id = ?", (str(owner_id),)
+        "SELECT u.tg_user_id, u.username, u.full_name, COALESCE(b.dm_open, 0) FROM tg_users u"
+        " LEFT JOIN tg_bot_users b ON b.tg_user_id=u.tg_user_id AND b.bot_profile=? WHERE u.owner_id = ?",
+        (bot_profiles.validate(profile or bot_profiles.current_profile()), str(owner_id))
     ).fetchall()
     conn.close()
     return [{"tg_user_id": r[0], "username": r[1], "full_name": r[2], "dm_open": bool(r[3])} for r in rows]
@@ -127,26 +151,28 @@ def tg_users_for_owner(owner_id: str) -> list[dict]:
 
 # ---- связь с Discord ----
 
-def create_link_token(discord_id: str) -> str:
+def create_link_token(discord_id: str, profile: str | None = None) -> str:
     """Токен для ссылки t.me/<бот>?start=link_<token> — создаёт сайт («Мой профиль»)."""
     token = secrets.token_urlsafe(16)
     conn = _connect()
     conn.execute("DELETE FROM tg_link_tokens WHERE expires_at < ? OR discord_id = ?", (time.time(), str(discord_id)))
     conn.execute(
-        "INSERT INTO tg_link_tokens (token, discord_id, expires_at) VALUES (?, ?, ?)",
-        (token, str(discord_id), time.time() + LINK_TOKEN_TTL),
+        "INSERT INTO tg_link_tokens (token, discord_id, expires_at, bot_profile) VALUES (?, ?, ?, ?)",
+        (token, str(discord_id), time.time() + LINK_TOKEN_TTL, bot_profiles.validate(profile or bot_profiles.current_profile())),
     )
     conn.commit()
     conn.close()
     return token
 
 
-def consume_link_token(token: str) -> str | None:
+def consume_link_token(token: str, profile: str | None = None) -> str | None:
     conn = _connect()
     row = conn.execute(
-        "SELECT discord_id FROM tg_link_tokens WHERE token = ? AND expires_at >= ?", (token, time.time())
+        "SELECT discord_id FROM tg_link_tokens WHERE token = ? AND expires_at >= ? AND bot_profile = ?",
+        (token, time.time(), bot_profiles.validate(profile or bot_profiles.current_profile()))
     ).fetchone()
-    conn.execute("DELETE FROM tg_link_tokens WHERE token = ?", (token,))
+    if row:
+        conn.execute("DELETE FROM tg_link_tokens WHERE token = ?", (token,))
     conn.commit()
     conn.close()
     return row[0] if row else None

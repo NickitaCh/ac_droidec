@@ -9,10 +9,11 @@ import os
 import sys
 
 from dotenv import load_dotenv
+load_dotenv()
 from swgoh_comlink import SwgohComlink
 
 import database
-from services import stat_forecast
+from services import bot_profiles, stat_forecast
 from tg_bot import checks, handlers, inline, more, notifier, relay_in, feedback  # noqa: F401 — регистрируют команды
 from tg_bot.api import TelegramAPI
 from tg_bot.core import App, menu_commands, run_polling
@@ -41,21 +42,24 @@ BOT_SHORT_DESCRIPTION = "«Дроидец» — бот гильдий SWGOH: с�
 
 async def main():
     load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    profile = bot_profiles.activate_worker()
+    token = bot_profiles.token("telegram", profile)
     if not token:
-        raise SystemExit("❌ TELEGRAM_BOT_TOKEN не задан в .env")
+        raise SystemExit(f"Не настроен Telegram-токен версии {profile}.")
     api = TelegramAPI(token)
     me = await api.get_me()
     comlink = SwgohComlink(url=COMLINK_URL)
-    app = App(api=api, comlink=comlink, username=me["username"], bot_id=me["id"], site_url=SITE_URL)
+    app = App(api=api, comlink=comlink, username=me["username"], bot_id=me["id"], site_url=SITE_URL, profile=profile)
     await api.set_my_commands(menu_commands())
     await api.set_my_description(BOT_DESCRIPTION)
     await api.set_my_short_description(BOT_SHORT_DESCRIPTION)
     # Сайт строит ссылку «Привязать Telegram» на этого бота (web/routes/telegram.py).
-    database.set_bot_state("telegram_bot_username", me["username"], guild_id=0)
+    database.set_bot_state(bot_profiles.state_key("telegram_bot_username", profile), me["username"], guild_id=0)
+    database.set_bot_state(bot_profiles.state_key("telegram_bot_id", profile), str(me["id"]), guild_id=0)
     # Вебхук и polling несовместимы — на случай, если кто-то ставил вебхук руками.
     await api.call("deleteWebhook")
-    stat_forecast.start_background_build(comlink)
+    if profile == "test":
+        stat_forecast.start_background_build(comlink)
     from services import memory_maintenance
     memory_maintenance.start("Telegram")
     print(f"✅ [TG] @{me['username']} запущен")
@@ -69,4 +73,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from services.bot_worker_lock import worker_instance
+    with worker_instance("telegram", bot_profiles.runtime_profile()):
+        asyncio.run(main())

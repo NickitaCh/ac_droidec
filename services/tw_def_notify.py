@@ -15,6 +15,7 @@ import re
 import httpx
 
 import database
+from services import bot_profiles
 import tb_platoon_notify
 import tw_def_engine as engine
 
@@ -191,8 +192,11 @@ async def send_maps(client, token: str, owner_id: str, maps: list[tuple[str, byt
     return True, "карта отправлена"
 
 
+@bot_profiles.guild_delivery
 async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | None, ally_codes: set[str], mode: str = "both") -> list[dict]:
     """Отчёт: [{ally_code, name, status: sent|partial|failed|skipped_no_discord, detail}]."""
+    if not bot_profiles.feature_for_guild("tw_order", guild_id):
+        raise ValueError("Раздел недоступен.")
     if mode not in DESTINATIONS:
         raise ValueError("Выберите Discord, Telegram или оба канала.")
     guild_name = (database.get_guild_config(guild_id) or {}).get("name") or "гильдия"

@@ -117,7 +117,8 @@ class RaidsCog(commands.Cog):
             await self._sync_raid_units()
         except Exception as e:
             print(f"⚠️ [Рейды] не удалось обновить состав рейдов: {e!r}")
-        for cfg in database.get_all_guild_configs():
+        from services import bot_profiles
+        for cfg in bot_profiles.served_guilds():
             if not cfg.get("swgoh_guild_id"):
                 continue
             try:

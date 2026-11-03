@@ -73,6 +73,17 @@ async def wait_stat_calc(bot, inter=None, timeout: float = 240):
     """bot.stat_calc, дождавшись первой сборки после рестарта (она идёт пару минут — вся игровая
     база из Comlink). Команда уже отложена (defer), токен живёт 15 минут, так что вместо отказа
     «ещё загружается» ждём, показав это игроку. None — если так и не собрался за timeout."""
+    from services import bot_profiles
+    if bot_profiles.worker_profile() == "prod":
+        # One lazy process-local instance, also reused by the service helpers.
+        # An unused public gateway need not reserve a full calculator at boot.
+        from services import stat_forecast
+        try:
+            bot.stat_calc = await stat_forecast.get_stat_calc(bot.comlink)
+        except Exception as exc:
+            print(f"⚠️ [Статы] Калькулятор недоступен: {exc}")
+            return None
+        return bot.stat_calc
     if getattr(bot, "stat_calc", None):
         return bot.stat_calc
     if inter is not None:

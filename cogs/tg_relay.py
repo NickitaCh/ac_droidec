@@ -128,7 +128,8 @@ async def forward_sent(message: disnake.Message | None, guild_id: int, kind: str
     """Пост бота в Discord — той же копией в Telegram, если у гильдии включён этот вид
     оповещений (маршрут tg_routes, /settings → Telegram). Теги — как у зеркал (relay_payload).
     Ошибка не мешает посту в Discord."""
-    if message is None:
+    from services import bot_profiles
+    if message is None or not bot_profiles.serves(guild_id):
         return
     try:
         if not await asyncio.to_thread(outbox.guild_wants, guild_id, kind):
@@ -167,6 +168,9 @@ class TgRelayCog(commands.Cog):
         def load():
             mirrors, flags = {}, {}
             for row in outbox.relay_channels():
+                from services import bot_profiles
+                if not bot_profiles.serves(row["guild_id"]):
+                    continue
                 if not row["enabled"] or row["direction"] not in outbox.TO_TG:
                     continue
                 gid = row["guild_id"]
@@ -198,6 +202,9 @@ class TgRelayCog(commands.Cog):
             return
         payloads = {}
         for guild_id, label in targets:
+            from services import bot_profiles
+            if not bot_profiles.serves(guild_id):
+                continue
             try:
                 if guild_id not in payloads:
                     payloads[guild_id] = await asyncio.to_thread(relay_payload, message, guild_id)

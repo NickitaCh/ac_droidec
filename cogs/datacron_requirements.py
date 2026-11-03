@@ -419,8 +419,20 @@ def refresh_catalog_shorts(catalog):
     return catalog
 
 
-@serialized_sync("каталог датакронов")
 async def _fetch_datacron_cache(comlink) -> dict:
+    from services import shared_datacron_catalog
+    shared = await asyncio.to_thread(shared_datacron_catalog.load)
+    if shared is not None:
+        return refresh_catalog_shorts(shared)
+    return await _refresh_datacron_cache(comlink)
+
+
+@serialized_sync("каталог датакронов")
+async def _refresh_datacron_cache(comlink) -> dict:
+    from services import shared_datacron_catalog
+    shared = await asyncio.to_thread(shared_datacron_catalog.load)
+    if shared is not None:
+        return refresh_catalog_shorts(shared)
     game_data = await asyncio.to_thread(comlink.get_game_data, items=DATACRON_GAME_DATA_ITEMS)
     loc = await asyncio.to_thread(comlink.get_localization, locale="RUS_RU", unzip=True)
     loc_kv = _parse_loc_kv(loc.get("Loc_RUS_RU.txt", ""))
@@ -527,7 +539,9 @@ async def _fetch_datacron_cache(comlink) -> dict:
         print(f"⚠️ [ДК] Не нашёл русское название ветки/текст бонуса: {', '.join(unresolved)}")
 
     catalog = {"seasons": result_seasons}
-    return _apply_ability_labels(catalog, database.get_datacron_ability_shorts(), database.get_datacron_shorts_version())
+    catalog = _apply_ability_labels(catalog, database.get_datacron_ability_shorts(), database.get_datacron_shorts_version())
+    await asyncio.to_thread(shared_datacron_catalog.save, catalog)
+    return catalog
 
 
 # =====================================================================
@@ -1416,6 +1430,8 @@ class DatacronGuildReportView(DatacronCheckRevealView):
 
     @disnake.ui.button(label="Тегнуть должников", emoji="📢", style=disnake.ButtonStyle.danger)
     async def tag_debtors(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if not await guild_resolver.check_bot_profile(interaction, self.guild_id):
+            return
         if self.tagged:
             await interaction.response.defer()
             return
@@ -1466,18 +1482,20 @@ class DatacronRequirementsCog(commands.Cog):
     async def _before_datacron_shorts_loop(self):
         await self.bot.wait_until_ready()
 
-    @tasks.loop(hours=12)
+    @tasks.loop(minutes=5)
     async def datacron_cache_loop(self):
+        # Poll the cheap shared snapshot; Comlink is fetched at most once per
+        # 12-hour TTL across processes. Polling avoids skipping a whole refresh
+        # when the previous build finished after the scheduled loop start.
         # На старте/при сетевых сбоях comlink иногда отдаёт /data с 400 (сторонний
         # сбой, не наш код) — без быстрого ретрая справочник застревал бы пустым
         # на все 12 часов (см. /дк_требования список: "справочник ещё загружается").
         # Тот же паттерн динамического интервала, что update_roster_cache в violations.py.
         try:
+            previous_generation = (self.bot.datacron_cache or {}).get("shared_generated_at")
             self.bot.datacron_cache = await _fetch_datacron_cache(self.bot.comlink)
-            print(f"✅ [ДК] Справочник датакронов обновлён: {len(self.bot.datacron_cache['seasons'])} сезонов")
-            if self.datacron_cache_loop.hours != 12:
-                print("⚙️ [ДК] Справочник восстановлен. Возвращаем штатный интервал: 12 часов")
-                self.datacron_cache_loop.change_interval(hours=12, minutes=0)
+            if self.bot.datacron_cache.get("shared_generated_at") != previous_generation:
+                print(f"✅ [ДК] Справочник датакронов обновлён: {len(self.bot.datacron_cache['seasons'])} сезонов")
         except Exception as e:
             print(f"❌ [ДК] Ошибка обновления справочника датакронов: {e}")
             if self.datacron_cache_loop.minutes != 5:
@@ -1487,8 +1505,15 @@ class DatacronRequirementsCog(commands.Cog):
 
         # Экспорт EN/RU для внешнего инструмента перевода — отдельный try, чтобы его
         # сбой не сбивал статус/интервал основного справочника выше.
+        from services import bot_profiles
+        if (bot_profiles.worker_profile() or bot_profiles.runtime_profile()) != "test":
+            return
+        generation = self.bot.datacron_cache.get("shared_generated_at")
+        if generation == getattr(self, "_translation_generation", None):
+            return
         try:
             n = await _fetch_and_write_translation_export(self.bot.comlink)
+            self._translation_generation = generation
             print(f"✅ [ДК] Экспорт EN/RU для перевода обновлён: {n} записей")
         except Exception as e:
             print(f"⚠️ [ДК] Не удалось обновить экспорт перевода датакронов: {e}")

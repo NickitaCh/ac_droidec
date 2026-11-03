@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.tmp
+.claude
+.venv
+venv
+__pycache__
+**/__pycache__
+*.db
+*.db-*
+*.db.*
+cache
+AGENTS.md

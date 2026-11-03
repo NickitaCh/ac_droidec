@@ -152,6 +152,11 @@ async def require_guild_id(inter):
     вызывающий код в этом случае просто return'ит. Работает как до, так и после
     inter.response.defer() (проверяет inter.response.is_done())."""
     guild_id = resolve_guild_id(inter.author)
+    from services import bot_profiles
+    mismatch = bot_profiles.mismatch_message(guild_id, "discord")
+    if mismatch:
+        await _reply(inter, mismatch)
+        return None
     if guild_id is None:
         msg = "❌ Не удалось определить, к какой гильдии вы относитесь."
         if inter.response.is_done():
@@ -223,6 +228,11 @@ async def require_alt(inter, feature_key: str, other_target: bool = False) -> di
     if alt is None:
         await _reply(inter, "❌ Второй аккаунт не найден — привяжите его через `/регистрация` (код союзника второго аккаунта).")
         return None
+    from services import bot_profiles
+    mismatch = bot_profiles.mismatch_message(alt["guild_id"], "discord")
+    if mismatch:
+        await _reply(inter, mismatch)
+        return None
     if not feature_flags.is_enabled(alt["guild_id"], feature_key):
         await _reply(inter, f"❌ Функция «{feature_flags.label(feature_key)}» отключена в гильдии вашего второго аккаунта.")
         return None
@@ -235,8 +245,11 @@ def autocomplete_guild_id(inter) -> int | None:
     if inter.filled_options.get("альт"):
         alt = alt_account(inter.author)
         if alt is not None:
-            return alt["guild_id"]
-    return resolve_guild_id(inter.author)
+            from services import bot_profiles
+            return alt["guild_id"] if bot_profiles.serves(alt["guild_id"]) else None
+    from services import bot_profiles
+    guild_id = resolve_guild_id(inter.author)
+    return guild_id if bot_profiles.serves(guild_id) else None
 
 
 ALT_PARAM_DESCRIPTION = "Ваш второй аккаунт (альт или аккаунт в другой гильдии) вместо основного"
@@ -287,6 +300,16 @@ async def send_denied(inter, text: str):
     except Exception:
         pass
     await inter.followup.send(text, ephemeral=True)
+
+
+async def check_bot_profile(inter, guild_id):
+    """Recheck stored panels after a guild is moved between bot pairs."""
+    from services import bot_profiles
+    message = bot_profiles.mismatch_message(guild_id, "discord")
+    if message:
+        await _reply(inter, message)
+        return False
+    return True
 
 
 def resolve_tier(author_or_id) -> str | None:

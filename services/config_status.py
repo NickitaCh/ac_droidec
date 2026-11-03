@@ -82,6 +82,8 @@ def missing_summary(guild_cfg: dict) -> list[dict]:
     команды/страницы."""
     result = []
     for feature, label in FEATURE_LABELS.items():
+        if feature == "tw_guide" and guild_cfg and guild_cfg.get("bot_profile") == "prod":
+            continue
         missing = missing_config_labels(guild_cfg, feature)
         if missing:
             result.append({"feature": feature, "label": label, "missing": missing})

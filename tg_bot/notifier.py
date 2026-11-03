@@ -108,7 +108,9 @@ async def _deliver(app: App, item: dict) -> str | None:
     if item["kind"] == "relay":
         return await _deliver_relay(app, item)
     if item["kind"] == "dm":
-        targets = [(u["tg_user_id"], None) for u in store.tg_users_for_owner(item["owner_id"]) if u["dm_open"]]
+        targets = [(u["tg_user_id"], None) for u in store.tg_users_for_owner(item["owner_id"], profile=getattr(app, "profile", None)) if u["dm_open"]]
+        if not targets:
+            return "Игрок ещё не открыл личку с этим ботом."
     else:
         targets = outbox.chats_for(item["guild_id"], item["kind"])  # маршрут вида: чат или ветка
     errors = []
@@ -122,7 +124,11 @@ async def _deliver(app: App, item: dict) -> str | None:
 async def run_notifier(app: App):
     while True:
         try:
-            for item in await asyncio.to_thread(outbox.pending):
+            from services import bot_profiles
+            profile = getattr(app, "profile", bot_profiles.runtime_profile())
+            for item in await asyncio.to_thread(outbox.pending, profile=profile):
+                if item.get("guild_id") is not None and bot_profiles.guild_profile(item["guild_id"]) != profile:
+                    continue
                 if time.time() - item["created_at"] > MAX_AGE:
                     outbox.mark_sent(item["id"], "устарело")
                     continue

@@ -65,7 +65,8 @@ async def _verify_bot_in_guild(discord_guild_id: str) -> tuple[bool, str | None]
     Возвращает (True, None) если бот на сервере, иначе (False, сообщение_для_пользователя).
     При отсутствии DISCORD_TOKEN в окружении (не должно случаться на проде,
     см. CLAUDE.md) не блокируем заявку — тот же fallback, что в guild_dashboard.py."""
-    token = os.environ.get("DISCORD_TOKEN")
+    from services import bot_profiles
+    token = bot_profiles.token("discord")
     if not token:
         return True, None
     try:

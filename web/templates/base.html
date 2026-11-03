@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}AC Droidec{% endblock %}</title>
+    <title>{% set page_title %}{% block title %}AC Droidec{% endblock %}{% endset %}{{ page_title|replace('AC Droidec', 'Droidec') if not user or user.bot_profile == 'prod' else page_title }}</title>
     <link rel="icon" type="image/png" href="/static/favicons/favicon-96x96.png" sizes="96x96">
     <link rel="icon" type="image/svg+xml" href="/static/favicons/favicon.svg">
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
@@ -174,9 +174,9 @@
                         <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>{% endif %}
                         <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
                         <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Функции по гильдиям</span></a>
-                        <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
+                        {% if user.bot_profile != 'prod' %}<a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
                         <a href="/admin/unit-aliases"><span class="nav-icon">🔤</span><span class="nav-label">Сокращения юнитов</span></a>
-                        {% if user.bot_profile != 'prod' %}<a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
+                        <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
                         <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
                         <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>{% endif %}
                     </div>
@@ -314,7 +314,7 @@
     <div class="main-area">
         <header class="mobile-topbar">
             <label for="nav-toggle" class="nav-toggle-btn" aria-label="Меню">☰</label>
-            <a class="brand" href="/">AC Droidec</a>
+            <a class="brand" href="/">{{ 'Droidec' if not user or user.bot_profile == 'prod' else 'AC Droidec' }}</a>
         </header>
         {% if user and user.is_demo %}
             <div class="demo-banner" role="status">

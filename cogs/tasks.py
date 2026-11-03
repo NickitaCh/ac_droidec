@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import database
 import guild_resolver
-from services import feature_flags, fun_features
+from services import bot_profiles, feature_flags, fun_features
 from services.units_sync import sync_units
 from services import journey_guide
 from services.equipment_sync import sync_equipment
@@ -23,8 +23,8 @@ class TasksCog(commands.Cog):
         # tasks_notify_loop (поминутный опрос, тот же паттерн, что rotation_ping.py)
         self._last_notify_day = {}
         # Запускаем фоновый аудит задач + плановую синхронизацию справочников юнитов/снаряжения
-        self.units_sync_loop.start()
-        self.equipment_sync_loop.start()
+        bot_profiles.start_shared_loop(self.units_sync_loop)
+        bot_profiles.start_shared_loop(self.equipment_sync_loop)
         self.tasks_audit_loop.start()
         self.tasks_notify_loop.start()
 
@@ -301,7 +301,7 @@ class TasksCog(commands.Cog):
         skill_thresholds = database.get_all_skill_tier_thresholds()
         today_msk = datetime.now(MSK).date()
 
-        for guild_cfg in database.get_all_guild_configs():
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             if not feature_flags.is_enabled(gid, "tasks"):
@@ -372,7 +372,7 @@ class TasksCog(commands.Cog):
         now_msk = datetime.now(MSK)
         today_key = now_msk.strftime("%Y-%m-%d")
 
-        for guild_cfg in database.get_all_guild_configs():
+        for guild_cfg in bot_profiles.served_guilds():
             gid = guild_cfg["id"]
             if not feature_flags.is_enabled(gid, "tasks"):
                 continue

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import database
 import guild_resolver
+from services import bot_profiles
 from tg_bot import store
 from tg_bot.api import TelegramAPI, TelegramError
 
@@ -78,6 +79,7 @@ class App:
     username: str
     bot_id: int
     site_url: str
+    profile: str = "test"
     tasks: set = field(default_factory=set)
 
 
@@ -94,7 +96,7 @@ class Ctx:
         self.user = user
         self.args = args.strip()
         self.callback_query = callback_query
-        self.owner_id = store.touch_user(user, dm_open=self.is_private)
+        self.owner_id = store.touch_user(user, dm_open=self.is_private, profile=getattr(app, "profile", None))
         self._access = None
 
     @property
@@ -239,6 +241,11 @@ GROUP_MESSAGE_HANDLER: dict = {"handler": None}
 
 
 async def handle_update(app: App, update: dict):
+    with bot_profiles.delivery_context(getattr(app, "profile", bot_profiles.runtime_profile())):
+        await _handle_update(app, update)
+
+
+async def _handle_update(app: App, update: dict):
     try:
         if "message" in update:
             await _handle_message(app, update["message"])
@@ -253,6 +260,13 @@ async def handle_update(app: App, update: dict):
 
 
 async def _handle_message(app: App, message: dict):
+    gid = store.chat_guild(message["chat"]["id"]) if message["chat"].get("type") != "private" else None
+    if gid is not None and not bot_profiles.serves(gid):
+        text = message.get("text") or ""
+        head = text.split(maxsplit=1)[0] if text else ""
+        if head.lower().endswith("@" + app.username.lower()) and _parse_command(text, app.username):
+            await app.api.send_message(message["chat"]["id"], bot_profiles.mismatch_message(gid, "telegram", profile=getattr(app, "profile", None)) or "Этот чат обслуживает другой бот.")
+        return
     if message.get("migrate_to_chat_id"):
         store.update_chat_id(message["chat"]["id"], message["migrate_to_chat_id"])
         return
@@ -283,6 +297,10 @@ async def _handle_message(app: App, message: dict):
         )
         return
     ctx = Ctx(app, message, user, args)
+    mismatch = bot_profiles.mismatch_message(ctx.access.get("guild_id"), "telegram", profile=getattr(app, "profile", None))
+    if cmd.tier != TIER_ANY and mismatch:
+        await ctx.reply(mismatch)
+        return
     from tg_bot import command_access
     if command_access.denied(ctx, cmd.name):
         return  # Keep forbidden topics free of denial-message spam as well.
@@ -309,6 +327,11 @@ async def _handle_callback(app: App, query: dict):
         await app.api.answer_callback(query["id"])
         return
     ctx = Ctx(app, message, query["from"], payload, callback_query=query)
+    gid = store.chat_guild(ctx.chat_id) if not ctx.is_private else ctx.access.get("guild_id")
+    if not bot_profiles.serves(gid):
+        await app.api.answer_callback(query["id"], "Этот аккаунт обслуживает другой бот.", alert=True)
+        await ctx.reply(bot_profiles.mismatch_message(gid, "telegram", profile=getattr(app, "profile", None)) or "Нет доступа.")
+        return
     from tg_bot import topics
     topics.observe(message)
     from tg_bot import command_access
@@ -336,7 +359,9 @@ async def _handle_membership(app: App, event: dict):
     if chat.get("type") == "private":
         return
     if new_status in ("left", "kicked"):
-        store.unbind_chat(chat["id"])
+        gid = store.chat_guild(chat["id"])
+        if gid is not None and bot_profiles.serves(gid):
+            store.unbind_chat(chat["id"])
         return
     if old_status in ("left", "kicked") and new_status in ("member", "administrator"):
         if chat.get("type") == "channel":

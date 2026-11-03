@@ -22,7 +22,7 @@ ACCESS_LABELS = {
 }
 
 
-def public_command_docs():
+def public_command_docs(profile=None):
     """/commands — публичная страница без авторизации, поэтому супер-админские
     команды (владелец бота: /гильдия, /админы, антиспам-настройки в /настройки)
     из неё нужно полностью убрать, а не просто визуально спрятать — само их
@@ -31,7 +31,11 @@ def public_command_docs():
     а не остаются пустым заголовком; access_labels — без бейджа "Супер-админ"
     (иначе легенда наверху всё равно намекала бы на скрытый уровень)."""
     sections = []
+    from services import bot_profiles
+    profile = profile or bot_profiles.current_profile()
     for section in COMMAND_DOCS:
+        if profile == "prod" and section["title"] == "Территориальная война (ВГ)":
+            continue
         commands = [c for c in section["commands"] if c["access"] != "super_admin"]
         if commands:
             sections.append({**section, "commands": commands})
