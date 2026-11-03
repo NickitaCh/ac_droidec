@@ -200,6 +200,15 @@ class AllianceTests(unittest.TestCase):
         local = int(a.consume(self.member, sid, "copy", "", "x"))
         self.assertEqual(database.get_datacron_focused_requirement(local, self.member)[3:5], ("TEST", 9))
 
+    def test_clear_season_does_not_partially_delete_before_focused_link_denial(self):
+        owned = database.add_datacron_requirement(22, "Наш", "L3", "L6", "L9", "", "x", guild_id=self.member)
+        focused = database.add_datacron_focused_requirement(22, "Чужой", "TEST", 9, "", "x", guild_id=self.owner)
+        sid = a.share(self.owner, "dc_focused", str(focused), [self.member], True, True)
+        a.consume(self.member, sid, "link", "", "x")
+        with self.assertRaises(a.AllianceError):
+            database.delete_datacron_requirements_by_set(22, self.member)
+        self.assertIsNotNone(database.get_datacron_requirement(owned, self.member))
+
     def test_omicron_replace_requires_confirmation_and_protects_writes(self):
         database.set_guild_omicron_priority(self.owner, ["skill2", "skill1"])
         database.set_guild_omicron_requirement_rules(self.owner, "Правила", "x")

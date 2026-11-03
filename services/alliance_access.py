@@ -45,10 +45,12 @@ def guard_edit(kind, key=None, lookup=None, season=False):
                     if row:
                         alliances.assert_editable(gid, resource_kind, row[0])
                 if season:
-                    table = "datacron_requirements" if resource_kind == "dc_base" else "datacron_focused_requirements"
-                    if c.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
-                        for row in c.execute("SELECT id FROM " + table + " WHERE guild_id=? AND set_id=?", (gid, values["set_id"])):
-                            alliances.assert_editable(gid, resource_kind, row[0])
+                    # The web's 'clear season' calls the two bulk deleters in
+                    # succession. Validate both before either can delete rows.
+                    for check_kind, table in (("dc_base", "datacron_requirements"), ("dc_focused", "datacron_focused_requirements")):
+                        if c.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                            for row in c.execute("SELECT id FROM " + table + " WHERE guild_id=? AND set_id=?", (gid, values["set_id"])):
+                                alliances.assert_editable(gid, check_kind, row[0])
             if not season:
                 alliances.assert_editable(gid, resource_kind, resource_key)
                 if kind == "plate" and values.get("fields", {}).get("plate_name"):
