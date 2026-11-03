@@ -25,6 +25,7 @@ _MAX_VALUE_LEN = 300
 
 # Раздел по первому сегменту пути — чтобы в логе было понятно "где", без чтения URL.
 SECTION_LABELS = {
+    "alliances": "Альянсы",
     "admin": "Админка", "plates": "Плейты", "tasks": "Задачи", "datacrons": "Датакроны",
     "omicron": "Омикроны", "omicrons": "Омикроны", "registration": "Регистрация", "birthdays": "Дни рождения",
     "tb": "ТБ", "tw": "ВГ", "violations": "Нарушения", "settings": "Настройки", "mod-search": "Поиск модов",

@@ -24,7 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_squads, telegram, tw_defense, tw_scout, unit_images
+from web.routes import admin, alliances, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_squads, telegram, tw_defense, tw_scout, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -35,6 +35,22 @@ from services.donation_progress import current as donation_progress
 
 app = FastAPI(title="AC Droidec", dependencies=[Depends(audit.capture_request)])
 app.state.donation_progress = donation_progress
+
+
+from services.alliances import AllianceError, read_only_context, pending_count
+app.state.alliance_read_only_context = read_only_context
+app.state.alliance_pending_count = pending_count
+
+
+@app.exception_handler(AllianceError)
+async def _alliance_edit_denied(request: Request, exc: AllianceError):
+    import html
+    return HTMLResponse('<!doctype html><html lang="ru"><meta charset="utf-8">'
+                        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                        '<link rel="stylesheet" href="/static/style.css"><main class="error-page">'
+                        '<h1>Подключённые настройки</h1><p>' + html.escape(str(exc)) + '</p>'
+                        '<a class="button" href="/alliances">Перейти к альянсу</a> '
+                        '<a class="button" href="javascript:history.back()">Назад</a></main></html>', status_code=409)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -93,6 +109,14 @@ async def _warm_stat_calc():
     from swgoh_comlink import SwgohComlink
     from services import stat_forecast as stat_forecast_service
     stat_forecast_service.start_background_build(SwgohComlink(url="http://localhost:3000"))
+    from services import memory_maintenance
+    memory_maintenance.start("Веб")
+
+
+@app.on_event("shutdown")
+async def _stop_memory_maintenance():
+    from services import memory_maintenance
+    await memory_maintenance.stop()
 
 session_secret = os.getenv("WEB_SESSION_SECRET")
 if not session_secret:
@@ -112,6 +136,7 @@ app.include_router(auth.router, tags=["auth"])
 app.include_router(dashboard.router, tags=["dashboard"])
 app.include_router(unit_images.router, tags=["unit-images"])
 app.include_router(guild_dashboard.router, tags=["guild-dashboard"])
+app.include_router(alliances.router, prefix="/alliances", tags=["alliances"])
 app.include_router(tw_defense.router, prefix="/tw/def", tags=["tw-defense"])
 app.include_router(tw_scout.router, prefix="/tw/scout", tags=["tw-scout"])
 app.include_router(tb_squads.router, prefix="/tb/squads", tags=["tb-squads"])

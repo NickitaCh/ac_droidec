@@ -3378,6 +3378,25 @@ dialog.stat-problem-dialog.scout-dialog { max-width: 52em; }
 .tg-settings form.tg-inline .checkbox { margin: 0; }
 .tg-settings form.tg-inline .badge { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .tg-settings form.tg-inline { max-width: 100%; }
+
+/* Alliance settings: forms fill their cards on desktop and narrow phones. */
+.alliance-panel { padding: 1.2em; margin-bottom: 1.2em; min-width: 0; scroll-margin-top: 1em; }
+.alliance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23em), 1fr)); gap: 1em; margin-top: 1em; }
+.alliance-card { border: 1px solid var(--border, #39414e); border-radius: 0.7em; padding: 1em; min-width: 0; overflow-wrap: anywhere; }
+.alliance-card h3, .alliance-card h4 { margin-top: 0; }
+.alliance-panel form.alliance-form { max-width: none; width: 100%; display: flex; flex-direction: column; gap: 0.8em; margin: 1em 0 0; }
+.alliance-form > label { display: flex; flex-direction: column; gap: 0.35em; min-width: 0; }
+.alliance-form select, .alliance-form input:not([type="checkbox"]) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.alliance-form button { align-self: flex-start; max-width: 100%; white-space: normal; }
+.alliance-panel .alliance-check { display: flex; flex-direction: row; align-items: flex-start; gap: 0.5em; font-weight: normal; min-width: 0; }
+.alliance-check .checkbox { flex: 0 0 auto; margin-top: 0.25em; }
+.alliance-checks { display: grid; gap: 0.5em; }
+.alliance-recipients { margin: 0; padding: 0.7em; min-width: 0; display: grid; gap: 0.5em; }
+.alliance-actions, .alliance-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em 1em; }
+.alliance-actions form { margin: 0; max-width: 100%; }
+.alliance-spaced { margin-top: 1em; }
+.alliance-tabs { margin: 0 0 1.2em; }
+.alliance-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tg-settings .tg-x { padding: 0.1em 0.45em; line-height: 1.2; }
 .tg-settings form.tg-route-form { max-width: none; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.4em 0.8em; margin: 0; }
 .tg-settings form.tg-route-form select { flex: 1 1 14em; min-width: 0; max-width: 100%; width: auto; }

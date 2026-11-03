@@ -56,12 +56,15 @@ async def main():
     # Вебхук и polling несовместимы — на случай, если кто-то ставил вебхук руками.
     await api.call("deleteWebhook")
     stat_forecast.start_background_build(comlink)
+    from services import memory_maintenance
+    memory_maintenance.start("Telegram")
     print(f"✅ [TG] @{me['username']} запущен")
     notifier_task = asyncio.create_task(notifier.run_notifier(app))
     try:
         await run_polling(app)
     finally:
         notifier_task.cancel()
+        await memory_maintenance.stop()
         await api.close()
 
 

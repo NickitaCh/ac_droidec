@@ -6,6 +6,7 @@ import re
 import sqlite3
 
 from services import unit_aliases
+from services.alliance_access import guard_edit, refresh_before
 
 DB_NAME = "guild_management.db"
 
@@ -3855,6 +3856,7 @@ def add_datacron_requirement(set_id: int, pack: str, level3_value: str, level6_v
     return req_id
 
 
+@guard_edit("dc_base", "req_id")
 def update_datacron_requirement(req_id: int, set_id: int, pack: str, level3_value: str, level6_value: str,
                                  level9_value: str, comment: str, priority: str, guild_id: int = 1,
                                  stats: str = None, quantity: int = 1) -> bool:
@@ -3872,6 +3874,7 @@ def update_datacron_requirement(req_id: int, set_id: int, pack: str, level3_valu
     return updated
 
 
+@guard_edit("dc_base", "req_id")
 def delete_datacron_requirement(req_id: int, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3885,6 +3888,7 @@ def delete_datacron_requirement(req_id: int, guild_id: int = 1) -> bool:
     return deleted
 
 
+@guard_edit("dc_base", season=True)
 def delete_datacron_requirements_by_set(set_id: int, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3912,6 +3916,7 @@ def count_datacron_requirements_by_set(set_id: int, guild_id: int = 1) -> int:
     return count
 
 
+@refresh_before("dc_base")
 def get_datacron_requirement(req_id: int, guild_id: int = 1):
     """Требование по id — только если оно принадлежит указанной гильдии (предотвращает
     просмотр/редактирование чужого требования по угаданному числовому id)."""
@@ -3928,6 +3933,7 @@ def get_datacron_requirement(req_id: int, guild_id: int = 1):
     return row
 
 
+@refresh_before("dc_base")
 def get_datacron_requirements_by_set(set_id: int, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -3942,6 +3948,7 @@ def get_datacron_requirements_by_set(set_id: int, guild_id: int = 1):
     return rows
 
 
+@refresh_before("dc_base")
 def get_all_datacron_requirements(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4098,6 +4105,7 @@ def _ensure_datacron_requirement_stats_table(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_datacron_req_stats_req ON datacron_requirement_stats(req_id, guild_id)")
 
 
+@guard_edit("dc_base", "req_id")
 def set_datacron_requirement_stats(req_id: int, stat_pairs, guild_id: int = 1):
     """Полностью заменяет набор стат-требований для req_id — удаляет старые строки и
     вставляет новые. stat_pairs: [(stat_id:int, min_value:float), ...], максимум 5
@@ -4165,6 +4173,7 @@ def _ensure_datacron_requirement_squads_table(cursor):
     """)
 
 
+@guard_edit("dc_squad", "req_id")
 def set_datacron_requirement_squad(kind: str, req_id: int, units: list, guild_id: int = 1):
     """Пустой units — состав убирается (требование снова для всех)."""
     conn = sqlite3.connect(DB_NAME)
@@ -4261,6 +4270,7 @@ def add_datacron_focused_requirement(set_id: int, pack: str, character_key: str,
     return req_id
 
 
+@guard_edit("dc_focused", "req_id")
 def update_datacron_focused_requirement(req_id: int, set_id: int, pack: str, character_key: str,
                                          required_level: int, comment: str, priority: str, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
@@ -4277,6 +4287,7 @@ def update_datacron_focused_requirement(req_id: int, set_id: int, pack: str, cha
     return updated
 
 
+@guard_edit("dc_focused", "req_id")
 def delete_datacron_focused_requirement(req_id: int, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4288,6 +4299,7 @@ def delete_datacron_focused_requirement(req_id: int, guild_id: int = 1) -> bool:
     return deleted
 
 
+@guard_edit("dc_focused", season=True)
 def delete_datacron_focused_requirements_by_set(set_id: int, guild_id: int = 1) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4309,6 +4321,7 @@ def count_datacron_focused_requirements_by_set(set_id: int, guild_id: int = 1) -
     return count
 
 
+@refresh_before("dc_focused")
 def get_datacron_focused_requirement(req_id: int, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4322,6 +4335,7 @@ def get_datacron_focused_requirement(req_id: int, guild_id: int = 1):
     return row
 
 
+@refresh_before("dc_focused")
 def get_datacron_focused_requirements_by_set(set_id: int, guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4335,6 +4349,7 @@ def get_datacron_focused_requirements_by_set(set_id: int, guild_id: int = 1):
     return rows
 
 
+@refresh_before("dc_focused")
 def get_all_datacron_focused_requirements(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -4558,6 +4573,7 @@ def _ensure_stat_plate_squads_table(cursor):
     """)
 
 
+@guard_edit("plate", "plate_name")
 def set_stat_plate_squad(plate_name: str, units: list, guild_id: int = 1):
     """Пустой units — состав убирается (плейт снова для всех)."""
     conn = sqlite3.connect(DB_NAME)
@@ -4687,6 +4703,7 @@ def get_stat_plate_components(parent_plate: str, guild_id: int = 1):
     return rows
 
 
+@guard_edit("plate", "parent_plate")
 def set_stat_plate_components(parent_plate: str, components: list, created_by: str, guild_id: int = 1):
     """Полная замена состава модульного плейта (как set_stat_plate_character_order — веб шлёт
     целиком новый набор чекбоксов при каждом сохранении). components: list[(source_plate,
@@ -4751,6 +4768,7 @@ def create_stat_plate(name: str, description: str, created_by: str, guild_id: in
         conn.close()
 
 
+@guard_edit("plate", "old_name")
 def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
     """Возвращает False, если old_name не найден либо new_name уже занят другим плейтом этой гильдии."""
     conn = sqlite3.connect(DB_NAME)
@@ -4802,6 +4820,7 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
         conn.close()
 
 
+@guard_edit("plate", "name")
 def update_stat_plate_description(name: str, description: str, guild_id: int = 1) -> bool:
     """Меняет заметку уже существующего плейта — раньше её можно было задать только при
     создании (/статы_требования создать), заметка Коли в Discord-треде "Гайд по АС Боту"
@@ -4842,6 +4861,7 @@ def count_stat_requirements_by_character(plate_name: str, character_key: str, gu
     return count
 
 
+@guard_edit("plate", "plate_name")
 def delete_stat_requirements_by_character(plate_name: str, character_key: str, guild_id: int = 1) -> int:
     """Удаляет все требования одного персонажа в плейте (сам плейт остаётся, даже если
     после этого в нём не остаётся ни одного персонажа), возвращает количество удалённых."""
@@ -4863,6 +4883,7 @@ def delete_stat_requirements_by_character(plate_name: str, character_key: str, g
     return deleted
 
 
+@guard_edit("plate", "name")
 def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     """Удаляет плейт и все его требования (в пределах гильдии), возвращает количество удалённых
     требований. Для модульного плейта требований в stat_requirements нет (у него только
@@ -4891,6 +4912,7 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     return deleted
 
 
+@refresh_before("plate")
 def get_stat_plate(name: str, guild_id: int = 1):
     """Возвращает (name, description, created_by, created_at) либо None."""
     conn = sqlite3.connect(DB_NAME)
@@ -4906,6 +4928,7 @@ def get_stat_plate(name: str, guild_id: int = 1):
     return row
 
 
+@refresh_before("plate")
 def get_all_stat_plates_detailed(guild_id: int = 1):
     """Возвращает список (name, description, is_modular, character_count, requirement_count) по
     всем плейтам гильдии, включая пустые (без единого требования/компонента), отсортированный
@@ -4945,6 +4968,7 @@ def get_all_stat_plates_detailed(guild_id: int = 1):
     return result
 
 
+@guard_edit("plate", "plate_name")
 def add_stat_requirement(plate_name: str, character_key: str, stat_name: str, operator: str,
                           threshold_value: float, priority: str, raw_text: str, comment: str,
                           created_by: str, guild_id: int = 1, skill_id: str = None, mod_slot: str = None,
@@ -4994,6 +5018,7 @@ def get_character_scheme_labels(plate_name: str, character_key: str, guild_id: i
     return {scheme_num: label for scheme_num, label in rows}
 
 
+@guard_edit("plate", "plate_name")
 def set_character_scheme_label(plate_name: str, character_key: str, scheme_num: int, label: str, guild_id: int = 1) -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -5006,6 +5031,7 @@ def set_character_scheme_label(plate_name: str, character_key: str, scheme_num: 
     conn.close()
 
 
+@guard_edit("plate", lookup=("stat_requirements", "plate_name"))
 def set_stat_requirement_scheme(req_id: int, scheme_num: int | None, guild_id: int = 1) -> bool:
     """scheme_num=None переводит требование обратно в "общее для обеих схем" (либо просто
     "без схем", если у персонажа схем нет вовсе)."""
@@ -5027,6 +5053,7 @@ def set_stat_requirement_scheme(req_id: int, scheme_num: int | None, guild_id: i
     return updated
 
 
+@guard_edit("plate", "plate_name", lookup=("stat_requirements", "plate_name"))
 def update_stat_requirement(req_id: int, plate_name: str, character_key: str, stat_name: str, operator: str,
                              threshold_value: float, priority: str, comment: str, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
@@ -5043,6 +5070,7 @@ def update_stat_requirement(req_id: int, plate_name: str, character_key: str, st
     return updated
 
 
+@guard_edit("plate", lookup=("stat_requirements", "plate_name"))
 def update_stat_requirement_fields(req_id: int, guild_id: int, **fields) -> bool:
     """Точечное обновление строки требования (импорт HotBot: порог/оператор/приоритет и
     skill_id у основ и списков сетов), не трогая комментарий и схему."""
@@ -5062,6 +5090,7 @@ def update_stat_requirement_fields(req_id: int, guild_id: int, **fields) -> bool
     return updated
 
 
+@guard_edit("plate", lookup=("stat_requirements", "plate_name"))
 def delete_stat_requirement(req_id: int, guild_id: int = 1) -> bool:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -5088,6 +5117,7 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
     return row
 
 
+@refresh_before("plate")
 def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1):
     """Для модульного плейта прозрачно разворачивает композицию и возвращает требования из
     ВСЕХ плейтов-источников, где встретился этот персонаж (см. _resolve_modular_plate_leaf_pairs) —
@@ -5120,6 +5150,7 @@ def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1
     return rows
 
 
+@refresh_before("plate")
 def get_all_stat_requirement_plates(guild_id: int = 1):
     """Все известные плейты гильдии — и зарегистрированные через /статы_требования создать
     (даже пустые), и "исторические" (существующие только как plate_name у требований)."""
@@ -5138,6 +5169,7 @@ def get_all_stat_requirement_plates(guild_id: int = 1):
     return rows
 
 
+@refresh_before("plate")
 def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
     """Персонажи плейта в пользовательском порядке (см. set_stat_plate_character_order,
     драг-н-дроп на /plates/<name>); персонажи без сохранённого порядка (новые, ещё не
@@ -5176,6 +5208,7 @@ def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
     return rows
 
 
+@guard_edit("plate", "plate_name")
 def set_stat_plate_character_order(plate_name: str, ordered_keys: list, guild_id: int = 1) -> None:
     """Перезаписывает сохранённый порядок персонажей плейта целиком — веб drag-and-drop
     (SortableJS) шлёт полный новый порядок при каждом перетаскивании, поэтому проще
@@ -5192,6 +5225,7 @@ def set_stat_plate_character_order(plate_name: str, ordered_keys: list, guild_id
     conn.close()
 
 
+@refresh_before("plate")
 def get_all_stat_requirements(guild_id: int = 1):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -6165,6 +6199,7 @@ def _ensure_guild_omicron_priority_table(cursor):
     """)
 
 
+@refresh_before("omicrons")
 def get_guild_omicron_priority(guild_id: int) -> list:
     """[(skill_id, priority), ...] по возрастанию priority (0 — самый важный)."""
     conn = sqlite3.connect(DB_NAME)
@@ -6179,6 +6214,7 @@ def get_guild_omicron_priority(guild_id: int) -> list:
     return rows
 
 
+@guard_edit("omicrons")
 def set_guild_omicron_priority(guild_id: int, ordered_skill_ids: list) -> None:
     """Перезаписывает весь приоритетный список гильдии целиком (порядок в списке = приоритет) —
     так же просто, как set_unit_omicron_skills/set_skill_tier_thresholds перезаписывают
@@ -6260,6 +6296,7 @@ def _ensure_guild_omicron_requirement_rules_table(cursor):
     """)
 
 
+@refresh_before("omicrons")
 def get_guild_omicron_requirement_rules(guild_id: int) -> str:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -6270,6 +6307,7 @@ def get_guild_omicron_requirement_rules(guild_id: int) -> str:
     return row[0] if row else ""
 
 
+@guard_edit("omicrons")
 def set_guild_omicron_requirement_rules(guild_id: int, rules_text: str, updated_by: str = None) -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()

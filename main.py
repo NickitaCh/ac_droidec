@@ -330,6 +330,8 @@ channel_health.install_disnake_hook()
 @bot.event
 async def on_ready():
     loop_watchdog.start()
+    from services import memory_maintenance
+    memory_maintenance.start("Discord")
 
     # 1. Инициализация таблиц (создает таблицы, если их нет)
     database.init_db()
