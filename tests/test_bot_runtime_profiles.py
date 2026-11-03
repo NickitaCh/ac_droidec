@@ -193,6 +193,7 @@ class RuntimeProfileTests(unittest.IsolatedAsyncioTestCase):
 
     def test_public_invite_does_not_request_antispam_permissions(self):
         public = discord_invite.required_permissions("prod")
+        self.assertTrue(public.send_messages_in_threads)
         self.assertFalse(public.manage_messages)
         self.assertFalse(public.moderate_members)
         self.assertTrue(public.manage_roles)

@@ -67,6 +67,7 @@ def missing_permissions(granted: disnake.Permissions) -> list[str]:
 def required_permissions(profile=None):
     permissions = disnake.Permissions(REQUIRED_PERMISSIONS.value)
     if (profile or bot_profiles.current_profile()) == "prod":
+        permissions.send_messages_in_threads = True
         permissions.manage_messages = False
         permissions.moderate_members = False
     return permissions
