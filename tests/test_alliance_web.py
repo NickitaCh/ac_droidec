@@ -57,11 +57,14 @@ class AllianceWebTests(unittest.TestCase):
         alliances.invite(self.gid, other, "1")
         alliances.respond(other, alliances.page(other)["incoming"][0]["id"], True)
         database.create_stat_plate("Тестовый", "<script>bad</script>", "1", self.gid)
+        database.add_stat_requirement("Тестовый", "TEST", "ModPrimary", "=", 5, "required", None, "", "1", self.gid, mod_slot="arrow")
         sid = alliances.share(self.gid, "plate", "Тестовый", [other], True, True)
         response = self.client.get("/alliances/shared/%s" % sid)
         self.assertEqual(response.status_code, 200)
         self.assertIn("&lt;script&gt;bad&lt;/script&gt;", response.text)
         self.assertNotIn("<script>bad</script>", response.text)
+        self.assertIn("Основа:", response.text)
+        self.assertNotIn("ModPrimary", response.text)
         self.assertEqual(self.client.post("/alliances/consume", data={"share_id": "wrong"}, follow_redirects=True).status_code, 200)
 
 

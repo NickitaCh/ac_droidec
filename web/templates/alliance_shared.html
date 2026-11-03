@@ -7,7 +7,7 @@
 {% if kind == "plate" %}
   <p>{{ snapshot.description or "" }}</p>
   <div class="table-scroll"><table class="data cards-on-phone"><thead><tr><th>Персонаж</th><th>Требование</th><th>Приоритет</th><th>Примечание</th></tr></thead><tbody>
-    {% for r in snapshot.requirements %}<tr><td data-label="Персонаж">{{ r.character_name }}</td><td data-label="Требование">{{ r.stat_label }} {{ r.operator }} {{ r.threshold_value }}{% if r.scheme_num %} · вариант {{ r.scheme_num }}{% endif %}</td><td data-label="Приоритет">{{ {"required":"Обязательно","optional":"Желательно","useful":"Полезно"}.get(r.priority,r.priority) }}</td><td data-label="Примечание">{{ r.comment or "—" }}</td></tr>{% else %}<tr><td colspan="4">Плейт пока пуст.</td></tr>{% endfor %}
+    {% for r in snapshot.requirements %}<tr><td data-label="Персонаж">{{ r.character_name }}</td><td data-label="Требование">{{ r.value_display }}{% if r.scheme_num %} · вариант {{ r.scheme_num }}{% endif %}</td><td data-label="Приоритет">{{ {"required":"Обязательно","optional":"Желательно","useful":"Полезно"}.get(r.priority,r.priority) }}</td><td data-label="Примечание">{{ r.comment or "—" }}</td></tr>{% else %}<tr><td colspan="4">Плейт пока пуст.</td></tr>{% endfor %}
   </tbody></table></div>
 {% elif kind in ("dc_base", "dc_focused") %}
   <p>Сезон {{ snapshot.row.set_id }} · {{ snapshot.row.pack or "Без пака" }}</p>

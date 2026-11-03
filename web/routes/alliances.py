@@ -42,10 +42,23 @@ async def shared(request: Request, share_id: int, user: dict = Depends(require_o
     except alliances.AllianceError as exc:
         return _redirect(error=str(exc))
     if kind == "plate":
-        from web.routes.stat_plates import _stat_ru
+        from web.routes import stat_plates as plates
         for row in snapshot["requirements"]:
             row["character_name"] = database.get_game_unit_name(row["character_key"]) or row["character_key"]
-            row["stat_label"] = _stat_ru(row["stat_name"])
+            stat = row["stat_name"]
+            if stat == plates.STAT_OMICRON:
+                text = "Омикрон: %s — разблокирован" % plates._omicron_ability_name(row["skill_id"])
+            elif stat == plates.STAT_MOD_PRIMARY:
+                text = "Основа: " + plates._mod_primary_text(row["mod_slot"], row["threshold_value"], row["skill_id"])
+            elif stat == plates.STAT_SET:
+                text = "Сет: " + plates._mod_set_text(row["skill_id"], row["threshold_value"])
+            elif stat in (plates.STAT_SET_ANY, plates.STAT_SET_ONLY):
+                text = "Сеты: " + plates._set_list_text(stat, row["skill_id"])
+            elif row["compare_character_key"]:
+                text = "%s %s %s%s" % (plates._stat_ru(stat), row["operator"], plates._unit_name(row["compare_character_key"]), plates._compare_offset_text(row["operator"], row["threshold_value"]))
+            else:
+                text = "%s %s %s" % (plates._stat_ru(stat), row["operator"], plates._fmt_value(row["threshold_value"]))
+            row["value_display"] = text
     elif kind in ("dc_base", "dc_focused"):
         from web.routes.datacrons import _safe_catalog
         from cogs.datacron_requirements import _level_label, DATACRON_STAT_LABELS
