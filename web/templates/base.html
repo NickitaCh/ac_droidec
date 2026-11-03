@@ -35,8 +35,8 @@
     <aside class="sidebar">
         <div class="sidebar-top">
             <a class="brand" href="/">
-                <span class="brand-full">AC Droidec</span>
-                <span class="brand-short">AC</span>
+                <span class="brand-full">{{ 'Droidec' if not user or user.bot_profile == 'prod' else 'AC Droidec' }}</span>
+                <span class="brand-short">{{ 'D' if not user or user.bot_profile == 'prod' else 'AC' }}</span>
             </a>
             <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Свернуть меню" title="Свернуть меню">‹</button>
         </div>
@@ -91,11 +91,11 @@
                     {{ nav_link("/tb", "📄", "Итоги", exact=true, also=("/tb/player", "/tb/compare")) }}
                     {{ nav_link("/tb/missions", "🎯", "Бои и ОЗ") }}
                 {% endcall %}
-                {% call nav_group("⚔️", "ВГ", ("/tw",)) %}
+                {% if user.bot_profile != 'prod' %}{% call nav_group("⚔️", "ВГ", ("/tw",)) %}
                     {{ nav_link("/tw/def/plans", "🛡️", "Деф: расстановка и паки", also=("/tw/def",)) }}
                     {{ nav_link("/tw/scout", "🔭", "Разведка") }}
                     {{ nav_link("/tw", "📚", "История", exact=true) }}
-                {% endcall %}
+                {% endcall %}{% endif %}
                 {{ nav_link("/raids", "🐉", "Рейды") }}
             {% endif %}
             {% if conquest_ok %}
@@ -123,7 +123,7 @@
                 {% call nav_group("Ω", "Омикроны", ("/omicrons", "/omicron")) %}
                     {{ nav_link("/omicrons/priority", "🎯", "Приоритет для ВГ") }}
                     {{ nav_link("/omicrons/report", "📋", "Отчёт по игрокам") }}
-                    {{ nav_link("/omicron/phrases", "💬", "Фразы для омикронов") }}
+                    {% if user.bot_profile != 'prod' %}{{ nav_link("/omicron/phrases", "💬", "Фразы для омикронов") }}{% endif %}
                 {% endcall %}
                 {% endcall %}
             {% endif %}
@@ -139,13 +139,13 @@
                     {{ nav_link("/mod-builder", "🛠️", "Калькулятор") }}
                     {{ nav_link("/mod-search", "🔍", "Поиск модулей") }}
                 {% endcall %}
-                {% call nav_group("📊", "Аналитика", ("/mod-analysis", "/mod-scan")) %}
+                {% if user.bot_profile != 'prod' %}{% call nav_group("📊", "Аналитика", ("/mod-analysis", "/mod-scan")) %}
                     {{ nav_link("/mod-analysis", "📉", "Анализ модинга", exact=true) }}
                     {{ nav_link("/mod-analysis/compare", "⚖️", "Сравнение гильдий") }}
                     {% if user.guild_id == 1 %}
                         {{ nav_link("/mod-scan", "📡", "Скан модулей") }}
                     {% endif %}
-                {% endcall %}
+                {% endcall %}{% endif %}
             {% elif user and user.tier == "member" %}
                 {{ nav_link("/mod-builder", "🛠️", "Калькулятор модулей") }}
             {% endif %}
@@ -170,15 +170,15 @@
                         <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
                         <a href="/admin/audit"><span class="nav-icon">🕵️</span><span class="nav-label">Аудит действий</span></a>
                         <a href="/admin/command-usage"><span class="nav-icon">🖥️</span><span class="nav-label">Команды</span></a>
-                        <a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модулей</span></a>
-                        <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>
+                        {% if user.bot_profile != 'prod' %}<a href="/mod-optimizer"><span class="nav-icon">⚡</span><span class="nav-label">Оптимизатор модулей</span></a>
+                        <a href="/admin/fun"><span class="nav-icon">🎉</span><span class="nav-label">Фан</span></a>{% endif %}
                         <a href="/admin/tb-schedule"><span class="nav-icon">🕐</span><span class="nav-label">ТБ-время</span></a>
                         <a href="/admin/features"><span class="nav-icon">🧩</span><span class="nav-label">Функции по гильдиям</span></a>
                         <a href="/admin/datacron-shorts"><span class="nav-icon">✂️</span><span class="nav-label">Сокращения ДК</span></a>
                         <a href="/admin/unit-aliases"><span class="nav-icon">🔤</span><span class="nav-label">Сокращения юнитов</span></a>
-                        <a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
+                        {% if user.bot_profile != 'prod' %}<a href="/admin/ai-models"><span class="nav-icon">🧠</span><span class="nav-label">Модели ИИ</span></a>
                         <a href="/mod-ku"><span class="nav-icon">🧮</span><span class="nav-label">МодКу</span></a>
-                        <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>
+                        <a href="/farm"><span class="nav-icon">🌾</span><span class="nav-label">Фарм деталей</span></a>{% endif %}
                     </div>
                 </details>
                 {% endif %}
@@ -246,6 +246,13 @@
         <div class="sidebar-footer">
             {% if user %}
                 {% if user.real_super_admin %}
+                    <form method="post" action="/admin/switch-profile" class="guild-switch-form">
+                        <select name="profile" onchange="this.form.submit()" aria-label="Версия бота">
+                            <option value="test" {% if user.bot_profile != 'prod' %}selected{% endif %}>Версия: Тест</option>
+                            <option value="prod" {% if user.bot_profile == 'prod' %}selected{% endif %}>Версия: Прод</option>
+                        </select>
+                        <noscript><button type="submit">Переключить</button></noscript>
+                    </form>
                     <form method="post" action="/admin/view-as" class="guild-switch-form" title="Смотреть сайт глазами другой роли">
                         <select name="role" onchange="this.form.submit()" aria-label="Смотреть как">
                             <option value="" {% if not user.view_as %}selected{% endif %}>👑 Вид: супер-админ</option>
@@ -258,7 +265,7 @@
                 {% if user.real_super_admin and user.switchable_guilds %}
                     <form method="post" action="/admin/switch-guild" class="guild-switch-form">
                         <select name="guild_id" onchange="this.form.submit()">
-                            <option value="__self__" {% if user.guild_id == user.own_guild_id %}selected{% endif %}>— своя гильдия —</option>
+                            {% if user.own_guild_in_profile %}<option value="__self__" {% if user.guild_id == user.own_guild_id %}selected{% endif %}>— своя гильдия —</option>{% endif %}
                             {% for g in user.switchable_guilds %}
                                 <option value="{{ g.id }}" {% if user.guild_id == g.id %}selected{% endif %}>{{ g.name }}</option>
                             {% endfor %}

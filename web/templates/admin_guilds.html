@@ -7,7 +7,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Администрирование</p>
-                <h1>Обслуживаемые гильдии</h1>
+                <h1>Обслуживаемые гильдии · {{ 'Прод' if user.bot_profile == 'prod' else 'Тест' }}</h1>
             </div>
         </div>
     </section>
@@ -31,7 +31,7 @@
     </div>
 
     {% if not guilds %}
-        <p class="empty-state">Список пуст — добавьте первую гильдию ниже.</p>
+        <p class="empty-state">В этой версии пока нет гильдий.</p>
     {% else %}
         <div class="panel">
             <div class="table-toolbar">
@@ -90,6 +90,14 @@
                                     {% endif %}
                                 </td>
                                 <td class="row-actions">
+                                    <form method="post" action="/admin/guilds/{{ g.id }}/profile" class="inline-form"
+                                          onsubmit="return confirm('Сменить обслуживающую пару ботов? Данные гильдии сохранятся.');">
+                                        <select name="profile" aria-label="Обслуживающая пара ботов">
+                                            <option value="test" {% if g.bot_profile != 'prod' %}selected{% endif %}>Тест</option>
+                                            <option value="prod" {% if g.bot_profile == 'prod' %}selected{% endif %}>Прод</option>
+                                        </select>
+                                        <button type="submit" class="button-secondary">Перевести</button>
+                                    </form>
                                     <form method="post" action="/admin/guilds/{{ g.id }}/subscription" class="inline-form"
                                           title="Продлить подписку вручную, без оплаты — от текущего остатка; заодно включает гильдию">
                                         <input type="number" name="days" min="1" max="3650" value="30" style="width: 5em;" aria-label="Дней">

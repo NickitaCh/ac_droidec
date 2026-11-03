@@ -125,6 +125,8 @@ if not session_secret:
     session_secret = "dev-insecure-secret-change-me"
     print("⚠️ [web] WEB_SESSION_SECRET не задан — использую небезопасный dev-секрет")
 app.add_middleware(audit.AuditMiddleware)
+from services.bot_profiles import ProfileMiddleware
+app.add_middleware(ProfileMiddleware)
 app.add_middleware(demo_mode.DemoMiddleware)  # внутри SessionMiddleware — ему нужна сессия
 app.add_middleware(SessionMiddleware, secret_key=session_secret)
 

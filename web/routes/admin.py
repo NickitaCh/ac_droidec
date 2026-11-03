@@ -1,8 +1,8 @@
 import asyncio
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -30,6 +30,12 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 
+def _trusted_profile_request(request):
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.url.netloc:
+        raise HTTPException(status_code=403, detail="Недопустимый источник запроса.")
+
+
 def _get_comlink():
     # См. web/routes/registration.py::_get_comlink — веб-процесс не поднимает
     # диска-клиента, строит свой SwgohComlink на тот же comlink-сайдкар.
@@ -41,6 +47,7 @@ def _get_comlink():
 async def guilds_page(request: Request, user: dict = Depends(require_super_admin)):
     from services import bot_presence
     guilds = list_guilds(active_only=False)
+    guilds = [g for g in guilds if (g.get("bot_profile") or "test") == user.get("bot_profile", "test")]
     presence, presence_error = await bot_presence.overview(guilds)
     return templates.TemplateResponse(request, "admin_guilds.html", {
         "user": user,
@@ -66,11 +73,34 @@ async def switch_guild(request: Request, guild_id: str = Form(...), user: dict =
             gid = int(guild_id)
         except ValueError:
             gid = None
-        if gid is None or not any(g["id"] == gid for g in list_guilds(active_only=True)):
+        if gid is None or not any(g["id"] == gid and (g.get("bot_profile") or "test") == user.get("bot_profile", "test") for g in list_guilds(active_only=True)):
             return RedirectResponse(f"/admin/guilds?{urlencode({'error': 'Некорректная гильдия.'})}", status_code=303)
         request.session["impersonate_guild_id"] = gid
     referer = request.headers.get("referer") or "/"
     return RedirectResponse(referer, status_code=303)
+
+
+@router.post("/switch-profile", response_class=RedirectResponse)
+async def switch_profile(request: Request, profile: str = Form(...), user: dict = Depends(require_real_super_admin)):
+    _trusted_profile_request(request)
+    from services import bot_profiles
+    if profile not in bot_profiles.PROFILES:
+        return JSONResponse({"error": "Неизвестная версия бота."}, status_code=400)
+    request.session["bot_profile"] = profile
+    request.session.pop("impersonate_guild_id", None)
+    # Land on management even when this profile has no guilds yet.
+    return RedirectResponse("/admin/guilds", status_code=303)
+
+
+@router.post("/guilds/{guild_id}/profile", response_class=RedirectResponse)
+async def guild_profile_change(guild_id: int, request: Request, profile: str = Form(...), user: dict = Depends(require_super_admin)):
+    _trusted_profile_request(request)
+    from services import bot_profiles
+    try:
+        bot_profiles.assign_guild(guild_id, profile)
+    except ValueError as exc:
+        return RedirectResponse("/admin/guilds?" + urlencode({"error": str(exc)}), status_code=303)
+    return RedirectResponse("/admin/guilds", status_code=303)
 
 
 @router.post("/view-as", response_class=RedirectResponse)
@@ -95,10 +125,15 @@ async def guilds_add(
     discord_guild_id: str = Form(...),
     user: dict = Depends(require_super_admin),
 ):
+    from services import bot_profiles
+    if user.get("bot_profile") == "prod" and not bot_profiles.production_ready():
+        return RedirectResponse("/admin/guilds?" + urlencode({"error": "Публичные боты ещё не запущены."}), status_code=303)
     comlink = _get_comlink()
     result = await add_guild(comlink, ally_code, discord_guild_id)
     if not result.ok:
         return RedirectResponse(f"/admin/guilds?{urlencode({'error': result.error})}", status_code=303)
+    if user.get("bot_profile") == "prod":
+        bot_profiles.assign_guild(result.guild_id, "prod")
     return RedirectResponse("/admin/guilds", status_code=303)
 
 
@@ -445,7 +480,11 @@ async def tb_schedule_cancel_dst(user: dict = Depends(require_super_admin)):
 @router.get("/features", response_class=HTMLResponse)
 async def features_page(request: Request, user: dict = Depends(require_super_admin)):
     guilds = list_guilds(active_only=True)
+    from services import bot_profiles
+    profile = user.get("bot_profile", "test")
+    guilds = [g for g in guilds if (g.get("bot_profile") or "test") == profile]
     rows = feature_flags.matrix([g["id"] for g in guilds])
+    rows = [r for r in rows if bot_profiles.feature_available(r["key"], profile)]
     categories = {}
     for row in rows:
         categories.setdefault(row["category"], []).append(row)
@@ -459,12 +498,17 @@ async def features_page(request: Request, user: dict = Depends(require_super_adm
 
 @router.post("/features/save", response_class=HTMLResponse)
 async def features_save(request: Request, user: dict = Depends(require_super_admin)):
+    from services import bot_profiles
     form = await request.form()
     checked = set(form.keys())  # "{guild_id}:{key}" только для отмеченных чекбоксов
     guilds = list_guilds(active_only=True)
     for guild in guilds:
+        if (guild.get("bot_profile") or "test") != user.get("bot_profile", "test"):
+            continue
         gid = guild["id"]
         for key in feature_flags.FEATURES:
+            if not bot_profiles.feature_available(key, user.get("bot_profile", "test")):
+                continue
             want_enabled = f"{gid}:{key}" in checked
             if feature_flags.is_enabled(gid, key) != want_enabled:
                 feature_flags.set_enabled(gid, key, want_enabled, user["discord_id"])

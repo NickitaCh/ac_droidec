@@ -67,6 +67,9 @@ def set_enabled(action_key: str, enabled: bool, updated_by: str) -> bool:
 
 
 def should_trigger(action_key: str, author_id: int) -> bool:
+    from services import bot_profiles
+    if not bot_profiles.feature_available("fun", bot_profiles.runtime_profile()):
+        return False
     action = FUN_ACTIONS.get(action_key)
     if action is None or str(author_id) != action["target_user_id"]:
         return False

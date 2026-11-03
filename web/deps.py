@@ -40,8 +40,21 @@ def _apply_guild_switch(request: Request, user: dict) -> dict:
     # регистрации/гранту (может быть None) — сохраняем отдельно, чтобы
     # переключатель в шапке (base.html) мог показать "— своя гильдия —" как
     # текущий выбор, даже после переключения guild_id на другую гильдию ниже.
-    result = {**user, "own_guild_id": user.get("guild_id"), "switchable_guilds": list_guilds(active_only=True)}
+    from services import bot_profiles
+    profile = request.session.get("bot_profile")
+    if profile not in bot_profiles.PROFILES:
+        profile = bot_profiles.guild_profile(user.get("guild_id"))
+    guilds = [g for g in list_guilds(active_only=True, all_profiles=True)
+              if (g.get("bot_profile") or "test") == profile]
+    result = {**user, "own_guild_id": user.get("guild_id"), "switchable_guilds": guilds,
+              "bot_profile": profile,
+              "own_guild_in_profile": any(g["id"] == user.get("guild_id") for g in guilds)}
     override = request.session.get("impersonate_guild_id")
+    if override is not None and not any(g["id"] == override for g in guilds):
+        override = None
+    if not any(g["id"] == result.get("guild_id") for g in guilds):
+        result["guild_id"] = guilds[0]["id"] if guilds else None
+        result["tier"] = "officer"
     if override is not None and override != user.get("guild_id"):
         result["guild_id"] = override
         result["tier"] = "officer"
@@ -50,7 +63,7 @@ def _apply_guild_switch(request: Request, user: dict) -> dict:
     # real_super_admin остаётся True, чтобы сам переключатель и выбор гильдии работали.
     result["real_super_admin"] = True
     view_as = request.session.get("view_as")
-    if view_as in VIEW_AS_LABELS:
+    if view_as in VIEW_AS_LABELS and result.get("guild_id") is not None:
         result["view_as"] = view_as
         result["is_super_admin"] = False
         result["tier"] = view_as
@@ -80,7 +93,16 @@ def get_current_user(request: Request) -> dict:
         return demo_mode.demo_user()
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизованы — войдите через /login")
-    return _with_subscription_status(_apply_guild_switch(request, _refresh_access(user)))
+    result = _apply_guild_switch(request, _refresh_access(user))
+    from services import bot_profiles
+    profile = result.get("bot_profile") or bot_profiles.guild_profile(result.get("guild_id"))
+    result["bot_profile"] = profile
+    result["prod_disabled_features"] = bot_profiles.PROD_DISABLED if profile == "prod" else ()
+    if result.get("real_super_admin") and result.get("guild_id") is None and not request.url.path.startswith("/admin/") and request.url.path != "/logout":
+        raise HTTPException(status_code=307, headers={"Location": "/admin/guilds"})
+    if not bot_profiles.path_available(request.url.path, profile):
+        raise HTTPException(status_code=404, detail="Раздел недоступен.")
+    return _with_subscription_status(result)
 
 
 def get_current_user_optional(request: Request) -> dict | None:

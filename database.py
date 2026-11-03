@@ -273,6 +273,7 @@ def _migrate_user_mapping_guild_id(cursor):
 # сюда текущую гильдию (AC) через seed_default_guild, если таблица пуста.
 # =====================================================================
 GUILD_CONFIG_COLUMNS = [
+    "bot_profile",
     "name", "ally_code", "swgoh_guild_id", "discord_guild_id",
     "member_role_id", "officer_role_id",
     "ping_channel_id", "ping_role_id", "ping_start_date", "ping_schedule_json",
@@ -399,6 +400,13 @@ def _ensure_guilds_table(cursor):
     except sqlite3.OperationalError:
         pass
 
+    try:
+        # Existing guilds keep their original bot. New guilds start on test until
+        # explicitly assigned by a super-admin after public workers are ready.
+        cursor.execute("ALTER TABLE guilds ADD COLUMN bot_profile TEXT NOT NULL DEFAULT 'test'")
+    except sqlite3.OperationalError:
+        pass
+
 
 def _row_to_guild_dict(row, columns):
     return {columns[i]: row[i] for i in range(len(columns))}
@@ -470,6 +478,8 @@ def get_guild_config_by_discord_id(discord_guild_id: str) -> dict | None:
 def create_guild(**fields) -> int:
     """fields — любое подмножество GUILD_CONFIG_COLUMNS. name/ally_code/discord_guild_id/
     member_role_id/officer_role_id обязательны (NOT NULL в схеме)."""
+    if "bot_profile" in fields and fields["bot_profile"] not in ("test", "prod"):
+        raise ValueError("Неизвестная версия бота.")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guilds_table(cursor)
@@ -486,6 +496,8 @@ def create_guild(**fields) -> int:
 
 
 def update_guild_config(guild_id: int, **fields) -> bool:
+    if "bot_profile" in fields and fields["bot_profile"] not in ("test", "prod"):
+        raise ValueError("Неизвестная версия бота.")
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_guilds_table(cursor)

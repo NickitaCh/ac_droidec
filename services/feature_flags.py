@@ -76,6 +76,9 @@ def label(key: str) -> str:
 
 
 def is_enabled(guild_id: int, key: str) -> bool:
+    from services import bot_profiles
+    if not bot_profiles.feature_for_guild(key, guild_id):
+        return False
     if guild_id is None:
         return True
     if key == "antispam":
@@ -88,6 +91,9 @@ def is_enabled(guild_id: int, key: str) -> bool:
 
 
 def set_enabled(guild_id: int, key: str, enabled: bool, updated_by: str):
+    from services import bot_profiles
+    if enabled and not bot_profiles.feature_for_guild(key, guild_id):
+        raise ValueError("Функция недоступна в публичной версии.")
     if key == "antispam":
         database.update_guild_config(guild_id, antispam_enabled=int(enabled))
         return
