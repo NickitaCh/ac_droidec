@@ -23,13 +23,13 @@
                 <div class="lp-hero-text">
                     <p class="lp-eyebrow">Star Wars: Galaxy of Heroes</p>
                     <h1>{{ 'Droidec' if not user or user.bot_profile == 'prod' else 'AC Droidec' }}</h1>
-                    <p class="lp-lead">Бот для Discord и Telegram, и сайт для офицеров гильдии: ТБ{% if product_profile != 'prod' %} и ВГ{% endif %}, прокачка, модули, датакроны и дисциплина — в одном месте.</p>
+                    <p class="lp-lead">Бот для Discord и Telegram и сайт для управления гильдией: ТБ{% if product_profile != 'prod' %} и ВГ{% endif %}, прокачка, модули, датакроны и дисциплина — в одном месте.</p>
                     <div class="lp-cta">
                         <a class="button lp-button-primary" href="/login">Войти через Discord</a>
                         <a class="button lp-button-ghost" href="/subscribe">Подключить гильдию</a>
                     </div>
-                    <p class="lp-demo"><a class="button lp-button-demo" href="/demo">👀 Посмотреть демо</a> <span class="muted">выдуманная гильдия: можно потыкать все страницы и графики без входа</span></p>
-                    <p class="lp-alt-login">Нет Discord? <a href="/login/password">Вход по логину и паролю</a></p>
+                    <p class="lp-demo"><a class="button lp-button-demo" href="/demo">👀 Посмотреть демо</a> <span class="muted">пример гильдии: страницы и графики с демонстрационными данными, без входа</span></p>
+                    <p class="lp-alt-login">Уже есть логин и пароль? <a href="/login/password">Войти по паролю</a></p>
                 </div>
                 <div class="lp-roster" aria-hidden="true">
                     {% for name, side in hero_units %}
@@ -44,7 +44,7 @@
                         <span class="unit-portrait unit-portrait-dark"><img src="/static/img/game/portraits/thrawn.webp" alt="" loading="lazy"></span>
                     </div>
                     <h3>ТБ{% if product_profile != 'prod' %} и ВГ{% endif %}</h3>
-                    <p>Отчёты по Территориальным битвам и войнам, звёзды и очки по каждому игроку, сравнение с прошлыми битвами, взводы и ордера.</p>
+                    <p>Отчёты по Территориальным битвам{% if product_profile != 'prod' %} и войнам{% endif %}, результаты игроков, сравнение с прошлыми битвами, взводы и ордера ТБ.</p>
                 </article>
                 <article class="lp-feature">
                     <div class="lp-feature-art lp-art-gear">
@@ -52,7 +52,7 @@
                         <span class="unit-portrait"><img src="/static/img/game/portraits/luke_jml.webp" alt="" loading="lazy"></span>
                     </div>
                     <h3>Задачи на прокачку</h3>
-                    <p>Цели по звёздам, гиру и реликам с дедлайнами. Бот сам проверяет прогресс и напоминает в Discord.</p>
+                    <p>Задачи по звёздам, уровню снаряжения и реликам со сроками выполнения. Бот проверяет прогресс и отправляет уведомления в настроенные каналы Discord и Telegram.</p>
                 </article>
                 <article class="lp-feature">
                     <div class="lp-feature-art lp-art-badges">
@@ -76,7 +76,7 @@
                         <span class="unit-portrait"><img src="/static/img/game/portraits/sidious.webp" alt="" loading="lazy"></span>
                     </div>
                     <h3>Датакроны</h3>
-                    <p>Требования по датакронам на сезон и автоматическая сверка с ростером каждого игрока.</p>
+                    <p>Требования по датакронам на сезон и автоматическая проверка датакронов каждого игрока.</p>
                 </article>
                 <article class="lp-feature">
                     <div class="lp-feature-art lp-art-roles">
@@ -86,7 +86,7 @@
                         <img src="/static/img/game/roles/healer.png" alt="">
                     </div>
                     <h3>Дисциплина и состав</h3>
-                    <p>Нарушения, дни рождения, регистрация участников и доступ по игровому рангу — без ручной возни с ролями.</p>
+                    <p>Нарушения, дни рождения, регистрация участников и доступ по игровому рангу — без ручного назначения прав каждому участнику.</p>
                 </article>
             </section>
 
@@ -94,10 +94,10 @@
                 <div class="lp-pricing-text">
                     <h2>Подключение гильдии</h2>
                     <ol class="lp-meta">
-                        <li>Пригласите бота на Discord-сервер гильдии</li>
+                        <li>Если планируете пользоваться Discord, пригласите бота на сервер гильдии</li>
                         <li>Подайте заявку и оплатите на странице <a href="/subscribe">Подписка</a> (вход через Discord; ссылку с уже подставленным сервером даёт команда <code>/подписка</code>)</li>
                         <li>Доступ откроется автоматически в течение минуты после оплаты</li>
-                        <li>Участники привязывают себя командой <code>/регистрация</code> — права берутся из игрового ранга</li>
+                        <li>Участники привязывают игровой аккаунт: <code>/регистрация</code> в Discord или <code>/reg</code> в Telegram. Права определяются игровым рангом</li>
                     </ol>
                     <p class="muted">
                         Бот работает и в Telegram — тот же бот, те же данные и права, групповой чат привязывается
@@ -119,9 +119,9 @@
                     </div>
                     <div class="lp-pricing-actions">
                         {% if bot_invite_url %}
-                            <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">1. Пригласить бота на сервер</a>
+                            <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">Пригласить в Discord</a>
                         {% endif %}
-                        <a class="button" href="/subscribe">{% if bot_invite_url %}2. {% endif %}Подключить и оплатить</a>
+                        <a class="button" href="/subscribe">Подключить и оплатить</a>
                     </div>
                 </div>
             </section>

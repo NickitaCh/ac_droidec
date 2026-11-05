@@ -35,7 +35,7 @@
                     <div class="panel-title"><span>🔁 Продлить подписку — «{{ renewal_guild.name }}»</span></div>
                     <p class="muted">
                         {% if renewal_guild.expired %}
-                            Подписка закончилась — после оплаты всё включится обратно с прежними настройками.
+                            Подписка закончилась — после оплаты доступ восстановится с прежними настройками и данными.
                         {% elif renewal_guild.expires_at %}
                             Подписка активна до <code>{{ renewal_guild.expires_at[:10] }}</code>.
                         {% else %}
