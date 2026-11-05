@@ -68,6 +68,12 @@ def serves(guild_id):
     return guild_id is None or guild_profile(guild_id) == (worker_profile() or runtime_profile())
 
 
+def accepts(guild_id, profile=None):
+    """Prod accepts both audiences; background delivery still uses serves()."""
+    profile = profile or worker_profile() or runtime_profile()
+    return guild_id is None or profile == "prod" or guild_profile(guild_id) == profile
+
+
 def served_guilds(active_only=True):
     import database
     profile = worker_profile() or runtime_profile()
@@ -106,7 +112,7 @@ def mismatch_message(guild_id, platform, *, profile=None):
     # Web access does not depend on the worker profile. Account selection and
     # permissions remain unchanged; never silently switch to an alt account.
     profile = profile or worker_profile()
-    if guild_id is None or profile is None or guild_profile(guild_id) == profile:
+    if guild_id is None or profile is None or accepts(guild_id, profile):
         return None
     link = bot_link(platform, guild_profile(guild_id)) or "https://swgoh-sng.ru/start"
     return "Этот аккаунт обслуживает другой бот. Откройте нужного бота: " + link
@@ -147,7 +153,7 @@ def feature_available(key, profile):
 def feature_for_guild(key, guild_id):
     if key not in PROD_DISABLED:
         return True
-    return feature_available(key, guild_profile(guild_id))
+    return feature_available(key, guild_profile(guild_id)) and feature_available(key, current_profile())
 
 
 def path_available(path, profile):

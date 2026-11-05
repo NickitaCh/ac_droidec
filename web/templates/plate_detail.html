@@ -477,6 +477,37 @@
                     <span class="panel-title-left">{% if not is_modular %}<span class="drag-handle">⠿</span>{% endif %}<span>{{ char.name }}</span></span>
                     <span class="panel-hint">{{ char.requirements|length }} треб.</span>
                 </div>
+                <p class="muted">Отряд персонажа: {{ char.squad_label or 'не задан' }}
+                    <button type="button" class="link-btn" data-modal-open="char-squad-{{ char.base_id }}">{{ 'изменить' if char.squad_label else 'задать' }}</button>
+                </p>
+    <dialog class="edit-modal" id="char-squad-{{ char.base_id }}">
+        <form method="post" action="/plates/{{ plate_name }}/squad">
+            <input type="hidden" name="base_id" value="{{ char.base_id }}">
+            <div class="edit-modal-header">
+                <h3>Отряд для {{ char.name }}</h3>
+                <button type="button" class="twdef-x" data-modal-close title="Закрыть">✕</button>
+            </div>
+            <div class="edit-modal-body">
+                <div class="edit-modal-section">
+                    <p class="muted">Необязательно. При проверке «с отрядом» требования этого персонажа пропускаются у игроков без указанного отряда. Пустой состав убирает условие персонажа; общий отряд плейта продолжает действовать.</p>
+                    {% for u in char.squad_rows %}
+                        <div class="edit-modal-row">
+                            <div class="unit-search" data-live-search data-url="/plates/api/units" data-value-field="base_id" data-label-field="name" data-required="false" style="flex:1 1 14em;">
+                                <input type="text" class="unit-search-input" placeholder="Персонаж {{ loop.index }}…" autocomplete="off" value="{{ u.name }}">
+                                <input type="hidden" name="squad_unit_{{ loop.index }}" class="unit-search-value" value="{{ u.base_id }}">
+                                <div class="unit-search-results"></div>
+                            </div>
+                            <label style="flex-direction:row;align-items:center;gap:0.4em;">мин. R <input type="number" name="squad_relic_{{ loop.index }}" min="0" max="10" value="{{ u.min_relic if u.min_relic is not none else '' }}" style="width:4.5em;"></label>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="edit-modal-footer">
+                <button type="button" class="button-secondary" data-modal-close>Отмена</button>
+                <button type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
                 {% if char.has_schemes and not is_modular %}
                     <div class="scheme-columns" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1em;">
                         <div>

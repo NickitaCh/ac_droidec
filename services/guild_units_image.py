@@ -9,6 +9,7 @@ import math
 from PIL import Image, ImageDraw
 
 from services.profile_image import BG, GOLD, MUTED, TEXT, _font, _portrait
+from services import unit_alignment
 
 PAD = 12
 PCT_W, NAME_W, GUIDE_W, CELL_W = 64, 230, 90, 86
@@ -76,6 +77,7 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
         draw.text((gx + gw // 2, y + 22), "Цель", font=_font(16, True), fill=GOLD, anchor="mm")
     for i, u in enumerate(units):
         x = gx + gw + i * cell_w
+        draw.rectangle((x + 2, y + HEAD_H - 6, x + cell_w - 2, y + HEAD_H - 2), fill=unit_alignment.color(u["base_id"]))
         draw.text((x + cell_w // 2, y + 12), "Нужно", font=_font(14, True), fill=(230, 80, 80), anchor="mm")
         draw.text((x + cell_w // 2, y + 32), u["label"], font=_font(15, True), fill=TEXT, anchor="mm")
         p = _portrait(u["base_id"], PIC)
@@ -169,6 +171,7 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None) ->
         y = y0 + cy * (TILE_H + TILE_GAP)
         color = STATUS_COLORS[u["status"]]
         draw.rounded_rectangle((x, y, x + TILE_W, y + TILE_H), radius=8, fill=(8, 8, 10), outline=color, width=4)
+        draw.rectangle((x + 6, y + TILE_H - 9, x + TILE_W - 6, y + TILE_H - 5), fill=unit_alignment.color(u["base_id"]))
         # Угол с требованием.
         draw.polygon([(x + TILE_W - 62, y + 2), (x + TILE_W - 2, y + 2), (x + TILE_W - 2, y + 62)], fill=color)
         for k, part in enumerate(u["label"].split(" ")[:2]):

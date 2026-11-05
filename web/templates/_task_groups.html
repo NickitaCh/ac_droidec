@@ -1,0 +1,54 @@
+{% if view not in ('personal', 'departed') %}
+<div class="panel">
+    <div class="panel-title"><span>Группы задач</span></div>
+    <p class="muted">Общая цель из нескольких персонажей. Прогресс — по данным ежечасного обновления, уведомления — как у обычных задач.</p>
+    {% if view != 'archive' %}
+    <details>
+        <summary class="link-btn">Создать группу</summary>
+        <form method="post" action="/tasks/groups/create" class="task-group-form">
+            <label>Название <input name="name" maxlength="100" placeholder="Рейд. Ситхи" required></label>
+            <label>Дедлайн <input type="date" name="deadline" min="{{ today }}" required></label>
+            <details open><summary>Игроки</summary>
+                <label class="checkbox"><input type="checkbox" onchange="this.closest('details').querySelectorAll('[name=ally_codes]').forEach(c => c.checked=this.checked)"> Все игроки</label>
+                <div class="task-player-list">
+                    {% for code, name in roster %}<label class="checkbox"><input type="checkbox" name="ally_codes" value="{{ code }}"> {{ name }}</label>{% endfor %}
+                </div>
+            </details>
+            <p class="muted">Добавьте нужных персонажей и уровень каждого. Можно задать несколько критериев одному персонажу.</p>
+            {% for i in range(1, 21) %}
+            <div class="edit-modal-row task-group-row"{% if i > 5 %} hidden data-extra-group-row{% endif %}>
+                <div class="unit-search" data-live-search data-url="/tasks/api/units" data-value-field="base_id" data-label-field="name" data-required="false" style="flex:1">
+                    <input type="text" class="unit-search-input" placeholder="Персонаж {{ i }}…" autocomplete="off">
+                    <input type="hidden" name="unit_{{ i }}" class="unit-search-value">
+                    <div class="unit-search-results"></div>
+                </div>
+                <label>Критерий <select name="type_{{ i }}"><option value="relic">Реликвия</option><option value="stars">Звёзды</option><option value="gear">Снаряжение</option></select></label>
+                <label>Уровень <input type="number" name="value_{{ i }}" min="0" max="13" style="width:5em"></label>
+            </div>
+            {% endfor %}
+            <button type="button" class="button-secondary" onclick="const row=this.form.querySelector('[data-extra-group-row][hidden]'); if(row) row.hidden=false; this.disabled=!this.form.querySelector('[data-extra-group-row][hidden]')">Добавить персонажа</button>
+            <button type="submit">Создать и назначить</button>
+        </form>
+    </details>
+    {% endif %}
+    {% for group in task_groups %}
+    <details class="panel" id="task-group-{{ group.id }}">
+        <summary><strong>{{ group.name }}</strong> · готовы {{ group.ready }} из {{ group.total }} · выполнено {{ group.done }} из {{ group.checks }}</summary>
+        <p class="muted">Срок до {{ group.deadline }}</p>
+        <div class="table-scroll"><table class="data">
+            <thead><tr><th>Игрок</th><th>Выполнено</th>{% for req in group.requirements %}<th>{{ req.name }}<br>{{ req.label }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for player in group.rows %}<tr>
+                <td><a href="/player/{{ player.code }}">{{ player.name }}</a>{% if not player.cached %} <span class="muted">нет данных</span>{% endif %}</td>
+                <td>{{ player.done }} / {{ player.total }}</td>
+                {% for cell in player.cells %}<td>{{ '✅' if cell.met else '❌' }} {{ cell.current }}</td>{% endfor %}
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        <form method="post" action="/tasks/groups/{{ group.id }}/archive">
+            <input type="hidden" name="archived" value="{{ 'false' if view == 'archive' else 'true' }}">
+            <button type="submit" class="button-secondary">{{ 'Вернуть группу' if view == 'archive' else 'Скрыть группу в архив' }}</button>
+        </form>
+        <p class="muted">Архив группы скрывает её из списка. Назначенные задачи продолжают проверяться.</p>
+    </details>
+    {% else %}<p class="muted">Групп пока нет.</p>{% endfor %}
+</div>
+{% endif %}

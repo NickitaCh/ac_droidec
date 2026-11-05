@@ -315,6 +315,10 @@ async def sync_units(comlink) -> int:
     database.prune_game_units(units_to_db.keys())
     database.set_unit_thumbnails(thumbnails)
     database.set_unit_gear_recipes(gear_recipes)
+    database.set_bot_state("unit_alignments", json.dumps({
+        u["baseId"]: u["forceAlignment"] for u in _canonical_units(units_list)
+        if u.get("baseId") and u.get("forceAlignment") is not None
+    }), guild_id=0)
     # selftag_<юнит> → base_id: в условиях входа событий юниты указаны категориями,
     # и имя категории не всегда совпадает с base_id (selftag_asajventriss → ASAJVENTRESS).
     # Читает services/journey_guide.py.

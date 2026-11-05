@@ -4575,6 +4575,9 @@ def _ensure_stat_plate_squads_table(cursor):
     """Необязательный состав отряда плейта: [{"base_id", "min_relic"?}, ...], как у ДК
     (datacron_requirement_squads). /статы с «с_отрядом» не проверяет плейт у игроков без
     отряда; в модульном плейте действует отряд плейта-источника каждой строки."""
+    cursor.execute("""CREATE TABLE IF NOT EXISTS stat_character_squads (
+        guild_id INTEGER NOT NULL, plate_name TEXT NOT NULL, base_id TEXT NOT NULL,
+        units_json TEXT NOT NULL, PRIMARY KEY (guild_id, plate_name, base_id))""")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS stat_plate_squads (
             guild_id INTEGER NOT NULL,
@@ -4602,6 +4605,22 @@ def set_stat_plate_squad(plate_name: str, units: list, guild_id: int = 1):
     conn.close()
 
 
+@guard_edit("plate", "plate_name")
+def set_stat_character_squad(plate_name: str, base_id: str, units: list, guild_id: int = 1):
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        _ensure_stat_plate_squads_table(conn.cursor())
+        if units:
+            conn.execute("INSERT OR REPLACE INTO stat_character_squads VALUES (?, ?, ?, ?)",
+                         (guild_id, plate_name, base_id, json.dumps(units, ensure_ascii=False)))
+        else:
+            conn.execute("DELETE FROM stat_character_squads WHERE guild_id=? AND plate_name=? AND base_id=?",
+                         (guild_id, plate_name, base_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_stat_plate_squads(guild_id: int = 1) -> dict:
     """{plate_name: [units]} — все заданные отряды плейтов гильдии."""
     conn = sqlite3.connect(DB_NAME)
@@ -4610,8 +4629,10 @@ def get_stat_plate_squads(guild_id: int = 1) -> dict:
     conn.commit()
     cursor.execute("SELECT plate_name, units_json FROM stat_plate_squads WHERE guild_id = ?", (guild_id,))
     rows = cursor.fetchall()
+    cursor.execute("SELECT plate_name, base_id, units_json FROM stat_character_squads WHERE guild_id = ?", (guild_id,))
+    chars = cursor.fetchall()
     conn.close()
-    result = {}
+    result = {p + "\x1f" + b: json.loads(raw) for p, b, raw in chars}
     for plate_name, units_json in rows:
         try:
             units = json.loads(units_json)
@@ -4823,6 +4844,7 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
             "UPDATE stat_plate_squads SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
             (new_name, guild_id, old_name)
         )
+        cursor.execute("UPDATE stat_character_squads SET plate_name=? WHERE guild_id=? AND plate_name=?", (new_name, guild_id, old_name))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -4919,6 +4941,7 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     _ensure_stat_plate_squads_table(cursor)
     cursor.execute("DELETE FROM stat_plate_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
+    cursor.execute("DELETE FROM stat_character_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     conn.commit()
     conn.close()
     return deleted

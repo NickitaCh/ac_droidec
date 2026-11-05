@@ -468,7 +468,9 @@ def _squad_filter(values: dict, reqs_by_key: dict, missing: dict, plate_name: st
     if not missing:
         return values, None
     kept = {k: v for k, v in values.items()
-            if (reqs_by_key.get(k, {}).get("source") or plate_name) not in missing}
+            if (reqs_by_key.get(k, {}).get("source") or plate_name) not in missing
+            and (reqs_by_key.get(k, {}).get("source") or plate_name) + "\x1f" + reqs_by_key.get(k, {}).get("base_id", "") not in missing
+            and plate_name + "\x1f" + reqs_by_key.get(k, {}).get("base_id", "") not in missing}
     return kept, (None if kept or not values else next(iter(missing.values())))
 
 

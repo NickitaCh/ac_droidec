@@ -255,9 +255,15 @@ def _failed_groups(current: list) -> list:
 
 @router.get("", response_class=HTMLResponse)
 async def tasks_list(request: Request, user: dict = Depends(feature_flags.require_feature("tasks"))):
+    from services import task_groups
     guild_id = user["guild_id"]
     status_filter = request.query_params.get("status")
     view = request.query_params.get("view", "flat")
+    groups = task_groups.list_groups(guild_id, archived=view == "archive")
+    for group in groups:
+        for req in group["requirements"]:
+            req["name"] = database.get_game_unit_name(req["base_id"]) or req["base_id"]
+            req["label"] = _target_label(req["type"], req["value"])
 
     rows = database.get_all_tasks(guild_id)
     # Имена — включая выбывших из гильдии (их задачи в архиве со статусом LEFT), а список
@@ -379,6 +385,7 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
     return templates.TemplateResponse(request, "tasks.html", {
         "user": user,
         "tasks": tasks_ctx,
+        "task_groups": await asyncio.to_thread(task_groups.reports, guild_id, groups),
         "status_filter": status_filter,
         "view": view,
         "counts": counts,
@@ -403,6 +410,54 @@ async def tasks_list(request: Request, user: dict = Depends(feature_flags.requir
         "personal_count": len(personal),
         "config_warning": config_warning_html(database.get_guild_config(guild_id), "tasks"),
     })
+
+
+@router.post("/groups/create")
+async def group_create(request: Request, user: dict = Depends(feature_flags.require_feature("tasks"))):
+    from services import task_groups
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    deadline = str(form.get("deadline") or "").strip()
+    requirements = []
+    error = _validate_deadline(deadline)
+    if not name or len(name) > 100:
+        error = "Укажите название группы до 100 символов."
+    for i in range(1, 21):
+        base_id = str(form.get(f"unit_{i}") or "").strip()
+        if not base_id:
+            continue
+        kind = str(form.get(f"type_{i}") or "relic")
+        value = str(form.get(f"value_{i}") or "").strip()
+        if not database.get_game_unit_name(base_id):
+            error = "Выберите персонажей из справочника."
+            break
+        error = error or _validate_target(base_id, kind, value)
+        if kind in ("stars", "relic", "gear") and value.isdigit():
+            low, high = {"stars": (1, 7), "relic": (0, 10), "gear": (1, 13)}[kind]
+            if not low <= int(value) <= high:
+                error = "Цель прокачки вне допустимого диапазона."
+        req = {"base_id": base_id, "type": kind, "value": value}
+        if req not in requirements:
+            requirements.append(req)
+    roster = {str(code) for _, code, _ in database.get_all_user_mappings(user["guild_id"])}
+    codes = list(dict.fromkeys(c for c in form.getlist("ally_codes") if c in roster))
+    if not codes or not requirements:
+        error = error or "Выберите игроков и добавьте хотя бы одного персонажа."
+    if error:
+        return RedirectResponse("/tasks?" + urlencode({"error": error}), status_code=303)
+    _gid, created = await asyncio.to_thread(task_groups.create, user["guild_id"], name, requirements, codes,
+                                           deadline, str(user["discord_id"]))
+    lines = {code: name + ": " + ", ".join((database.get_game_unit_name(r["base_id"]) or r["base_id"]) + " — " +
+             _target_label(r["type"], r["value"]) for r in reqs) for code, reqs in created.items()}
+    await _mention_new_tasks(user["guild_id"], lines)
+    return RedirectResponse("/tasks?" + urlencode({"notice": f"Группа «{name}» создана."}), status_code=303)
+
+
+@router.post("/groups/{group_id}/archive")
+async def group_archive(group_id: int, archived: bool = Form(True), user: dict = Depends(feature_flags.require_feature("tasks"))):
+    from services import task_groups
+    task_groups.archive(user["guild_id"], group_id, archived)
+    return RedirectResponse("/tasks", status_code=303)
 
 
 @router.get("/api/players", response_class=JSONResponse)

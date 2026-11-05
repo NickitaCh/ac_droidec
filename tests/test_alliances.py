@@ -162,6 +162,7 @@ class AllianceTests(unittest.TestCase):
         self.plate("Источник")
         database.set_character_scheme_label("Источник", "TEST", 1, "Скорость", self.owner)
         database.set_stat_plate_squad("Источник", [{"base_id": "TEST", "min_relic": 7}], self.owner)
+        database.set_stat_character_squad("Источник", "TEST", [{"base_id": "OTHER", "min_relic": 5}], self.owner)
         database.create_stat_plate("Модульный", "", "x", guild_id=self.owner, modular=True)
         database.set_stat_plate_components("Модульный", [("Источник", "")], "x", self.owner)
         sid = a.share(self.owner, "plate", "Модульный", [self.member], True, True)
@@ -172,6 +173,7 @@ class AllianceTests(unittest.TestCase):
         self.assertNotEqual(leaf, "Источник")
         self.assertEqual(database.get_character_scheme_labels(leaf, "TEST", self.member)[1], "Скорость")
         self.assertEqual(database.get_stat_plate_squads(self.member)[leaf][0]["min_relic"], 7)
+        self.assertEqual(database.get_stat_plate_squads(self.member)[leaf + "\x1fTEST"][0]["min_relic"], 5)
         with self.assertRaises(a.AllianceError):
             database.delete_stat_plate(leaf, self.member)
 

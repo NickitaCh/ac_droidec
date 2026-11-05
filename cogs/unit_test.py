@@ -20,7 +20,7 @@ from disnake.ext import commands
 
 import database
 import guild_resolver
-from services import public_checks
+from services import public_checks, bot_profiles
 import stat_engine
 from cogs.unit_forecast import (
     LEGACY_UNIT_COMMANDS, ROKAMORA_ALLY_CODE, _parse_bracket_id, autocomplete_character_unit,
@@ -81,6 +81,8 @@ class CompareSetupView(disnake.ui.View):
         self.codes: list[str] = []
         self.with_self = False
         self.rokamora = False
+        if bot_profiles.current_profile() == "prod":
+            self.remove_item(self.rokamora_button)
 
         self.user_select = disnake.ui.UserSelect(placeholder="Участники Discord", min_values=0, max_values=COMPARE_SLOTS, row=0)
         self.user_select.callback = self._on_users
@@ -128,6 +130,8 @@ class CompareSetupView(disnake.ui.View):
 
     @disnake.ui.button(label="Rokamora: нет", style=disnake.ButtonStyle.secondary, row=1)
     async def rokamora_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        if bot_profiles.current_profile() == "prod":
+            return
         self.rokamora = not self.rokamora
         button.label = f"Rokamora: {'да' if self.rokamora else 'нет'}"
         button.style = disnake.ButtonStyle.primary if self.rokamora else disnake.ButtonStyle.secondary

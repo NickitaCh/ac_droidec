@@ -264,9 +264,11 @@ async def _handle_message(app: App, message: dict):
     if gid is not None and not bot_profiles.serves(gid):
         text = message.get("text") or ""
         head = text.split(maxsplit=1)[0] if text else ""
-        if head.lower().endswith("@" + app.username.lower()) and _parse_command(text, app.username):
+        direct = head.lower().endswith("@" + app.username.lower()) and _parse_command(text, app.username)
+        if direct and not bot_profiles.accepts(gid, getattr(app, "profile", None)):
             await app.api.send_message(message["chat"]["id"], bot_profiles.mismatch_message(gid, "telegram", profile=getattr(app, "profile", None)) or "Этот чат обслуживает другой бот.")
-        return
+        if not direct or not bot_profiles.accepts(gid, getattr(app, "profile", None)):
+            return
     if message.get("migrate_to_chat_id"):
         store.update_chat_id(message["chat"]["id"], message["migrate_to_chat_id"])
         return
@@ -328,7 +330,7 @@ async def _handle_callback(app: App, query: dict):
         return
     ctx = Ctx(app, message, query["from"], payload, callback_query=query)
     gid = store.chat_guild(ctx.chat_id) if not ctx.is_private else ctx.access.get("guild_id")
-    if not bot_profiles.serves(gid):
+    if not bot_profiles.accepts(gid, getattr(app, "profile", None)):
         await app.api.answer_callback(query["id"], "Этот аккаунт обслуживает другой бот.", alert=True)
         await ctx.reply(bot_profiles.mismatch_message(gid, "telegram", profile=getattr(app, "profile", None)) or "Нет доступа.")
         return

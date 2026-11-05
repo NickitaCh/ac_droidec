@@ -107,10 +107,10 @@ class RuntimeProfileTests(unittest.IsolatedAsyncioTestCase):
             access = guild_resolver.resolve_access("owner")
             self.assertEqual(access["guild_id"], self.test_gid)
             message = profiles.mismatch_message(access["guild_id"], "telegram")
-            self.assertIn("https://t.me/original_bot", message)
+            self.assertIsNone(message)
             self.assertEqual(access["ally_code"], "123456789")
 
-    async def test_wrong_bot_command_returns_link_without_running_handler(self):
+    async def test_prod_accepts_test_account_without_switching_it(self):
         app = self.app("prod")
         cmd = core.Command("profile_test", AsyncMock(), "Profile", tier=core.TIER_REGISTERED)
         database.set_bot_state("telegram_bot_username", "original_bot", guild_id=0)
@@ -118,8 +118,17 @@ class RuntimeProfileTests(unittest.IsolatedAsyncioTestCase):
         message = {"chat": {"id": 123, "type": "private"}, "from": {"id": 123}, "text": "/profile_test", "message_id": 10}
         with patch.dict(core.COMMANDS, {"profile_test": cmd}), patch.object(guild_resolver, "resolve_access", return_value=access):
             await core._handle_message(app, message)
+        cmd.handler.assert_awaited_once()
+
+    async def test_test_rejects_prod_account(self):
+        app = self.app("test")
+        cmd = core.Command("profile_test", AsyncMock(), "Profile", tier=core.TIER_REGISTERED)
+        access = {"guild_id": self.prod_gid, "tier": "officer", "is_super_admin": False}
+        message = {"chat": {"id": 123, "type": "private"}, "from": {"id": 123}, "text": "/profile_test", "message_id": 10}
+        with patch.dict(core.COMMANDS, {"profile_test": cmd}), patch.object(guild_resolver, "resolve_access", return_value=access):
+            await core._handle_message(app, message)
         cmd.handler.assert_not_awaited()
-        self.assertIn("https://t.me/original_bot", app.api.send_message.await_args.args[1])
+        self.assertIn("другой бот", app.api.send_message.await_args.args[1])
 
     async def test_removing_other_bot_from_group_does_not_unbind_it(self):
         store.bind_chat(-100, self.test_gid, "Group", "supergroup", "officer")

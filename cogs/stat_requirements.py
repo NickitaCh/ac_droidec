@@ -682,9 +682,12 @@ def _char_squad_skip(plate_name: str, base_id: str, guild_id: int, missing: dict
     if not missing:
         return set(), None
     leaves = {r[1] for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)}
-    skip = leaves & set(missing)
+    skip = {p for p in leaves if p in missing or p + "\x1f" + base_id in missing}
+    if plate_name + "\x1f" + base_id in missing:
+        return leaves, missing[plate_name + "\x1f" + base_id]
     if leaves and skip == leaves:
-        return skip, missing[sorted(skip)[0]]
+        p = sorted(skip)[0]
+        return skip, missing.get(p + "\x1f" + base_id) or missing[p]
     return skip, None
 
 
@@ -1926,7 +1929,7 @@ class StatRequirementsCog(commands.Cog):
         гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/модули с нормой плейта по релику", choices=SCENARIO_CHOICES),
         вариант: str = commands.Param(default=None, description="Форсировать вариант мод-билда вместо авто-детекта (не действует на персонажей без вариантов)", choices=FORCE_SCHEME_CHOICES),
-        с_отрядом: bool = commands.Param(default=False, description="Только у кого есть отряд плейта (состав задаётся на сайте). По умолчанию — все"),
+        с_отрядом: bool = commands.Param(default=False, description="Учитывать отряды плейта и отдельных персонажей (задаются на сайте). По умолчанию — все"),
         только_кресты: bool = commands.Param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
         альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):

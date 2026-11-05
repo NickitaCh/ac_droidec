@@ -246,10 +246,10 @@ def autocomplete_guild_id(inter) -> int | None:
         alt = alt_account(inter.author)
         if alt is not None:
             from services import bot_profiles
-            return alt["guild_id"] if bot_profiles.serves(alt["guild_id"]) else None
+            return alt["guild_id"] if bot_profiles.accepts(alt["guild_id"]) else None
     from services import bot_profiles
     guild_id = resolve_guild_id(inter.author)
-    return guild_id if bot_profiles.serves(guild_id) else None
+    return guild_id if bot_profiles.accepts(guild_id) else None
 
 
 ALT_PARAM_DESCRIPTION = "Ваш второй аккаунт (альт или аккаунт в другой гильдии) вместо основного"

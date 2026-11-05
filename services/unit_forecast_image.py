@@ -118,7 +118,10 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
     gp_cells = [(_int(cur["gp"]) if cur["gp"] else "—", TEXT, None)]
     if proj:
         gp_cells.append((_int(proj["gp"]) if proj["gp"] else "—", _delta_color(cur["gp"], proj["gp"]), None))
-    row("ГМ", gp_cells, PANEL, True)
+    from services import unit_alignment
+    if unit_alignment.side(base_id) == "neutral":
+        gp_cells = [(text, (25, 28, 35), badge) for text, _color, badge in gp_cells]
+    row("ГМ", gp_cells, unit_alignment.color(base_id), True)
 
     percent = result["percent"]
     for gi, group in enumerate(result["groups"]):

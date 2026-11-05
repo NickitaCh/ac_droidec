@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from services import toon
+from services import toon, unit_alignment
 from services.profile_image import (
     BG, GEAR_BG, GOLD, LABEL_FG, MUTED, PANEL, PANEL_ALT, RELIC_BG, TEXT, _dec, _font, _int, _portrait,
 )
@@ -167,9 +167,10 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
         draw.text((bx, badge_y + 1), str(count), font=font_b, fill=TEXT, anchor="mm", stroke_width=2, stroke_fill=(10, 10, 14))
 
     y_stats = py + PIC + 26
-    draw.rectangle((lx, y_stats, lx + LEFT_W - 1, y_stats + 30), fill=(120, 30, 30))
+    side = unit_alignment.side(base_id)
+    draw.rectangle((lx, y_stats, lx + LEFT_W - 1, y_stats + 30), fill=unit_alignment.color(base_id))
     draw.text((lx + LEFT_W // 2, y_stats + 15), f"ГМ {_int(card['gp'])}" if card["gp"] else "ГМ —",
-              font=_font(19, True), fill=TEXT, anchor="mm")
+              font=_font(19, True), fill=(25, 28, 35) if side == "neutral" else TEXT, anchor="mm")
     y_stats += 32
     label_w = 140
     for i, name in enumerate(toon.STATS):

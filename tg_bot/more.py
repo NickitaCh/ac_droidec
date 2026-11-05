@@ -653,6 +653,26 @@ async def cmd_tasks(ctx: Ctx):
         await ctx.reply(off)
         return
     text, (guild_mode,) = _split_flags(ctx.args, GUILD_WORDS)
+    group_args = text.strip().split()
+    if group_args and group_args[0].lower() in {"groups", "группы", "группа"}:
+        if ctx.access["tier"] != "officer":
+            await ctx.reply(SELF_ONLY)
+            return
+        from services import task_groups
+        groups = task_groups.list_groups(guild_id)
+        selected = group_args[1] if len(group_args) > 1 else None
+        if selected is not None:
+            groups = [g for g in groups if str(g["id"]) == selected]
+        lines = ["<b>Группы задач</b>"]
+        for r in await asyncio.to_thread(task_groups.reports, guild_id, groups):
+            group = r
+            lines.append(f"<b>{group['id']} · {esc(group['name'])}</b> — готовы {r['ready']} из {r['total']} · выполнено {r['done']} из {r['checks']}")
+            if selected is not None:
+                lines += [f"{esc(p['name'])} — {p['done']} / {p['total']}" for p in r["rows"]]
+        lines.append("/tasks группы НОМЕР — раскрыть группу\nhttps://swgoh-sng.ru/tasks")
+        for chunk in _html_chunks(lines):
+            await ctx.reply(chunk)
+        return
     if guild_mode:
         if ctx.access["tier"] != "officer":
             await ctx.reply(SELF_ONLY)

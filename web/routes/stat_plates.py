@@ -284,10 +284,17 @@ async def plates_edit_description(
 
 @router.post("/{plate_name}/squad", response_class=HTMLResponse)
 async def plates_squad_save(request: Request, plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
-    squad, error = _squad_from_form(await request.form())
+    form = await request.form()
+    squad, error = _squad_from_form(form)
     if error:
         return RedirectResponse(f"/plates/{plate_name}?{urlencode({'error': error})}", status_code=303)
-    database.set_stat_plate_squad(plate_name, squad, guild_id=user["guild_id"])
+    base_id = str(form.get("base_id") or "")
+    if base_id:
+        if base_id not in database.get_stat_requirement_characters(plate_name, guild_id=user["guild_id"]):
+            return RedirectResponse(f"/plates/{plate_name}", status_code=303)
+        database.set_stat_character_squad(plate_name, base_id, squad, guild_id=user["guild_id"])
+    else:
+        database.set_stat_plate_squad(plate_name, squad, guild_id=user["guild_id"])
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
@@ -370,6 +377,8 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         scheme1_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 1]
         scheme2_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 2]
         characters.append({
+            "squad_rows": _squad_rows(database.get_stat_plate_squads(guild_id).get(plate_name + "\x1f" + base_id, [])),
+            "squad_label": _squad_label(database.get_stat_plate_squads(guild_id).get(plate_name + "\x1f" + base_id, [])),
             "base_id": base_id, "name": _unit_name(base_id), "requirements": reqs,
             "has_schemes": has_schemes,
             "scheme_leaf_plate": scheme_leaf_plate,

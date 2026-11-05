@@ -67,7 +67,7 @@ def _ensure_resources(c):
                  "datacron_requirement_squads", "guild_omicron_priority", "guild_omicron_requirement_rules"):
         getattr(database, "_ensure_" + name + "_table")(c)
     tables = {
-        "plate": ("stat_plates", "stat_requirements", "stat_plate_components", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads"),
+        "plate": ("stat_plates", "stat_requirements", "stat_plate_components", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads"),
         "dc_base": ("datacron_requirements", "datacron_requirement_stats", "datacron_requirement_squads"),
         "dc_focused": ("datacron_focused_requirements", "datacron_requirement_squads"),
         "omicrons": ("guild_omicron_priority", "guild_omicron_requirement_rules"),
@@ -262,6 +262,8 @@ def _snapshot(c, gid, kind, key):
         leaves = list(dict.fromkeys(leaf for leaf, _ in pairs))
         return {"title": key, "description": plate["description"], "requirements": reqs,
                 "schemes": schemes, "order": order, "squads": _rows(c, "stat_plate_squads", gid, " AND plate_name=?", (key,)),
+                "char_squads": _rows(c, "stat_character_squads", gid, " AND plate_name=?", (key,)),
+                "leaf_char_squads": {leaf: _rows(c, "stat_character_squads", gid, " AND plate_name=?", (leaf,)) for leaf in leaves},
                 "modular": bool(plate["is_modular"]), "pairs": pairs,
                 "leaf_squads": {leaf: _rows(c, "stat_plate_squads", gid, " AND plate_name=?", (leaf,)) for leaf in leaves}}
     if kind in ("dc_base", "dc_focused"):
@@ -308,20 +310,24 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
                 leaf_snapshot = {**snapshot, "modular": False, "description": "Источник плейта «%s»" % name,
                                  "requirements": reqs, "schemes": [r for r in snapshot["schemes"] if r["plate_name"] == leaf],
                                  "order": list(dict.fromkeys(ck for lp, ck in snapshot["pairs"] if lp == leaf)),
-                                 "squads": snapshot["leaf_squads"].get(leaf, [])}
+                                 "squads": snapshot["leaf_squads"].get(leaf, []),
+                                 "char_squads": snapshot.get("leaf_char_squads", {}).get(leaf, [])}
                 _apply(c, gid, "plate", leaf_snapshot, child, actor)
                 c.execute("INSERT OR IGNORE INTO alliance_plate_children VALUES(?,?,?)", (gid, name, child))
             c.execute("INSERT INTO stat_plates(guild_id,name,description,created_by,created_at,is_modular) VALUES(?,?,?,?,datetime('now'),1) ON CONFLICT(guild_id,name) DO UPDATE SET description=excluded.description,is_modular=1", (gid, name, snapshot["description"], actor))
             for leaf, character in snapshot["pairs"]:
                 c.execute("INSERT OR IGNORE INTO stat_plate_components(guild_id,parent_plate,source_plate,character_key,created_by,created_at) VALUES(?,?,?,?,?,datetime('now'))", (gid, name, names[leaf], character, actor))
             c.execute("DELETE FROM stat_plate_squads WHERE guild_id=? AND plate_name=?", (gid, name))
+            c.execute("DELETE FROM stat_character_squads WHERE guild_id=? AND plate_name=?", (gid, name))
+            for row in snapshot.get("char_squads", []):
+                _insert(c, "stat_character_squads", row, guild_id=gid, plate_name=name)
             for row in snapshot["squads"]:
                 _insert(c, "stat_plate_squads", row, guild_id=gid, plate_name=name)
             return name
         # Updates replace only the linked plate; unrelated guild data stays untouched.
         c.execute("DELETE FROM stat_plate_components WHERE guild_id=? AND parent_plate=?", (gid, name))
         c.execute("DELETE FROM alliance_plate_children WHERE guild_id=? AND parent_plate=?", (gid, name))
-        for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads"):
+        for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads"):
             c.execute("DELETE FROM " + table + " WHERE guild_id=? AND plate_name=?", (gid, name))
         c.execute("INSERT INTO stat_plates(guild_id,name,description,created_by,created_at,is_modular) VALUES(?,?,?,?,datetime('now'),0) ON CONFLICT(guild_id,name) DO UPDATE SET description=excluded.description,is_modular=0", (gid, name, snapshot["description"], actor))
         for row in snapshot["requirements"]:
@@ -337,6 +343,8 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
             c.execute("INSERT INTO stat_plate_character_order VALUES(?,?,?,?)", (gid, name, character, n))
         for row in snapshot["squads"]:
             _insert(c, "stat_plate_squads", row, guild_id=gid, plate_name=name)
+        for row in snapshot.get("char_squads", []):
+            _insert(c, "stat_character_squads", row, guild_id=gid, plate_name=name)
         return name
     if kind in ("dc_base", "dc_focused"):
         table = "datacron_requirements" if kind == "dc_base" else "datacron_focused_requirements"

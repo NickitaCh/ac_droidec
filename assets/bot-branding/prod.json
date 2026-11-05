@@ -1,0 +1,5 @@
+{
+  "asset": "prod.png",
+  "generator": "built-in image_gen",
+  "prompt": "Use case: logo-brand. Create a square Discord and Telegram bot avatar for «Дроидец», a Star Wars Galaxy of Heroes guild management assistant. A single iconic droideka rolling battle droid in deployed three-legged stance, bronze metal curved armored shell, twin blasters, clearly recognizable silhouette; polished game illustration with clean strong shapes and dramatic lighting. Dark navy background, subtle warm gold rim glow. Centered, fills 75% of image, must remain legible at 48 pixels and inside circular crop. No letters, no text, no logos, no extra characters. One square image, opaque background."
+}

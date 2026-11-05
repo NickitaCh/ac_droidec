@@ -7,7 +7,7 @@ import database
 import guild_resolver
 from services import bot_profiles, feature_flags, fun_features
 from services.units_sync import sync_units
-from services import journey_guide
+from services import journey_guide, task_groups
 from services.equipment_sync import sync_equipment
 from tg_bot import outbox
 # Напрямую импортируем готовую рабочую функцию автозаполнения игроков
@@ -409,6 +409,32 @@ class TasksCog(commands.Cog):
     @commands.slash_command(name="задачи", description="Прогресс по задачам на прокачку (постановка — на сайте)")
     async def tasks_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
+
+    @tasks_group.sub_command(name="группы", description="Прогресс гильдии по именованным группам задач")
+    async def tasks_groups_report(self, inter: disnake.ApplicationCommandInteraction,
+                                  группа: int = commands.Param(default=None, description="Номер группы из списка; пусто — все группы")):
+        await inter.response.defer()
+        guild_id = await guild_resolver.require_feature(inter, "tasks")
+        if guild_id is None:
+            return
+        if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+            await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
+            return
+        groups = task_groups.list_groups(guild_id)
+        if группа is not None:
+            groups = [g for g in groups if g["id"] == группа]
+        lines = []
+        for r in await asyncio.to_thread(task_groups.reports, guild_id, groups):
+            group = r
+            lines.append(f"**{group['id']} · {group['name']}** — готовы {r['ready']} из {r['total']} · выполнено {r['done']} из {r['checks']}")
+            if группа is not None:
+                for player in r["rows"]:
+                    lines.append(f"{player['name']} — {player['done']} / {player['total']}")
+        lines.append("[Открыть группы задач на сайте](https://swgoh-sng.ru/tasks)")
+        embeds = _lines_to_embeds("Группы задач", DATACRON_LIST_COLOR, lines)
+        await inter.edit_original_response(embed=embeds[0])
+        for embed in embeds[1:]:
+            await inter.followup.send(embed=embed)
 
     @tasks_group.sub_command(name="отчёт", description="Прогресс по своим задачам (чужие и по всей гильдии — 🔒 офицеры)")
     async def tasks_report(

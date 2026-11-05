@@ -42,6 +42,8 @@
         <p class="badge badge-ok">✅ Справочник юнитов обновлён: {{ synced }} записей</p>
     {% endif %}
 
+    {% include "_task_groups.html" %}
+
     <div class="panel task-form-panel">
         <div class="panel-title"><span>Новая задача</span></div>
         {% if prefill.active %}
