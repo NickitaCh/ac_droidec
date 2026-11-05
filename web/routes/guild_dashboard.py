@@ -2579,6 +2579,7 @@ async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: s
         results.append({"char_name": char_name, "block": block, "matched": matched, "total": total, "updated_at": updated_at})
         for item in char_failed_required:
             failed_required.append({"char_name": char_name, **item})
+    results.sort(key=lambda r: r["matched"] >= r["total"])
     return {"loading": False, "results": results, "failed_required": failed_required}
 
 

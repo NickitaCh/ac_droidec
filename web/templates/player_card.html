@@ -50,7 +50,7 @@
             </div>
         {% endif %}
         <nav class="hero-tabs card-tabs" hidden>
-            {% for key, label in [("all", "Всё"), ("tb", "ВИ"), ("checks", "Проверки"), ("tools", "Инструменты")] %}
+            {% for key, label in [("all", "Основное"), ("tb", "ТБ"), ("checks", "Проверки"), ("tools", "Инструменты")] %}
                 <a href="#{{ key }}" data-filter="{{ key }}">{{ label }}</a>
             {% endfor %}
         </nav>
@@ -328,7 +328,7 @@
         {% endif %}
 
         {% if is_officer %}
-        <div class="widget" data-tab="tb">
+        <div class="widget" id="tb-history" data-tab="tb">
             <div class="widget-header">
                 <h2>⚔️ Территориальная битва</h2>
             </div>
@@ -355,9 +355,9 @@
                     <table class="data">
                         <thead><tr><th>ТБ</th><th class="num">Очки</th><th class="num">Юн</th><th class="num">ОЗ</th><th class="num">Волн</th></tr></thead>
                         <tbody>
-                            {% for event_id, completed_at in tb_report_events %}
+                            {% for event_id, completed_at in tb_report_events|reverse %}
                                 {% set s = tb_row.per_event.get(event_id) %}
-                                <tr>
+                                <tr data-tb-history-row{% if loop.index > 5 %} hidden{% endif %}>
                                     <td class="nowrap" title="{{ completed_at[:10] }}">{{ completed_at[8:10] }}.{{ completed_at[5:7] }}.{{ completed_at[2:4] }}</td>
                                     <td class="num nowrap">{{ ui.num(s.summary) if s else "—" }}</td>
                                     <td class="num">{{ s.unit_donated if s else "—" }}</td>
@@ -368,6 +368,31 @@
                         </tbody>
                     </table>
                 </div>
+                {% if tb_report_events|length > 5 %}
+                <div class="filter-row" id="tb-history-pagination" aria-label="Страницы истории ТБ">
+                    <button type="button" data-prev disabled aria-label="Предыдущая страница">←</button>
+                    <span data-page aria-live="polite"></span>
+                    <button type="button" data-next aria-label="Следующая страница">→</button>
+                </div>
+                <script>
+                (() => {
+                    const widget = document.getElementById("tb-history");
+                    const rows = Array.from(widget.querySelectorAll("[data-tb-history-row]"));
+                    const nav = widget.querySelector("#tb-history-pagination");
+                    const pages = Math.ceil(rows.length / 5);
+                    let page = 0;
+                    function render() {
+                        rows.forEach((row, i) => { row.hidden = Math.floor(i / 5) !== page; });
+                        nav.querySelector("[data-page]").textContent = `${page + 1} / ${pages}`;
+                        nav.querySelector("[data-prev]").disabled = page === 0;
+                        nav.querySelector("[data-next]").disabled = page === pages - 1;
+                    }
+                    nav.querySelector("[data-prev]").addEventListener("click", () => { if (page > 0) { page--; render(); } });
+                    nav.querySelector("[data-next]").addEventListener("click", () => { if (page < pages - 1) { page++; render(); } });
+                    render();
+                })();
+                </script>
+                {% endif %}
             {% endif %}
             <p class="widget-more"><a href="{{ card.tb_player_url }}">Подробно по фазам/планетам</a></p>
         </div>
@@ -639,15 +664,6 @@
                 {% if not stats_result.results %}
                     <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
                 {% else %}
-                    {% for r in stats_result.results %}
-                        <div class="panel">
-                            <div class="panel-title">
-                                <span>{{ r.char_name }}</span>
-                                <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
-                            </div>
-                            <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
-                        </div>
-                    {% endfor %}
                     <div class="panel">
                         <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
                         {% if not stats_result.failed_required %}
@@ -670,6 +686,15 @@
                             </div>
                         {% endif %}
                     </div>
+                    {% for r in stats_result.results %}
+                        <div class="panel">
+                            <div class="panel-title">
+                                <span>{{ r.char_name }}</span>
+                                <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
+                            </div>
+                            <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
+                        </div>
+                    {% endfor %}
                 {% endif %}
             {% endif %}
         </div>
