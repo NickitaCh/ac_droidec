@@ -128,6 +128,12 @@ def build_player_rows(guild_id: int, plan: dict, catalog: dict | None) -> list[d
             "units": [unit_names.get(b, b) for b in a["units"]],
             "datacrons": dc_texts,
         })
+    # A withdrawn assignment also needs an update, including players with no rows left.
+    from services import tw_workspace
+    for delivery in tw_workspace.delivery_rows(guild_id, plan["id"]):
+        code = delivery["ally_code"]
+        rows.setdefault(code, {"ally_code": code, "name": names.get(code) or code,
+                              "discord_id": discord_by_ally.get(code), "entries": [], "withdrawn": True})
     for row in rows.values():
         row["channels"] = tb_platoon_notify.channels(row["discord_id"])
     return sorted(rows.values(), key=lambda r: r["name"].lower())
@@ -140,6 +146,8 @@ def format_dm(guild_name: str, plan_name: str, player_rows: list[dict]) -> list[
     for row in player_rows:
         if multi:
             lines.append(f"**Аккаунт: {row['name']}**")
+        if not row["entries"]:
+            lines.append("**Предыдущие назначения в защиту по этому плану сняты. Ориентируйтесь на новые указания офицеров.**")
         for e in row["entries"]:
             lines.append(f"**{e['zone']} — {e['squad']}: {', '.join(e['units'])}**")
             multiple_dc = len(e["datacrons"]) > 1
@@ -240,6 +248,12 @@ async def send_broadcast(token: str, guild_id: int, plan: dict, catalog: dict | 
                 deliveries.append((ok, f"{label}: " + (("отправлено" if channel == "discord" else "в очереди отправки") if ok else detail)))
                 if not map_ok:
                     deliveries.append((False, f"{label}: {map_detail}"))
+                if plan.get("id"):
+                    from services import tw_workspace
+                    for row in player_rows:
+                        tw_workspace.record_delivery(guild_id, plan["id"], row, channel,
+                            ("queued" if channel == "tg" else "sent") if ok and map_ok else "partial" if ok else "failed",
+                            detail if ok and map_ok else "; ".join(filter(None, (detail, map_detail))))
             count = sum(ok for ok, _ in deliveries)
             status = "sent" if count == len(deliveries) else "partial" if count else "failed"
             for row in player_rows:

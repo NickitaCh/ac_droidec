@@ -47,10 +47,10 @@
                                 <td class="num">{{ p.player_count }}</td>
                                 <td>{{ p.updated_at }}</td>
                                 <td class="twdef-row-actions">
-                                    <form method="post" action="/tw/def/plans/{{ p.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия</button></form>
+                                    <form method="post" action="/tw/def/plans/{{ p.id }}/copy" class="twdef-inline">{{ twui.revision_input(p.revision) }}<button type="submit" class="button-secondary">Копия</button></form>
                                     <form method="post" action="/tw/def/plans/{{ p.id }}/delete" class="twdef-inline"
                                           onsubmit="return confirm('Удалить план «{{ p.name }}» со всеми назначениями?');">
-                                        <button type="submit" class="button-danger">Удалить</button>
+                                        {{ twui.revision_input(p.revision) }}<button type="submit" class="button-danger">Удалить</button>
                                     </form>
                                 </td>
                             </tr>

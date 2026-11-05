@@ -18,7 +18,9 @@
 {% block content %}
     {{ twui.tw_hero("Разведка", "scout", "Своя гильдия против соперника: сводка, участники по рангу и плейты гильдии на обеих сторонах. Текущего соперника игра без входа в аккаунт не показывает — выберите из прошлых ВГ или введите код союзника любого его участника.") }}
 
+    {% if plan %}{{ twui.plan_nav(plan, "scout", workspace) }}{% endif %}
     <form method="get" action="/tw/scout" class="filter-row panel scout-pick">
+        {% if plan %}<input type="hidden" name="plan" value="{{ plan.id }}">{% endif %}
         {% if recent %}
         <label>Из прошлых ВГ
             <select name="opp" onchange="this.form.querySelector('[name=opp_code]').value=''; this.form.submit()">
@@ -62,6 +64,7 @@
             <div class="panel-title"><span>{{ report.own_name }} против {{ report.opp_name }}</span>
                 <span class="panel-hint">ростеры соперника: {{ report.fetched_msk }} МСК{% if report.errors %} · не загрузились {{ report.errors }}{% endif %}</span></div>
             <form method="post" action="/tw/scout/run" class="scout-run">
+                {% if plan %}<input type="hidden" name="plan" value="{{ plan.id }}">{% endif %}
                 <input type="hidden" name="opp" value="{{ opp }}">
                 <details>
                     <summary class="link-btn">Плейты для сравнения ({{ selected_plates|length }})</summary>

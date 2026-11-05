@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% import "_tw.html" as tw %}{% import "_game.html" as game %}
+{% block title %}Предложение защиты — {{ plan.name }}{% endblock %}{% block main_class %}wide{% endblock %}
+{% block content %}{{ tw.tw_hero(plan.name, "plans") }}{{ tw.plan_nav(plan, "strategy") }}
+<section class="panel"><div class="panel-title">Предложение защиты</div><p>Новых назначений: <strong>{{ proposal.rows|length }}</strong>. Целей с нехваткой: <strong>{{ proposal.shortages|length }}</strong>.</p><p class="muted">Существующие назначения закреплены. Подбор учитывает приоритеты целей, дефицит паков, резерв атаки и обязательные ДК. Это последовательный подбор, он не гарантирует единственное лучшее решение.</p>
+{% for s in proposal.shortages %}<p class="config-warning"><strong>{{ zones.get(s.zone, s.zone) }} · {{ s.squad }}</strong> — не хватает {{ s.missing }} отрядов.<br>{{ s.reason }}</p>{% endfor %}
+<div class="tw-proposal-list">{% for a in proposal.rows %}<article class="tw-proposal-row"><div><strong>{{ a.name }}</strong><small>{{ zones[a.zone] }} · {{ a.squad_name }}</small></div><div class="twdef-units">{% for b in a.units %}<span title="{{ unit_names.get(b, b) }}">{{ game.portrait(b, 'xs') }}</span>{% endfor %}</div><small>{{ a.reason }}{% if a.datacron_id %} · ДК назначен{% endif %}</small></article>{% endfor %}</div>
+<form method="post" action="/tw/def/plans/{{ plan.id }}/apply" class="tw-work-form tw-inline-form">{{ tw.revision_input(revision) }}<input type="hidden" name="token" value="{{ token }}"><button{% if not proposal.rows %} disabled{% endif %}>Применить {{ proposal.rows|length }} назначений</button><a class="button button-secondary" href="/tw/def/plans/{{ plan.id }}/strategy">Вернуться к стратегии</a></form></section>
+{% endblock %}

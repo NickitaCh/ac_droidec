@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
-from services import feature_flags, guild_compare, mod_compare, stat_forecast, tw_scout
+from services import feature_flags, guild_compare, mod_compare, stat_forecast, tw_scout, tw_workspace
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -34,13 +34,19 @@ def _selected_plates(guild_id: int) -> list[str]:
 @router.get("", response_class=HTMLResponse)
 async def scout_page(request: Request, opp: str = "", user: dict = Depends(_require)):
     guild_id = user["guild_id"]
+    plan_id = request.query_params.get("plan") or database.get_bot_state("tw_active_plan", guild_id=guild_id)
+    plan = database.get_tw_def_plan(guild_id, int(plan_id)) if str(plan_id).isdigit() else None
+    ws = tw_workspace.workspace(guild_id, plan["id"]) if plan else None
+    if not opp and ws:
+        opp = ws["opponent"]
     opp = opp.strip()
     all_plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     selected = [p for p in _selected_plates(guild_id) if p in all_plates]
     ctx = {"user": user, "opp": opp, "recent": guild_compare.load_recent_opponents(guild_id),
            "label": guild_compare.opponent_label, "plates": all_plates, "selected_plates": selected,
            "plate_sizes": {p: len(database.get_stat_requirement_characters(p, guild_id=guild_id)) for p in all_plates},
-           "report": None, "progress": None, "error": request.query_params.get("error"), "lookup": None}
+           "report": None, "progress": None, "error": request.query_params.get("error"), "lookup": None,
+           "plan": plan, "workspace": ws}
     if opp:
         comlink = _get_comlink()
         lookup = await mod_compare.resolve(comlink, opp)
@@ -69,16 +75,19 @@ async def scout_run(request: Request, opp: str = Form(...), refetch: str = Form(
     """Пересчитать отчёт (с выбранными плейтами); refetch — заново собрать ростеры соперника."""
     guild_id = user["guild_id"]
     form = await request.form()
+    plan_id = str(form.get("plan") or "")
+    plan = database.get_tw_def_plan(guild_id, int(plan_id)) if plan_id.isdigit() else None
+    params = {"opp": opp, **({"plan": plan["id"]} if plan else {})}
     all_plates = set(database.get_all_stat_requirement_plates(guild_id=guild_id))
     plates = [p for p in form.getlist("plates") if p in all_plates]
     database.set_bot_state(PLATES_STATE, json.dumps(plates, ensure_ascii=False), guild_id=guild_id)
     comlink = _get_comlink()
     lookup = await mod_compare.resolve(comlink, opp.strip())
     if not lookup.ok:
-        return RedirectResponse(f"/tw/scout?{urlencode({'opp': opp, 'error': lookup.error})}", status_code=303)
+        return RedirectResponse(f"/tw/scout?{urlencode({**params, 'error': lookup.error})}", status_code=303)
     stat_calc = stat_forecast.cached_stat_calc()
     if stat_calc is None:
         stat_forecast.start_background_build(comlink)
-        return RedirectResponse(f"/tw/scout?{urlencode({'opp': opp, 'error': 'Калькулятор статов ещё загружается — попробуйте через минуту.'})}", status_code=303)
+        return RedirectResponse(f"/tw/scout?{urlencode({**params, 'error': 'Калькулятор статов ещё загружается — попробуйте через минуту.'})}", status_code=303)
     tw_scout.start(comlink, guild_id, lookup, plates, stat_calc, refetch=bool(refetch))
-    return RedirectResponse(f"/tw/scout?{urlencode({'opp': opp})}", status_code=303)
+    return RedirectResponse(f"/tw/scout?{urlencode(params)}", status_code=303)

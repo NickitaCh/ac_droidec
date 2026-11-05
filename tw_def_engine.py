@@ -495,7 +495,8 @@ def used_units_by_player(assignments: list[dict]) -> dict[str, set[str]]:
 def squad_counts_by_player(assignments: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for a in assignments:
-        counts[a["ally_code"]] = counts.get(a["ally_code"], 0) + 1
+        if not a.get("reserve"):
+            counts[a["ally_code"]] = counts.get(a["ally_code"], 0) + 1
     return counts
 
 

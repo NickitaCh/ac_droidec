@@ -1,193 +1,38 @@
 {% extends "base.html" %}
-{% import "_tw.html" as twui %}
-{% import "_game.html" as game %}
-{% block title %}{{ plan.name }} — Расстановка дефа ВГ{% endblock %}
-{% block main_class %}wide{% endblock %}
-
-{% macro unit_strip(units, kind=None) -%}
-<span class="twdef-units">
-    {%- for u in units -%}
-        <span class="twdef-unit{% if kind == 'ship' and loop.index in (2, 5) %} twdef-unit-gap{% endif %}" title="{{ u.name }}{% if u.badge %} · {{ u.badge }}{% endif %}">{{ game.portrait(u.base_id, "xs") }}{% if u.badge %}<span class="twdef-unit-badge">{{ u.badge }}</span>{% endif %}</span>
-    {%- endfor -%}
-</span>
-{%- endmacro %}
-
+{% import "_tw.html" as tw %}{% import "_game.html" as game %}
+{% block title %}{{ plan.name }} — Защита ВГ{% endblock %}{% block main_class %}wide{% endblock %}
+{% macro unit_strip(units, kind=None) -%}<span class="twdef-units">{% for u in units %}<span class="twdef-unit{% if kind == 'ship' and loop.index in (2, 5) %} twdef-unit-gap{% endif %}" title="{{ u.name }}{% if u.badge %} · {{ u.badge }}{% endif %}">{{ game.portrait(u.base_id, 'xs') }}{% if u.badge %}<span class="twdef-unit-badge">{{ u.badge }}</span>{% endif %}</span>{% endfor %}</span>{%- endmacro %}
 {% block content %}
-    {% call twui.tw_hero(plan.name, "plans") %}
-        <div class="hero-kpis">
-            <div class="hero-kpi"><span class="hero-kpi-value">{{ assigned_total }}<span class="hero-kpi-of">/{{ capacity_total }}</span></span><span class="hero-kpi-label">паков расставлено</span></div>
-            <div class="hero-kpi"><span class="hero-kpi-value">{{ players_used }}<span class="hero-kpi-of">/{{ players_total }}</span></span><span class="hero-kpi-label">игроков в дефе</span></div>
-            <div class="hero-kpi"><span class="hero-kpi-value">{{ plan.excluded|length }}</span><span class="hero-kpi-label">не участвуют</span></div>
-        </div>
-    {% endcall %}
+{{ tw.tw_hero(plan.name, 'plans') }}{{ tw.plan_nav(plan, 'defense', workspace) }}
+{% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}{% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
+{% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
+{% if not has_squads %}<p class="config-warning">Добавьте первый пак в <a href="/tw/def/squads/new">библиотеку</a>.</p>{% endif %}
+<div class="tw-defense-head"><div><span class="tw-eyebrow">План защиты{% if workspace.opponent_name %} · {{ workspace.opponent_name }}{% endif %}</span><h2>{{ assigned_total }} <small>из {{ capacity_total }} отрядов</small></h2><p class="muted">{{ players_used }} из {{ players_total }} игроков в защите · ростеры {{ last_sync or 'не загружены' }} UTC</p></div><a class="button" href="/tw/def/plans/{{ plan.id }}/strategy">Стратегия и общий подбор →</a></div>
+{% if plan.note %}<p class="twdef-note">{{ plan.note }}</p>{% endif %}
+<div class="tw-defense-toolbar"><div class="tw-view-tabs" aria-label="Вид защиты">{% for key, label in [('map','Карта'),('players','Игроки'),('problems','Проблемы')] %}<a href="?view={{ key }}" data-tw-view="{{ key }}" class="{{ 'active' if view == key else '' }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}{% if key == 'problems' %}<span>{{ issues|length }}</span>{% endif %}</a>{% endfor %}</div><div class="tw-inline-form"><a class="button button-secondary" href="/tw/def/plans/{{ plan.id }}/text">Текст плана</a><a class="button" href="/tw/def/plans/{{ plan.id }}/notify">Рассылка заданий</a></div></div>
 
-    <p><a href="/tw/def/plans">← Все планы</a> <span class="muted">· ростеры обновлены: {{ last_sync or "—" }} (UTC)</span></p>
-    {% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}
-    {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
-    {% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
-    {% if not has_squads %}<p class="config-warning">В библиотеке нет паков — <a href="/tw/def/squads/new">создайте первый</a>.</p>{% endif %}
-    {% if plan.note %}<p class="twdef-note">{{ plan.note }}</p>{% endif %}
+<section data-tw-view-panel="map"{% if view != 'map' %} hidden{% endif %}>
+<div class="tw-battle-layout"><div class="tw-battlefield"><div class="tw-field-heading"><span>Тыл</span><span>Линия обороны <b>→</b> Фронт</span></div><div class="tw-map-grid">
+{% for column in columns %}<div class="tw-map-column"><span class="tw-column-label">Линия {{ column[0].column }}</span>{% for z in column %}<button type="button" class="tw-zone-card tw-zone-{{ z.kind }}{% if z.count >= z.capacity %} is-full{% endif %}" data-tw-zone="{{ z.key }}" aria-controls="zone-{{ z.key }}" aria-expanded="false" style="--zone-row:{{ z.row }}">
+<span class="tw-zone-top"><strong>{{ z.label }}</strong><span>{{ '◈' if z.kind == 'ship' else '⬡' }}</span></span><span class="tw-zone-total">{{ z.count }} <small>из {{ z.capacity }}</small></span><span class="tw-zone-progress"><span style="width:{{ [100, z.count * 100 // z.capacity]|min }}%"></span></span>
+<span class="tw-zone-packs">{% for g in z.groups[:3] %}<span>{% if g.rows and g.rows[0].units %}{{ game.portrait(g.rows[0].units[0].base_id, 'xs') }}{% endif %}<span>{{ g.squad_name }}</span><b>×{{ g.rows|length }}</b></span>{% else %}<span class="tw-zone-empty">Нет назначений</span>{% endfor %}{% if z.groups|length > 3 %}<small>Ещё паков: {{ z.groups|length - 3 }}</small>{% endif %}</span>
+<span class="tw-zone-footer">{% if z.issue_count %}<span class="tw-zone-warning">Проблем: {{ z.issue_count }}</span>{% elif z.target_count %}<span>Цель: {{ z.target_count }} отрядов</span>{% else %}<span>{{ 'Заполнена' if z.count >= z.capacity else 'Есть свободные места' }}</span>{% endif %}<b>↗</b></span></button>{% endfor %}</div>{% endfor %}
+</div><p class="tw-field-legend"><span><i class="tw-legend-character"></i> Наземные отряды</span><span><i class="tw-legend-ship"></i> Флот</span><span>Нажмите зону, чтобы изменить состав</span></p></div>
+<aside class="tw-zone-inspector" aria-label="Выбранная зона">
+{% for z in zones %}<section id="zone-{{ z.key }}" data-tw-zone-panel="{{ z.key }}"{% if not loop.first %} hidden{% endif %}><header class="tw-inspector-header"><div><span class="tw-eyebrow">{{ 'Флотская зона' if z.kind == 'ship' else 'Наземная зона' }}</span><h2>{{ z.label }}</h2></div><span class="badge {{ 'badge-ok' if z.count >= z.capacity else 'badge-neutral' }}">{{ z.count }} из {{ z.capacity }}</span></header>
+{% if z.issue_count %}<p class="config-warning">Требуют проверки: {{ z.issue_count }}. <a href="?view=problems" data-tw-view="problems">Показать проблемы</a></p>{% endif %}
+{% if z.squads and z.count < z.capacity %}<form method="post" action="/tw/def/plans/{{ plan.id }}/autoadd" class="tw-zone-add-form">{{ tw.revision_input(revision) }}<input type="hidden" name="zone" value="{{ z.key }}"><label>Добавить пак<select name="squad_id" required>{% for s in z.squads %}<option value="{{ s.id }}" data-name="{{ s.name }}">{{ s.name }} · {% if s.free is none %}ждёт данных{% else %}доступно {{ s.free }}{% endif %}</option>{% endfor %}</select></label><div class="tw-inline-form"><label>Количество<input type="number" name="count" value="1" min="1" max="{{ z.capacity - z.count }}"></label><button type="submit">Подобрать</button><button type="button" class="button-secondary" data-twdef-pick data-url="/tw/def/api/plans/{{ plan.id }}/candidates" data-action="/tw/def/plans/{{ plan.id }}/assign" data-zone="{{ z.key }}">Выбрать игроков</button></div></form>{% elif not z.squads %}<p class="muted">Нет подходящих паков в библиотеке.</p>{% endif %}
+{% for g in z.groups %}<details class="tw-inspector-group" open><summary><strong>{{ g.squad_name }}</strong><span>{{ g.rows|length }} отрядов</span></summary>{% for r in g.rows %}<article class="tw-assignment"><div class="tw-assignment-head"><strong>{{ r.name }}</strong><span>{% if r.dc %}<span class="badge badge-ok">ДК</span>{% endif %}{% if r.gone %}<span class="badge badge-danger">Вышел из гильдии</span>{% elif r.excluded %}<span class="badge badge-warn">Не участвует</span>{% endif %}</span></div>{{ unit_strip(r.units, z.kind) }}<div class="tw-assignment-actions"><button type="button" class="button-secondary" data-twdef-move="{{ r.id }}" data-kind="{{ z.kind }}" data-zone="{{ z.key }}">Перенести</button><button type="button" class="button-secondary" data-twdef-del="{{ r.id }}" data-back="#zone-{{ z.key }}">Убрать</button></div></article>{% endfor %}<form method="post" action="/tw/def/plans/{{ plan.id }}/clear" class="tw-work-form" onsubmit="return confirm('Убрать этот пак из зоны?');">{{ tw.revision_input(revision) }}<input type="hidden" name="zone" value="{{ z.key }}"><input type="hidden" name="squad_id" value="{{ g.squad_id or '' }}"><button class="tw-text-button">Убрать группу из зоны</button></form></details>{% else %}<div class="tw-empty-zone"><span>⬡</span><p>Зона пока пуста</p><small>Выберите пак выше или задайте состав в стратегии.</small></div>{% endfor %}</section>{% endfor %}
+</aside></div>
+<details class="panel"><summary class="panel-title">Доступность паков</summary><p class="muted">Доступно сейчас — с учётом назначений, резерва атаки и обязательных ДК.</p><div class="tw-availability-grid">{% for s in squad_stats %}<div><strong>{{ s.name }}</strong><span>В плане: {{ s.placed }}</span><span>{% if s.stats_pending %}Ожидает данных{% else %}Доступно: {{ s.can_now }} из {{ s.can_total }}{% endif %}</span></div>{% endfor %}</div></details>
+</section>
 
-    <div class="twdef-toolbar">
-        <div class="segmented-toggle-options">
-            {% if view == "map" %}<strong>Карта</strong>{% else %}<a href="/tw/def/plans/{{ plan.id }}">Карта</a>{% endif %}
-            {% if view == "players" %}<strong>По игрокам</strong>{% else %}<a href="/tw/def/plans/{{ plan.id }}?view=players">По игрокам</a>{% endif %}
-        </div>
-        <a class="button" href="/tw/def/plans/{{ plan.id }}/text">Текст для Discord</a>
-        <a class="button" href="/tw/def/plans/{{ plan.id }}/notify">Разослать в личку</a>
-        <form method="post" action="/tw/def/plans/{{ plan.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия плана</button></form>
-        {% if assigned_total %}
-            <form method="post" action="/tw/def/plans/{{ plan.id }}/clear" class="twdef-inline" onsubmit="return confirm('Убрать все {{ assigned_total }} назначений из плана?');">
-                <button type="submit" class="button-danger">Очистить всё</button>
-            </form>
-        {% endif %}
-    </div>
+<section data-tw-view-panel="players"{% if view != 'players' %} hidden{% endif %}><div class="tw-player-filters"><input type="search" data-tw-player-search placeholder="Поиск игрока…" aria-label="Поиск игрока"><label class="checkbox"><input type="checkbox" data-tw-player-empty>Только без защиты</label></div><div class="tw-player-grid">{% for p in players %}<article class="panel tw-player-card" data-tw-player="{{ p.name|lower }}" data-count="{{ p.count }}"><header><strong>{{ p.name }}</strong><span class="badge {{ 'badge-neutral' if p.count else 'badge-warn' }}">{{ p.count }} отрядов</span></header>{% if p.gone %}<p class="config-warning">Не в текущем составе</p>{% elif p.excluded %}<p class="muted">Не участвует в этой ВГ</p>{% endif %}{% for e in p.entries %}<div class="tw-player-entry"><strong>{{ e.zone }} · {{ e.squad_name }}</strong>{{ unit_strip(e.units, e.kind) }}<button type="button" class="tw-text-button" data-twdef-del="{{ e.id }}" data-back="?view=players">Убрать назначение</button></div>{% else %}<p class="muted">Назначений в защиту нет.</p>{% endfor %}</article>{% endfor %}</div></section>
 
-    <details class="panel twdef-settings">
-        <summary class="panel-title">Настройки плана <span class="panel-hint">название, вместимость зон, кто не участвует</span></summary>
-        <form method="post" action="/tw/def/plans/{{ plan.id }}/settings" class="twdef-settings-form">
-            <div class="twdef-row-form">
-                <label>Название <input type="text" name="name" value="{{ plan.name }}" maxlength="80" required></label>
-                <label>Паков на зону <input type="number" name="squads_per_zone" value="{{ plan.squads_per_zone }}" min="1" max="100"></label>
-                <label>Флотов на зону <input type="number" name="fleets_per_zone" value="{{ plan.fleets_per_zone }}" min="1" max="100"></label>
-                <label class="twdef-field-wide">Заметка <input type="text" name="note" value="{{ plan.note or '' }}" maxlength="300"></label>
-            </div>
-            <fieldset class="twdef-excluded">
-                <legend>Не участвуют в этой ВГ <span class="muted">(автоподбор их не берёт)</span></legend>
-                <div class="checkbox-grid">
-                    {% for p in roster_players %}
-                        <label class="checkbox"><input type="checkbox" name="excluded" value="{{ p.ally_code }}" {% if p.ally_code in plan.excluded %}checked{% endif %}> {{ p.name }}</label>
-                    {% endfor %}
-                </div>
-            </fieldset>
-            <div><button type="submit">Сохранить настройки</button></div>
-        </form>
-    </details>
+<section data-tw-view-panel="problems"{% if view != 'problems' %} hidden{% endif %}><div class="panel"><div class="panel-title">Проверка назначений</div><p class="muted">Проверяем сохранённый состав по текущим ростерам и требованиям: участие, занятые юниты, резерв атаки и обязательные ДК. Постановку в игре это не подтверждает.</p>{% for i in issues %}<article class="tw-issue"><div><strong>{{ i.name }} · {{ i.squad }}</strong><ul>{% for reason in i.reasons %}<li>{{ reason }}</li>{% endfor %}</ul></div><a class="button button-secondary" href="#zone-{{ i.zone }}" data-tw-jump-zone="{{ i.zone }}">Открыть зону →</a></article>{% else %}<div class="tw-empty"><h3>Проблем с назначениями не найдено</h3><p>Все проверенные назначения соответствуют доступным данным.</p></div>{% endfor %}</div></section>
 
-    {% if view == "map" %}
-        <div class="twdef-map">
-            {% for column in columns %}
-                <div class="twdef-map-col">
-                    <div class="twdef-map-col-title">Зона {{ column[0].column }}{% if column[0].column == 1 %} · фронт{% elif column[0].column == 4 %} · тыл{% endif %}</div>
-                    {% for z in column %}
-                        {% set full = z.count >= z.capacity %}
-                        <section class="twdef-zone twdef-zone-{{ z.kind }}{% if full %} twdef-zone-full{% endif %}" id="zone-{{ z.key }}">
-                            <header class="twdef-zone-head">
-                                <h3>{{ z.label }}</h3>
-                                <span class="twdef-zone-count">{{ z.count }}/{{ z.capacity }}</span>
-                            </header>
-                            <div class="meter-track twdef-zone-meter"><div class="meter-fill" style="width: {{ [100, (z.count * 100 // z.capacity) if z.capacity else 0]|min }}%"></div></div>
-
-                            {% if z.squads and not full %}
-                                <form method="post" action="/tw/def/plans/{{ plan.id }}/autoadd" class="twdef-zone-add">
-                                    <input type="hidden" name="zone" value="{{ z.key }}">
-                                    <select name="squad_id" required aria-label="Пак">
-                                        {% for s in z.squads %}<option value="{{ s.id }}" data-name="{{ s.name }}">{{ s.name }} · {% if s.free is none %}ждёт загрузки{% else %}свободно {{ s.free }}{% endif %}</option>{% endfor %}
-                                    </select>
-                                    <input type="number" name="count" value="1" min="1" max="{{ z.capacity - z.count }}" aria-label="Сколько" title="Сколько паков добавить">
-                                    <button type="submit" title="Подобрать игроков автоматически">Авто</button>
-                                    <button type="button" class="button-secondary" data-twdef-pick
-                                            data-url="/tw/def/api/plans/{{ plan.id }}/candidates"
-                                            data-action="/tw/def/plans/{{ plan.id }}/assign"
-                                            data-zone="{{ z.key }}" title="Выбрать игроков вручную">Выбрать…</button>
-                                </form>
-                            {% elif not z.squads %}
-                                <p class="muted twdef-zone-empty">Нет {{ "флотов" if z.kind == "ship" else "наземных паков" }} в библиотеке.</p>
-                            {% endif %}
-
-                            {% for g in z.groups %}
-                                <details class="twdef-group">
-                                    <summary><span class="twdef-group-name">{{ g.squad_name }}</span> <span class="twdef-group-count">×{{ g.rows|length }}</span></summary>
-                                    <ul class="twdef-rows">
-                                        {% for r in g.rows %}
-                                            <li class="twdef-row{% if r.gone %} twdef-row-gone{% elif r.excluded %} twdef-row-excluded{% endif %}">
-                                                <span class="twdef-row-name">{{ r.name }}{% if r.dc %} <span class="badge badge-ok" title="Игроку назначен датакрон под этот пак">ДК</span>{% endif %}{% if r.gone %} <span class="badge badge-danger">не в гильдии</span>{% elif r.excluded %} <span class="badge badge-warn">не участвует</span>{% endif %}</span>
-                                                {{ unit_strip(r.units, z.kind) }}
-                                                <button type="button" class="twdef-x" data-twdef-move="{{ r.id }}" data-kind="{{ z.kind }}" data-zone="{{ z.key }}" title="Перенести в другую зону">⇄</button>
-                                                <button type="button" class="twdef-x" data-twdef-del="{{ r.id }}" data-back="#zone-{{ z.key }}" title="Убрать">✕</button>
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                    <form method="post" action="/tw/def/plans/{{ plan.id }}/clear" class="twdef-inline twdef-group-clear"
-                                          onsubmit="return confirm('Убрать «{{ g.squad_name }}» из зоны {{ z.label }}?');">
-                                        <input type="hidden" name="zone" value="{{ z.key }}">
-                                        <input type="hidden" name="squad_id" value="{{ g.squad_id or '' }}">
-                                        <button type="submit" class="link-btn twdef-linklike">убрать весь пак из зоны</button>
-                                    </form>
-                                </details>
-                            {% endfor %}
-                        </section>
-                    {% endfor %}
-                </div>
-            {% endfor %}
-        </div>
-
-        <div class="panel">
-            <div class="panel-title">Паки <span class="panel-hint">«свободно» — сколько игроков ещё могут поставить пак с учётом уже занятых в плане юнитов</span></div>
-            {% if squad_stats %}
-                <div class="table-scroll">
-                    <table class="data">
-                        <thead><tr><th>Пак</th><th>Тип</th><th class="num">В плане</th><th class="num">Свободно</th><th class="num">Могут всего</th></tr></thead>
-                        <tbody>
-                            {% for s in squad_stats %}
-                                <tr>
-                                    <td>{{ s.name }}</td>
-                                    <td>{{ "флот" if s.combat_type == "ship" else "наземный" }}</td>
-                                    <td class="num">{{ s.placed }}</td>
-                                    {% if s.stats_pending %}
-                                        <td class="num muted" colspan="2">ждёт загрузки данных</td>
-                                    {% else %}
-                                        <td class="num">{% if s.can_now == 0 and s.can_total > 0 %}<span class="muted">0</span>{% else %}{{ s.can_now }}{% endif %}</td>
-                                        <td class="num">{{ s.can_total }}</td>
-                                    {% endif %}
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <p class="muted">Библиотека паков пуста.</p>
-            {% endif %}
-        </div>
-    {% else %}
-        <div class="panel">
-            <div class="table-toolbar">
-                <input type="search" data-table-search="twdef-players" placeholder="Поиск игрока…">
-            </div>
-            <div class="table-scroll">
-                <table class="data" id="twdef-players">
-                    <thead><tr><th>Игрок</th><th class="num">Паков</th><th>Деф</th></tr></thead>
-                    <tbody>
-                        {% for p in players %}
-                            <tr class="{% if p.excluded %}twdef-row-excluded{% endif %}" data-search="{{ p.name|lower }}">
-                                <td>{{ p.name }}{% if p.gone %} <span class="badge badge-danger">не в гильдии</span>{% elif p.excluded %} <span class="badge badge-warn">не участвует</span>{% elif not p.count %} <span class="badge badge-neutral">без дефа</span>{% endif %}</td>
-                                <td class="num" data-value="{{ p.count }}">{{ p.count }}</td>
-                                <td>
-                                    <ul class="twdef-player-entries">
-                                        {% for e in p.entries %}
-                                            <li>
-                                                <span class="twdef-entry-zone">{{ e.zone }}</span> — {{ e.squad_name }}
-                                                {{ unit_strip(e.units, e.kind) }}
-                                                <button type="button" class="twdef-x" data-twdef-del="{{ e.id }}" data-back="?view=players" title="Убрать">✕</button>
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    {% endif %}
-
-    <form method="post" action="/tw/def/plans/{{ plan.id }}/unassign" id="twdef-del-form" hidden>
-        <input type="hidden" name="assignment_id"><input type="hidden" name="back">
-    </form>
-    <form method="post" action="/tw/def/plans/{{ plan.id }}/move" id="twdef-move-form" hidden>
-        <input type="hidden" name="assignment_id"><input type="hidden" name="zone">
-    </form>
-    <script type="application/json" id="twdef-zones">{{ zone_options | tojson }}</script>
-    {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261102" defer></script>
+<details class="panel tw-plan-settings"><summary class="panel-title">Настройки плана</summary><form method="post" action="/tw/def/plans/{{ plan.id }}/settings" class="tw-work-form">{{ tw.revision_input(revision) }}<div class="tw-form-grid"><label>Название<input name="name" value="{{ plan.name }}" required maxlength="80"></label><label>Паков на зону<input type="number" name="squads_per_zone" value="{{ plan.squads_per_zone }}" min="1" max="100"></label><label>Флотов на зону<input type="number" name="fleets_per_zone" value="{{ plan.fleets_per_zone }}" min="1" max="100"></label><label>Заметка<input name="note" value="{{ plan.note or '' }}" maxlength="300"></label></div><fieldset class="tw-excluded"><legend>Не участвуют в этой ВГ</legend><div class="checkbox-grid">{% for p in roster_players %}<label class="checkbox"><input type="checkbox" name="excluded" value="{{ p.ally_code }}"{% if p.ally_code in plan.excluded %} checked{% endif %}>{{ p.name }}</label>{% endfor %}</div></fieldset><button>Сохранить настройки</button></form><div class="tw-inline-form tw-danger-actions"><form method="post" action="/tw/def/plans/{{ plan.id }}/copy">{{ tw.revision_input(revision) }}<button class="button-secondary">Копия плана</button></form>{% if assigned_total %}<form method="post" action="/tw/def/plans/{{ plan.id }}/clear" onsubmit="return confirm('Убрать все назначения? План сохранится в истории изменений.');">{{ tw.revision_input(revision) }}<button class="button-danger">Очистить назначения</button></form>{% endif %}<a href="/tw/def/plans/{{ plan.id }}/strategy">История и восстановление →</a></div></details>
+<form method="post" action="/tw/def/plans/{{ plan.id }}/unassign" id="twdef-del-form" hidden>{{ tw.revision_input(revision) }}<input type="hidden" name="assignment_id"><input type="hidden" name="back"></form><form method="post" action="/tw/def/plans/{{ plan.id }}/move" id="twdef-move-form" hidden>{{ tw.revision_input(revision) }}<input type="hidden" name="assignment_id"><input type="hidden" name="zone"></form>
+<script type="application/json" id="twdef-zones">{{ zone_options|tojson }}</script>
+{% include "_tw_def_picker.html" %}<script src="/static/tw_def.js?v=20261105" defer></script><script src="/static/tw_workspace.js?v=20261105" defer></script>
 {% endblock %}

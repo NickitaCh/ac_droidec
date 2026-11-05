@@ -2,6 +2,7 @@
    просмотр «кто может», на карте расстановки — выбор игроков с отправкой формы assign. #}
 <dialog id="twdef-picker" class="twdef-picker">
     <form method="post" id="twdef-picker-form" class="twdef-picker-form">
+        {% if revision %}<input type="hidden" name="revision" value="{{ revision }}">{% endif %}
         <div class="twdef-picker-header">
             <div>
                 <h3 id="twdef-picker-title">Кандидаты</h3>

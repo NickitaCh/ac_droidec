@@ -46,32 +46,29 @@
     {% else %}
         <div class="panel">
             <div class="table-scroll">
-                <table class="data">
+                <table class="data cards-on-phone">
                     <thead>
                         <tr>
                             <th>Дата</th>
-                            <th>Результат</th>
-                            <th class="num">Наш счёт</th>
-                            <th class="num">Счёт соперника</th>
                             <th>Соперник</th>
-                            <th class="num">GP соперника</th>
+                            <th class="num">Счёт · мы : они</th>
+                            <th>Результат</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in rows %}
                             <tr>
-                                <td>{{ row.date_label }}</td>
-                                <td><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
-                                <td class="num">{{ "{:,}".format(row.own_score).replace(",", " ") }}</td>
-                                <td class="num">{{ "{:,}".format(row.opponent_score).replace(",", " ") }}</td>
-                                <td>
+                                <td data-label="Дата">{{ row.date_label }}</td>
+                                <td data-label="Соперник">
                                     {% if row.opponent_url %}
                                         <a href="{{ row.opponent_url }}" target="_blank" rel="noopener">{{ row.opponent_name }}</a>
                                     {% else %}
                                         {{ row.opponent_name }}
                                     {% endif %}
+                                    {% if row.opponent_gp %}<div class="cell-sub">ГМ {{ "{:,}".format(row.opponent_gp).replace(",", " ") }}</div>{% endif %}
                                 </td>
-                                <td class="num">{{ "{:,}".format(row.opponent_gp).replace(",", " ") if row.opponent_gp else "—" }}</td>
+                                <td class="num" data-label="Счёт · мы : они">{{ "{:,}".format(row.own_score).replace(",", " ") }} : {{ "{:,}".format(row.opponent_score).replace(",", " ") }}</td>
+                                <td data-label="Результат"><span class="badge badge-{{ row.result_class }}">{{ row.result_label }}</span></td>
                             </tr>
                         {% endfor %}
                     </tbody>

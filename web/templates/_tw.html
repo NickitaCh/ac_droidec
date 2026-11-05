@@ -11,9 +11,10 @@
     {# «Деф» — одна группа: расстановка + библиотека паков (подвкладки). #}
     {% set in_def = active in ("plans", "squads") %}
     <nav class="hero-tabs">
-        {% if active == "history" %}<strong>История</strong>{% else %}<a href="/tw">История</a>{% endif %}
+        {% if active == "command" %}<strong>Текущая ВГ</strong>{% else %}<a href="/tw">Текущая ВГ</a>{% endif %}
         {% if in_def %}<strong>Деф</strong>{% else %}<a href="/tw/def/plans">Деф</a>{% endif %}
         {% if active == "scout" %}<strong>Разведка</strong>{% else %}<a href="/tw/scout">Разведка</a>{% endif %}
+        {% if active == "history" %}<strong>История</strong>{% else %}<a href="/tw/history">История</a>{% endif %}
     </nav>
     {% if in_def %}
         <nav class="hero-subtabs">
@@ -25,3 +26,14 @@
     {% if caller %}{{ caller() }}{% endif %}
 </section>
 {%- endmacro %}
+
+{% macro plan_nav(plan, active, workspace=None) -%}
+<nav class="tw-command-nav" aria-label="Подготовка к ВГ">
+    {% for key, label, href in [("overview", "Обзор", "/tw?plan=" ~ plan.id), ("strategy", "Стратегия", "/tw/def/plans/" ~ plan.id ~ "/strategy"), ("defense", "Защита", "/tw/def/plans/" ~ plan.id), ("attack", "Атака", "/tw/def/plans/" ~ plan.id ~ "/attack"), ("notify", "Рассылка", "/tw/def/plans/" ~ plan.id ~ "/notify")] %}
+    <a href="{{ href }}"{% if active == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+    {% if workspace and workspace.opponent %}<a href="/tw/scout?opp={{ workspace.opponent|urlencode }}&amp;plan={{ plan.id }}"{% if active == 'scout' %} class="active" aria-current="page"{% endif %}>Разведка соперника ↗</a>{% endif %}
+</nav>
+{%- endmacro %}
+
+{% macro revision_input(revision) -%}<input type="hidden" name="revision" value="{{ revision }}">{%- endmacro %}

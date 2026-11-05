@@ -165,6 +165,12 @@ def _tw_guides_sync_status(guild_id: int) -> dict | None:
 
 
 @router.get("/tw", response_class=HTMLResponse)
+async def tw_command(request: Request, user: dict = Depends(feature_flags.require_feature("tw_order"))):
+    from web.routes.tw_defense import command_page
+    return await command_page(request, user)
+
+
+@router.get("/tw/history", response_class=HTMLResponse)
 async def tw_report(request: Request, user: dict = Depends(feature_flags.require_feature("tw_order"))):
     rows = dashboard_data.get_recent_tw_results(user["guild_id"], limit=50)
     wins = sum(1 for r in rows if r.result == "win")
@@ -182,7 +188,7 @@ async def tw_guides_sync(user: dict = Depends(feature_flags.require_feature("tw_
     """Аналог /вг_гайды_синхронизация: заявка боту, он подхватит её за ~20 секунд
     (cogs/tw_counters.py::web_sync_requests_loop)."""
     database.set_bot_state("tw_sync_request", datetime.now(timezone.utc).isoformat(), guild_id=user["guild_id"])
-    return RedirectResponse("/tw", status_code=303)
+    return RedirectResponse("/tw/history", status_code=303)
 
 
 def _parse_event_id(request: Request) -> int | None:

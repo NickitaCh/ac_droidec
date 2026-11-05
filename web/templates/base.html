@@ -9,7 +9,8 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261103alliances">
+    <link rel="stylesheet" href="/static/style.css?v=20261105tw">
+    {% if request.url.path.startswith('/tw') %}<link rel="stylesheet" href="/static/tw_workspace.css?v=20261105">{% endif %}
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
         // который грузится с defer и сработал бы уже после первого кадра —
@@ -92,9 +93,10 @@
                     {{ nav_link("/tb/missions", "🎯", "Бои и ОЗ") }}
                 {% endcall %}
                 {% if user.bot_profile != 'prod' %}{% call nav_group("⚔️", "ВГ", ("/tw",)) %}
+                    {{ nav_link("/tw", "⚔️", "Текущая ВГ", exact=true) }}
                     {{ nav_link("/tw/def/plans", "🛡️", "Деф: расстановка и паки", also=("/tw/def",)) }}
                     {{ nav_link("/tw/scout", "🔭", "Разведка") }}
-                    {{ nav_link("/tw", "📚", "История", exact=true) }}
+                    {{ nav_link("/tw/history", "📚", "История", exact=true) }}
                 {% endcall %}{% endif %}
                 {{ nav_link("/raids", "🐉", "Рейды") }}
             {% endif %}

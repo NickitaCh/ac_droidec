@@ -72,6 +72,15 @@ async def _redirect_unauthenticated_to_login(request: Request, exc: StarletteHTT
         # рендерит персонализированный статус через access_status_message
         # (services/dashboard_data.py), не нужно дублировать текст тут.
         return RedirectResponse("/")
+    if exc.status_code == 409 and request.url.path.startswith("/tw/def/plans/"):
+        import html
+        plan_id = request.url.path.split("/")[4]
+        target = f"/tw/def/plans/{plan_id}" if plan_id.isdigit() else "/tw"
+        return HTMLResponse('<!doctype html><html lang="ru"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<link rel="stylesheet" href="/static/style.css"><main class="error-page">'
+            '<h1>Проверьте актуальный план</h1><p>' + html.escape(str(exc.detail)) + '</p>'
+            '<a class="button" href="' + target + '">Открыть план</a></main></html>', status_code=409)
     return await http_exception_handler(request, exc)
 
 @app.exception_handler(Exception)

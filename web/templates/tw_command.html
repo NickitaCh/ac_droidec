@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% import "_tw.html" as tw %}
+{% import "_game.html" as game %}
+{% block title %}Текущая ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{{ tw.tw_hero("Командный центр", "command") }}
+{% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
+{% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}
+{% if not plan %}
+<section class="panel tw-empty"><h2>Подготовим следующую войну</h2><p>Создайте план защиты, выберите соперника и задайте стратегию.</p><a class="button" href="/tw/def/plans">Создать первый план</a><a href="/tw/def/squads">Библиотека паков →</a></section>
+{% else %}
+<form method="get" action="/tw" class="tw-work-form tw-plan-pick"><label>План войны<select name="plan" onchange="this.form.submit()">{% for p in plans %}<option value="{{ p.id }}"{% if p.id == plan.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><button type="submit" class="button-secondary">Открыть</button><a href="/tw/def/plans">Все планы →</a></form>
+{{ tw.plan_nav(plan, "overview", workspace) }}
+<section class="tw-matchup">
+    <div><span class="tw-eyebrow">Наша гильдия</span><h2>{{ guild_name }}</h2><span>{{ plan.name }}</span></div>
+    <span class="tw-versus">VS</span>
+    <div><span class="tw-eyebrow">Соперник</span><h2>{{ workspace.opponent_name or 'Ещё не выбран' }}</h2><span class="badge badge-neutral">{{ phases[workspace.phase] }}</span></div>
+</section>
+<div class="tw-kpi-grid">
+    <a class="tw-kpi" href="/tw/def/plans/{{ plan.id }}"><span class="tw-eyebrow">Защита</span><strong>{{ assigned }} <small>из {{ capacity }}</small></strong><span>отрядов назначено</span></a>
+    <a class="tw-kpi{% if issues %} tw-kpi-alert{% endif %}" href="/tw/def/plans/{{ plan.id }}?view=problems"><span class="tw-eyebrow">Требуют внимания</span><strong>{{ issues|length }}</strong><span>проблем с назначениями</span></a>
+    <a class="tw-kpi" href="/tw/def/plans/{{ plan.id }}/notify"><span class="tw-eyebrow">Рассылка</span><strong>{{ delivered }} <small>из {{ recipients }}</small></strong><span>аккаунтов без новых изменений</span></a>
+    <a class="tw-kpi" href="/tw/def/plans/{{ plan.id }}/strategy"><span class="tw-eyebrow">Стратегия</span><strong>{{ workspace.targets|length }}</strong><span>целей по зонам</span></a>
+</div>
+<p class="muted">Ростеры: {{ last_sync or 'нет данных' }} UTC. Назначения — план офицеров; фактическая постановка в игре автоматически не проверяется.</p>
+{% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
+<div class="tw-two-col">
+<section class="panel"><div class="panel-title">Следующие действия</div><div class="tw-action-list">
+    <a href="/tw/def/plans/{{ plan.id }}/strategy"><b>01</b><span><strong>Задать стратегию</strong><small>Какие паки нужны в зонах и что сохранить для атаки</small></span><span>→</span></a>
+    <a href="/tw/def/plans/{{ plan.id }}"><b>02</b><span><strong>Собрать защиту</strong><small>Назначить игроков и устранить проблемы</small></span><span>→</span></a>
+    <a href="/tw/def/plans/{{ plan.id }}/notify"><b>03</b><span><strong>Отправить задания</strong><small>Карты и составы в Discord / Telegram</small></span><span>→</span></a>
+    <a href="/tw/def/plans/{{ plan.id }}/attack"><b>04</b><span><strong>Подготовить атаку</strong><small>Контры из гайдов и приказы по зонам</small></span><span>→</span></a>
+</div></section>
+<section class="panel"><div class="panel-title">Что видно в разведке</div>
+{% if scout_report %}<p class="muted">Ростеры соперника: {{ scout_report.fetched_msk }} МСК.{% if scout_report.errors %} Не загружено игроков: {{ scout_report.errors }}.{% endif %} Это состав гильдии, участие в конкретной ВГ неизвестно.</p>
+<div class="tw-difference-list">{% for d in differences %}<div>{{ game.portrait(d.base_id, "xs") }}<span>{{ d.name }}<small>У нас {{ d.own }}, у соперника {{ d.opp }}</small></span><b class="{{ 'scout-win' if d.delta > 0 else 'scout-lose' }}">{{ '%+d'|format(d.delta) }}</b></div>{% else %}<p>По числу владельцев ГЛ и флотов различий нет.</p>{% endfor %}</div>
+{% else %}<p class="muted">Выберите соперника и откройте разведку — здесь появятся различия по ГЛ и флотам.</p>{% endif %}
+{% if workspace.opponent %}<a href="/tw/scout?opp={{ workspace.opponent|urlencode }}&amp;plan={{ plan.id }}">Открыть разведку →</a>{% endif %}
+</section></div>
+{% if result %}<section class="panel"><div class="panel-title">Результат этой ВГ</div><p class="tw-result-score">{{ '{:,}'.format(result[1]).replace(',', ' ') }} <span>:</span> {{ '{:,}'.format(result[2]).replace(',', ' ') }}</p><p>{{ 'Победа' if result[9] == 'win' else 'Поражение' if result[9] == 'loss' else 'Ничья' }} · {{ result[4] }}</p></section>{% endif %}
+<details class="panel"{% if not workspace.opponent %} open{% endif %}><summary class="panel-title">Параметры ВГ</summary>
+<form method="post" action="/tw/def/plans/{{ plan.id }}/campaign" class="tw-work-form">{{ tw.revision_input(revision) }}
+    <div class="tw-form-grid"><label>Соперник<select name="opponent"><option value="">Не выбран</option>{% if workspace.opponent %}<option value="{{ workspace.opponent }}" selected>{{ workspace.opponent_name }}</option>{% endif %}{% for o in recent %}{% if o.id != workspace.opponent %}<option value="{{ o.id }}">{{ opponent_label(o) }}</option>{% endif %}{% endfor %}</select></label>
+    <label>Или код союзника / ID гильдии<input name="opponent_code" maxlength="80" placeholder="123-456-789"></label>
+    <label>Этап<select name="phase">{% for key, label in phases.items() %}<option value="{{ key }}"{% if key == workspace.phase %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Связать с результатом<select name="result_start"><option value="">Пока нет результата</option>{% for r in results if r.opponent == workspace.opponent %}<option value="{{ r.start }}"{% if r.start|string == workspace.result_start|string %} selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></label></div>
+    <p class="muted">Этап задаёт офицер. После сохранения этот план станет текущей ВГ для гильдии.</p><button type="submit">Сохранить</button>
+</form></details>
+{% endif %}
+<script src="/static/tw_def.js?v=20261105" defer></script><script src="/static/tw_workspace.js?v=20261105" defer></script>
+{% endblock %}

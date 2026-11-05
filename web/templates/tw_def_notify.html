@@ -5,7 +5,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     {{ twui.tw_hero(plan.name, "plans", "Каждому отмеченному игроку в личку Discord или Telegram уйдёт его часть плана: зона, отряд, персонажи и датакрон. Для Telegram игроку нужно сначала открыть бота в личке и нажать /start.") }}
-    <p><a href="/tw/def/plans/{{ plan.id }}">← К карте</a></p>
+    {{ twui.plan_nav(plan, "notify") }}
 
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
@@ -35,13 +35,16 @@
         {% else %}
             {% set destinations = destinations if destinations is defined else ["discord", "tg"] %}
             <form method="post" action="/tw/def/plans/{{ plan.id }}/notify" id="tw-notify-form" style="max-width:none">
+                {{ twui.revision_input(revision) }}
                 <div class="panel">
                     <div class="panel-title"><span>Куда отправить</span></div>
                     <label class="checkbox"><input type="checkbox" name="destinations" value="discord"{% if "discord" in destinations %} checked{% endif %}> Discord</label>
                     <label class="checkbox"><input type="checkbox" name="destinations" value="tg"{% if "tg" in destinations %} checked{% endif %}> Telegram</label>
+                    <p class="muted" data-tw-notify-summary aria-live="polite"></p>
                     <p class="muted">Обе галочки — каждый получит копию в обоих местах, если оба аккаунта подключены. Для лички Telegram нужно написать боту /start. Выбор запоминается для гильдии.</p>
                 </div>
                 <p class="platoon-export-actions">
+                    <button type="button" class="button" data-tw-notify-changed>Только новые и изменённые</button>
                     <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = !c.disabled)">Отметить всех</button>
                     <button type="button" class="button" onclick="document.querySelectorAll('.notify-check').forEach(c => c.checked = false)">Снять все отметки</button>
                 </p>
@@ -53,10 +56,10 @@
                     <div class="notify-recipients-grid">
                         {% for row in rows %}
                             {% set ch = row.channels %}
-                            <label class="notify-recipient-card" data-discord="{{ 1 if ch.discord else 0 }}" data-tg="{{ 1 if ch.tg else 0 }}">
+                            <label class="notify-recipient-card" data-discord="{{ 1 if ch.discord else 0 }}" data-tg="{{ 1 if ch.tg else 0 }}" data-discord-current="{{ 1 if row.delivery_states.discord else 0 }}" data-tg-current="{{ 1 if row.delivery_states.tg else 0 }}">
                                 <span class="notify-recipient-top">
                                 <input type="checkbox" class="checkbox notify-check" name="ally_codes" value="{{ row.ally_code }}"
-                                       {% if row.discord_id %}checked{% else %}disabled{% endif %}>
+                                       {% if row.discord_id and row.changed %}checked{% elif not row.discord_id %}disabled{% endif %}>
                                 <span class="notify-recipient-name">{{ row.name }}</span>
                                 <span class="badge badge-neutral">отрядов: {{ row.entries|length }}</span>
                                 </span>
@@ -65,6 +68,7 @@
                                     <span class="badge {% if ch.tg %}badge-ok{% else %}badge-neutral{% endif %}">{{ ch.tg_name or "Telegram: нет лички" }}</span>
                                     <span data-goes class="notify-goes"></span>
                                 </span>
+                                <span class="muted">{{ row.delivery_label }}{% if row.withdrawn %} · отправим отмену прежних назначений{% endif %}</span>
                                 {% if not row.discord_id %}<span class="badge badge-danger">нет регистрации</span>{% endif %}
                             </label>
                         {% endfor %}
@@ -74,7 +78,7 @@
                     <div class="panel">
                         <div class="panel-title"><span>Пример сообщения</span><span class="panel-hint">{{ rows[0].name }}</span></div>
                         <p class="muted">Каждому игровому аккаунту — своя карта с лидерами отрядов по зонам, затем составы и бонусы датакронов текстом.</p>
-                        <img src="/tw/def/plans/{{ plan.id }}/notify/map/{{ rows[0].ally_code }}.png" alt="Персональная карта защиты: {{ rows[0].name }}" loading="lazy" style="width:100%;height:auto;border-radius:12px">
+                        {% if rows[0].entries %}<img src="/tw/def/plans/{{ plan.id }}/notify/map/{{ rows[0].ally_code }}.png" alt="Персональная карта защиты: {{ rows[0].name }}" loading="lazy" style="width:100%;height:auto;border-radius:12px">{% endif %}
                         <textarea class="twdef-text" readonly rows="10">{{ preview }}</textarea>
                     </div>
                 {% endif %}
@@ -93,8 +97,20 @@
                             card.querySelector('[data-goes]').textContent = channels.length ? channels.join(" + ") : "нет доступного канала";
                             card.classList.toggle('notify-recipient-card-disabled', !channels.length);
                         });
+                        const cards = [...form.querySelectorAll('.notify-recipient-card')].filter(card => {
+                            const box = card.querySelector('.notify-check'); return box.checked && !box.disabled;
+                        });
+                        const count = ch => selected.has(ch) ? cards.filter(card => card.dataset[ch] === '1').length : 0;
+                        form.querySelector('[data-tw-notify-summary]').textContent = `Выбрано аккаунтов: ${cards.length}. Discord: ${count('discord')}, Telegram: ${count('tg')}. Telegram передаётся в очередь отправки.`;
                     };
                     form.addEventListener('change', update);
+                    form.querySelector('[data-tw-notify-changed]').addEventListener('click', () => {
+                        const selected = Array.from(form.querySelectorAll('[name="destinations"]:checked'), e => e.value);
+                        form.querySelectorAll('.notify-recipient-card').forEach(card => {
+                            card.querySelector('.notify-check').checked = selected.some(ch => card.dataset[ch] === '1' && card.dataset[ch + 'Current'] !== '1');
+                        });
+                        update();
+                    });
                     update();
                 })();
             </script>
