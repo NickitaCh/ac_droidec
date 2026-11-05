@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from services.config_status import config_warning_html
 from services.units_sync import sync_units
-from services import discord_rest, feature_flags, journey_guide
+from services import bot_profiles, discord_rest, feature_flags, journey_guide
 from services.dashboard_data import failed_task_activity_url, task_status_badge
 from tg_bot import outbox
 from web.deps import require_officer_access
@@ -205,7 +205,7 @@ async def _mention_new_tasks(guild_id: int, lines_by_code: dict) -> None:
             lines.append(f"<@{discord_id}> — {text}")
     try:
         for chunk in discord_rest.chunk_lines("📝 Новые задачи на прокачку:", lines):
-            await discord_rest.send_message(str(channel_id), chunk, mention_ids)
+            await discord_rest.send_message(str(channel_id), chunk, mention_ids, profile=bot_profiles.guild_profile(guild_id))
     except Exception as e:
         print(f"⚠️ [web/tasks] Не удалось тегнуть игроков о новых задачах: {e}")
 

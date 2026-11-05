@@ -99,6 +99,19 @@ class GroupAndSquadTests(unittest.TestCase):
                 view.stop()
         asyncio.run(check())
 
+    def test_group_notifications_follow_assigned_bot_in_shared_web(self):
+        from services import bot_profiles
+        from web.routes import tasks
+        database.update_guild_config(self.gid,tasks_log_channel_id='123',web_both_profiles=1)
+        with patch.object(tasks.outbox,'guild_wants',return_value=False), \
+             patch.object(tasks.feature_flags,'is_enabled',return_value=True), \
+             patch.object(database,'get_discord_id_for_ally',return_value='456'), \
+             patch.object(tasks.discord_rest,'send_message',AsyncMock()) as send:
+            token=bot_profiles.web_profile.set('prod')
+            try:asyncio.run(tasks._mention_new_tasks(self.gid,{'123456789':'Raid'}))
+            finally:bot_profiles.web_profile.reset(token)
+        self.assertEqual(send.await_args.kwargs['profile'],'test')
+
 
 if __name__ == '__main__':
     unittest.main()
