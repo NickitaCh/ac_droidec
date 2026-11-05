@@ -24,7 +24,7 @@ _FIELD_LABELS = dict(SETTINGS_FIELDS + _EXTRA_FIELD_LABELS)
 # feature_key -> (список полей guilds, которые фиче нужны, чтобы реально что-то делать)
 FEATURE_FIELDS = {
     "tb_rotation": ["ping_channel_id", "ping_role_id"],
-    "tb_plan_order": ["tb_plan_channel_id", "tb_order_source_channel_id", "tb_order_role_id"],
+    "tb_plan_order": ["tb_plan_channel_id", "tb_order_role_id"],
     "tb_report": ["officer_channel_id"],
     "birthday": ["birthday_channel_id", "birthday_role_id"],
     "tw_guide": ["tw_guide_forum_channel_id"],
