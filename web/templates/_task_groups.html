@@ -35,6 +35,13 @@
     <details class="panel" id="task-group-{{ group.id }}">
         <summary><strong>{{ group.name }}</strong> · готовы {{ group.ready }} из {{ group.total }} · выполнено {{ group.done }} из {{ group.checks }}</summary>
         <p class="muted">Срок до {{ group.deadline }}</p>
+        {% if view != 'archive' %}
+        <form method="post" action="/tasks/groups/{{ group.id }}/deadline" class="inline-form">
+            <label>Новый срок <input type="date" name="deadline" value="{{ group.deadline }}" min="{{ today }}" required></label>
+            <button type="submit">Изменить срок группы</button>
+        </form>
+        <p class="muted">Меняется срок действующих задач. Более ранние сроки других целей сохраняются.</p>
+        {% endif %}
         <div class="table-scroll"><table class="data">
             <thead><tr><th>Игрок</th><th>Выполнено</th>{% for req in group.requirements %}<th>{{ req.name }}<br>{{ req.label }}</th>{% endfor %}</tr></thead>
             <tbody>{% for player in group.rows %}<tr>

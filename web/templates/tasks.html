@@ -290,7 +290,7 @@
 
     {% if batch_list %}
         <details class="muted" style="margin-top: 2em; font-size: 0.9em;">
-            <summary class="link-btn">Отменить групповое задание…</summary>
+            <summary class="link-btn">Массовые задания: изменить срок или отменить…</summary>
             <div class="table-scroll" style="margin-top: 0.5em;">
                 <table class="data">
                     <thead><tr><th>Юниты</th><th>Цели</th><th>Дедлайн</th><th>Игроки</th><th>Заданий</th><th></th></tr></thead>
@@ -303,6 +303,10 @@
                                 <td>{{ b.players|join(", ") }}</td>
                                 <td>{{ b.count }}</td>
                                 <td>
+                                    <form method="post" action="/tasks/batch/{{ b.batch_id }}/deadline" class="inline-form">
+                                        <input type="date" name="deadline" value="{{ b.deadline }}" min="{{ today }}" required aria-label="Новый срок группы">
+                                        <button type="submit">Изменить срок</button>
+                                    </form>
                                     <form method="post" action="/tasks/batch/{{ b.batch_id }}/delete" onsubmit="return confirm('Отменить всю группу ({{ b.count }} заданий)?');">
                                         <button type="submit" class="button-danger">Отменить группу</button>
                                     </form>

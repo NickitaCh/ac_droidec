@@ -59,6 +59,29 @@ class GroupAndSquadTests(unittest.TestCase):
         database.create_stat_plate(name,'','x',guild_id=self.gid)
         database.add_stat_requirement(name,char,'Speed','>=',300,'required',None,'','x',guild_id=self.gid)
 
+    def test_deadline_changes_are_scoped_and_preserve_shared_goals(self):
+        reqs = [{'base_id':'B','type':'stars','value':'7'}]
+        gid, _ = task_groups.create(self.gid,'Raid',reqs,['123456789'],'2099-01-01','x')
+        self.assertIsNone(task_groups.change_deadline(self.gid+1,'2099-03-01',group_id=gid))
+        self.assertEqual(task_groups.change_deadline(self.gid,'2099-02-01',group_id=gid),1)
+        self.assertEqual(database.get_all_tasks(self.gid)[0][5],'2099-02-01')
+        other, _ = task_groups.create(self.gid,'Other',reqs,['123456789'],'2099-02-01','x')
+        self.assertEqual(task_groups.change_deadline(self.gid,'2099-03-01',group_id=gid),0)
+        self.assertEqual(database.get_all_tasks(self.gid)[0][5],'2099-02-01')
+        self.assertEqual(task_groups.change_deadline(self.gid,'2099-01-15',group_id=other),1)
+
+    def test_batch_deadline_keeps_completed_and_personal_tasks(self):
+        ids = [database.add_task('123456789','B','stars','7','2099-01-01','x',guild_id=self.gid,batch_id='batch') for _ in range(3)]
+        database.update_task_status(ids[1], 'COMPLETED')
+        with sqlite3.connect(database.DB_NAME) as conn:
+            conn.execute('UPDATE tasks SET is_personal=1 WHERE task_id=?',(ids[2],))
+            conn.execute("UPDATE tasks SET reminder_sent_at='2098-12-31'")
+        conn.close()
+        self.assertEqual(task_groups.change_deadline(self.gid,'2099-02-01',batch_id='batch'),1)
+        self.assertEqual(database.get_task(ids[0])[5],'2099-02-01')
+        self.assertEqual(database.get_task(ids[1])[5],'2099-01-01')
+        self.assertEqual(database.get_task(ids[2])[5],'2099-01-01')
+
     def test_character_squad_only_skips_its_character_and_survives_rename(self):
         self.plate('Plate','A')
         database.add_stat_requirement('Plate','B','Speed','>=',300,'required',None,'','x',guild_id=self.gid)

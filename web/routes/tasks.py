@@ -453,6 +453,30 @@ async def group_create(request: Request, user: dict = Depends(feature_flags.requ
     return RedirectResponse("/tasks?" + urlencode({"notice": f"Группа «{name}» создана."}), status_code=303)
 
 
+@router.post("/groups/{group_id}/deadline")
+async def group_deadline(group_id: int, deadline: str = Form(...),
+                         user: dict = Depends(feature_flags.require_feature("tasks"))):
+    return await _change_deadline(user, deadline, group_id=group_id)
+
+
+@router.post("/batch/{batch_id}/deadline")
+async def batch_deadline(batch_id: str, deadline: str = Form(...),
+                         user: dict = Depends(feature_flags.require_feature("tasks"))):
+    return await _change_deadline(user, deadline, batch_id=batch_id)
+
+
+async def _change_deadline(user, deadline, **selection):
+    from services import task_groups
+    error = _validate_deadline(deadline)
+    if error:
+        return RedirectResponse(f"/tasks?{urlencode({'error': error})}", status_code=303)
+    database.get_departed_players(user['guild_id'])  # Ensure the lazy archive table exists.
+    changed = await asyncio.to_thread(task_groups.change_deadline, user['guild_id'], deadline.strip(), **selection)
+    message = {'error': 'Группа не найдена.'} if changed is None else {
+        'notice': f'Срок сохранён. Изменено действующих задач: {changed}. Более ранние сроки других целей сохранены.'}
+    return RedirectResponse(f"/tasks?{urlencode(message)}", status_code=303)
+
+
 @router.post("/groups/{group_id}/archive")
 async def group_archive(group_id: int, archived: bool = Form(True), user: dict = Depends(feature_flags.require_feature("tasks"))):
     from services import task_groups

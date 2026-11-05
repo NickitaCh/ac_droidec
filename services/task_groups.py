@@ -138,3 +138,44 @@ def archive(guild_id, group_id, archived=True):
         conn.commit()
     finally:
         conn.close()
+
+
+def change_deadline(guild_id, deadline, *, group_id=None, batch_id=None):
+    """Change pending guild tasks atomically; preserve earlier shared goals."""
+    conn = connect()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        if group_id is not None:
+            group = conn.execute('SELECT deadline FROM task_groups WHERE id=? AND guild_id=? AND archived=0',
+                                 (group_id, guild_id)).fetchone()
+            if not group:
+                return None
+            rows = conn.execute('SELECT task_id,deadline FROM tasks WHERE guild_id=? AND task_id IN '
+                                '(SELECT task_id FROM task_group_links WHERE group_id=?)',
+                                (guild_id, group_id)).fetchall()
+            conn.execute('UPDATE task_groups SET deadline=? WHERE id=? AND guild_id=?',
+                         (deadline, group_id, guild_id))
+        elif batch_id:
+            rows = conn.execute('SELECT task_id,deadline FROM tasks WHERE guild_id=? AND batch_id=?',
+                                (guild_id, batch_id)).fetchall()
+        else:
+            return None
+        changed = 0
+        for row in rows:
+            other = conn.execute('SELECT MIN(g.deadline) FROM task_group_links l JOIN task_groups g '
+                                 'ON g.id=l.group_id WHERE l.task_id=? AND g.guild_id=? AND g.id!=?',
+                                 (row['task_id'], guild_id, group_id or -1)).fetchone()[0]
+            target = min(deadline, other) if other else deadline
+            # An earlier reused task may also be an independent commitment.
+            if group_id is not None and row['deadline'] < group['deadline']:
+                target = min(target, row['deadline'])
+            cur = conn.execute("UPDATE tasks SET deadline=?, reminder_sent_at=NULL WHERE task_id=? "
+                               "AND guild_id=? AND status='ACTIVE' AND is_personal=0 "
+                               "AND archived_at IS NULL AND deadline!=? AND ally_code NOT IN "
+                               "(SELECT ally_code FROM departed_players WHERE guild_id=?)",
+                               (target, row['task_id'], guild_id, target, guild_id))
+            changed += cur.rowcount
+        conn.commit()
+        return changed
+    finally:
+        conn.close()
