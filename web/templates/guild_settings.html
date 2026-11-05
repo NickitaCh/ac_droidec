@@ -11,12 +11,15 @@
             </div>
         </div>
     </section>
-    <p class="muted">
+    <details class="muted">
+        <summary>Как выбрать канал и скопировать ID роли</summary>
+        <p>
         В списке сначала каналы гильдии, ниже — все остальные каналы сервера. Ветки (треды) в список
         не попадают: для них впишите ID вручную в поле под списком или напишите <code>/канал</code> прямо в ветке. Для роли всё ещё
         нужен голый ID (включите режим разработчика в Discord — Настройки пользователя → Расширенные
         — чтобы скопировать его правой кнопкой).
-    </p>
+        </p>
+    </details>
 
     {% if error %}
         <p class="error">{{ error }}</p>
@@ -38,7 +41,8 @@
         {% for group in groups %}
             <div class="panel settings-group" data-tab="{{ group.tab }}">
                 <h3 style="margin-top: 0;">{{ group.name }}</h3>
-                <p class="muted" style="margin-top: -0.5em;">{{ group.hint }}</p>
+                <p class="muted" style="margin-top: -0.5em;">{{ group.summary }}</p>
+                {% if group.tab not in ['ДР', 'Омикроны'] %}<details class="muted"><summary>Подробности</summary><p>{{ group.hint }}</p></details>{% endif %}
                 {% for row in group.rows %}
                     {% if row.kind == 'flag' %}
                         <label class="checkbox">
@@ -139,10 +143,10 @@
         {% if tg_error %}<p class="error">{{ tg_error }}</p>{% endif %}
         {% if tg_saved %}<p class="tg-saved"><span class="badge badge-ok">Сохранено</span></p>{% endif %}
 
-        <p class="muted">Команды по темам: вызовите <code>/command_access</code> в группе.
+        <details class="muted"><summary>Доступ к командам по темам</summary><p>Вызовите <code>/command_access</code> в группе.
             Можно запретить команды везде, выбрать разрешённые темы и добавить исключения для офицеров.
             Эти ограничения не меняют маршруты уведомлений ниже. В списках доступны темы, известные боту;
-            старую тему можно добавить по ссылке через <code>/command_access</code>.</p>
+            старую тему можно добавить по ссылке через <code>/command_access</code>.</p></details>
         <h4>Группы</h4>
         {% if tg.chats %}
             <table class="data cards-on-phone">
@@ -174,7 +178,6 @@
                     {% endfor %}
                 </tbody>
             </table>
-            <p class="muted">Ещё группа (например, офицерская): добавьте в неё бота и напишите там <code>/bind</code>.</p>
         {% else %}
             <p class="muted">Ни одной группы. Добавьте бота{% if telegram_bot_username() %} <a href="https://t.me/{{ telegram_bot_username() }}" target="_blank" rel="noopener">@{{ telegram_bot_username() }}</a>{% endif %} в группу гильдии и напишите там <code>/bind</code>.</p>
         {% endif %}
@@ -216,10 +219,9 @@
         <h4>Личные рассылки</h4>
         <p>Взводы ВИ: <a href="/tb/platoons#platoon-dm">выбор получателей и мессенджеров</a>.
             {% if user.bot_profile != 'prod' %}Защита ВГ: <a href="/tw/def">откройте план и его рассылку</a>.{% endif %}
-            Можно отправлять в Discord, Telegram или оба. Если выбран один мессенджер,
-            в другой сообщение не уйдёт. В Telegram игроку нужно сначала написать боту <code>/start</code>.</p>
-        <p class="muted">Ордер ВИ публикуется из редактора этапа отдельно в каждый мессенджер;
-            автоордер использует маршруты выше. Отключение команд в теме не отключает публикации из веба.</p>
+            Доставка — только в выбранные мессенджеры. Для лички Telegram игроку нужен <code>/start</code> у бота.</p>
+        <details class="muted"><summary>Публикация ордера ВИ</summary><p>Из редактора этапа — отдельно в каждый мессенджер;
+            автоордер — по маршрутам выше. Запрет команд в теме не отключает публикации из веба.</p></details>
 
         <h4>Зеркала каналов{% call ui.help() %}Всё, что люди пишут в выбранном Discord-канале, уходит копией в ветку Telegram вместе с картинками и файлами, и наоборот — из ветки в Discord (с подписью: имя и @ник в Telegram); направление можно ограничить одной стороной. Файлы из Telegram больше 10 МБ в Discord не влезают. Сообщения самого бота не зеркалятся (для них — «Оповещения» выше), правки и удаления не переносятся. Одно сообщение можно отправить и вручную: <code>/тг канал: метка сообщение: ссылка</code> в Discord.{% endcall %}</h4>
         <form method="post" action="/settings/tg/toggle" class="tg-inline">
