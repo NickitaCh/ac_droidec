@@ -45,7 +45,7 @@ def _apply_guild_switch(request: Request, user: dict) -> dict:
     if profile not in bot_profiles.PROFILES:
         profile = bot_profiles.guild_profile(user.get("guild_id"))
     guilds = [g for g in list_guilds(active_only=True, all_profiles=True)
-              if (g.get("bot_profile") or "test") == profile]
+              if bot_profiles.web_visible(g, profile)]
     result = {**user, "own_guild_id": user.get("guild_id"), "switchable_guilds": guilds,
               "bot_profile": profile,
               "own_guild_in_profile": any(g["id"] == user.get("guild_id") for g in guilds)}

@@ -74,6 +74,10 @@ def accepts(guild_id, profile=None):
     return guild_id is None or profile == "prod" or guild_profile(guild_id) == profile
 
 
+def web_visible(cfg, profile):
+    return bool(cfg.get("web_both_profiles")) or (cfg.get("bot_profile") or "test") == profile
+
+
 def served_guilds(active_only=True):
     import database
     profile = worker_profile() or runtime_profile()

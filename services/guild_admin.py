@@ -109,10 +109,11 @@ def deactivate_guild(guild_id: int) -> bool:
 
 
 def list_guilds(active_only: bool = True, *, all_profiles: bool = False) -> list:
+    from services import bot_profiles
     from services.bot_profiles import web_profile
     rows = database.get_all_guild_configs(active_only=active_only)
     profile = web_profile.get()
-    return rows if profile is None or all_profiles else [g for g in rows if (g.get("bot_profile") or "test") == profile]
+    return rows if profile is None or all_profiles else [g for g in rows if bot_profiles.web_visible(g, profile)]
 
 
 def add_super_admin(discord_id: str, username: str, added_by: str) -> bool:

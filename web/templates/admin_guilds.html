@@ -108,6 +108,10 @@
                                     {% endif %}
                                 </td>
                                 <td class="row-actions">
+                                    <form method="post" action="/admin/guilds/{{ g.id }}/web-visibility" class="inline-form">
+                                        <label class="checkbox"><input type="checkbox" name="both" value="true"{% if g.web_both_profiles %} checked{% endif %}> Сайт: в обеих версиях</label>
+                                        <button type="submit" class="button-secondary">Сохранить</button>
+                                    </form>
                                     <form method="post" action="/admin/guilds/{{ g.id }}/profile" class="inline-form"
                                           onsubmit="return confirm('Сменить обслуживающую пару ботов? Данные гильдии сохранятся.');">
                                         <select name="profile" aria-label="Обслуживающая пара ботов">

@@ -47,7 +47,7 @@ def _get_comlink():
 async def guilds_page(request: Request, user: dict = Depends(require_super_admin)):
     from services import bot_presence, bot_profiles, discord_invite
     guilds = list_guilds(active_only=False)
-    guilds = [g for g in guilds if (g.get("bot_profile") or "test") == user.get("bot_profile", "test")]
+    guilds = [g for g in guilds if bot_profiles.web_visible(g, user.get("bot_profile", "test"))]
     presence, presence_error = await bot_presence.overview(guilds)
     return templates.TemplateResponse(request, "admin_guilds.html", {
         "user": user,
@@ -68,6 +68,7 @@ async def guilds_page(request: Request, user: dict = Depends(require_super_admin
 # =====================================================================
 @router.post("/switch-guild", response_class=RedirectResponse)
 async def switch_guild(request: Request, guild_id: str = Form(...), user: dict = Depends(require_real_super_admin)):
+    from services import bot_profiles
     if guild_id == "__self__":
         request.session.pop("impersonate_guild_id", None)
     else:
@@ -75,7 +76,7 @@ async def switch_guild(request: Request, guild_id: str = Form(...), user: dict =
             gid = int(guild_id)
         except ValueError:
             gid = None
-        if gid is None or not any(g["id"] == gid and (g.get("bot_profile") or "test") == user.get("bot_profile", "test") for g in list_guilds(active_only=True)):
+        if gid is None or not any(g["id"] == gid and bot_profiles.web_visible(g, user.get("bot_profile", "test")) for g in list_guilds(active_only=True)):
             return RedirectResponse(f"/admin/guilds?{urlencode({'error': 'Некорректная гильдия.'})}", status_code=303)
         request.session["impersonate_guild_id"] = gid
     referer = request.headers.get("referer") or "/"
@@ -102,6 +103,15 @@ async def guild_profile_change(guild_id: int, request: Request, profile: str = F
         await bot_profiles.transfer_guild(guild_id, profile)
     except ValueError as exc:
         return RedirectResponse("/admin/guilds?" + urlencode({"error": str(exc)}), status_code=303)
+    return RedirectResponse("/admin/guilds", status_code=303)
+
+
+@router.post("/guilds/{guild_id}/web-visibility", response_class=RedirectResponse)
+async def guild_web_visibility(guild_id: int, request: Request, both: bool = Form(False), user: dict = Depends(require_super_admin)):
+    _trusted_profile_request(request)
+    if not database.get_guild_config(guild_id):
+        raise HTTPException(status_code=404, detail="Гильдия не найдена.")
+    database.update_guild_config(guild_id, web_both_profiles=int(both))
     return RedirectResponse("/admin/guilds", status_code=303)
 
 
@@ -482,7 +492,7 @@ async def features_page(request: Request, user: dict = Depends(require_super_adm
     guilds = list_guilds(active_only=True)
     from services import bot_profiles
     profile = user.get("bot_profile", "test")
-    guilds = [g for g in guilds if (g.get("bot_profile") or "test") == profile]
+    guilds = [g for g in guilds if bot_profiles.web_visible(g, profile)]
     rows = feature_flags.matrix([g["id"] for g in guilds])
     rows = [r for r in rows if bot_profiles.feature_available(r["key"], profile)]
     categories = {}
@@ -503,7 +513,7 @@ async def features_save(request: Request, user: dict = Depends(require_super_adm
     checked = set(form.keys())  # "{guild_id}:{key}" только для отмеченных чекбоксов
     guilds = list_guilds(active_only=True)
     for guild in guilds:
-        if (guild.get("bot_profile") or "test") != user.get("bot_profile", "test"):
+        if not bot_profiles.web_visible(guild, user.get("bot_profile", "test")):
             continue
         gid = guild["id"]
         for key in feature_flags.FEATURES:

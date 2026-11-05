@@ -274,6 +274,7 @@ def _migrate_user_mapping_guild_id(cursor):
 # =====================================================================
 GUILD_CONFIG_COLUMNS = [
     "bot_profile",
+    "web_both_profiles",
     "name", "ally_code", "swgoh_guild_id", "discord_guild_id",
     "member_role_id", "officer_role_id",
     "ping_channel_id", "ping_role_id", "ping_start_date", "ping_schedule_json",
@@ -404,6 +405,10 @@ def _ensure_guilds_table(cursor):
         # Existing guilds keep their original bot. New guilds start on test until
         # explicitly assigned by a super-admin after public workers are ready.
         cursor.execute("ALTER TABLE guilds ADD COLUMN bot_profile TEXT NOT NULL DEFAULT 'test'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE guilds ADD COLUMN web_both_profiles INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
 

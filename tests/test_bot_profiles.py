@@ -118,6 +118,29 @@ class BotProfileTests(unittest.TestCase):
         self.assertEqual(result["switchable_guilds"], [])
         self.assertTrue(result["is_super_admin"])
 
+    def test_shared_web_guild_appears_in_both_profiles_without_bot_transfer(self):
+        database.update_guild_config(self.gid, web_both_profiles=1)
+        for profile in ("test", "prod"):
+            result = deps._apply_guild_switch(request(session={"bot_profile":profile}), self.user)
+            self.assertEqual(result["guild_id"],self.gid)
+            self.assertEqual([g["id"] for g in result["switchable_guilds"]],[self.gid])
+        self.assertEqual(database.get_guild_config(self.gid)["bot_profile"],"test")
+        with patch.object(profiles,"_worker_profile","prod"):
+            self.assertEqual(profiles.served_guilds(),[])
+        with patch.object(profiles,"_worker_profile","test"):
+            self.assertEqual([g["id"] for g in profiles.served_guilds()],[self.gid])
+
+    def test_web_visibility_requires_admin_and_preserves_bot_assignment(self):
+        with patch.object(deps,"_refresh_access",return_value=self.user), TestClient(self.http_app()) as client:
+            client.post('/__login')
+            response=client.post(f'/admin/guilds/{self.gid}/web-visibility',data={'both':'true'},follow_redirects=False)
+            self.assertEqual(response.status_code,303)
+            self.assertEqual(database.get_guild_config(self.gid)['web_both_profiles'],1)
+            self.assertEqual(database.get_guild_config(self.gid)['bot_profile'],'test')
+            response=client.post(f'/admin/guilds/{self.gid}/web-visibility',data={'both':'false'},headers={'Origin':'https://foreign.invalid'},follow_redirects=False)
+            self.assertEqual(response.status_code,403)
+            self.assertEqual(database.get_guild_config(self.gid)['web_both_profiles'],1)
+
     def test_other_profile_guild_override_is_ignored(self):
         prod = self.production_guild()
         result = deps._apply_guild_switch(request(session={"bot_profile": "prod", "impersonate_guild_id": self.gid}), self.user)
