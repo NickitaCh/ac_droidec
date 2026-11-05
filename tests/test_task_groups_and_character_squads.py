@@ -49,6 +49,12 @@ class GroupAndSquadTests(unittest.TestCase):
         self.assertEqual(task_groups.list_groups(self.gid),[])
         self.assertEqual(database.get_all_tasks(self.gid),[])
 
+    def test_earlier_group_deadline_keeps_its_own_reminders(self):
+        reqs=[{'base_id':'B','type':'stars','value':'7'}]
+        task_groups.create(self.gid,'Later',reqs,['123456789'],'2099-02-01','officer')
+        task_groups.create(self.gid,'Earlier',reqs,['123456789'],'2099-01-01','officer')
+        self.assertEqual({r[5] for r in database.get_all_tasks(self.gid)}, {'2099-01-01','2099-02-01'})
+
     def plate(self,name,char):
         database.create_stat_plate(name,'','x',guild_id=self.gid)
         database.add_stat_requirement(name,char,'Speed','>=',300,'required',None,'','x',guild_id=self.gid)

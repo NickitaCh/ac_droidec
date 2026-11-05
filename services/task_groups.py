@@ -74,8 +74,8 @@ def create(guild_id, name, requirements, codes, deadline, actor):
                 unit = roster.get(req['base_id'])
                 if meets(unit, req, thresholds):
                     continue
-                candidates = conn.execute("SELECT task_id,target_value FROM tasks WHERE guild_id=? AND ally_code=? AND base_id=? AND target_type=? AND status='ACTIVE' AND is_personal=0",
-                                          (guild_id, code, req['base_id'], req['type'])).fetchall()
+                candidates = conn.execute("SELECT task_id,target_value FROM tasks WHERE guild_id=? AND ally_code=? AND base_id=? AND target_type=? AND status='ACTIVE' AND is_personal=0 AND deadline<=?",
+                                          (guild_id, code, req['base_id'], req['type'], deadline)).fetchall()
                 existing = next((r for r in candidates if
                     (r['target_value'] == req['value'] if req['type'] == 'omicron'
                      else int(r['target_value']) >= int(req['value']))), None)
