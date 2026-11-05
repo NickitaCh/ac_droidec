@@ -66,6 +66,30 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(response.text.count('data-tw-zone="'), 10)
         self.assertEqual(response.text.count('data-tw-view-panel="'), 3)
 
+    def test_squad_editor_round_trips_alternative_datacrons_and_soft_skills(self):
+        import json
+        options = [{'value': 'focused:1', 'label': 'Season A'}, {'value': 'base:2', 'label': 'Season B'}]
+        with patch.object(web, '_dc_options', return_value=options), \
+             patch.object(database, 'get_unit_types', return_value={'A': 'character'}), \
+             patch.object(database, 'get_omicron_capable', return_value=set()):
+            data = {'squad_id': str(self.squad_id), 'name': 'Test', 'combat_type': 'character',
+                    'slots_json': json.dumps([{'options': [{'base_id': 'A', 'zeta': True,
+                                                          'ignore_skills_placement': True}]}]),
+                    'datacron': ['focused:1', 'base:2'], 'datacron_required': '1'}
+            response = self.client.post('/tw/def/squads/save', data=data, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            saved = database.get_tw_def_squad(self.gid, self.squad_id)
+            self.assertEqual(len(saved['datacron']['alternatives']), 2)
+            self.assertTrue(saved['slots'][0]['options'][0]['ignore_skills_placement'])
+            response = self.client.get(f'/tw/def/squads/{self.squad_id}/edit')
+            self.assertEqual(response.status_code, 200)
+            for value in ('focused:1', 'base:2'):
+                self.assertIn(f'value="{value}" checked', response.text)
+            data.pop('datacron')
+            response = self.client.post('/tw/def/squads/save', data=data, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertIsNone(database.get_tw_def_squad(self.gid, self.squad_id)['datacron'])
+
     def test_stale_writes_and_concurrent_writer_rejected(self):
         rev = work.revision(self.gid, self.plan_id)
         self.assertEqual(self.post("strategy", {"zone": "1t", "squad_id": self.squad_id, "count": "1"}).status_code, 303)

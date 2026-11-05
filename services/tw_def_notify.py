@@ -67,6 +67,9 @@ def describe_datacron(dc: dict, catalog: dict | None) -> str:
 def describe_recommendation(dc: dict, requirements: dict, catalog: dict | None, guild_id: int) -> str:
     """Рекомендация отряда, независимо от коллекции игрока и количества ДК."""
     from cogs.datacron_requirements import _focused_char_label, _level_label, DATACRON_NONE, DATACRON_ANY, DATACRON_STAT_LABELS
+    if "alternatives" in dc:
+        return " ИЛИ ".join(describe_recommendation(opt, requirements, catalog, guild_id)
+                            for opt in engine.datacron_options(dc))
     row = requirements.get((dc.get("kind"), dc.get("req_id")))
     if row is None:
         return "Рекомендация удалена — уточните у офицеров"

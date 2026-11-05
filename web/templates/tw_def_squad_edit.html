@@ -46,12 +46,12 @@
             </div>
             {% if dc_options %}
                 <div class="twdef-row-form">
-                    <label class="twdef-field-wide">Нужный ДК
-                        <select name="datacron">
-                            <option value="">— без датакрона —</option>
-                            {% for o in dc_options %}<option value="{{ o.value }}" {% if o.value == dc_value %}selected{% endif %}>{{ o.label }}</option>{% endfor %}
-                        </select>
-                    </label>
+                    <details class="twdef-field-wide" {% if dc_values %}open{% endif %}>
+                        <summary>Допустимые ДК — любой из выбранных</summary>
+                        {% for o in dc_options %}
+                        <label class="checkbox"><input type="checkbox" name="datacron" value="{{ o.value }}" {% if o.value in dc_values %}checked{% endif %}> {{ o.label }}</label>
+                        {% endfor %}
+                    </details>
                     <label class="checkbox" title="Без нужного ДК игрок не может поставить этот пак">
                         <input type="checkbox" name="datacron_required" value="1" {% if squad.datacron and squad.datacron.required %}checked{% endif %}> обязателен
                     </label>
@@ -85,6 +85,7 @@
             </label>
             <label class="twdef-req twdef-req-char twdef-check" title="Все зеты юнита"><input type="checkbox" data-field="zeta"> зеты</label>
             <label class="twdef-req twdef-req-char twdef-check" title="Омикрон для ВГ (если у юнита нет ВГ-омикрона — любой)"><input type="checkbox" data-field="omicron"> омикрон</label>
+            <label class="twdef-req twdef-req-char twdef-check" title="Нехватка зет и омикронов останется видна, но не помешает ручной расстановке и автоподбору"><input type="checkbox" data-field="ignore_skills_placement"> не учитывать зеты и омикроны при расстановке</label>
             <label class="twdef-req twdef-req-char twdef-check" title="Абсолютная способность (легенды)"><input type="checkbox" data-field="ultimate"> абс.</label>
             <button type="button" class="button-secondary twdef-small twdef-req-char twdef-add-stat" title="Минимальный стат с модулями: скорость, здоровье, защита…">+ стат</button>
             <button type="button" class="button-danger twdef-remove-option" title="Убрать вариант">✕</button>
@@ -104,5 +105,5 @@
     </template>
 
     <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
-    <script src="/static/tw_def.js?v=20261102" defer></script>
+    <script src="/static/tw_def.js?v=20261105-dc-or" defer></script>
 {% endblock %}

@@ -35,7 +35,7 @@ MAX_SLOTS = {"character": 5, "ship": 8}
 SHIP_DEFAULT_MIN_STARS = 7
 
 OPTION_INT_FIELDS = {"min_relic": (0, 10), "min_stars": (1, 7), "min_gear": (1, 13)}
-OPTION_BOOL_FIELDS = ("zeta", "omicron", "ultimate")
+OPTION_BOOL_FIELDS = ("zeta", "omicron", "ultimate", "ignore_skills_placement")
 
 # Статы, которые можно требовать от юнита (ключи stat_engine.calc_final_stats; %-статы там уже
 # в игровых процентах). Подпись — в редакторе, короткая — в списках требований.
@@ -163,7 +163,7 @@ def normalize_slots(raw_slots, combat_type: str, known_units: dict, omicron_capa
             if opt.get("omicron") and omicron_capable is not None and base_id not in omicron_capable:
                 opt.pop("omicron")
             if combat_type == "ship":
-                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "stats"):
+                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "stats", "ignore_skills_placement"):
                     opt.pop(key, None)
             options.append(opt)
         if options:
@@ -192,6 +192,8 @@ def option_requirement_label(opt: dict, combat_type: str) -> str:
         parts.append("зеты")
     if opt.get("omicron"):
         parts.append("омикрон")
+    if opt.get("ignore_skills_placement") and (opt.get("zeta") or opt.get("omicron")):
+        parts.append("зеты/омикрон не мешают расстановке")
     if opt.get("ultimate"):
         parts.append("абс.")
     for st in option_stats(opt):
@@ -354,6 +356,12 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
     return None
 
 
+def datacron_options(dc: dict | None) -> list[dict]:
+    if not dc:
+        return []
+    return dc.get("alternatives", [dc])
+
+
 def pick_datacron(roster: Roster, ally_code: str, dc: dict | None, used=frozenset()) -> tuple[str | None, str | None]:
     """Подбор ДК игрока под требование пака: (статус, id). Статус: None (у пака нет ДК),
     "ok" (есть свободный подходящий — id через запятую, если quantity>1), "used" (подходящие
@@ -363,6 +371,16 @@ def pick_datacron(roster: Roster, ally_code: str, dc: dict | None, used=frozense
         return None, None
     if not dc.get("required"):
         return None, None
+    if "alternatives" in dc:
+        results = [pick_datacron(roster, ally_code, {**opt, "required": True}, used)
+                   for opt in datacron_options(dc)]
+        for result in results:
+            if result[0] == "ok":
+                return result
+        for state in ("used", "unknown", "no", "gone"):
+            if any(result[0] == state for result in results):
+                return state, None
+        return "gone", None
     row = roster.dc_reqs.get((dc.get("kind"), dc.get("req_id")))
     if row is None:
         return "gone", None
@@ -437,7 +455,8 @@ def match_squad(roster: Roster, ally_code: str, squad: dict, blocked: set[str] =
         ok_ids = []
         slot_reason = None
         for opt in slot["options"]:
-            reason = check_option(roster, ally_code, opt, combat_type)
+            placement_opt = {**opt, "zeta": False, "omicron": False} if opt.get("ignore_skills_placement") else opt
+            reason = check_option(roster, ally_code, placement_opt, combat_type)
             if reason is None:
                 if opt["base_id"] in blocked:
                     blocked_hit = True
@@ -530,7 +549,7 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             continue
         blocked = used.get(ally_code, set())
         match = match_squad(roster, ally_code, squad, blocked)
-        if (squad.get("datacron") or {}).get("required") and entry["dc"] in ("no", "unknown", "used"):
+        if (squad.get("datacron") or {}).get("required") and entry["dc"] in ("no", "unknown", "used", "gone"):
             plan_only = entry["dc"] == "used" and (match.units is not None or match.blocked_by_plan)
             entry["status"] = "used" if plan_only else "no"
             dc_reason = DC_REASONS[entry["dc"]]
@@ -541,6 +560,13 @@ def evaluate_candidates(roster: Roster, squad: dict, assignments: list[dict], ex
             entry["status"] = "ok"
             entry["units"] = match.units
             entry["power"] = match.power
+            warnings = []
+            for base_id, slot in zip(match.units, squad["slots"]):
+                options = [o for o in slot["options"] if o["base_id"] == base_id]
+                if options and all(check_option(roster, ally_code, o, squad["combat_type"]) for o in options):
+                    warnings.append(f"{roster.unit_name(base_id)}: {check_option(roster, ally_code, options[0], squad['combat_type'])}")
+            if warnings:
+                entry["reason"] = "; ".join(warnings)
             if others:
                 after = blocked | set(match.units)
                 for other in others:
@@ -587,7 +613,7 @@ def availability(roster: Roster, squad: dict, assignments: list[dict] = (), excl
             with_dc += 1
         elif dc_state == "unknown":
             dc_unknown += 1
-        if dc_required and dc_state in ("no", "unknown"):
+        if dc_required and dc_state != "ok":
             continue
         if match_squad(roster, ally_code, squad).units is None:
             continue

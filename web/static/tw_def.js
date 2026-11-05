@@ -330,7 +330,7 @@
             row.querySelector(".twdef-add-stat").disabled = box.children.length >= MAX_STATS;
             return line;
         };
-        const FLAGS = ["zeta", "omicron", "ultimate"];
+        const FLAGS = ["zeta", "omicron", "ultimate", "ignore_skills_placement"];
 
         const combatType = () => editor.querySelector("input[name=combat_type]:checked").value;
 

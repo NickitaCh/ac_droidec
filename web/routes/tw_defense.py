@@ -166,15 +166,24 @@ def _dc_options(guild_id: int) -> list[dict]:
     return options
 
 
-def _parse_dc(value: str, required: bool, options: list[dict]) -> dict | None:
-    if not value or value not in {o["value"] for o in options}:
+def _parse_dc(value: str | list[str], required: bool, options: list[dict]) -> dict | None:
+    values = [value] if isinstance(value, str) else value
+    allowed = {o["value"] for o in options}
+    parsed = []
+    for v in dict.fromkeys(values):
+        if v not in allowed:
+            continue
+        kind, req_id = v.split(":", 1)
+        parsed.append({"kind": kind, "req_id": int(req_id)})
+    if not parsed:
         return None
-    kind, req_id = value.split(":", 1)
-    return {"kind": kind, "req_id": int(req_id), "required": bool(required)}
+    if len(parsed) == 1:
+        return {**parsed[0], "required": bool(required)}
+    return {"alternatives": parsed, "required": bool(required)}
 
 
 def _dc_value(dc: dict | None) -> str:
-    return f"{dc['kind']}:{dc['req_id']}" if dc else ""
+    return f"{dc['kind']}:{dc['req_id']}" if dc and "kind" in dc else ""
 
 
 def _squad_view(squad: dict, roster: engine.Roster | None = None) -> dict:
@@ -206,7 +215,7 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
         v["availability"] = engine.availability(roster, s)
         v["stats_pending"] = _stats_not_ready(s)
         if s.get("datacron"):
-            v["dc_label"] = dc_labels.get(_dc_value(s["datacron"]), "требование ДК удалено на странице «Датакроны»")
+            v["dc_label"] = " ИЛИ ".join(dc_labels.get(_dc_value(opt), "требование ДК удалено на странице «Датакроны»") for opt in engine.datacron_options(s["datacron"]))
         views.append(v)
     return templates.TemplateResponse(request, "tw_def_squads.html", {
         "user": user,
@@ -273,7 +282,7 @@ def _editor_context(user: dict, squad: dict, errors: list) -> dict:
         "user": user, "squad": squad, "errors": errors, "max_slots": engine.MAX_SLOTS,
         "stat_choices": [{"key": k, "label": label} for k, label, _short, _pct in engine.STAT_CHOICES],
         "dc_options": _dc_options(user["guild_id"]),
-        "dc_value": _dc_value(squad.get("datacron")),
+        "dc_values": [_dc_value(opt) for opt in engine.datacron_options(squad.get("datacron"))],
     }
 
 
@@ -300,7 +309,7 @@ async def squad_save(
     combat_type: str = Form("character"),
     note: str = Form(""),
     slots_json: str = Form("[]"),
-    datacron: str = Form(""),
+    datacron: list[str] = Form([]),
     datacron_required: str = Form(""),
     user: dict = Depends(_require),
 ):
