@@ -90,3 +90,23 @@ class CompareRefreshTests(unittest.IsolatedAsyncioTestCase):
         args = cog.render_card.call_args.args
         self.assertEqual(args[2], self.codes)
         self.assertIs(args[3]["обновить"], True)
+
+    async def test_forced_refresh_bypasses_cooldown_for_every_player(self):
+        for code in self.codes:
+            database.upsert_player_units(code, {'HUX': {'definitionId': 'HUX:SEVEN_STAR', 'marker': 'recent'}})
+        for _ in range(2):
+            players, ages = await self.cog._card_players(self.codes, None, True, force_refresh=True)
+            self.assertEqual(ages, [None, None, None])
+            self.assertTrue(all(len(p['rosterUnit']) == 2 for p in players))
+        self.assertEqual(self.comlink.get_player.call_count, 6)
+
+    async def test_unit_command_enables_force_only_when_refresh_requested(self):
+        from cogs.unit_test import UnitTestCog
+        cards = SimpleNamespace(_card_players=AsyncMock(return_value=([None], [None])))
+        cog = UnitTestCog(SimpleNamespace(get_cog=lambda name: cards))
+        inter = SimpleNamespace(author=SimpleNamespace(id=123), edit_original_response=AsyncMock())
+        with patch('cogs.unit_test.stat_engine.wait_stat_calc', AsyncMock(return_value=True)), \
+             patch('cogs.unit_test.guild_resolver.resolve_guild_id', return_value=None):
+            for refresh in (False, True):
+                await cog.render_card(inter, None, self.codes[:1], {"обновить": refresh})
+                cards._card_players.assert_awaited_with(self.codes[:1], None, refresh, force_refresh=refresh)

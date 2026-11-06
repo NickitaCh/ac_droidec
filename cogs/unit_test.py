@@ -291,7 +291,8 @@ class UnitTestCog(commands.Cog):
             return
         card_cog = self.bot.get_cog("UnitForecastCog")
         guild_id = guild_resolver.resolve_guild_id(inter.author)
-        players, ages = await card_cog._card_players(ally_codes, guild_id, params["обновить"])
+        players, ages = await card_cog._card_players(
+            ally_codes, guild_id, params["обновить"], force_refresh=params["обновить"])
         for code, player in zip(ally_codes, players):
             if not player or not player.get("rosterUnit"):
                 await reply(f"❌ Не удалось получить игрока с кодом {code} из игры.")

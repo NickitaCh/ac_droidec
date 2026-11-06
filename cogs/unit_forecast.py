@@ -259,10 +259,11 @@ class UnitForecastCog(commands.Cog):
             return
         await inter.edit_original_response(content=note, file=disnake.File(io.BytesIO(png), filename="toon.png"))
 
-    async def _card_players(self, ally_codes: list[str], guild_id: int, refresh: bool) -> tuple[list, list]:
+    async def _card_players(self, ally_codes: list[str], guild_id: int, refresh: bool, *, force_refresh: bool = False) -> tuple[list, list]:
         """([сырой игрок {name, rosterUnit} | None], [возраст кэша в секундах | None = из игры]).
         Игрок из кэша синка — без запроса в игру; «обновить» освежает кэш (кулдаун 30 с,
-        общий с /статы), игрок не из кэша — всегда свежий get_player."""
+        общий с /статы), игрок не из кэша — всегда свежий get_player.
+        force_refresh=True у /юнит обходит кулдаун для явного «обновить»."""
         names = database.get_player_names(guild_id) if guild_id is not None else {}
         profiles = database.get_player_profiles_bulk(ally_codes)
 
@@ -271,7 +272,7 @@ class UnitForecastCog(commands.Cog):
                 refreshed = False
                 if refresh:
                     try:
-                        refreshed = await activity_diff.refresh_player_units(self.bot.comlink, code)
+                        refreshed = await activity_diff.refresh_player_units(self.bot.comlink, code, force=force_refresh)
                     except Exception as e:
                         print(f"⚠️ [Юнит] обновление {code}: {e!r}")
                 units = await asyncio.to_thread(database.get_player_units, code)

@@ -52,13 +52,16 @@ REFRESH_COOLDOWN_SECONDS = 30
 _refresh_locks: dict[str, asyncio.Lock] = {}
 
 
-async def refresh_player_units(comlink, ally_code: str) -> bool:
-    """Свежий ростер игрока в player_unit_cache. False — пропущено: кэш и так свежее кулдауна."""
+async def refresh_player_units(comlink, ally_code: str, *, force: bool = False) -> bool:
+    """Свежий ростер в player_unit_cache. False — кэш свежее кулдауна.
+
+    force=True для явного «обновить» в /юнит: пропускает кулдаун, сохраняя lock.
+    """
     ally_code = str(ally_code)
     lock = _refresh_locks.setdefault(ally_code, asyncio.Lock())
     async with lock:
         age = database.get_player_units_age_seconds(ally_code)
-        if age is not None and age < REFRESH_COOLDOWN_SECONDS:
+        if not force and age is not None and age < REFRESH_COOLDOWN_SECONDS:
             return False
         units = await fetch_player_units(comlink, ally_code)
         if units:
