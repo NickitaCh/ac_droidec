@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import database
 import guild_resolver
 from cogs.raids import RaidsCog, autocomplete_raid_teams
-from services import raids, public_checks
+from services import raids, public_checks, feature_flags, bot_profiles, guild_units_image
 from tg_bot import core, more
 
 
@@ -79,9 +79,29 @@ class PersonalRaidReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([u["base_id"] for u in report["units"]], raids.PREVIEW_RAIDS["droiddestruction"]["units"])
         self.assertTrue(plan["entry"]["preview"])
         self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "GLMANDOGROGU"), "Мандалорец и Грогу")
-        self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "B1BATTLEDROIDV2"), "Боевой дроид B1")
+        self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "B1MERCDROID"), "Наемный охранный дроид (B1)")
         self.assertNotIn("GLMANDO", plan["requirements"])
         self.assertNotIn("B1BATTLEDROID", plan["requirements"])
+
+    def test_custom_b1_portrait_is_opt_in_test_only_and_guild_scoped(self):
+        with bot_profiles.delivery_context("test"):
+            self.assertEqual(raids.readiness_portraits(1), {})
+            feature_flags.set_enabled(1, "raid_b1_portrait", True, "test")
+            custom = raids.readiness_portraits(1)
+            self.assertEqual(set(custom), {"B1MERCDROID"})
+            self.assertTrue(custom["B1MERCDROID"].is_file())
+            with patch.object(guild_units_image, "_portrait") as normal:
+                portrait = guild_units_image._unit_portrait("B1MERCDROID", 64, custom)
+                self.assertEqual(portrait.size, (64, 64))
+                normal.assert_not_called()
+                guild_units_image._unit_portrait("GLMANDOGROGU", 64, custom)
+                normal.assert_called_once_with("GLMANDOGROGU", 64)
+            self.assertEqual(raids.readiness_portraits(2), {})
+            self.assertEqual(raids.readiness_portraits(None), {})
+            with bot_profiles.delivery_context("prod"):
+                self.assertEqual(raids.readiness_portraits(1), {})
+            feature_flags.set_enabled(1, "raid_b1_portrait", False, "test")
+            self.assertEqual(raids.readiness_portraits(1), {})
 
     async def test_discord_personal_renders_without_guild_feature_or_rosters(self):
         with patch("services.guild_units_image.render_player", return_value=b"png") as render, \

@@ -530,7 +530,8 @@ async def cmd_raidready(ctx: Ctx):
     if plan["entry"].get("preview"):
         note += f" · предварительно: {plan['entry']['preview']}"
     name = player.get("name") or account["name"] or code
-    png = await asyncio.to_thread(guild_units_image.render_player, report, name, note)
+    png = await asyncio.to_thread(guild_units_image.render_player, report, name, note,
+                                  portrait_overrides=raids_svc.readiness_portraits(ctx.access["guild_id"]))
     met = sum(u["status"] == "met" for u in report["units"])
     text = f"<b>{esc(name)}</b> — {esc(plan['title'])}: подготовлено {met} из {len(report['units'])} персонажей."
     if plan["entry"].get("preview"):

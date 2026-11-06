@@ -241,7 +241,7 @@ class RaidsCog(commands.Cog):
         png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия",
                                       f"в рейд пускают с {entry['min_stars']}★ · "
                                       + (f"предварительно: {entry['preview']}" if entry.get("preview") else "данные ежечасного обновления"),
-                                      title)
+                                      title, portrait_overrides=rs.readiness_portraits(guild_id))
         ready = sum(1 for p in r["players"] if p["ready"])
         content = (f"**{rs.raid_name(рейд)}**" + (f", {отряд}" if отряд else "") + f" — {len(grouped)} персонажей, порог {level}: "
                    f"готовы {ready} из {len(r['players'])}")
@@ -274,7 +274,8 @@ class RaidsCog(commands.Cog):
         entry = plan["entry"]
         if entry.get("preview"):
             note += f" · предварительно: {entry['preview']}"
-        png = await asyncio.to_thread(guild_units_image.render_player, report, name, note)
+        png = await asyncio.to_thread(guild_units_image.render_player, report, name, note,
+                                      portrait_overrides=rs.readiness_portraits(guild_id))
         met = sum(u["status"] == "met" for u in report["units"])
         content = f"**{name}** — {plan['title']}: подготовлено {met} из {len(report['units'])} персонажей."
         if entry.get("tiers"):

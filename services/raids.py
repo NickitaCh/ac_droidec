@@ -137,6 +137,17 @@ RAID_UNITS_STATE = "raid_entry_units"   # bot_state guild 0: {node_id: {"units":
 CAMPAIGN_FLAG = 274877906944
 
 
+def readiness_portraits(guild_id: int | None) -> dict:
+    """Локальная подмена только в рейдовых отчётах тестового бота; общий кэш не меняется."""
+    from pathlib import Path
+    from services import bot_profiles, feature_flags
+    if guild_id is None or bot_profiles.current_profile() != "test":
+        return {}
+    if not feature_flags.is_enabled(guild_id, "raid_b1_portrait"):
+        return {}
+    return {"B1MERCDROID": Path(__file__).parent / "assets" / "raid_b1_test.jpg"}
+
+
 def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
     """Кого пускают в каждый рейд — из условий входа узла GUILD/RAIDS (категории
     entryCategoryAllowed + минимум звёзд) и категорий персонажей. Проверено 2026-10-21:
@@ -175,15 +186,15 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
 # колонок и уровни переходят к настоящему рейду (_raid_units_data); супер-админам уходит
 # личка (cogs/raids.py). Запись отсюда после этого можно удалить.
 # ID Мандалорца и Грогу и нового B1 сверены с Comlink: GLMANDOGROGU и
-# B1BATTLEDROIDV2; игровые имена и портреты берутся из общего справочника.
+# B1MERCDROID; игровые имена и портреты берутся из общего справочника.
 PREVIEW_RAIDS = {
     "droiddestruction": {
         "units": ["4LOM", "ZUCKUSS", "STORMTROOPERLUKE", "IG90", "ASAJJDARKDISCIPLE", "INQUISITORBARRISS",
                   "YODACHEWBACCA", "VADERDUELSEND", "MAULHATEFUELED", "KLEYA", "VEL", "CINTA", "DEDRAMEERO",
                   "MAJORPARTAGAZ", "KXSECURITYDROID", "CASSIANUNDERCOVER", "CARSONTEVA", "R5D4", "BISHOP",
                   "RANGERZEB", "GOPHERANTS", "REMNANTSNOWCOMMANDER", "RACCOON", "MARAJADESKYWALKER", "YODADSV",
-                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR", "GLMANDOGROGU", "B1BATTLEDROIDV2", "ADELPHIRANGER"],
-        "names": {"GLMANDOGROGU": "Мандалорец и Грогу", "B1BATTLEDROIDV2": "Боевой дроид B1"},
+                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR", "GLMANDOGROGU", "B1MERCDROID", "ADELPHIRANGER"],
+        "names": {"GLMANDOGROGU": "Мандалорец и Грогу", "B1MERCDROID": "Наемный охранный дроид (B1)"},
         "min_stars": 4,
         "preview": "до выхода рейда (ноябрь 2026), состав по анонсу — может измениться",
         # Уровень сложности: (порог входа для КАЖДОГО юнита отряда, очки за бой); 5 попыток.

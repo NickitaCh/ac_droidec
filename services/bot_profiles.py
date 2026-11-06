@@ -21,7 +21,7 @@ _worker_profile = None
 PROD_DISABLED = frozenset({
     "fun", "omicron_phrases", "steal_build", "mod_analysis", "mod_compare",
     "mod_scan", "tw_order", "antispam", "mod_optimizer", "mod_ku", "gear_farm",
-    "ai_models", "qa_checklist", "datacron_shorts", "unit_aliases", "mod_ku_plates",
+    "ai_models", "qa_checklist", "datacron_shorts", "unit_aliases", "mod_ku_plates", "raid_b1_portrait",
 })
 
 PROD_BLOCKED_PATHS = (

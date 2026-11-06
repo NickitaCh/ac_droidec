@@ -6,7 +6,7 @@
 import io
 import math
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 from services.profile_image import BG, GOLD, MUTED, TEXT, _font, _portrait
 from services import unit_alignment
@@ -33,8 +33,21 @@ def _row_color(pct: float):
     return (int(96 - 4 * k), int(32 + 52 * k), int(26 - 6 * k))
 
 
+def _unit_portrait(base_id: str, size: int, overrides: dict | None):
+    path = (overrides or {}).get(base_id)
+    if path:
+        try:
+            with Image.open(path) as source:
+                return ImageOps.fit(ImageOps.exif_transpose(source).convert("RGBA"), (size, size),
+                                    method=Image.Resampling.LANCZOS)
+        except OSError:
+            pass
+    return _portrait(base_id, size)
+
+
 def render(r: dict, guild_name: str, updated_note: str | None = None, title: str | None = None,
-           notes: list[str] | None = None, summary: str | None = None, cell_w: int = CELL_W) -> bytes:
+           notes: list[str] | None = None, summary: str | None = None, cell_w: int = CELL_W,
+           *, portrait_overrides: dict | None = None) -> bytes:
     """title — заголовок вместо «Готовность к «цель»» (рейд); без r["guide"] нет колонки «Цель».
     notes — подписи внизу вместо стандартных, summary — строка под заголовком вместо «Готовы: …»."""
     units, players = r["units"], r["players"]
@@ -80,7 +93,7 @@ def render(r: dict, guild_name: str, updated_note: str | None = None, title: str
         draw.rectangle((x + 2, y + HEAD_H - 6, x + cell_w - 2, y + HEAD_H - 2), fill=unit_alignment.color(u["base_id"]))
         draw.text((x + cell_w // 2, y + 12), "Нужно", font=_font(14, True), fill=(230, 80, 80), anchor="mm")
         draw.text((x + cell_w // 2, y + 32), u["label"], font=_font(15, True), fill=TEXT, anchor="mm")
-        p = _portrait(u["base_id"], PIC)
+        p = _unit_portrait(u["base_id"], PIC, portrait_overrides)
         if p is not None:
             img.paste(p, (x + (cell_w - PIC) // 2, y + HEAD_H - PIC - 8), p)
     draw.line((gx + gw - 3, y + 6, gx + gw - 3, y + HEAD_H + ROW_H * len(players)), fill=(200, 200, 200), width=2)
@@ -140,7 +153,8 @@ def _level_badge(level: dict | None, is_ship: bool) -> str:
     return str(level["relic"]) if level["relic"] is not None else f"G{level['gear']}"
 
 
-def render_player(r: dict, player_name: str, updated_note: str | None = None) -> bytes:
+def render_player(r: dict, player_name: str, updated_note: str | None = None,
+                  *, portrait_overrides: dict | None = None) -> bytes:
     """Плитки требуемых юнитов: портрет, текущие звёзды и реликвия/гир, в углу — сколько нужно;
     рамка — зелёная (выполнено), жёлтая (не хватает реликвии/гира), красная (нет / мало звёзд)."""
     units = r["units"]
@@ -178,7 +192,7 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None) ->
             draw.text((x + TILE_W - 8, y + 6 + k * 17), part, font=_font(14, True), fill=(20, 20, 20), anchor="ra")
         pic = 96
         px, py = x + (TILE_W - pic) // 2, y + 22
-        portrait = _portrait(u["base_id"], pic)
+        portrait = _unit_portrait(u["base_id"], pic, portrait_overrides)
         if portrait is not None:
             if u["level"] is None:  # юнита нет — серый портрет
                 gray = portrait.convert("LA").convert("RGBA")

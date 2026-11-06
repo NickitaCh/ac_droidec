@@ -45,6 +45,7 @@ FEATURES: dict[str, dict] = {
     "raid_tickets": {"label": "Энка — напоминания и итог дня", "category": "Прочее"},
     "raid_tickets_dm": {"label": "Энка — личка недосдавшим", "category": "Прочее"},
     "raids": {"label": "Рейды — история очков", "category": "Прочее"},
+    "raid_b1_portrait": {"label": "Рейды — особый портрет B1 (тестовый бот)", "category": "Прочее"},
     "datacrons": {"label": "Датакроны", "category": "Прочее"},
     "omicron": {"label": "Омикрон-объявления", "category": "Прочее"},
     "stat_requirements": {"label": "Статы и плейты", "category": "Мод-инструменты"},
@@ -68,7 +69,7 @@ FEATURES: dict[str, dict] = {
 # (решение пользователя 2026-10-28: «опционально, по умолчанию выкл»).
 # tg_relay_auto — копии сообщений Discord-каналов в ветки Telegram (cogs/tg_relay.py);
 # тумблер на /settings → Telegram (решение пользователя 2026-10-29: «нужен тумблер»).
-OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm", "tg_relay_auto"}
+OPT_IN = {"tasks_mention", "mod_ku_plates", "tb_star_goal", "tb_classic_nav", "raid_tickets_dm", "tg_relay_auto", "raid_b1_portrait"}
 
 
 def label(key: str) -> str:
