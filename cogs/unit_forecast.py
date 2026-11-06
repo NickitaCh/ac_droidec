@@ -268,16 +268,18 @@ class UnitForecastCog(commands.Cog):
 
         async def one(code):
             if database.get_player_units_age_seconds(code) is not None:
+                refreshed = False
                 if refresh:
                     try:
-                        await activity_diff.refresh_player_units(self.bot.comlink, code)
+                        refreshed = await activity_diff.refresh_player_units(self.bot.comlink, code)
                     except Exception as e:
                         print(f"⚠️ [Юнит] обновление {code}: {e!r}")
                 units = await asyncio.to_thread(database.get_player_units, code)
                 if units:
                     name = (profiles.get(code) or {}).get("name") or names.get(code) or code
                     age = database.get_player_units_age_seconds(code)
-                    return {"name": name, "rosterUnit": list(units.values())}, (None if refresh else age)
+                    fresh = refreshed and age is not None and age < activity_diff.REFRESH_COOLDOWN_SECONDS
+                    return {"name": name, "rosterUnit": list(units.values())}, (None if fresh else age)
             try:
                 return await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(code)), None
             except Exception as e:

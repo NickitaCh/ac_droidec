@@ -195,6 +195,8 @@ class UnitTestCog(commands.Cog):
     def own_code(self, inter, guild_id: int, alt: bool) -> tuple[str | None, str | None]:
         account = public_checks.account(inter.author, alt=alt)
         if account is None:
+            if alt:
+                return None, "❌ Второй аккаунт (альт) не найден. Для основного аккаунта выключите «альт»; для свежих данных включите «обновить». Второй аккаунт можно привязать через `/регистрация`."
             return None, "❌ Аккаунт не найден — привяжите его через `/регистрация`."
         return account["ally_code"], None
 
