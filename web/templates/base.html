@@ -3,6 +3,18 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% if request.url.hostname == 'swgoh-sng.ru' %}
+    <!-- Yandex.Metrika counter -->
+    <script>
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a);
+        })(window,document,'script','https://mc.yandex.ru/metrika/tag.js?id=114105635','ym');
+        ym(114105635,'init',{webvisor:false,clickmap:true,accurateTrackBounce:true,trackLinks:true});
+    </script>
+    {% endif %}
     <title>{% set page_title %}{% block title %}AC Droidec{% endblock %}{% endset %}{{ page_title|replace('AC Droidec', 'Droidec') if not user or user.bot_profile == 'prod' else page_title }}</title>
     <link rel="icon" type="image/png" href="/static/favicons/favicon-96x96.png" sizes="96x96">
     <link rel="icon" type="image/svg+xml" href="/static/favicons/favicon.svg">
@@ -31,6 +43,9 @@
     <script src="/static/dashboard.js?v=20261102platoons" defer></script>
 </head>
 <body>
+    {% if request.url.hostname == 'swgoh-sng.ru' %}
+    <noscript><div><img src="https://mc.yandex.ru/watch/114105635" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    {% endif %}
     <div class="app-shell">
     <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
     <aside class="sidebar">
