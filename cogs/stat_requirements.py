@@ -1696,15 +1696,21 @@ class StatRequirementsCog(commands.Cog):
         hits = list(hits)
         if not hits:
             return
-        skill_info = database.get_skill_display_info([skill_id for _, _, _, skill_id, _ in hits])
+        skill_info = await asyncio.to_thread(database.get_skill_display_info, [skill_id for _, _, _, skill_id, _ in hits])
+        def load_guild_settings():
+            return {
+                gid: (feature_flags.is_enabled(gid, "omicron"), database.get_guild_config(gid))
+                for gid in {hit[4] for hit in hits}
+            }
+        guild_settings = await asyncio.to_thread(load_guild_settings)
         names_by_guild = {}
         channels_by_id: dict[int, object] = {}
         items_by_channel: dict[int, list[tuple[int, str]]] = {}
         guild_by_channel: dict[int, int] = {}
         for event_id, ally_code, base_id, skill_id, guild_id in hits:
-            if not feature_flags.is_enabled(guild_id, "omicron"):
+            enabled, guild_cfg = guild_settings[guild_id]
+            if not enabled:
                 continue
-            guild_cfg = database.get_guild_config(guild_id)
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
                 # Гильдия без Discord-канала, но с Telegram-чатом (/notify «омикроны») —

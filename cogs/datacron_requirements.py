@@ -1474,7 +1474,7 @@ class DatacronRequirementsCog(commands.Cog):
         # Сокращения бонусов правятся в вебе (/admin/datacron-shorts) — подхватываем без
         # ожидания 12-часового пересбора каталога. Исключение не должно убить loop навсегда.
         try:
-            refresh_catalog_shorts(self.bot.datacron_cache)
+            await asyncio.to_thread(refresh_catalog_shorts, self.bot.datacron_cache)
         except Exception as e:
             print(f"⚠️ [ДК] Не удалось обновить сокращения бонусов: {e}")
 

@@ -548,7 +548,7 @@ class GuildEvents(commands.Cog):
                 self.last_reported_tb_fingerprint[gid] = database.get_bot_state("last_reported_tb_fingerprint", guild_id=gid)
             try:
                 result = guild.get("recentTerritoryBattleResult", [])
-                if result and feature_flags.is_enabled(gid, "tb_reports"):
+                if result and await asyncio.to_thread(feature_flags.is_enabled, gid, "tb_reports"):
                     fingerprint = hashlib.sha1(
                         json.dumps(result, sort_keys=True, default=str).encode()
                     ).hexdigest()
@@ -561,8 +561,8 @@ class GuildEvents(commands.Cog):
 
             try:
                 tw_results = guild.get("recentTerritoryWarResult", [])
-                if tw_results and feature_flags.is_enabled(gid, "tw_order"):
-                    self.generate_tw_report(gid, tw_results)
+                if tw_results and await asyncio.to_thread(feature_flags.is_enabled, gid, "tw_order"):
+                    await asyncio.to_thread(self.generate_tw_report, gid, tw_results)
             except Exception as e:
                 print(f"❌ [{gname}] Ошибка обработки истории ВГ: {e}")
 

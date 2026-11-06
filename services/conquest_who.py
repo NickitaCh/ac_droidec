@@ -167,11 +167,16 @@ async def annotate(comlink, state: dict, units: list, loc: dict) -> None:
 
     skills = (await asyncio.to_thread(_data, SKILL_DEFINITIONS_FLAG)).get("skill") or []
     abilities = (await asyncio.to_thread(_data, ABILITY_DEFINITIONS_FLAG)).get("ability") or []
-    chars_list = [u for u in units if u.get("combatType") == 1]
-    chars = {u["baseId"]: {"alignment": u.get("forceAlignment")} for u in chars_list}
-    names = {b: words(n) for b, n in database.get_game_unit_names(list(chars)).items()}
-    ability_words = unit_ability_words(chars_list, skills, abilities, loc)
-    facs = faction.factions()
-    for d in state["difficulties"]:
-        for f in d["feats"]:
-            f["who"] = match(f, chars, names, facs, ability_words)
+    def apply():
+        # Matching all feat texts takes seconds; DB reads may also wait for a writer.
+        # Keep both off the Discord event loop, including during startup sync.
+        chars_list = [u for u in units if u.get("combatType") == 1]
+        chars = {u["baseId"]: {"alignment": u.get("forceAlignment")} for u in chars_list}
+        names = {b: words(n) for b, n in database.get_game_unit_names(list(chars)).items()}
+        ability_words = unit_ability_words(chars_list, skills, abilities, loc)
+        facs = faction.factions()
+        for d in state["difficulties"]:
+            for f in d["feats"]:
+                f["who"] = match(f, chars, names, facs, ability_words)
+
+    await asyncio.to_thread(apply)
