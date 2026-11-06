@@ -228,11 +228,18 @@ class _Canvas:
         badge = self._badge(row, guild)
         if badge:
             text, color = badge
-            bf = _font(15, True)
-            tw = int(self.draw.textlength(text, font=bf)) + 12
-            bx, by = px + pic - tw + 4, py + pic - 18
-            self.draw.rounded_rectangle((bx, by, bx + tw, by + 20), radius=9, fill=color, outline=(20, 20, 20))
-            self.text((bx + tw // 2, by + 10), text, bf, anchor="mm")
+            if not row["is_ship"] and row.get("relic") is not None:
+                # Same round, number-only relic marker as /юнит.
+                bx, by = px + pic - 12, py + pic - 12
+                self.draw.ellipse((bx - 15, by - 15, bx + 15, by + 15),
+                                  fill=(120, 30, 30), outline=(230, 230, 230), width=2)
+                self.text((bx, by), str(row["relic"]), _font(16, True, condensed=True), anchor="mm")
+            else:
+                bf = _font(15, True)
+                tw = int(self.draw.textlength(text, font=bf)) + 12
+                bx, by = px + pic - tw + 4, py + pic - 18
+                self.draw.rounded_rectangle((bx, by, bx + tw, by + 20), radius=9, fill=color, outline=(20, 20, 20))
+                self.text((bx + tw // 2, by + 10), text, bf, anchor="mm")
 
         if not guild and not row["is_ship"]:
             # Stack ability counts on the portrait's left edge, clear of the relic badge.
