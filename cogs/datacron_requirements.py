@@ -1315,7 +1315,7 @@ def _format_stat_check_line(check) -> str:
     return f"{icon} {label}: {actual_str} (нужно ≥{check['min_value']:g}%)"
 
 
-def build_player_check(cache, player, set_id, requirements, focused_requirements, guild_id) -> tuple[list, int, int]:
+def build_player_check(cache, player, set_id, requirements, focused_requirements, guild_id, *, counts_out=None) -> tuple[list, int, int]:
     """Проверка датакронов одного игрока по требованиям сезона — строки отчёта (Discord-
     разметка) и итог «закрыто/всего». Общая для /дк_требования проверить и Telegram-бота
     (tg_bot/commands_more.py)."""
@@ -1372,6 +1372,8 @@ def build_player_check(cache, player, set_id, requirements, focused_requirements
     }
     total_matched = sum(g["matched"] for g in groups.values())
     total_all = sum(g["total"] for g in groups.values())
+    if counts_out is not None:
+        counts_out.update({p: {"matched": g["matched"], "total": g["total"]} for p, g in groups.items()})
     lines = _build_priority_description(priority_items, footer_totals)
     lines.extend(_skipped_lines(skipped, cache, set_id))
     return lines, total_matched, total_all
@@ -1698,12 +1700,15 @@ class DatacronRequirementsCog(commands.Cog):
             # игровое имя из ответа Comlink.
             игрок = player["name"]
 
+        counts = {}
         lines, total_matched, total_all = build_player_check(
             self.bot.datacron_cache, player, set_id, requirements, focused_requirements, guild_id,
+            counts_out=counts,
         )
-        if total_matched == total_all:
+        required = counts[PRIORITY_REQUIRED]
+        if required["matched"] == required["total"]:
             color = DATACRON_CHECK_COLOR_FULL
-        elif total_matched:
+        elif required["matched"]:
             color = DATACRON_CHECK_COLOR_PARTIAL
         else:
             color = DATACRON_CHECK_COLOR_NONE
