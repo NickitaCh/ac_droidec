@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import database
 from services import player_profile as pp
+from services import unit_alignment
 
 ROOT = Path(__file__).resolve().parent.parent
 FONT_DIR = ROOT / "assets" / "fonts"
@@ -232,8 +233,11 @@ class _Canvas:
                 # Same round, number-only relic marker as /юнит.
                 bx, by = px + pic - 12, py + pic - 12
                 self.draw.ellipse((bx - 15, by - 15, bx + 15, by + 15),
-                                  fill=(120, 30, 30), outline=(230, 230, 230), width=2)
-                self.text((bx, by), str(row["relic"]), _font(16, True, condensed=True), anchor="mm")
+                                  fill=unit_alignment.color(row["base_id"], (120, 30, 30)),
+                                  outline=(230, 230, 230), width=2)
+                badge_text = (25, 28, 35) if unit_alignment.side(row["base_id"]) == "neutral" else TEXT
+                self.text((bx, by), str(row["relic"]), _font(16, True, condensed=True),
+                          fill=badge_text, anchor="mm")
             else:
                 bf = _font(15, True)
                 tw = int(self.draw.textlength(text, font=bf)) + 12
