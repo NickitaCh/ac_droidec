@@ -78,7 +78,10 @@ class PersonalRaidReadinessTests(unittest.IsolatedAsyncioTestCase):
         report = raids.personal_readiness(plan, {})
         self.assertEqual([u["base_id"] for u in report["units"]], raids.PREVIEW_RAIDS["droiddestruction"]["units"])
         self.assertTrue(plan["entry"]["preview"])
-        self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "GLMANDO"), "Мандалорец и Грогу")
+        self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "GLMANDOGROGU"), "Мандалорец и Грогу")
+        self.assertEqual(next(u["name"] for u in report["units"] if u["base_id"] == "B1BATTLEDROIDV2"), "Боевой дроид B1")
+        self.assertNotIn("GLMANDO", plan["requirements"])
+        self.assertNotIn("B1BATTLEDROID", plan["requirements"])
 
     async def test_discord_personal_renders_without_guild_feature_or_rosters(self):
         with patch("services.guild_units_image.render_player", return_value=b"png") as render, \

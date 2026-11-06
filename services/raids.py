@@ -174,16 +174,16 @@ def parse_raid_entry_units(campaigns: list, units: list, known: set) -> dict:
 # с тем же id или почти тем же составом), предварительный список скрывается сам, а порядок
 # колонок и уровни переходят к настоящему рейду (_raid_units_data); супер-админам уходит
 # личка (cogs/raids.py). Запись отсюда после этого можно удалить.
-# Ещё не вышедшие в игре юниты (Мандалорец и Грогу, новый B1) — под id из таблицы WookieeBot
-# (GLMANDO, B1BATTLEDROID), имена — из "names": в game_units их нет, у всех будет «—».
+# ID Мандалорца и Грогу и нового B1 сверены с Comlink: GLMANDOGROGU и
+# B1BATTLEDROIDV2; игровые имена и портреты берутся из общего справочника.
 PREVIEW_RAIDS = {
     "droiddestruction": {
         "units": ["4LOM", "ZUCKUSS", "STORMTROOPERLUKE", "IG90", "ASAJJDARKDISCIPLE", "INQUISITORBARRISS",
                   "YODACHEWBACCA", "VADERDUELSEND", "MAULHATEFUELED", "KLEYA", "VEL", "CINTA", "DEDRAMEERO",
                   "MAJORPARTAGAZ", "KXSECURITYDROID", "CASSIANUNDERCOVER", "CARSONTEVA", "R5D4", "BISHOP",
                   "RANGERZEB", "GOPHERANTS", "REMNANTSNOWCOMMANDER", "RACCOON", "MARAJADESKYWALKER", "YODADSV",
-                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR", "GLMANDO", "B1BATTLEDROID", "ADELPHIRANGER"],
-        "names": {"GLMANDO": "Мандалорец и Грогу", "B1BATTLEDROID": "Боевой дроид B1 (новый)"},
+                  "LUKESTARKILLER", "STORMTROOPERCONCEPT", "JAXXON", "THERONIN", "DARTHJARJAR", "GLMANDOGROGU", "B1BATTLEDROIDV2", "ADELPHIRANGER"],
+        "names": {"GLMANDOGROGU": "Мандалорец и Грогу", "B1BATTLEDROIDV2": "Боевой дроид B1"},
         "min_stars": 4,
         "preview": "до выхода рейда (ноябрь 2026), состав по анонсу — может измениться",
         # Уровень сложности: (порог входа для КАЖДОГО юнита отряда, очки за бой); 5 попыток.
