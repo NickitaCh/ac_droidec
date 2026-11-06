@@ -24,7 +24,7 @@ FLEET_META = ("CAPITALLEVIATHAN", "CAPITALPROFUNDITY", "CAPITALEXECUTOR")
 # ГЛ — в порядке выхода в игре, как у HotBot; новые (из игровых данных) — в конец.
 GL_ORDER = (
     "GLREY", "SUPREMELEADERKYLOREN", "GRANDMASTERLUKE", "SITHPALPATINE", "JEDIMASTERKENOBI",
-    "LORDVADER", "JABBATHEHUTT", "GLLEIA", "GLAHSOKATANO", "GLHONDO",
+    "LORDVADER", "JABBATHEHUTT", "GLLEIA", "GLAHSOKATANO", "GLMANDOGROGU", "GLHONDO",
 )
 # Список ГЛ берётся из игровых данных (категория galactic_legend, пишет units_sync в
 # bot_state "galactic_legends"); это — запасной вариант до первого синка.
@@ -138,6 +138,7 @@ def _unit_row(unit: dict, names: dict, skills: dict, is_ship: bool) -> dict:
         "protection": None if is_ship else _stat(final, "Protection", False),
         "potency": _stat(final, "Potency", is_ship),
         "tenacity": _stat(final, "Tenacity", is_ship),
+        "armor": None if is_ship else _stat(final, "Armor", False),
         "phys": _stat(final, "Physical Damage", is_ship),
         "spec": _stat(final, "Special Damage", is_ship),
     }
@@ -172,16 +173,24 @@ def _mod_summary(roster: list[dict]) -> dict:
 
 
 def _datacron_summary(datacrons: list[dict]) -> dict:
-    out = {"rerolls": 0, "l9": 0, "l6_8": 0, "l3_5": 0}
+    out = {"total": 0, "rerolls": 0, "l15": 0, "l12_14": 0, "l9_11": 0, "l9": 0, "l6_8": 0, "l3_5": 0, "l0_2": 0}
     for dc in datacrons or []:
+        out["total"] += 1
         out["rerolls"] += int(dc.get("rerollCount") or 0)
         level = len(dc.get("affix") or [])
-        if level >= 9:
-            out["l9"] += 1
+        out["l9"] += level >= 9  # Existing consumers use this as 9+.
+        if level >= 15:
+            out["l15"] += 1
+        elif level >= 12:
+            out["l12_14"] += 1
+        elif level >= 9:
+            out["l9_11"] += 1
         elif level >= 6:
             out["l6_8"] += 1
         elif level >= 3:
             out["l3_5"] += 1
+        else:
+            out["l0_2"] += 1
     return out
 
 
@@ -322,8 +331,8 @@ def _aggregate_units(players: list[dict], key: str, ids: list[str], names: dict)
                "avg_relic": _avg(r["relic"] for r in owners),
                "r8_plus": sum((r["relic"] or 0) >= 8 for r in owners),
                "stars7": sum(r["stars"] >= 7 for r in owners)}
-        for stat in ("speed", "speed_mods", "health", "protection", "potency", "tenacity", "phys", "spec"):
-            row[stat] = _avg(r[stat] for r in owners)
+        for stat in ("speed", "speed_mods", "health", "protection", "potency", "tenacity", "phys", "spec", "armor"):
+            row[stat] = _avg(r.get(stat) for r in owners)
         result.append(row)
     return result
 
@@ -348,7 +357,7 @@ def summarize_guild(guild_name: str, guild_gp: int | None, players: list[dict], 
         "g12": _sum(players, "g12"),
         "relics": {k: _sum(players, "relics", k) for k in relic_keys},
         "mods": {k: _sum(players, "mods", k) for k in players[0]["mods"]} if players else {},
-        "datacrons": {k: _sum(players, "datacrons", k) for k in ("rerolls", "l9", "l6_8", "l3_5")},
+        "datacrons": {k: _sum(players, "datacrons", k) for k in _datacron_summary([])},
         "avg": {
             "gp": _sum(players, "gp") / n,
             "top80": _sum(players, "top80") / n,

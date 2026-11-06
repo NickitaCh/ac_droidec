@@ -246,13 +246,9 @@ class _Canvas:
         line3.append(f"Урон {short(row.get('phys'))} / {short(row.get('spec'))}")
         self.text((tx, y + 56), self.fit("  ·  ".join(line3), small, tw), small)
         line4 = [f"Стойк. {_pct(row.get('tenacity'))}", f"Эфф. {_pct(row.get('potency'))}"]
-        if not guild:
-            if row.get("zetas"):
-                line4.append(f"Зет {row['zetas']}")
-            if row.get("omicrons"):
-                line4.append(f"Омик. {row['omicrons']}")
-            if row.get("ultimate"):
-                line4.append("Абсолютная")
+        if not row["is_ship"]:
+            armor = row.get("armor")
+            line4.append(f"Броня {_dec(armor * 100) if armor is not None else '—'}" + ("%" if armor is not None else ""))
         self.text((tx, y + 79), self.fit("  ·  ".join(line4), small, tw), small, fill=MUTED)
         if guild:
             parts = [f"Есть {row['owners']}"]
@@ -280,16 +276,16 @@ class _Canvas:
 # ---------------------------------------------------------------- страницы
 
 def _relic_cells(rel: dict) -> list:
-    return [("Всего", _int(rel["total"])), ("R10", _int(rel["r10"])), ("R9", _int(rel["r9"])),
-            ("R8", _int(rel["r8"])), ("R7", _int(rel["r7"])), ("R6", _int(rel["r6"])),
-            ("R5", _int(rel["r5"])), ("R1–R4", _int(rel["r1_4"]))]
+    return [("Всего", _int(rel["total"])), ("Р10", _int(rel["r10"])), ("Р9", _int(rel["r9"])),
+            ("Р8", _int(rel["r8"])), ("Р7", _int(rel["r7"])), ("Р6", _int(rel["r6"])),
+            ("Р5", _int(rel["r5"])), ("Р1–Р4", _int(rel["r1_4"]))]
 
 
-def _mod_cells(mods: dict) -> list:
-    return [("Скорость 25+", _int(mods["s25"])), ("Скорость 20–24", _int(mods["s20_24"])), ("6 точек", _int(mods["six_dot"])),
-            ("Скорость 15–19", _int(mods["s15_19"])), ("Скорость 10–14", _int(mods["s10_14"])), ("Скорость 20+", _int(mods["s20"])),
-            ("Скорость 15+", _int(mods["s15"])), ("Скорость 10+", _int(mods["s10"])), ("Нападение 6%+", _int(mods["off6"])),
-            ("Нападение 4%+", _int(mods["off4"])), ("Защита 14%+", _int(mods["def14"])), ("Защита 9%+", _int(mods["def9"]))]
+def _mod_cells(mods: dict, modku: float | None = None) -> list:
+    return [("МодКу", _modku(modku)), ("6 точек", _int(mods["six_dot"])), ("Скорость 25+", _int(mods["s25"])),
+            ("Скорость 20–24", _int(mods["s20_24"])), ("Скорость 15–19", _int(mods["s15_19"])),
+            ("Скорость 10–14", _int(mods["s10_14"])), ("Атака 6%+", _int(mods["off6"])),
+            ("Атака 4%+", _int(mods["off4"]))]
 
 
 def _modku(value: float | None) -> str:
@@ -297,8 +293,10 @@ def _modku(value: float | None) -> str:
 
 
 def _datacron_cells(dc: dict) -> list:
-    return [("Перебросов", _int(dc["rerolls"])), ("Уровень 9", _int(dc["l9"])),
-            ("Уровень 6–8", _int(dc["l6_8"])), ("Уровень 3–5", _int(dc["l3_5"]))]
+    return [("Всего", _int(dc["total"])), ("Уровень 15", _int(dc["l15"])),
+            ("Уровень 12–14", _int(dc["l12_14"])), ("Уровень 9–11", _int(dc["l9_11"])),
+            ("Перебросов", _int(dc["rerolls"])), ("Уровень 6–8", _int(dc["l6_8"])),
+            ("Уровень 3–5", _int(dc["l3_5"])), ("Уровень 0–2", _int(dc["l0_2"]))]
 
 
 def _ally(code: str) -> str:
@@ -324,26 +322,21 @@ def render_player(s: dict, guild_gp: int | None = None) -> bytes:
         ("Побед в атаке", _int(stats.get("STAT_SEASON_OFFENSIVE_BATTLES_WON_NAME"))),
         ("Меньшим составом", _int(stats.get("STAT_SEASON_UNDERSIZED_SQUAD_WINS_NAME"))),
         ("Успешных защит", _int(stats.get("STAT_SEASON_SUCCESSFUL_DEFENDS_NAME"))),
-        ("Полных зачисток", _int(stats.get("STAT_SEASON_FULL_CLEAR_ROUND_WINS_NAME"))),
         ("Зон захвачено", _int(stats.get("STAT_SEASON_TERRITORIES_DEFEATED_NAME"))),
-        ("ГМ гильдии", compact(guild_gp) if guild_gp else "—"),
+        ("БЗ захвачено", _int(stats.get("STAT_SEASON_FULL_CLEAR_ROUND_WINS_NAME"))),
     ])
 
     cv.section("Сводка")
     cv.grid([
-        ("ГМ", compact(s["gp"])), ("ГМ персонажей", compact(s["char_gp"])), ("ГМ кораблей", compact(s["ship_gp"])),
+        ("ГМ", compact(s["gp"])), ("ГМ пехоты", compact(s["char_gp"])), ("ГМ флота", compact(s["ship_gp"])),
         ("Лучшие 80", compact(s["top80"])), ("Арена", _int(m.get("arena_rank"))), ("Флот", _int(m.get("fleet_rank"))),
         ("Зеты", _int(s["zetas"])), ("Омикроны", _int(s["omicrons"])),
-        ("Омик. ВГ / ТБ / ВА", f"{s['omicrons_tw']} / {s['omicrons_tb']} / {s['omicrons_gac']}"),
-        ("G13", _int(s["g13"])), ("G12", _int(s["g12"])), ("G11", _int(s["g11"])),
-        # Целая часть, без округления — как у HotBot (139,7 → 139).
-        ("Скорость G11+", f"+{int(s['speed_g11'])}" if s["speed_g11"] is not None else "—"),
-        ("Скорость топ-80", f"+{int(s['speed_top80'])}" if s["speed_top80"] is not None else "—"),
-        ("МодКу", _modku(s.get("modku"))),
+        ("ВГ / ТБ / ВА", f"{s['omicrons_tw']} / {s['omicrons_tb']} / {s['omicrons_gac']}"),
+        ("Т13", _int(s["g13"])), ("Т12", _int(s["g12"])), ("Т11", _int(s["g11"])),
     ])
 
     cv.section("Модули")
-    cv.grid(_mod_cells(s["mods"]))
+    cv.grid(_mod_cells(s["mods"], s.get("modku")))
     cv.section("Реликвии")
     cv.grid(_relic_cells(s["relics"]), cols=4)
     cv.section("Датакроны")
@@ -368,7 +361,7 @@ def render_guild(g: dict) -> bytes:
     ])
     if g["mods"]:
         cv.section("Модули")
-        cv.grid(_mod_cells(g["mods"]))
+        cv.grid(_mod_cells(g["mods"], g["avg"].get("modku")))
     cv.section("Реликвии")
     cv.grid(_relic_cells(g["relics"]), cols=4)
     cv.section("Датакроны")
