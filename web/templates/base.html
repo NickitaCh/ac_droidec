@@ -12,7 +12,7 @@
             for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
             k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a);
         })(window,document,'script','https://mc.yandex.ru/metrika/tag.js?id=114105635','ym');
-        ym(114105635,'init',{webvisor:false,clickmap:true,accurateTrackBounce:true,trackLinks:true});
+        ym(114105635,'init',{webvisor:true,clickmap:true,accurateTrackBounce:true,trackLinks:true});
     </script>
     {% endif %}
     <title>{% set page_title %}{% block title %}AC Droidec{% endblock %}{% endset %}{{ page_title|replace('AC Droidec', 'Droidec') if not user or user.bot_profile == 'prod' else page_title }}</title>
