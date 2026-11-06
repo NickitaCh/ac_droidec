@@ -285,10 +285,12 @@ class GuildEvents(commands.Cog):
         self._tb_order_sent_key = {}
         self.monitor_loop.start()
         self.tb_order_loop.start()
+        self.tb_platoon_auto_loop.start()
 
     def cog_unload(self):
         self.monitor_loop.cancel()
         self.tb_order_loop.cancel()
+        self.tb_platoon_auto_loop.cancel()
 
     # ------------------ Авто-разбор плана планет из анонсов офицеров ------------------
     @commands.Cog.listener()
@@ -481,6 +483,15 @@ class GuildEvents(commands.Cog):
 
     @tb_order_loop.before_loop
     async def _before_tb_order_loop(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(seconds=30)
+    async def tb_platoon_auto_loop(self):
+        from services import tb_platoon_auto
+        await tb_platoon_auto.tick()
+
+    @tb_platoon_auto_loop.before_loop
+    async def _before_tb_platoon_auto_loop(self):
         await self.bot.wait_until_ready()
 
     def _planet_label(self, phase, conflict_key, planet_map):

@@ -1408,7 +1408,11 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
     if view not in ("planet", "player"):
         view = "planet"
 
-    dm = None
+    from services import tb_platoon_auto
+    dm = {"mode": tb_platoon_notify.guild_mode(guild_id), "modes": tb_platoon_notify.MODES,
+          "players": 0, "discord": 0, "tg": 0, "none": 0,
+          "saved": bool(request.query_params.get("dm_saved")),
+          "auto": tb_platoon_auto.settings(guild_id)}
     if plan and selected_round_num:
         # Блок «Рассылка взводов»: куда уйдёт личка этого этапа при выбранном режиме гильдии.
         mode = tb_platoon_notify.guild_mode(guild_id)
@@ -1421,7 +1425,7 @@ async def tb_platoons(request: Request, user: dict = Depends(feature_flags.requi
             if not targets:
                 counts["none"] += 1
         dm = {"mode": mode, "modes": tb_platoon_notify.MODES, "players": len(dm_rows), **counts,
-              "saved": bool(request.query_params.get("dm_saved"))}
+              "saved": bool(request.query_params.get("dm_saved")), "auto": dm["auto"]}
 
     return templates.TemplateResponse(request, "tb_platoons.html", {
         "user": user,
@@ -2122,6 +2126,24 @@ async def tb_platoons_dm_mode(mode: str = Form(...), back: str = Form(default="/
     """Куда по умолчанию уходит личка с взводами (сайт и /тб_план в Discord)."""
     if mode in tb_platoon_notify.MODES:
         database.update_guild_config(user["guild_id"], tb_platoon_dm_mode=mode)
+    if not back.startswith("/tb/platoons"):
+        back = "/tb/platoons"
+    return RedirectResponse(back + ("&" if "?" in back else "?") + "dm_saved=1#platoon-dm", status_code=303)
+
+
+@router.post("/tb/platoons/auto-dm")
+async def tb_platoons_auto_dm(enabled: bool = Form(False), timing: str = Form("order"),
+                              time: str = Form(""), back: str = Form("/tb/platoons"),
+                              user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    from services import tb_platoon_auto
+    if timing not in {"order", "custom"}:
+        raise HTTPException(status_code=400, detail="Выберите время рассылки.")
+    try:
+        custom_time = tb_platoon_auto.validate_time(time) if timing == "custom" else None
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    database.update_guild_config(user["guild_id"], tb_platoon_auto_enabled=int(enabled),
+                                 tb_platoon_auto_time=custom_time)
     if not back.startswith("/tb/platoons"):
         back = "/tb/platoons"
     return RedirectResponse(back + ("&" if "?" in back else "?") + "dm_saved=1#platoon-dm", status_code=303)

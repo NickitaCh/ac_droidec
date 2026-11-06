@@ -293,6 +293,7 @@ GUILD_CONFIG_COLUMNS = [
     "is_active",
     "subscription_expires_at", "subscription_source", "payment_customer_id",
     "tb_platoon_dm_mode", "tw_def_dm_mode",
+    "tb_platoon_auto_enabled", "tb_platoon_auto_time",
 ]
 
 
@@ -396,6 +397,11 @@ def _ensure_guilds_table(cursor):
         cursor.execute("ALTER TABLE guilds ADD COLUMN tb_platoon_dm_mode TEXT")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    for column in ("tb_platoon_auto_enabled INTEGER NOT NULL DEFAULT 0", "tb_platoon_auto_time TEXT"):
+        try:
+            cursor.execute(f"ALTER TABLE guilds ADD COLUMN {column}")
+        except sqlite3.OperationalError:
+            pass
     try:
         cursor.execute("ALTER TABLE guilds ADD COLUMN tw_def_dm_mode TEXT")
     except sqlite3.OperationalError:
@@ -2857,6 +2863,21 @@ def set_bot_state(key: str, value: str, guild_id: int = 1):
     """, (guild_id, key, value))
     conn.commit()
     conn.close()
+
+
+def claim_bot_state(key: str, value: str, guild_id: int) -> bool:
+    """Атомарно занять одноразовую фоновую отправку; отметка переживает рестарт."""
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        cursor = conn.cursor()
+        _ensure_bot_state_table(cursor)
+        cursor.execute("INSERT OR IGNORE INTO bot_state (guild_id, key, value) VALUES (?, ?, ?)",
+                       (guild_id, key, value))
+        claimed = cursor.rowcount == 1
+        conn.commit()
+        return claimed
+    finally:
+        conn.close()
 
 
 # =====================================================================

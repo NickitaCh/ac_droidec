@@ -605,6 +605,11 @@ form {
     max-width: 20em;
 }
 form label { display: flex; flex-direction: column; gap: 0.25em; }
+.platoon-auto-form { display: block; width: 100%; min-width: 0; max-width: none; margin: 16px 0; }
+.platoon-auto-form .platoon-auto-check { flex-direction: row; align-items: center; gap: 8px; }
+.platoon-auto-time { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.platoon-auto-time select { min-width: 0; max-width: 100%; }
+#auto-dm-custom[hidden] { display: none; }
 form label.checkbox { flex-direction: row; align-items: center; gap: 0.5em; }
 /* Группа чекбоксов одной категории (/mod-search: сет/слот/primary — несколько значений,
    ИЛИ внутри категории) — построчный wrap вместо стекания каждого чекбокса на свою строку. */

@@ -72,17 +72,44 @@
         </p>
     {% endif %}
 
-    {% if plan and planets and dm %}
+    {% if dm %}
         <div class="panel platoon-dm" id="platoon-dm">
-            <div class="panel-title"><span>📨 Рассылка взводов в личку — этап {{ selected_round_num }}</span>
+            <div class="panel-title"><span>📨 Рассылка взводов в личку{% if selected_round_num %} — этап {{ selected_round_num }}{% endif %}</span>
                 {% if dm.saved %}<span class="badge badge-ok">Сохранено</span>{% endif %}</div>
             <form method="post" action="/tb/platoons/dm-mode" class="platoon-dm-mode">
-                <input type="hidden" name="back" value="/tb/platoons?plan_id={{ plan.id }}&round={{ selected_round_num }}">
+                <input type="hidden" name="back" value="/tb/platoons{% if plan %}?plan_id={{ plan.id }}&round={{ selected_round_num or 1 }}{% endif %}">
                 <label for="dm-mode">Куда уходит личка</label>
                 <select id="dm-mode" name="mode" onchange="this.form.submit()">
                     {% for key, label in dm.modes.items() %}<option value="{{ key }}"{{ " selected" if key == dm.mode }}>{{ label }}</option>{% endfor %}
                 </select>
                 <noscript><button type="submit">Сохранить</button></noscript>
+            </form>
+            <form method="post" action="/tb/platoons/auto-dm" class="platoon-auto-form">
+                <input type="hidden" name="back" value="/tb/platoons{% if plan %}?plan_id={{ plan.id }}&round={{ selected_round_num or 1 }}{% endif %}">
+                <label class="platoon-auto-check">
+                    <input type="checkbox" class="checkbox" name="enabled" value="true"{{ " checked" if dm.auto.enabled }}>
+                    <strong>Автоматически отправлять взводы в личку</strong>
+                </label>
+                <p class="muted">Каждому игроку — его назначения на этап из активного плана гильдии. Основной аккаунт и альты придут одним сообщением. Каналы доставки — по настройке выше.</p>
+                <div class="platoon-auto-time">
+                    <label for="auto-dm-timing">Время отправки (МСК)</label>
+                    <select id="auto-dm-timing" name="timing" onchange="document.getElementById('auto-dm-custom').hidden = this.value !== 'custom'">
+                        <option value="order"{{ " selected" if not dm.auto.time }}>В начале этапа, как автоордер (сейчас {{ dm.auto.order_time }})</option>
+                        <option value="custom"{{ " selected" if dm.auto.time }}>Своё время в день начала этапа</option>
+                    </select>
+                    <label id="auto-dm-custom"{% if not dm.auto.time %} hidden{% endif %}>
+                        <span class="muted">МСК</span> <input type="time" name="time" value="{{ dm.auto.time or dm.auto.order_time }}" required>
+                    </label>
+                    <button type="submit" class="button">Сохранить авторассылку</button>
+                </div>
+                {% if dm.auto.active_plan %}<p class="muted">Активный план для авторассылки: <strong>{{ dm.auto.active_plan }}</strong>.</p>
+                {% else %}<p class="muted">Для авторассылки выберите активный план на странице «План». Пока он не выбран, сообщения не отправляются.</p>{% endif %}
+                {% if dm.auto.last %}
+                    <p class="muted">Последняя авторассылка: {{ dm.auto.last.at }} МСК · этап {{ dm.auto.last.phase }} · {{ dm.auto.last.plan }}.
+                    {% if dm.auto.last.status == 'done' %}Принято к отправке: {{ dm.auto.last.sent }}, ошибки или пропуски: {{ dm.auto.last.failed }}.
+                    {% elif dm.auto.last.status == 'failed' %}Ошибка отправки. Проверьте и отправьте вручную.
+                    {% else %}Рассылка начата. Если она прервалась, повторите вручную.{% endif %}</p>
+                {% endif %}
             </form>
             <p class="platoon-dm-counts">
                 {% if dm.players %}
@@ -94,8 +121,8 @@
                     На этом этапе никому не назначено ни одного слота.
                 {% endif %}
             </p>
-            <p class="muted platoon-dm-hint">Режим общий для гильдии: так рассылают и сайт, и <code>/тб_план</code> в Discord. Перед отправкой можно снять игроков и посмотреть, куда уйдёт каждому.</p>
-            <a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать этап {{ selected_round_num }}…</a>
+            <p class="muted platoon-dm-hint">{% if dm.auto.enabled %}Авторассылка включена.{% else %}Авторассылка выключена. Включите галочку и сохраните, чтобы отправлять назначения автоматически.{% endif %} Повторную рассылку можно запустить вручную — с выбором игроков.</p>
+            {% if plan and selected_round_num %}<a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать этап {{ selected_round_num }} вручную…</a>{% endif %}
         </div>
     {% endif %}
 
