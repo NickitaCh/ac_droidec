@@ -342,9 +342,10 @@ def render_player(s: dict, guild_gp: int | None = None) -> bytes:
     cv.section("Великая арена")
     cv.grid([
         ("Лига", f"{league} {m.get('division') or ''}".strip() or "—"), ("Рейтинг", _int(m.get("skill_rating"))),
-        ("Повышений", _int(stats.get("STAT_SEASON_PROMOTIONS_EARNED_NAME"))),
+        ("Ранг", _int(m.get("gac_rank"))),
         ("Побед в атаке", _int(stats.get("STAT_SEASON_OFFENSIVE_BATTLES_WON_NAME"))),
-        ("Меньшим составом", _int(stats.get("STAT_SEASON_UNDERSIZED_SQUAD_WINS_NAME"))),
+        # Public player data has no lower-GP win counter; undersized wins are a different statistic.
+        ("С меньшим ГМ", "н/д"),
         ("Успешных защит", _int(stats.get("STAT_SEASON_SUCCESSFUL_DEFENDS_NAME"))),
         ("Зон захвачено", _int(stats.get("STAT_SEASON_TERRITORIES_DEFEATED_NAME"))),
         ("БЗ захвачено", _int(stats.get("STAT_SEASON_FULL_CLEAR_ROUND_WINS_NAME"))),

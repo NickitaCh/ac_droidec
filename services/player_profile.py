@@ -76,6 +76,9 @@ def player_meta(player: dict) -> dict:
     rating = player.get("playerRating") or {}
     rank_status = rating.get("playerRankStatus") or {}
     division_id = rank_status.get("divisionId")
+    seasons = [s for s in player.get("seasonStatus") or [] if not s.get("remove")]
+    latest_season = max(seasons, key=lambda s: (int(s.get("endTime") or 0), int(s.get("joinTime") or 0)), default={})
+    season_rank = int(latest_season.get("rank") or 0)
     return {
         "name": player.get("name") or "",
         "ally_code": str(player.get("allyCode") or ""),
@@ -87,6 +90,7 @@ def player_meta(player: dict) -> dict:
         "league": rank_status.get("leagueId") or "",
         "division": (30 - division_id) // 5 if division_id else None,
         "skill_rating": (rating.get("playerSkillRating") or {}).get("skillRating"),
+        "gac_rank": season_rank if season_rank > 0 else None,
     }
 
 
