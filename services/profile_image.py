@@ -258,18 +258,18 @@ class _Canvas:
         small = _font(17, condensed=True)
         bold = _font(17, True, condensed=True)
         speed = row.get("speed")
-        speed_text = f"Скор. {_int(speed)}" if speed is not None else ""
+        speed_text = f"Скор {_int(speed)}" if speed is not None else ""
         if speed is not None and row.get("speed_mods"):
             speed_text += f" (+{_int(row['speed_mods'])})"
         self.text((tx, y + 33), speed_text, bold, fill=GOLD)
         sx = tx + int(self.draw.textlength(speed_text + "   ", font=bold)) if speed_text else tx
-        self.text((sx, y + 33), self.fit(f"ЗД {short(row.get('health'))}", small, x + w - 10 - sx), small)
+        self.text((sx, y + 33), self.fit(f"ХП {short(row.get('health'))}", small, x + w - 10 - sx), small)
         line3 = []
         if row.get("protection"):
             line3.append(f"Защ {short(row['protection'])}")
         line3.append(f"Урон {short(row.get('phys'))} / {short(row.get('spec'))}")
         self.text((tx, y + 56), self.fit("  ·  ".join(line3), small, tw), small)
-        line4 = [f"Стойк. {_pct(row.get('tenacity'))}", f"Эфф. {_pct(row.get('potency'))}"]
+        line4 = [f"Стойк {_pct(row.get('tenacity'))}", f"Эфф {_pct(row.get('potency'))}"]
         if not row["is_ship"]:
             armor = row.get("armor")
             line4.append(f"Броня {_dec(armor * 100) if armor is not None else '—'}" + ("%" if armor is not None else ""))
@@ -306,8 +306,8 @@ def _relic_cells(rel: dict) -> list:
 
 
 def _mod_cells(mods: dict, modku: float | None = None) -> list:
-    return [("МодКу", _modku(modku)), ("6 точек", _int(mods["six_dot"])), ("Скорость 25+", _int(mods["s25"])),
-            ("Скорость 20–24", _int(mods["s20_24"])), ("Скорость 15–19", _int(mods["s15_19"])),
+    return [("МодКу (Hotbot)", _modku(modku)), ("6 точек", _int(mods["six_dot"])), ("Скорость 25+", _int(mods["s25"])),
+            ("Скорость 20+", _int(mods["s20"])), ("Скорость 20–24", _int(mods["s20_24"])), ("Скорость 15–19", _int(mods["s15_19"])),
             ("Скорость 10–14", _int(mods["s10_14"])), ("Атака 6%+", _int(mods["off6"])),
             ("Атака 4%+", _int(mods["off4"]))]
 
@@ -319,7 +319,7 @@ def _modku(value: float | None) -> str:
 def _datacron_cells(dc: dict) -> list:
     return [("Всего", _int(dc["total"])), ("Уровень 15", _int(dc["l15"])),
             ("Уровень 12–14", _int(dc["l12_14"])), ("Уровень 9–11", _int(dc["l9_11"])),
-            ("Перебросов", _int(dc["rerolls"])), ("Уровень 6–8", _int(dc["l6_8"])),
+            ("Рероллов", _int(dc["rerolls"])), ("Уровень 6–8", _int(dc["l6_8"])),
             ("Уровень 3–5", _int(dc["l3_5"])), ("Уровень 0–2", _int(dc["l0_2"]))]
 
 
@@ -347,14 +347,14 @@ def render_player(s: dict, guild_gp: int | None = None) -> bytes:
         ("Меньшим составом", _int(stats.get("STAT_SEASON_UNDERSIZED_SQUAD_WINS_NAME"))),
         ("Успешных защит", _int(stats.get("STAT_SEASON_SUCCESSFUL_DEFENDS_NAME"))),
         ("Зон захвачено", _int(stats.get("STAT_SEASON_TERRITORIES_DEFEATED_NAME"))),
-        ("БЗ захвачено", _int(stats.get("STAT_SEASON_FULL_CLEAR_ROUND_WINS_NAME"))),
+        ("Полных зачисток", _int(stats.get("STAT_SEASON_FULL_CLEAR_ROUND_WINS_NAME"))),
     ])
 
     cv.section("Сводка")
     cv.grid([
-        ("ГМ", compact(s["gp"])), ("ГМ пехоты", compact(s["char_gp"])), ("ГМ флота", compact(s["ship_gp"])),
-        ("Лучшие 80", compact(s["top80"])), ("Арена", _int(m.get("arena_rank"))), ("Флот", _int(m.get("fleet_rank"))),
-        ("Зеты", _int(s["zetas"])), ("Омикроны", _int(s["omicrons"])),
+        ("ГМ", compact(s["gp"])), ("ГМ персонажей", compact(s["char_gp"])), ("ГМ кораблей", compact(s["ship_gp"])),
+        ("ГМ гильдии", compact(guild_gp) if guild_gp else "—"), ("Арена", _int(m.get("arena_rank"))), ("Флот", _int(m.get("fleet_rank"))),
+        ("Дзеты", _int(s["zetas"])), ("Омикроны", _int(s["omicrons"])),
         ("ВГ / ТБ / ВА", f"{s['omicrons_tw']} / {s['omicrons_tb']} / {s['omicrons_gac']}"),
         ("Т13", _int(s["g13"])), ("Т12", _int(s["g12"])), ("Т11", _int(s["g11"])),
     ])
