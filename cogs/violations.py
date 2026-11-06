@@ -265,6 +265,15 @@ class ViolationsCog(commands.Cog):
     @update_roster_cache.before_loop
     async def before_loop(self):
         await self.bot.wait_until_ready()
+        # The initial multi-guild roster refresh takes several minutes. Let the
+        # calculator take the shared sync slot first, so commands work at boot.
+        initial = getattr(self.bot, "stat_calc_initial_attempt", None)
+        from services import bot_profiles
+        if initial is not None and (bot_profiles.worker_profile() or bot_profiles.runtime_profile()) != "prod":
+            try:
+                await asyncio.wait_for(initial.wait(), timeout=120)
+            except asyncio.TimeoutError:
+                pass  # A failed/stuck calculator must not stop roster updates.
 
     # ------------------ /нарушения — панель (2026-10-14) ------------------
     # Одна команда вместо добавить/список/снять: режим и нарушения — выпадашками,

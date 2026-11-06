@@ -1544,6 +1544,7 @@ class StatRequirementsCog(commands.Cog):
         self.bot = bot
         if not hasattr(bot, "stat_calc"):
             bot.stat_calc = None
+        bot.stat_calc_initial_attempt = asyncio.Event()
         from services import bot_profiles
         bot_profiles.start_shared_loop(self.stat_calc_loop)
         self.player_units_sync_loop.change_interval(hours=bot.PLAYER_STATS_SYNC_HOURS)
@@ -1560,6 +1561,8 @@ class StatRequirementsCog(commands.Cog):
             print("✅ [Статы] Калькулятор статов обновлён")
         except Exception as e:
             print(f"❌ [Статы] Ошибка обновления калькулятора статов: {e}")
+        finally:
+            self.bot.stat_calc_initial_attempt.set()
 
     @stat_calc_loop.before_loop
     async def _before_stat_calc_loop(self):

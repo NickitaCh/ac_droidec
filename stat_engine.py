@@ -88,7 +88,7 @@ async def wait_stat_calc(bot, inter=None, timeout: float = 240):
         return bot.stat_calc
     if inter is not None:
         try:
-            await inter.edit_original_response("⏳ Бот только что перезапустился — калькулятор статов загружается, ответ будет через минуту-две…")
+            await inter.edit_original_response("⏳ Калькулятор статов загружается после перезапуска. Команда выполнится автоматически, повторять её не нужно…")
         except Exception:
             pass
     waited = 0.0

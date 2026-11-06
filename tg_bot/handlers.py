@@ -307,7 +307,7 @@ async def _stat_calc(ctx: Ctx, timeout: float = 240):
         if not status["loading"] and status["error"]:
             break  # сборка упала (Comlink недоступен) — не ждём зря
         if not warned:
-            await ctx.reply("⏳ Бот только что перезапустился — калькулятор статов загружается, ответ будет через минуту-две…")
+            await ctx.reply("⏳ Калькулятор статов загружается после перезапуска. Команда выполнится автоматически, повторять её не нужно…")
             warned = True
         await asyncio.sleep(2)
         waited += 2
