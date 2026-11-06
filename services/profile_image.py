@@ -8,6 +8,7 @@
 
 import io
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import httpx
@@ -91,6 +92,13 @@ def short(n) -> str:
 
 def _pct(fraction) -> str:
     return f"{_int(fraction * 100)}%" if fraction is not None else "—"
+
+
+@lru_cache(maxsize=2)
+def _ability_badge(kind: str):
+    path = ROOT / "web" / "static" / "img" / "game" / "badges" / f"{kind}.png"
+    with Image.open(path) as source:
+        return source.convert("RGBA").resize((30, 30), Image.Resampling.LANCZOS)
 
 
 # ---------------------------------------------------------------- портреты
@@ -225,6 +233,22 @@ class _Canvas:
             bx, by = px + pic - tw + 4, py + pic - 18
             self.draw.rounded_rectangle((bx, by, bx + tw, by + 20), radius=9, fill=color, outline=(20, 20, 20))
             self.text((bx + tw // 2, by + 10), text, bf, anchor="mm")
+
+        if not guild and not row["is_ship"]:
+            # Stack ability counts on the portrait's left edge, clear of the relic badge.
+            for kind, offset in (("zeta", 0), ("omicron", 32)):
+                count = row.get("zetas" if kind == "zeta" else "omicrons", 0)
+                if not count:
+                    continue
+                ix, iy = px - 4, py + pic - 28 - offset
+                icon = _ability_badge(kind)
+                self.img.paste(icon, (ix, iy), icon)
+                self.draw.text((ix + 15, iy + 16), str(count), font=_font(16, True),
+                               fill=TEXT, anchor="mm", stroke_width=2, stroke_fill=BG)
+            if row.get("ultimate"):
+                ux, uy = px + pic - 10, py + 10
+                self.draw.ellipse((ux - 13, uy - 13, ux + 13, uy + 13), fill=BG, outline=GOLD, width=1)
+                self.text((ux, uy), "★", _font(21, True), fill=GOLD, anchor="mm")
 
         tx = px + pic + 14
         tw = x + w - 10 - tx
