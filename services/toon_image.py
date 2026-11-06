@@ -117,9 +117,9 @@ def _card_height(card: dict) -> int:
     return TITLE_H + max(left, right) + 6
 
 
-def _circle(draw, cx: int, cy: int, r: int, fill, text: str, font):
+def _circle(draw, cx: int, cy: int, r: int, fill, text: str, font, text_color=TEXT):
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=fill, outline=(15, 16, 20), width=2)
-    draw.text((cx, cy), text, font=font, fill=TEXT, anchor="mm")
+    draw.text((cx, cy), text, font=font, fill=text_color, anchor="mm")
 
 
 def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str, card: dict, best: dict, col: int):
@@ -153,11 +153,13 @@ def _draw_card(img, draw, x0: int, y0: int, h: int, unit_name: str, base_id: str
     level = card["level"]
     badge_y = py + PIC - 8
     font_b = _font(20, True)
+    side = unit_alignment.side(base_id)
+    badge_text = (25, 28, 35) if side == "neutral" else TEXT
     _circle(draw, cx - 36, badge_y, 24, LEVEL_BG, str(card["unit_level"]), font_b)
     if level["relic"] is not None:
-        _circle(draw, cx + 36, badge_y, 24, RELIC_BG, f"R{level['relic']}", font_b)
+        _circle(draw, cx + 36, badge_y, 24, unit_alignment.color(base_id, RELIC_BG), f"R{level['relic']}", font_b, badge_text)
     else:
-        _circle(draw, cx + 36, badge_y, 24, GEAR_BG, f"G{level['gear']}", font_b)
+        _circle(draw, cx + 36, badge_y, 24, unit_alignment.color(base_id, GEAR_BG), f"G{level['gear']}", font_b, badge_text)
     # Зеты слева, омикроны справа — иконкой с числом поверх, как в игре.
     for kind, count, bx in (("zeta", card["zetas"], cx - 104), ("omicron", card["omicrons"], cx + 104)):
         icon = _badge(kind, 46)

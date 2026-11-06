@@ -2,7 +2,7 @@
 import json
 import database
 
-COLORS = {"light": (32, 78, 135), "dark": (120, 30, 30), "neutral": (210, 212, 218)}
+COLORS = {"light": (32, 78, 135), "dark": (120, 30, 30), "neutral": (236, 236, 240)}
 
 
 def side(base_id):

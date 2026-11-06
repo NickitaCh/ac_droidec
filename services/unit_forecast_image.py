@@ -4,6 +4,7 @@
 import io
 
 from PIL import Image, ImageDraw
+from services import unit_alignment
 
 from services.profile_image import (
     BG, GEAR_BG, GOLD, GREEN, LABEL_BG, LABEL_FG, MUTED, PANEL, PANEL_ALT, RED, RELIC_BG, TEXT,
@@ -95,7 +96,7 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
             if badge:
                 tw = int(draw.textlength(text, font=font)) + 18
                 draw.rounded_rectangle((x + 10, y + 4, x + 10 + tw, y + ROW_H - 4), radius=10, fill=badge)
-                draw.text((x + 10 + tw // 2, y + ROW_H // 2), text, font=font, fill=TEXT, anchor="mm")
+                draw.text((x + 10 + tw // 2, y + ROW_H // 2), text, font=font, fill=color, anchor="mm")
             else:
                 draw.text((x + 12, y + ROW_H // 2), text, font=font, fill=color, anchor="lm")
         y += ROW_H + 2
@@ -114,11 +115,12 @@ def render(unit_name: str, base_id: str, player_name: str, updated_at: str | Non
         for k in range(7):
             draw.text((x + k * 24, y - 2 - ROW_H // 2), "★", font=font, fill=GOLD if k < c["level"]["stars"] else (90, 94, 104), anchor="lm")
     if not is_ship:
-        row("Гир / Реликвия", [(*_level_text(c["level"])[:1], TEXT, _level_text(c["level"])[1]) for c in cols], PANEL_ALT, True)
+        badge_text = (25, 28, 35) if unit_alignment.side(base_id) == "neutral" else TEXT
+        row("Гир / Реликвия", [(_level_text(c["level"])[0], badge_text,
+            unit_alignment.color(base_id, _level_text(c["level"])[1])) for c in cols], PANEL_ALT, True)
     gp_cells = [(_int(cur["gp"]) if cur["gp"] else "—", TEXT, None)]
     if proj:
         gp_cells.append((_int(proj["gp"]) if proj["gp"] else "—", _delta_color(cur["gp"], proj["gp"]), None))
-    from services import unit_alignment
     if unit_alignment.side(base_id) == "neutral":
         gp_cells = [(text, (25, 28, 35), badge) for text, _color, badge in gp_cells]
     row("ГМ", gp_cells, unit_alignment.color(base_id), True)
