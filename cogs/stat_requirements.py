@@ -3,6 +3,7 @@ from services.sync_queue import serialized_sync
 import asyncio
 import contextvars
 import math
+import io
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -1460,7 +1461,7 @@ def _build_stats_pages(title: str, summary_lines: list, picks: list, char_pages:
         for k, chunk in enumerate(_chunk_lines(block.split("\n"), STATS_PAGE_TEXT_BUDGET, byte_budget)):
             char_start.setdefault(name, len(pages))
             pages.append({"head": f"### {title} — {name}" + (" (продолжение)" if k else ""), "text": chunk,
-                          "back": 0, "char": char_start[name]})
+                          "back": 0, "char": char_start[name], "char_name": name})
     targets = [(label, emoji, char_start[name]) for label, emoji, name in picks if name in char_start]
     return pages, targets
 
@@ -1472,6 +1473,8 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
     items = [ui.TextDisplay(page["head"])]
     if page.get("text"):
         items.append(ui.TextDisplay(page["text"]))
+    if state.get("show_scheme") and page.get("scheme_model"):
+        items.append(ui.MediaGallery(disnake.MediaGalleryItem("attachment://mod-scheme.png")))
     footer = f"Страница {i + 1} из {len(pages)}" + (f" · {state['footer']}" if state["footer"] else "")
     items.append(ui.TextDisplay(f"-# {footer}"))
     components = [ui.Container(*items, accent_colour=disnake.Colour(state["color"]))]
@@ -1499,8 +1502,51 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
                    for label, emoji, target in part]
         components.append(ui.ActionRow(ui.StringSelect(custom_id=f"stp|{token}|pick{n}", placeholder=placeholder, options=options)))
     if "back" in page:
-        components.append(ui.ActionRow(ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")))
+        buttons = [ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")]
+        if page.get("scheme_model"):
+            buttons.append(ui.Button(label="Скрыть схему" if state.get("show_scheme") else "Схема модинга",
+                                     custom_id=f"stp|{token}|scheme", style=disnake.ButtonStyle.secondary))
+        components.append(ui.ActionRow(*buttons))
     return components
+
+
+def _stats_scheme_model(plate, base_id, guild_id, active_scheme, scheme_label, skip_plates):
+    loaded = _load_char_rows(plate, base_id, guild_id, skip_plates=skip_plates)
+    if not loaded:
+        return None
+    rows, name, *_ = loaded
+    slots, requirements = {}, []
+    for row in rows:
+        if active_scheme is not None and row[14] and row[14] != active_scheme:
+            continue
+        label, value = progress_row_text(row)
+        if row[3] == STAT_MOD_PRIMARY:
+            suffix = " *" if row[6] in ("optional", "useful") else ""
+            slots.setdefault(row[12], []).append(value + suffix)
+        else:
+            requirements.append((label, value))
+    return {"base_id": base_id, "name": name, "plate": plate, "scheme": scheme_label,
+            "slots": slots, "requirements": requirements}
+
+
+async def _edit_stats_pager(inter, state):
+    """Заменяем вложение вместе со страницей, чтобы не оставалась картинка прошлого юнита."""
+    page = state["pages"][state["index"]]
+    files = []
+    if state.get("show_scheme") and page.get("scheme_model"):
+        root = state["pages"][page["char"]]
+        if "scheme_png" not in root:
+            from services.mod_scheme_image import render
+            try:
+                root["scheme_png"] = await asyncio.to_thread(render, page["scheme_model"])
+            except Exception as exc:
+                print(f"⚠️ [Статы] Не удалось нарисовать схему: {exc!r}")
+                state["show_scheme"] = False
+                await inter.followup.send("Не удалось построить схему модинга — попробуйте ещё раз.", ephemeral=True)
+        if state.get("show_scheme"):
+            files = [disnake.File(io.BytesIO(root["scheme_png"]), filename="mod-scheme.png")]
+    await inter.edit_original_response(components=_render_stats_page(state), attachments=[], files=files,
+                                       flags=disnake.MessageFlags(is_components_v2=True))
 
 
 def _stats_pager_gone_text(token: str) -> str:
@@ -1528,12 +1574,15 @@ async def _check_stats_pager_access(inter: disnake.MessageInteraction, token: st
 
 async def _expire_stats_pager(token: str):
     await asyncio.sleep(STATS_PAGER_TTL)
-    state = _stats_pagers.pop(token, None)
-    if state and state.get("message") is not None:
-        try:
-            await state["message"].edit(components=_render_stats_page(state, closed=True), flags=disnake.MessageFlags(is_components_v2=True))
-        except disnake.HTTPException:
-            pass
+    state = _stats_pagers.get(token)
+    if state:
+        async with state["lock"]:
+            if _stats_pagers.pop(token, None) is not state or state.get("message") is None:
+                return
+            try:
+                await state["message"].edit(components=_render_stats_page(state, closed=True), flags=disnake.MessageFlags(is_components_v2=True))
+            except disnake.HTTPException:
+                pass
 
 
 # =====================================================================
@@ -2044,6 +2093,7 @@ class StatRequirementsCog(commands.Cog):
                 return
 
         char_pages = []  # (char_name, block)
+        scheme_models = {}
         summary_rows = []  # (char_name, matched, total, has_failed_required)
         matched_total = 0
         rows_total = 0
@@ -2063,6 +2113,8 @@ class StatRequirementsCog(commands.Cog):
             # «Только кресты»: персонаж без единого ❌ отдельной страницы не получает.
             if not (только_кресты and matched == total and "❌" not in block):
                 char_pages.append((char_name, block))
+                scheme_models[char_name] = _stats_scheme_model(
+                    плейт, base_id, guild_id, _active_scheme, _scheme_label, skip_plates)
             matched_total += matched
             rows_total += total
             if updated_at:
@@ -2141,9 +2193,12 @@ class StatRequirementsCog(commands.Cog):
         if target_discord_id and str(target_discord_id).isdigit():
             allowed_ids.add(int(target_discord_id))
         pages, picks = _build_stats_pages(title, summary, picks, char_pages)
+        for page in pages:
+            if "char" in page:
+                page["scheme_model"] = scheme_models.get(page["char_name"])
         state = {
             "token": token, "allowed_ids": allowed_ids, "index": 0, "color": color, "footer": footer, "guild_id": guild_id,
-            "pages": pages, "picks": picks, "message": None,
+            "pages": pages, "picks": picks, "message": None, "lock": asyncio.Lock(), "show_scheme": False,
         }
         _stats_pagers[str(token)] = state
         await inter.edit_original_response(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
@@ -2159,21 +2214,27 @@ class StatRequirementsCog(commands.Cog):
         state = await _check_stats_pager_access(inter, parts[1])
         if state is None:
             return
-        action, last = parts[2], len(state["pages"]) - 1
-        flags = disnake.MessageFlags(is_components_v2=True)
-        if action == "close":
-            _stats_pagers.pop(parts[1], None)
-            await inter.response.edit_message(components=_render_stats_page(state, closed=True), flags=flags)
-            return
-        targets = {"first": 0, "prev": state["index"] - 1, "next": state["index"] + 1, "last": last,
-                   "back": state["pages"][state["index"]].get("back", 0)}
-        if action in targets:
-            index = targets[action]
-        else:
-            await inter.response.defer()
-            return
-        state["index"] = max(0, min(index, last))
-        await inter.response.edit_message(components=_render_stats_page(state), flags=flags)
+        await inter.response.defer()
+        async with state["lock"]:
+            if _stats_pagers.get(parts[1]) is not state:
+                return
+            action, last = parts[2], len(state["pages"]) - 1
+            if action == "close":
+                _stats_pagers.pop(parts[1], None)
+                await inter.edit_original_response(components=_render_stats_page(state, closed=True),
+                                                   flags=disnake.MessageFlags(is_components_v2=True))
+                return
+            targets = {"first": 0, "prev": state["index"] - 1, "next": state["index"] + 1, "last": last,
+                       "back": state["pages"][state["index"]].get("back", 0)}
+            if action == "scheme":
+                if not state["pages"][state["index"]].get("scheme_model"):
+                    return
+                state["show_scheme"] = not state["show_scheme"]
+            elif action in targets:
+                state["index"] = max(0, min(targets[action], last))
+            else:
+                return
+            await _edit_stats_pager(inter, state)
 
     @commands.Cog.listener("on_dropdown")
     async def on_stats_pager_pick(self, inter: disnake.MessageInteraction):
@@ -2188,8 +2249,12 @@ class StatRequirementsCog(commands.Cog):
         if not value.isdigit():
             await inter.response.defer()
             return
-        state["index"] = max(0, min(int(value), len(state["pages"]) - 1))
-        await inter.response.edit_message(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
+        await inter.response.defer()
+        async with state["lock"]:
+            if _stats_pagers.get(parts[1]) is not state:
+                return
+            state["index"] = max(0, min(int(value), len(state["pages"]) - 1))
+            await _edit_stats_pager(inter, state)
 
     # ------------------ /статы_релик (пересчёт нормы плейта на другой релик) ------------------
     @commands.slash_command(name="статы_релик", description="Пересчитать уже заданную в плейте норму персонажа на другой релик")
