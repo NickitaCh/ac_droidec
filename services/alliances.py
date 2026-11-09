@@ -62,12 +62,12 @@ def _ensure(c):
 
 def _ensure_resources(c):
     for name in ("stat_requirements", "stat_plates", "stat_plate_components",
-                 "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads",
+                 "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "mod_secondary_recommendations",
                  "datacron_requirements", "datacron_focused_requirements", "datacron_requirement_stats",
                  "datacron_requirement_squads", "guild_omicron_priority", "guild_omicron_requirement_rules"):
         getattr(database, "_ensure_" + name + "_table")(c)
     tables = {
-        "plate": ("stat_plates", "stat_requirements", "stat_plate_components", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads"),
+        "plate": ("stat_plates", "stat_requirements", "stat_plate_components", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads", "mod_secondary_recommendations"),
         "dc_base": ("datacron_requirements", "datacron_requirement_stats", "datacron_requirement_squads"),
         "dc_focused": ("datacron_focused_requirements", "datacron_requirement_squads"),
         "omicrons": ("guild_omicron_priority", "guild_omicron_requirement_rules"),
@@ -247,7 +247,7 @@ def _snapshot(c, gid, kind, key):
             pairs = database._resolve_modular_plate_leaf_pairs(key, gid, cursor)
         else:
             pairs = [(key, x[0]) for x in c.execute("SELECT DISTINCT character_key FROM stat_requirements WHERE guild_id=? AND plate_name=?", (gid, key))]
-        reqs, schemes, order = [], [], []
+        reqs, schemes, order, secondaries = [], [], [], []
         for leaf, character in pairs:
             if leaf != key and c.execute("SELECT 1 FROM alliance_links WHERE guild_id=? AND kind='plate' AND local_key=?", (gid, leaf)).fetchone():
                 raise AllianceError("В модульном плейте есть подключённый источник. Сначала отключите его обновления.")
@@ -255,6 +255,7 @@ def _snapshot(c, gid, kind, key):
                 raise AllianceError("В модульном плейте есть источник подключённых данных. Сначала отключите его обновления.")
             reqs.extend(_rows(c, "stat_requirements", gid, " AND plate_name=? AND character_key=? ORDER BY id", (leaf, character)))
             schemes.extend(_rows(c, "stat_plate_character_schemes", gid, " AND plate_name=? AND character_key=?", (leaf, character)))
+            secondaries.extend(_rows(c, "mod_secondary_recommendations", gid, " AND plate_name=? AND character_key=? ORDER BY scheme_num,stat_id", (leaf, character)))
             if character not in order:
                 order.append(character)
         if not plate["is_modular"]:
@@ -262,7 +263,7 @@ def _snapshot(c, gid, kind, key):
             order.sort(key=lambda x: (preferred.index(x) if x in preferred else len(preferred), x))
         leaves = list(dict.fromkeys(leaf for leaf, _ in pairs))
         return {"title": key, "description": plate["description"], "requirements": reqs,
-                "schemes": schemes, "order": order, "squads": _rows(c, "stat_plate_squads", gid, " AND plate_name=?", (key,)),
+                "schemes": schemes, "secondaries": secondaries, "order": order, "squads": _rows(c, "stat_plate_squads", gid, " AND plate_name=?", (key,)),
                 "char_squads": _rows(c, "stat_character_squads", gid, " AND plate_name=?", (key,)),
                 "leaf_char_squads": {leaf: _rows(c, "stat_character_squads", gid, " AND plate_name=?", (leaf,)) for leaf in leaves},
                 "modular": bool(plate["is_modular"]), "pairs": pairs,
@@ -297,7 +298,7 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
             for child in names.values():
                 if child not in known and c.execute("SELECT 1 FROM stat_plates WHERE guild_id=? AND name=?", (gid, child)).fetchone():
                     raise AllianceError("Имя источника модульного плейта занято. Выберите другое название копии.")
-            for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order"):
+            for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order", "mod_secondary_recommendations"):
                 c.execute("DELETE FROM " + table + " WHERE guild_id=? AND plate_name=?", (gid, name))
             c.execute("DELETE FROM stat_plate_components WHERE guild_id=? AND parent_plate=?", (gid, name))
             # A removed source is frozen as an ordinary copy, so existing guild
@@ -309,6 +310,7 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
                 # components are unique in the existing database schema.
                 reqs = [r for r in snapshot["requirements"] if r["plate_name"] == leaf]
                 leaf_snapshot = {**snapshot, "modular": False, "description": "Источник плейта «%s»" % name,
+                                 "secondaries": [r for r in snapshot.get("secondaries", []) if r["plate_name"] == leaf],
                                  "requirements": reqs, "schemes": [r for r in snapshot["schemes"] if r["plate_name"] == leaf],
                                  "order": list(dict.fromkeys(ck for lp, ck in snapshot["pairs"] if lp == leaf)),
                                  "squads": snapshot["leaf_squads"].get(leaf, []),
@@ -328,7 +330,7 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
         # Updates replace only the linked plate; unrelated guild data stays untouched.
         c.execute("DELETE FROM stat_plate_components WHERE guild_id=? AND parent_plate=?", (gid, name))
         c.execute("DELETE FROM alliance_plate_children WHERE guild_id=? AND parent_plate=?", (gid, name))
-        for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads"):
+        for table in ("stat_requirements", "stat_plate_character_schemes", "stat_plate_character_order", "stat_plate_squads", "stat_character_squads", "mod_secondary_recommendations"):
             c.execute("DELETE FROM " + table + " WHERE guild_id=? AND plate_name=?", (gid, name))
         c.execute("INSERT INTO stat_plates(guild_id,name,description,created_by,created_at,is_modular) VALUES(?,?,?,?,datetime('now'),0) ON CONFLICT(guild_id,name) DO UPDATE SET description=excluded.description,is_modular=0", (gid, name, snapshot["description"], actor))
         for row in snapshot["requirements"]:
@@ -342,6 +344,8 @@ def _apply(c, gid, kind, snapshot, key=None, actor="alliance"):
                 seen.add(identity)
         for n, character in enumerate(snapshot["order"]):
             c.execute("INSERT INTO stat_plate_character_order VALUES(?,?,?,?)", (gid, name, character, n))
+        for row in { (r["character_key"], r["scheme_num"], r["stat_id"]): r for r in snapshot.get("secondaries", []) }.values():
+            _insert(c, "mod_secondary_recommendations", row, guild_id=gid, plate_name=name)
         for row in snapshot["squads"]:
             _insert(c, "stat_plate_squads", row, guild_id=gid, plate_name=name)
         for row in snapshot.get("char_squads", []):

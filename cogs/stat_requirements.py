@@ -1511,6 +1511,7 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
 
 
 def _stats_scheme_model(plate, base_id, guild_id, active_scheme, scheme_label, skip_plates):
+    from services.mod_recommendations import SECONDARIES
     loaded = _load_char_rows(plate, base_id, guild_id, skip_plates=skip_plates)
     if not loaded:
         return None
@@ -1525,8 +1526,11 @@ def _stats_scheme_model(plate, base_id, guild_id, active_scheme, scheme_label, s
             slots.setdefault(row[12], []).append(value + suffix)
         else:
             requirements.append((label, value))
+    secondary_labels = list(dict.fromkeys(
+        SECONDARIES[sid] for source, scheme, sid in database.get_mod_secondary_recommendations(plate, base_id, guild_id)
+        if sid in SECONDARIES and source not in (skip_plates or ()) and (not scheme or scheme == active_scheme)))
     return {"base_id": base_id, "name": name, "plate": plate, "scheme": scheme_label,
-            "slots": slots, "requirements": requirements}
+            "slots": slots, "requirements": requirements, "secondaries": secondary_labels}
 
 
 async def _edit_stats_pager(inter, state):

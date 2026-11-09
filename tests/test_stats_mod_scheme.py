@@ -19,13 +19,16 @@ class SchemeTests(unittest.IsolatedAsyncioTestCase):
     def test_snapshot_keeps_common_and_active_variant_and_explicit_alternatives(self):
         rows = [row("Speed"), row(stats.STAT_MOD_PRIMARY, 5, 1, "arrow", skill="5,48"),
                 row("Health", 100000, 2), row("Protection", 50000, 1, priority="optional")]
-        with patch.object(stats, "_load_char_rows", return_value=(rows, "Хакс", None, [], "")) as load:
+        with patch.object(stats, "_load_char_rows", return_value=(rows, "Хакс", None, [], "")) as load, \
+             patch.object(stats.database, "get_mod_secondary_recommendations", return_value=[
+                 ("leaf", 0, 5), ("leaf", 1, 41), ("leaf", 2, 1), ("skipped", 0, 28)]):
             model = stats._stats_scheme_model("plate", "HUX", 7, 1, "Быстрый", {"skipped"})
         load.assert_called_once_with("plate", "HUX", 7, skip_plates={"skipped"})
         self.assertEqual(model["scheme"], "Быстрый")
         self.assertEqual(model["slots"]["arrow"], [stats.progress_row_text(rows[1])[1]])
         self.assertEqual(model["requirements"], [stats.progress_row_text(rows[0]), stats.progress_row_text(rows[3])])
         self.assertNotIn("square", model["slots"])
+        self.assertEqual(model["secondaries"], ["Скорость", "Атака"])
 
     def state(self):
         pages, picks = stats._build_stats_pages("Плейт", ["Итог"], [("Хакс", "✅", "Хакс"), ("Рей", "✅", "Рей")],

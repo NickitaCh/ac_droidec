@@ -21,6 +21,7 @@ from cogs.stat_requirements import (
     STAT_SET, STAT_SET_ANY, STAT_SET_ONLY, SET_CHOICES, mod_primary_allowed, parse_id_list,
 )
 from services import feature_flags, hotbot_import
+from services.mod_recommendations import SECONDARIES
 from web.routes.datacrons import _squad_from_form, _squad_rows
 
 router = APIRouter()
@@ -377,6 +378,11 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         scheme1_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 1]
         scheme2_reqs = common_reqs + [r for r in reqs if r["scheme_num"] == 2]
         characters.append({
+            "secondary_recommendations": [
+                {"stat_id": sid, "label": SECONDARIES[sid], "source": source, "scheme": scheme,
+                 "variant": scheme_labels.get(scheme, f"Вариант {scheme}") if scheme else "Оба варианта"}
+                for source, scheme, sid in database.get_mod_secondary_recommendations(plate_name, base_id, guild_id)
+                if sid in SECONDARIES],
             "squad_rows": _squad_rows(database.get_stat_plate_squads(guild_id).get(plate_name + "\x1f" + base_id, [])),
             "squad_label": _squad_label(database.get_stat_plate_squads(guild_id).get(plate_name + "\x1f" + base_id, [])),
             "base_id": base_id, "name": _unit_name(base_id), "requirements": reqs,
@@ -435,8 +441,31 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
         ],
         "compare_stat_options": COMPARE_STAT_OPTIONS,
         "scheme_options": SCHEME_OPTIONS,
+        "secondary_options": SECONDARIES,
         "error": request.query_params.get("error"),
     })
+
+
+@router.post("/{plate_name}/characters/{base_id}/secondary", response_class=HTMLResponse)
+async def character_secondary_save(
+    plate_name: str, base_id: str, stat_id: int = Form(...), scheme_num: int = Form(0),
+    action: str = Form("add"), user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    guild_id = user["guild_id"]
+    error = None
+    if database.is_stat_plate_modular(plate_name, guild_id):
+        error = "Рекомендации меняются в исходном плейте."
+    elif base_id not in database.get_stat_requirement_characters(plate_name, guild_id):
+        error = "Персонаж не найден в этом плейте."
+    elif stat_id not in SECONDARIES or scheme_num not in (0, 1, 2) or action not in ("add", "delete"):
+        error = "Выберите характеристику и вариант из списка."
+    elif action == "add" and scheme_num and not any(r[14] for r in database.get_stat_requirements(plate_name, base_id, guild_id)):
+        error = "У персонажа нет отдельных вариантов мод-билда."
+    else:
+        save = database.add_mod_secondary_recommendation if action == "add" else database.delete_mod_secondary_recommendation
+        save(plate_name, base_id, stat_id, scheme_num, guild_id)
+    suffix = "?" + urlencode({"error": error}) if error else ""
+    return RedirectResponse(f"/plates/{plate_name}{suffix}#char-{base_id}", status_code=303)
 
 
 @router.post("/{plate_name}/characters/{base_id}/scheme_label", response_class=HTMLResponse)

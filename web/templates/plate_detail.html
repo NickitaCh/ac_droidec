@@ -477,6 +477,44 @@
                     <span class="panel-title-left">{% if not is_modular %}<span class="drag-handle">⠿</span>{% endif %}<span>{{ char.name }}</span></span>
                     <span class="panel-hint">{{ char.requirements|length }} треб.</span>
                 </div>
+                <details class="secondary-recommendations" {% if char.secondary_recommendations %}open{% endif %}>
+                    <summary>Рекомендуемые доп. статы{% if char.secondary_recommendations %} ({{ char.secondary_recommendations|length }}){% endif %}</summary>
+                    <p class="muted">Какие дополнительные характеристики искать на модулях. На результат проверки не влияет.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.5em;margin-bottom:0.6em;">
+                        {% for rec in char.secondary_recommendations %}
+                            {% if is_modular %}
+                                <span class="badge">{{ rec.label }}{% if rec.scheme %} · {{ rec.variant }}{% endif %} · <a href="/plates/{{ rec.source | urlencode }}#char-{{ char.base_id }}">{{ rec.source }}</a></span>
+                            {% else %}
+                                <form method="post" action="/plates/{{ plate_name | urlencode }}/characters/{{ char.base_id }}/secondary" class="inline-form" style="margin:0;max-width:none;">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="stat_id" value="{{ rec.stat_id }}">
+                                    <input type="hidden" name="scheme_num" value="{{ rec.scheme }}">
+                                    <span>{{ rec.label }}{% if rec.scheme %} · {{ rec.variant }}{% endif %}</span>
+                                    <button type="submit" class="button-secondary" aria-label="Удалить рекомендацию {{ rec.label }}">×</button>
+                                </form>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% if not is_modular %}
+                        <form method="post" action="/plates/{{ plate_name | urlencode }}/characters/{{ char.base_id }}/secondary" class="inline-form" style="max-width:none;">
+                            <label>Доп. стат
+                                <select name="stat_id" required>
+                                    {% for stat_id, label in secondary_options.items() %}<option value="{{ stat_id }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </label>
+                            {% if char.has_schemes %}
+                                <label>Вариант мод-билда
+                                    <select name="scheme_num">
+                                        <option value="0">Оба варианта</option>
+                                        <option value="1">{{ char.scheme1_label }}</option>
+                                        <option value="2">{{ char.scheme2_label }}</option>
+                                    </select>
+                                </label>
+                            {% endif %}
+                            <button type="submit">Добавить</button>
+                        </form>
+                    {% endif %}
+                </details>
                 <p class="muted">Отряд персонажа: {{ char.squad_label or 'не задан' }}
                     <button type="button" class="link-btn" data-modal-open="char-squad-{{ char.base_id }}">{{ 'изменить' if char.squad_label else 'задать' }}</button>
                 </p>

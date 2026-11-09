@@ -104,11 +104,26 @@ class AllianceTests(unittest.TestCase):
             lambda: database.rename_stat_plate("Связанный", "Подмена", self.member),
             lambda: database.set_character_scheme_label("Связанный", "TEST", 1, "X", self.member),
             lambda: self.plate("Связанный", guild=self.member),
+            lambda: database.add_mod_secondary_recommendation("Связанный", "TEST", 5, guild_id=self.member),
+            lambda: database.delete_mod_secondary_recommendation("Связанный", "TEST", 5, guild_id=self.member),
         ):
             with self.assertRaises(a.AllianceError):
                 write()
         with self.assertRaises(a.AllianceError):
             a.share(self.member, "plate", "Связанный", [self.owner], True, True)
+
+    def test_secondary_recommendations_copy_and_link_without_checks(self):
+        self.plate()
+        database.add_mod_secondary_recommendation("Плейт", "TEST", 5, guild_id=self.owner)
+        sid = self.plate_share()
+        a.consume(self.member, sid, "copy", "Копия", "x")
+        a.consume(self.member, sid, "link", "Линк", "x")
+        database.add_mod_secondary_recommendation("Плейт", "TEST", 41, guild_id=self.owner)
+        self.assertEqual({r[2] for r in database.get_mod_secondary_recommendations("Копия", "TEST", self.member)}, {5})
+        self.assertEqual({r[2] for r in database.get_mod_secondary_recommendations("Линк", "TEST", self.member)}, {5, 41})
+        database.delete_mod_secondary_recommendation("Плейт", "TEST", 5, guild_id=self.owner)
+        self.assertEqual({r[2] for r in database.get_mod_secondary_recommendations("Линк", "TEST", self.member)}, {41})
+        self.assertEqual(database.count_stat_requirements_by_plate("Линк", self.member), 1)
 
     def test_revision_skips_snapshot_when_source_has_not_changed(self):
         self.plate()
@@ -160,6 +175,7 @@ class AllianceTests(unittest.TestCase):
 
     def test_modular_plate_keeps_leaf_squads_and_variants(self):
         self.plate("Источник")
+        database.add_mod_secondary_recommendation("Источник", "TEST", 41, guild_id=self.owner)
         database.set_character_scheme_label("Источник", "TEST", 1, "Скорость", self.owner)
         database.set_stat_plate_squad("Источник", [{"base_id": "TEST", "min_relic": 7}], self.owner)
         database.set_stat_character_squad("Источник", "TEST", [{"base_id": "OTHER", "min_relic": 5}], self.owner)
@@ -174,6 +190,7 @@ class AllianceTests(unittest.TestCase):
         self.assertEqual(database.get_character_scheme_labels(leaf, "TEST", self.member)[1], "Скорость")
         self.assertEqual(database.get_stat_plate_squads(self.member)[leaf][0]["min_relic"], 7)
         self.assertEqual(database.get_stat_plate_squads(self.member)[leaf + "\x1fTEST"][0]["min_relic"], 5)
+        self.assertEqual(database.get_mod_secondary_recommendations("Наш модульный", "TEST", self.member), [(leaf, 0, 41)])
         with self.assertRaises(a.AllianceError):
             database.delete_stat_plate(leaf, self.member)
 

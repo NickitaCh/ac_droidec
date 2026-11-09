@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import closing
 
 from services import unit_aliases
 from services.alliance_access import guard_edit, refresh_before
@@ -4468,6 +4469,51 @@ def _ensure_stat_requirements_table(cursor):
     )
 
 
+def _ensure_mod_secondary_recommendations_table(cursor):
+    cursor.execute("""CREATE TABLE IF NOT EXISTS mod_secondary_recommendations (
+        guild_id INTEGER NOT NULL, plate_name TEXT NOT NULL, character_key TEXT NOT NULL,
+        scheme_num INTEGER NOT NULL DEFAULT 0, stat_id INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, plate_name, character_key, scheme_num, stat_id))""")
+
+
+@guard_edit("plate", "plate_name")
+def add_mod_secondary_recommendation(plate_name, character_key, stat_id, scheme_num=0, guild_id=1):
+    from services.mod_recommendations import SECONDARIES
+    if stat_id not in SECONDARIES or scheme_num not in (0, 1, 2):
+        raise ValueError("Недопустимая рекомендация.")
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _ensure_mod_secondary_recommendations_table(conn.cursor())
+        conn.execute("INSERT OR IGNORE INTO mod_secondary_recommendations VALUES(?,?,?,?,?)",
+                     (guild_id, plate_name, character_key, scheme_num, stat_id))
+
+
+@guard_edit("plate", "plate_name")
+def delete_mod_secondary_recommendation(plate_name, character_key, stat_id, scheme_num=0, guild_id=1):
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _ensure_mod_secondary_recommendations_table(conn.cursor())
+        conn.execute("DELETE FROM mod_secondary_recommendations WHERE guild_id=? AND plate_name=? AND character_key=? AND scheme_num=? AND stat_id=?",
+                     (guild_id, plate_name, character_key, scheme_num, stat_id))
+
+
+@refresh_before("plate")
+def get_mod_secondary_recommendations(plate_name, character_key, guild_id=1):
+    """[(источник, вариант (0 = общий), UnitStat)] — включая источники модульного плейта."""
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        cursor = conn.cursor()
+        _ensure_mod_secondary_recommendations_table(cursor)
+        _ensure_stat_plates_table(cursor)
+        _ensure_stat_plate_components_table(cursor)
+        _ensure_stat_requirements_table(cursor)
+        pairs = (_resolve_modular_plate_leaf_pairs(plate_name, guild_id, cursor)
+                 if _is_modular_raw(plate_name, guild_id, cursor) else [(plate_name, character_key)])
+        result = []
+        for leaf, ck in dict.fromkeys(pairs):
+            if ck == character_key:
+                result.extend(cursor.execute("SELECT plate_name,scheme_num,stat_id FROM mod_secondary_recommendations WHERE guild_id=? AND plate_name=? AND character_key=? ORDER BY scheme_num,stat_id",
+                                             (guild_id, leaf, ck)).fetchall())
+        return result
+
+
 def _ensure_stat_plate_character_schemes_table(cursor):
     """Человекочитаемые названия схем (1/2) мод-билда персонажа внутри плейта — сама
     привязка требования к схеме хранится в stat_requirements.scheme_num, тут только
@@ -4865,6 +4911,8 @@ def rename_stat_plate(old_name: str, new_name: str, guild_id: int = 1) -> bool:
             "UPDATE stat_plate_character_schemes SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
             (new_name, guild_id, old_name)
         )
+        _ensure_mod_secondary_recommendations_table(cursor)
+        cursor.execute("UPDATE mod_secondary_recommendations SET plate_name=? WHERE guild_id=? AND plate_name=?", (new_name, guild_id, old_name))
         _ensure_stat_plate_squads_table(cursor)
         cursor.execute(
             "UPDATE stat_plate_squads SET plate_name = ? WHERE guild_id = ? AND plate_name = ?",
@@ -4934,6 +4982,8 @@ def delete_stat_requirements_by_character(plate_name: str, character_key: str, g
     )
     deleted = cursor.rowcount
     _ensure_stat_plate_character_schemes_table(cursor)
+    _ensure_mod_secondary_recommendations_table(cursor)
+    cursor.execute("DELETE FROM mod_secondary_recommendations WHERE guild_id=? AND plate_name=? AND character_key=?", (guild_id, plate_name, character_key))
     cursor.execute(
         "DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ? AND character_key = ?",
         (guild_id, plate_name, character_key),
@@ -4965,6 +5015,8 @@ def delete_stat_plate(name: str, guild_id: int = 1) -> int:
     cursor.execute("DELETE FROM stat_plate_components WHERE guild_id = ? AND parent_plate = ?", (guild_id, name))
     _ensure_stat_plate_character_schemes_table(cursor)
     cursor.execute("DELETE FROM stat_plate_character_schemes WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
+    _ensure_mod_secondary_recommendations_table(cursor)
+    cursor.execute("DELETE FROM mod_secondary_recommendations WHERE guild_id=? AND plate_name=?", (guild_id, name))
     _ensure_stat_plate_squads_table(cursor)
     cursor.execute("DELETE FROM stat_plate_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, name))
     cursor.execute("DELETE FROM stat_character_squads WHERE guild_id = ? AND plate_name = ?", (guild_id, name))

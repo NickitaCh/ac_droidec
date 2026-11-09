@@ -34,6 +34,8 @@ def render(model: dict) -> bytes:
         details.extend(_wrap(f"{label}: {value}", 912, font))
     if not details:
         details = ["Другие требования не заданы"]
+    if model.get("secondaries"):
+        details += [""] + _wrap("Рекомендуемые доп. статы: " + ", ".join(model["secondaries"]), 912, font)
     title_lines = _wrap(model["name"], 780, _font(32, True))
     subtitle = _wrap(model["plate"] + (" · " + model["scheme"] if model.get("scheme") else ""), 780, _font(22))
     top = max(150, 40 + 39 * len(title_lines) + 28 * len(subtitle))
@@ -73,7 +75,7 @@ def render(model: dict) -> bytes:
     for line in details:
         draw.text((36, y), line, font=font, fill="#e8eff8")
         y += 29
-    draw.text((36, height - 40), "Только требования плейта · * необязательно · Не задано = нет требования", font=_font(19), fill="#9bb3c9")
+    draw.text((36, height - 40), "По плейту · * необязательно · Не задано = нет требования", font=_font(19), fill="#9bb3c9")
     output = io.BytesIO()
     image.save(output, "PNG")
     return output.getvalue()
