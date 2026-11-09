@@ -42,7 +42,7 @@ def info_for(guild_id: int | None) -> dict | None:
         return {"unlimited": True}
     seconds_left = (expires - datetime.now(timezone.utc)).total_seconds()
     days_left = max(1, math.ceil(seconds_left / 86400))
-    return {"unlimited": False, "days_left": days_left, "date": expires.strftime("%d.%m.%Y"),
+    return {"unlimited": False, "trial": cfg.get("subscription_source") == "trial", "days_left": days_left, "date": expires.strftime("%d.%m.%Y"),
             "urgent": days_left <= URGENT_DAYS}
 
 

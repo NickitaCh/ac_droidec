@@ -25,20 +25,21 @@ main.py::_access_denied_message) годами обещали "подключит
 что и у самой Discord-команды (там вообще нет проверки роли/ранга, только
 ALWAYS_ALLOWED_COMMANDS + inter.guild_id is not None)."""
 
+import asyncio
 import os
 import re
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
-from services import discord_invite
+from services import discord_invite, trials
 from services.guild_admin import add_guild
 from services.payments import PERIOD_CHOICES, build_payment_link
-from web.deps import get_current_user
+from web.deps import get_current_user, require_super_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -116,6 +117,7 @@ async def subscribe_form(request: Request, user: dict = Depends(get_current_user
         "period_options": PERIOD_OPTIONS,
         "renewal_guild": _renewal_guild(user),
         "result": None,
+        "trial_campaign": await asyncio.to_thread(trials.campaign_enabled),
         "error": request.query_params.get("error"),
         # /подписка в Discord подставляет ID сервера, где её вызвали.
         "prefill": _prefill(user, "".join(filter(str.isdigit, request.query_params.get("discord_guild_id", "")))[:20]),
@@ -125,16 +127,23 @@ async def subscribe_form(request: Request, user: dict = Depends(get_current_user
 @router.post("/subscribe", response_class=HTMLResponse)
 async def subscribe_submit(
     request: Request,
-    period: int = Form(...),
+    period: int = Form(default=30),
     ally_code: str = Form(default=""),
     discord_guild_id: str = Form(default=""),
     renew_guild_id: str = Form(default=""),
+    action: str = Form(default="pay"),
+    promo_code: str = Form(default=""),
     user: dict = Depends(get_current_user),
 ):
+    from urllib.parse import urlsplit
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.url.netloc:
+        raise HTTPException(403, "Запрос должен быть отправлен с этого сайта.")
     renewal_guild = _renewal_guild(user)
     context = {
         "user": user, "period_options": PERIOD_OPTIONS, "renewal_guild": renewal_guild,
         "result": None, "error": None,
+        "trial_campaign": await asyncio.to_thread(trials.campaign_enabled),
         "prefill": {"ally_code": ally_code, "discord_guild_id": discord_guild_id, "guild_name": None},
     }
 
@@ -178,6 +187,15 @@ async def subscribe_submit(
             return templates.TemplateResponse(request, "subscribe.html", context)
         guild_id, guild_name = add_result.guild_id, add_result.name
 
+    if action == "trial":
+        try:
+            expires = await asyncio.to_thread(trials.activate, guild_id, str(user["discord_id"]), promo_code)
+        except trials.TrialError as exc:
+            context["error"] = str(exc)
+            return templates.TemplateResponse(request, "subscribe.html", context)
+        context["result"] = {"trial": True, "guild_name": guild_name, "expires": expires}
+        return templates.TemplateResponse(request, "subscribe.html", context)
+
     link = await build_payment_link(guild_id, guild_name, period)
     if not link.ok:
         context["error"] = link.error
@@ -190,3 +208,31 @@ async def subscribe_submit(
         "url": link.url,
     }
     return templates.TemplateResponse(request, "subscribe.html", context)
+
+
+@router.get("/admin/promos", response_class=HTMLResponse)
+async def promo_page(request: Request, user: dict = Depends(require_super_admin)):
+    return templates.TemplateResponse(request, "admin_promos.html", {
+        "user": user, "promos": await asyncio.to_thread(trials.promos),
+        "campaign": await asyncio.to_thread(trials.campaign_enabled),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/admin/promos")
+async def promo_save(request: Request, user: dict = Depends(require_super_admin)):
+    from urllib.parse import urlsplit, urlencode
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.url.netloc:
+        raise HTTPException(403, "Запрос должен быть отправлен с этого сайта.")
+    form = await request.form()
+    try:
+        if form.get("action") == "campaign":
+            await asyncio.to_thread(database.set_bot_state, 'trial_campaign_enabled', '1' if form.get('enabled') == '1' else '0', guild_id=0)
+        elif form.get("action") == "disable":
+            await asyncio.to_thread(trials.disable_promo, form.get("code", ""))
+        else:
+            await asyncio.to_thread(trials.save_promo, form.get('code', ''), int(form.get('max_uses', '0')), form.get('expires', ''))
+    except ValueError as exc:
+        return RedirectResponse('/admin/promos?' + urlencode({'error': str(exc)}), status_code=303)
+    return RedirectResponse('/admin/promos', status_code=303)

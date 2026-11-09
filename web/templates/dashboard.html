@@ -95,7 +95,7 @@
                     <h2>Подключение гильдии</h2>
                     <ol class="lp-meta">
                         <li>Если планируете пользоваться Discord, пригласите бота на сервер гильдии</li>
-                        <li>Подайте заявку и оплатите на странице <a href="/subscribe">Подписка</a> (вход через Discord; ссылку с уже подставленным сервером даёт команда <code>/подписка</code>)</li>
+                        <li>Откройте <a href="/subscribe">Подписку</a>: новая гильдия может попробовать публичного бота бесплатно 30 дней или выбрать оплату (вход через Discord)</li>
                         <li>Доступ откроется автоматически в течение минуты после оплаты</li>
                         <li>Участники привязывают игровой аккаунт: <code>/регистрация</code> в Discord или <code>/reg</code> в Telegram. Права определяются игровым рангом</li>
                     </ol>
@@ -121,7 +121,7 @@
                         {% if bot_invite_url %}
                             <a class="button button-secondary" href="{{ bot_invite_url }}" target="_blank" rel="noopener">Пригласить в Discord</a>
                         {% endif %}
-                        <a class="button" href="/subscribe">Подключить и оплатить</a>
+                        <a class="button" href="/subscribe">Попробовать или подключить</a>
                     </div>
                 </div>
             </section>
@@ -167,9 +167,11 @@
                         {% endif %}
                         {% if widgets.sync_status.next_auto_text %}<br><span class="page-hero-sync-next">автообновление {{ widgets.sync_status.next_auto_text }}</span>{% endif %}
                     </span>
-                    <form method="post" action="/sync" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Обновляю…';">
+                    <form method="post" action="/sync" data-guild-sync>
                         <button type="submit">Обновить сейчас</button>
                     </form>
+                    <span data-guild-sync-status role="status" aria-live="polite"></span>
+                    <script src="/static/guild_sync.js" defer></script>
                 </div>
             </div>
             <div class="hero-kpis">

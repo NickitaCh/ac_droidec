@@ -350,8 +350,12 @@ async def builder_form(request: Request, user: dict = Depends(feature_flags.requ
 
     primary_list = _primaries_to_list(primaries)
     unit = stat_engine.build_hypothetical_unit(character, relic, set_counts, primary_list, rarity=rarity)
-    base_final_stats = stat_engine.calc_final_stats(stat_calc, unit)
-    raw_base_stats = stat_engine.calc_base_stats(stat_calc, unit)
+    try:
+        base_final_stats = stat_engine.calc_final_stats(stat_calc, unit)
+        raw_base_stats = stat_engine.calc_base_stats(stat_calc, unit)
+    except KeyError:
+        context["error"] = "Для выбранного персонажа или звёздности ещё нет данных расчёта. Выберите другую звёздность или повторите после обновления игровых данных."
+        return templates.TemplateResponse(request, "stat_builder.html", context)
     final_stats = stat_engine.apply_manual_stat_totals(base_final_stats, manual_stats, raw_base_stats)
 
     # Несколько независимых целевых значений на стат (по запросу пользователя

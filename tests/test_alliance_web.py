@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -50,6 +50,27 @@ class AllianceWebTests(unittest.TestCase):
         with patch("web.deps.get_current_user", return_value={"tier": "member", "guild_id": self.gid}):
             self.assertEqual(self.client.get("/alliances").status_code, 403)
             self.assertEqual(self.client.post("/alliances/create", data={"name": "X"}).status_code, 403)
+
+    def test_invitation_preview_requires_confirmation_and_rechecks_target(self):
+        alliances.create(self.gid, 'Test', '1')
+        other = database.create_guild(name='Другие', ally_code='234567891', discord_guild_id='2', member_role_id='', officer_role_id='')
+        target = database.get_guild_config(other)
+        with patch('web.routes.alliances.alliance_invites.resolve', new=AsyncMock(return_value=target)), \
+             patch('web.routes.alliances.alliance_invites.notify', new=AsyncMock()) as notify:
+            response = self.client.post('/alliances/invite-preview', data={'ally_code': '234567891'})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('Пригласить эту гильдию', response.text)
+            self.assertEqual(alliances.pending_count(other), 0)
+            self.client.post('/alliances/invite', data={'ally_code': '234567891', 'target': self.gid})
+            self.assertEqual(alliances.pending_count(other), 0)
+            self.client.post('/alliances/invite', data={'ally_code': '234567891', 'target': other})
+            self.assertEqual(alliances.pending_count(other), 1)
+            notify.assert_awaited_once()
+
+    def test_numeric_target_alone_cannot_bypass_ally_code_lookup(self):
+        alliances.create(self.gid, 'Test', '1')
+        response = self.client.post('/alliances/invite', data={'target': 999}, follow_redirects=True)
+        self.assertIn('9 цифр без нуля', response.text)
 
     def test_share_preview_and_post_errors_are_escaped(self):
         alliances.create(self.gid, "Test", "1")

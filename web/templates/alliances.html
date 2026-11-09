@@ -33,7 +33,8 @@
 <nav class="alliance-tabs" aria-label="Разделы альянса"><a href="#shared">Доступно нам</a><a href="#sharing">Наш обмен</a><a href="#members">Гильдии</a></nav>
 
 <section id="shared" class="panel alliance-panel"><h2>Доступно нашей гильдии</h2>
-  <p class="muted">Копия редактируется независимо. Подключение получает изменения владельца при следующем открытии или проверке. При выходе или отзыве доступа последняя версия остаётся независимой копией.</p>
+  <p class="muted">Чтобы использовать плейт: задайте название у нас → выберите режим → нажмите «Добавить в нашу гильдию». Затем откройте его в разделе «Плейты».</p>
+  <p class="muted">«Независимая копия» — правите сами. «Подключить обновления» — изменения владельца поступают автоматически, местная правка недоступна. При выходе или отзыве доступа последняя версия остаётся независимой копией.</p>
   {% if available %}<div class="alliance-grid">{% for s in available %}<article class="alliance-card">
     <p class="muted">{{ kinds[s.kind] }} · {{ s.owner_name }}</p>
     <h3><a href="/alliances/shared/{{ s.id }}">{{ s.title }}</a></h3>
@@ -67,14 +68,21 @@
 
 <section id="sharing" class="panel alliance-panel"><h2>Чем делится наша гильдия</h2>
   <p class="muted">Каждый ресурс настраивается отдельно. Оригинал редактируют только ваши офицеры. Уже полученные копии нельзя отозвать.</p>
-  <details class="alliance-card"><summary>Открыть обмен данными</summary>
+  <button type="button" data-share-open>Выбрать ресурсы для обмена</button>
+  <dialog class="edit-modal alliance-share-dialog" data-share-dialog aria-label="Ресурсы для обмена">
     <form method="post" action="/alliances/share" class="alliance-form">
-      <label>Что передать<select name="resource" required>
-        {% for kind,label in kinds.items() %}<optgroup label="{{ label }}">{% for rk,key,title in resources if rk == kind %}<option value="{{ kind }}|{{ key }}">{{ title }}</option>{% endfor %}</optgroup>{% endfor %}
-      </select></label>
+      <div class="alliance-actions"><h2>Что передать</h2><button type="button" class="secondary" data-share-close>Закрыть</button></div>
+      <label class="alliance-check"><input type="checkbox" class="checkbox" data-share-all>Выбрать всё</label>
+      <div class="alliance-resource-list">
+      {% for kind,label in kinds.items() %}
+      <fieldset data-share-category><legend><label class="alliance-check"><input type="checkbox" class="checkbox" data-share-group>{{ label }}</label></legend>
+        {% for rk,key,title in resources if rk == kind %}<label class="alliance-check"><input type="checkbox" class="checkbox" name="resources" value="{{ kind }}|{{ key }}">{{ title }}</label>{% else %}<p class="muted">Нет ресурсов</p>{% endfor %}
+      </fieldset>{% endfor %}
+      </div>
+      <p data-share-count role="status">Выбрано: 0</p>
       {{ sharing_fields() }}<button>Открыть обмен</button>
     </form>
-  </details>
+  </dialog>
   <div class="alliance-grid">{% for s in mine %}<article class="alliance-card">
     <p class="muted">{{ kinds[s.kind] }}</p><h3><a href="/alliances/shared/{{ s.id }}">{{ s.title }}</a></h3>
     <form method="post" action="/alliances/share" class="alliance-form"><input type="hidden" name="resource" value="{{ s.kind }}|{{ s.resource_key }}">{{ sharing_fields(s) }}<button>Сохранить доступ</button></form>
@@ -96,13 +104,16 @@
     {% if user.guild_id == alliance.owner_guild_id and m.guild_id != user.guild_id %}<form method="post" action="/alliances/transfer" class="alliance-spaced" onsubmit="return confirm('Передать этой гильдии владение альянсом?')"><input type="hidden" name="target" value="{{ m.guild_id }}"><button class="secondary">Передать владение</button></form>{% endif %}
   </article>{% endfor %}</div>
   {% if membership.can_invite %}<h3>Пригласить гильдию</h3>
-  <form method="post" action="/alliances/invite" class="alliance-form">
-    <label>Подключённая гильдия<select name="target" required><option value="">Выберите гильдию</option>{% for g in guilds %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select></label><button>Отправить приглашение</button>
-  </form><p class="muted">Приглашение появится на странице «Альянс» у её офицеров и действует 14 дней.</p>
+  <form method="post" action="/alliances/invite-preview" class="alliance-form">
+    <label>Код союзника любого участника<input type="text" name="ally_code" required inputmode="numeric" placeholder="123456789" value="{{ invite_code|default('') }}" maxlength="15"></label><button>Найти гильдию</button>
+  </form>
+  {% if invite_target %}<div class="alliance-card"><h4>{{ invite_target.name }}</h4><form method="post" action="/alliances/invite" class="alliance-form"><input type="hidden" name="ally_code" value="{{ invite_code }}"><input type="hidden" name="target" value="{{ invite_target.id }}"><button>Пригласить эту гильдию</button></form></div>{% endif %}
+  <p class="muted">Все её офицеры увидят приглашение в вебе. Лидер и инициатор получат личное уведомление, если доступны боту. Срок — 14 дней.</p>
   {% endif %}
   {% if outgoing %}<h3>Отправленные приглашения</h3>{% for i in outgoing %}<div class="alliance-card alliance-actions"><span>{{ i.to_name }} · до {{ i.expires_at[:10] }}</span>{% if membership.can_invite %}<form method="post" action="/alliances/cancel"><input type="hidden" name="invite_id" value="{{ i.id }}"><button class="secondary">Отменить</button></form>{% endif %}</div>{% endfor %}{% endif %}
   {% if membership.can_manage %}<details class="alliance-spaced"><summary>Изменить название</summary><form method="post" action="/alliances/rename" class="alliance-form"><label>Название<input name="name" value="{{ alliance.name }}" maxlength="100" required></label><button>Сохранить</button></form></details>{% endif %}
   <form method="post" action="/alliances/leave" class="alliance-spaced" onsubmit="return confirm('Выйти из альянса? Обновления общих настроек прекратятся.')"><button class="danger">{{ "Закрыть альянс" if members|length == 1 else "Выйти из альянса" }}</button></form>
 </section>
 {% endif %}
+<script src="/static/alliances.js" defer></script>
 {% endblock %}

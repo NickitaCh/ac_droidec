@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Пробный период и промокоды{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="page-hero"><h1>Пробный период и промокоды</h1><p>30 дней один раз для новой гильдии публичного бота. Платные и прежние подключения не участвуют.</p></section>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<section class="panel alliance-panel"><h2>Открытая акция</h2>
+<form method="post" class="alliance-form"><input type="hidden" name="action" value="campaign"><label class="alliance-check"><input class="checkbox" type="checkbox" name="enabled" value="1" {% if campaign %}checked{% endif %}>Новые гильдии могут начать пробный период без промокода</label><button>Сохранить</button></form>
+<p class="muted">Выключение не отменяет уже выданные периоды. Промокоды продолжают работать до своего срока и лимита.</p></section>
+<section class="panel alliance-panel"><h2>Создать или обновить промокод</h2>
+<form method="post" class="alliance-form"><label>Код<input name="code" required pattern="[A-Za-z0-9_-]{3,40}" maxlength="40"></label><label>Всего активаций<input name="max_uses" type="number" min="1" max="100000" value="100" required></label><label>Действует до (00:00 UTC)<input name="expires" type="date" required></label><button>Сохранить промокод</button></form></section>
+<section class="panel alliance-panel"><h2>Промокоды</h2><div class="alliance-grid">{% for promo in promos %}<article class="alliance-card"><h3>{{ promo.code }}</h3><p>{{ promo.uses }} из {{ promo.max_uses }} · до {{ promo.expires_at[:10] }} · {{ 'Включён' if promo.enabled else 'Выключен' }}</p><form method="post"><input type="hidden" name="action" value="disable"><input type="hidden" name="code" value="{{ promo.code }}"><button class="secondary">Выключить</button></form></article>{% else %}<p>Промокодов пока нет.</p>{% endfor %}</div></section>
+{% endblock %}

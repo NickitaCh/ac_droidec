@@ -16,6 +16,13 @@
     {% endif %}
 
     {% if result %}
+      {% if result.trial %}
+        <section class="panel"><h2>Пробный период включён</h2>
+          <p>Гильдия «{{ result.guild_name }}» подключена на 30 дней, до {{ result.expires[:10] }} (UTC). Автоматических списаний нет.</p>
+          <p>Привяжите свой игровой аккаунт через <a href="/registration">регистрацию</a> или команду бота. Права определяются игровым рангом после загрузки состава.</p>
+          <a class="button" href="/">На главную</a>
+        </section>
+      {% else %}
         <div class="subscribe-grid">
             <div class="panel">
                 <div class="panel-title"><span>💳 Ссылка на оплату готова</span></div>
@@ -28,6 +35,7 @@
                 <p class="muted">Доступ откроется автоматически в течение минуты после оплаты.</p>
             </div>
         </div>
+      {% endif %}
     {% else %}
         <div class="subscribe-grid">
             {% if renewal_guild %}
@@ -82,7 +90,12 @@
                             {% endfor %}
                         </select>
                     </label>
-                    <button type="submit">Получить ссылку на оплату</button>
+                    <label>Промокод (если есть)<input type="text" name="promo_code" maxlength="40" autocomplete="off"></label>
+                    <div class="alliance-actions">
+                        <button type="submit" name="action" value="trial">{% if trial_campaign %}Попробовать 30 дней бесплатно{% else %}Активировать промокод{% endif %}</button>
+                        <button type="submit" name="action" value="pay" class="secondary">Получить ссылку на оплату</button>
+                    </div>
+                    <p class="muted">Пробный период — один раз для новой гильдии, на публичной версии. Начинается при активации. Без автоматических списаний. После окончания можно оплатить продолжение с сохранением данных.</p>
                 </form>
             </div>
 

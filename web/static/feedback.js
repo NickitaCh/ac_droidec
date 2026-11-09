@@ -112,6 +112,47 @@
         var status = dialog.querySelector("[data-feedback-status]");
         var submit = dialog.querySelector("[data-feedback-submit]");
         var serverLines = [];
+        var attachment = null;
+        var previewUrl = null;
+        var fileInput = form.elements.attachment;
+        var attachmentBox = dialog.querySelector('[data-feedback-attachment]');
+        var preview = dialog.querySelector('[data-feedback-preview]');
+
+        function setAttachment(file) {
+            if (file && file.size > 5 * 1024 * 1024) {
+                status.textContent = 'Файл больше 5 МБ.';
+                fileInput.value = '';
+                return;
+            }
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            previewUrl = null;
+            attachment = file || null;
+            attachmentBox.hidden = !attachment;
+            preview.hidden = true;
+            preview.removeAttribute('src');
+            dialog.querySelector('[data-feedback-filename]').textContent = attachment ? attachment.name : '';
+            if (attachment && /^image\/(png|jpeg|gif|webp|bmp)$/.test(attachment.type)) {
+                previewUrl = URL.createObjectURL(attachment);
+                preview.src = previewUrl;
+                preview.hidden = false;
+            }
+        }
+        fileInput.addEventListener('change', function () { setAttachment(fileInput.files[0]); });
+        dialog.querySelector('[data-feedback-remove]').addEventListener('click', function () {
+            fileInput.value = '';
+            setAttachment(null);
+        });
+        dialog.addEventListener('paste', function (ev) {
+            var items = (ev.clipboardData && ev.clipboardData.items) || [];
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) {
+                    ev.preventDefault();
+                    var blob = items[i].getAsFile();
+                    if (blob) setAttachment(new File([blob], blob.name || 'screenshot.png', {type: blob.type}));
+                    return;
+                }
+            }
+        });
 
         function refreshLog() {
             logBox.value = buildLog(serverLines);
@@ -119,6 +160,7 @@
 
         function open(kind) {
             form.reset();
+            setAttachment(null);
             status.textContent = "";
             submit.disabled = false;
             if (kind) form.elements.kind.value = kind;
@@ -149,6 +191,8 @@
         form.addEventListener("submit", function (ev) {
             ev.preventDefault();
             var data = new FormData(form);
+            data.delete('attachment');
+            if (attachment) data.set('attachment', attachment, attachment.name);
             data.set("page_url", location.href);
             if (!form.elements.attach_log.checked) data.delete("log_text");
             data.delete("attach_log");
@@ -160,6 +204,8 @@
                     if (res.ok) {
                         status.innerHTML = "Спасибо! Обращение №" + res.id + " отправлено. Ответ придёт в личку Discord и появится на странице <a href=\"/feedback\">«Мои обращения»</a>.";
                         form.elements.message.value = "";
+                        fileInput.value = '';
+                        setAttachment(null);
                     } else {
                         status.textContent = res.error || "Не удалось отправить.";
                         submit.disabled = false;

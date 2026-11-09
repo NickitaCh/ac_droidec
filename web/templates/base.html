@@ -21,7 +21,7 @@
     <link rel="shortcut icon" href="/static/favicons/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png">
     <link rel="manifest" href="/static/favicons/site.webmanifest">
-    <link rel="stylesheet" href="/static/style.css?v=20261105tasks">
+    <link rel="stylesheet" href="/static/style.css?v=20261109">
     {% if request.url.path.startswith('/tw') %}<link rel="stylesheet" href="/static/tw_workspace.css?v=20261105">{% endif %}
     <script>
         // Применяем сохранённую тему ДО отрисовки страницы (не в dashboard.js,
@@ -39,7 +39,7 @@
             } catch (e) {}
         })();
     </script>
-    <script src="/static/feedback.js?v=20261022a"></script>
+    <script src="/static/feedback.js?v=20261109"></script>
     <script src="/static/dashboard.js?v=20261102platoons" defer></script>
 </head>
 <body>
@@ -96,6 +96,7 @@
             {% endif %}
 
             {% set is_officer = user and user.tier == "officer" %}
+            {% set alliance_invites = request.app.state.alliance_pending_count(user.guild_id) if is_officer and request.scope.get('app') and request.app.state.alliance_pending_count is defined else 0 %}
             {% set conquest_ok = user and (user.tier in ("officer", "member") or user.is_super_admin or user.real_super_admin) %}
             {% if is_officer or conquest_ok %}{% call nav_block("events", "События") %}
             {% if is_officer %}
@@ -126,7 +127,6 @@
             {% if is_officer %}
                 {% call nav_block("guild", "Гильдия") %}
                 {{ nav_link("/activity", "📈", "Активность") }}
-                {% set alliance_invites = request.app.state.alliance_pending_count(user.guild_id) if request.scope.get('app') and request.app.state.alliance_pending_count is defined else 0 %}
                 {{ nav_link("/alliances", "🤝", "Альянс" ~ (" · " ~ alliance_invites if alliance_invites else "")) }}
                 {{ nav_link("/tickets", "🎟️", "Энка") }}
                 {{ nav_link("/tasks", "✅", "Задачи") }}
@@ -182,6 +182,7 @@
                         <a href="/admin/feedback"><span class="nav-icon">📨</span><span class="nav-label">Обращения</span></a>
                         <a href="/admin/donations"><span class="nav-icon">💛</span><span class="nav-label">Донаты</span></a>
                         <a href="/admin/guilds"><span class="nav-icon">🏰</span><span class="nav-label">Гильдии и подписки</span></a>
+                        <a href="/admin/promos"><span class="nav-icon">🎟</span><span class="nav-label">Пробный период и промокоды</span></a>
                         <a href="/admin/access"><span class="nav-icon">👮</span><span class="nav-label">Админы</span></a>
                         <a href="/admin/web-accounts"><span class="nav-icon">🔐</span><span class="nav-label">Логин/пароль</span></a>
                         <a href="/admin/access-log"><span class="nav-icon">📜</span><span class="nav-label">Лог входов</span></a>
@@ -210,7 +211,7 @@
             {% if user and user.subscription %}
                 {% set sub = user.subscription %}
                 <div class="nav-sub-widget{% if sub.urgent %} nav-sub-widget-urgent{% endif %}">
-                    <span class="nav-sub-title">💳 Подписка</span>
+                    <span class="nav-sub-title">{{ '🎁 Пробный период' if sub.trial else '💳 Подписка' }}</span>
                     {% if sub.unlimited %}
                         <span class="nav-sub-days">бессрочно</span>
                     {% else %}
@@ -363,6 +364,9 @@
                 <p>Обновляется владельцем. Чтобы править свою копию, <a href="/alliances#shared">отключите обновления</a>.</p>
             </aside>
             {% endif %}
+            {% if user and user.tier == 'officer' and alliance_invites|default(0) %}
+            <aside class="alliance-card alliance-linked-notice" role="status">Ваша гильдия получила приглашение в альянс. <a href="/alliances">Посмотреть и ответить</a></aside>
+            {% endif %}
             {% block content %}{% endblock %}
             {% if linked_settings %}
             <script>
@@ -416,6 +420,12 @@
                     <label>Скриншот или файл (до 5 МБ)
                         <input type="file" name="attachment">
                     </label>
+                    <p class="muted">Скриншот можно вставить сюда из буфера: Ctrl+V или ⌘V.</p>
+                    <div data-feedback-attachment hidden>
+                        <img data-feedback-preview alt="Прикреплённый скриншот" hidden>
+                        <span data-feedback-filename></span>
+                        <button type="button" class="secondary" data-feedback-remove>Удалить вложение</button>
+                    </div>
                     <label class="checkbox"><input type="checkbox" name="attach_log" checked> Приложить журнал ошибок</label>
                     <details class="feedback-log-details">
                         <summary>Что в журнале</summary>

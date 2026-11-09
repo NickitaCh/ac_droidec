@@ -4,12 +4,12 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
-from services import alliances
+from services import alliances, alliance_invites
 from web.deps import require_officer_access
 
 router = APIRouter()
@@ -83,9 +83,6 @@ def _perform(gid, actor, action, form):
     if action == "rename":
         alliances.rename(gid, form.get("name", ""))
         return "Название сохранено."
-    if action == "invite":
-        alliances.invite(gid, number("target"), actor)
-        return "Приглашение отправлено офицерам гильдии в вебе."
     if action in ("accept", "decline"):
         alliances.respond(gid, number("invite_id"), action == "accept")
         return "Вы вступили в альянс." if action == "accept" else "Приглашение отклонено."
@@ -96,9 +93,9 @@ def _perform(gid, actor, action, form):
         alliances.membership(gid, gid if action == "leave" else number("target"), action, checked("can_invite"), checked("can_manage"))
         return "Изменения сохранены. При выходе гильдии подключения сохраняются как независимые копии."
     if action == "share":
-        kind, key = form.get("resource", "|").split("|", 1)
-        alliances.share(gid, kind, key, form.getlist("recipients"), checked("allow_copy"), checked("allow_link"), checked("all_members"))
-        return "Настройки обмена сохранены."
+        resources = form.getlist("resources") or [form.get("resource", "|")]
+        count = alliances.share_many(gid, resources, form.getlist("recipients"), checked("allow_copy"), checked("allow_link"), checked("all_members"))
+        return "Настройки обмена сохранены. Ресурсов: %s." % count
     if action == "revoke":
         alliances.revoke(gid, number("share_id"))
         return "Обмен закрыт. Полученные ранее версии остаются у гильдий; новые обновления недоступны."
@@ -112,12 +109,29 @@ def _perform(gid, actor, action, form):
 
 
 @router.post("/{action}")
-async def mutate(request: Request, action: str, user: dict = Depends(require_officer_access)):
+async def mutate(request: Request, action: str, background_tasks: BackgroundTasks, user: dict = Depends(require_officer_access)):
     origin = request.headers.get("origin")
     if origin and urlsplit(origin).netloc != request.url.netloc:
         raise HTTPException(403, "Запрос должен быть отправлен с этого сайта.")
     form = await request.form()
     try:
+        if action in ("invite-preview", "invite"):
+            gid = _gid(user)
+            ctx = await asyncio.to_thread(alliances.page, gid)
+            if not ctx["membership"] or not ctx["membership"]["can_invite"]:
+                raise alliances.AllianceError("У вашей гильдии нет права приглашать.")
+            from web.routes.subscribe import _get_comlink
+            target = await alliance_invites.resolve(_get_comlink(), form.get("ally_code", ""))
+            if action == "invite-preview":
+                return templates.TemplateResponse(request, "alliances.html", {
+                    "user": user, **ctx, "invite_target": target,
+                    "invite_code": form.get("ally_code", ""), "error": None, "notice": None,
+                })
+            if str(target["id"]) != form.get("target"):
+                raise alliances.AllianceError("Игрок сменил гильдию. Найдите гильдию ещё раз.")
+            await asyncio.to_thread(alliances.invite, gid, target["id"], str(user["discord_id"]))
+            background_tasks.add_task(alliance_invites.notify, gid, target["id"], str(user["discord_id"]), ctx["alliance"]["name"])
+            return _redirect(notice="Приглашение создано и видно всем офицерам гильдии в вебе. Личные уведомления отправляются лидеру и вам; закрытая личка не отменяет приглашение.")
         message = await asyncio.to_thread(_perform, _gid(user), str(user["discord_id"]), action, form)
     except (alliances.AllianceError, ValueError) as exc:
         return _redirect(error=str(exc))

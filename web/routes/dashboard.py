@@ -1,12 +1,10 @@
-from services.sync_queue import serialized_sync
-
 import asyncio
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 import database
@@ -219,32 +217,21 @@ async def home(request: Request, user: dict | None = Depends(get_current_user_op
     })
 
 
-@router.post("/sync", response_class=HTMLResponse)
-@serialized_sync("ручное обновление гильдии")
-async def home_sync(user: dict = Depends(require_guild_access)):
-    """"Обновить сейчас" на главной — тот же синк активности/статов игроков, что
-    и на /activity (web/routes/guild_dashboard.py::activity_sync), просто
-    редиректит обратно на / вместо /activity. Не трогает ростер (имена/ранги) —
-    тот и так обновляется ботом каждые 15 минут (cogs/violations.py), синкать
-    его вручную незачем; здесь именно то, что реально отстаёт (гир/релики/
-    звёзды/зеты/омикроны, автоцикл которых — часы, не минуты, см.
-    database.PLAYER_STATS_SYNC_HOURS)."""
-    guild_id = user["guild_id"]
-    ally_codes = [code for _, code, _ in database.get_all_user_mappings(guild_id)]
-    comlink = _get_comlink()
-    today = datetime.now(MSK).date().isoformat()
-    semaphore = asyncio.Semaphore(6)
-    skill_tier_map = database.get_all_skill_tier_thresholds()
+@router.post("/sync")
+async def home_sync(request: Request, user: dict = Depends(require_guild_access)):
+    from urllib.parse import urlsplit
+    from fastapi import HTTPException
+    from services import guild_sync
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.url.netloc:
+        raise HTTPException(403, "Запрос должен быть отправлен с этого сайта.")
+    job = await guild_sync.start(user["guild_id"], _get_comlink())
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse(job)
+    return RedirectResponse("/?sync=1", status_code=303)
 
-    async def sync_one(ally_code):
-        async with semaphore:
-            try:
-                guild_ids = database.get_guild_ids_for_ally_code(ally_code) or {guild_id}
-                _, added, _ = await activity_diff.sync_player(comlink, ally_code, guild_ids, today, skill_tier_map)
-                return added
-            except Exception as e:
-                print(f"⚠️ [/sync] Не удалось обновить ростер {ally_code}: {e}")
-                return 0
 
-    results = await asyncio.gather(*(sync_one(ac) for ac in ally_codes))
-    return RedirectResponse(f"/?synced={sum(results)}", status_code=303)
+@router.get("/sync/status")
+async def home_sync_status(user: dict = Depends(require_guild_access)):
+    from services import guild_sync
+    return await asyncio.to_thread(guild_sync.status, user["guild_id"])

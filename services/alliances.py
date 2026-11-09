@@ -150,10 +150,11 @@ def invite(gid, target, actor):
             raise AllianceError("Эта гильдия уже состоит в альянсе.")
         c.execute("UPDATE alliance_invites SET status='expired' WHERE status='pending' AND expires_at<=datetime('now')")
         try:
-            c.execute("INSERT INTO alliance_invites(alliance_id,from_guild_id,to_guild_id,created_by) VALUES(?,?,?,?)",
-                      (m["alliance_id"], gid, target, str(actor)))
+            invite_id = c.execute("INSERT INTO alliance_invites(alliance_id,from_guild_id,to_guild_id,created_by) VALUES(?,?,?,?)",
+                                  (m["alliance_id"], gid, target, str(actor))).lastrowid
         except sqlite3.IntegrityError:
             raise AllianceError("Приглашение этой гильдии уже отправлено.") from None
+        return invite_id
 
 
 def respond(gid, invite_id, accept):
@@ -392,27 +393,42 @@ def _allowed(c, share, gid, mode=None):
 
 def share(gid, kind, key, recipients, allow_copy, allow_link, all_members=False):
     with _db(resources=True) as c:
-        m = _member(c, gid)
-        _snapshot(c, gid, kind, str(key))  # Ownership and existence, not a client-supplied title.
-        if not (allow_copy or allow_link):
-            raise AllianceError("Выберите копирование или подключение.")
-        recipients = {int(x) for x in recipients} - {gid}
-        for target in recipients:
-            _member(c, target, m["alliance_id"])
-        if not recipients and not all_members:
-            raise AllianceError("Выберите гильдии-получатели.")
-        c.execute("""INSERT INTO alliance_shares(alliance_id,owner_guild_id,kind,resource_key,allow_copy,allow_link,all_members)
-            VALUES(?,?,?,?,?,?,?) ON CONFLICT(alliance_id,owner_guild_id,kind,resource_key) DO UPDATE SET
-            allow_copy=excluded.allow_copy,allow_link=excluded.allow_link,all_members=excluded.all_members""",
-                  (m["alliance_id"], gid, kind, str(key), int(allow_copy), int(allow_link), int(all_members)))
-        sid = c.execute("SELECT id FROM alliance_shares WHERE alliance_id=? AND owner_guild_id=? AND kind=? AND resource_key=?", (m["alliance_id"], gid, kind, str(key))).fetchone()[0]
-        c.execute("DELETE FROM alliance_share_recipients WHERE share_id=?", (sid,))
-        c.executemany("INSERT INTO alliance_share_recipients VALUES(?,?)", [(sid, x) for x in recipients])
-        current = c.execute("SELECT * FROM alliance_shares WHERE id=?", (sid,)).fetchone()
-        for link in c.execute("SELECT * FROM alliance_links WHERE share_id=?", (sid,)).fetchall():
-            if not _allowed(c, current, link["guild_id"], "link"):
-                _freeze_links(c, "id=?", (link["id"],))
-        return sid
+        return _share(c, gid, kind, key, recipients, allow_copy, allow_link, all_members)
+
+
+def share_many(gid, resources, recipients, allow_copy, allow_link, all_members=False):
+    resources = list(dict.fromkeys(resources))
+    if not resources or len(resources) > 1000:
+        raise AllianceError("Выберите от 1 до 1000 ресурсов.")
+    with _db(resources=True) as c:
+        for resource in resources:
+            kind, key = resource.split("|", 1)
+            _share(c, gid, kind, key, recipients, allow_copy, allow_link, all_members)
+    return len(resources)
+
+
+def _share(c, gid, kind, key, recipients, allow_copy, allow_link, all_members):
+    m = _member(c, gid)
+    _snapshot(c, gid, kind, str(key))  # Ownership and existence, not a client-supplied title.
+    if not (allow_copy or allow_link):
+        raise AllianceError("Выберите копирование или подключение.")
+    recipients = {int(x) for x in recipients} - {gid}
+    for target in recipients:
+        _member(c, target, m["alliance_id"])
+    if not recipients and not all_members:
+        raise AllianceError("Выберите гильдии-получатели.")
+    c.execute("""INSERT INTO alliance_shares(alliance_id,owner_guild_id,kind,resource_key,allow_copy,allow_link,all_members)
+        VALUES(?,?,?,?,?,?,?) ON CONFLICT(alliance_id,owner_guild_id,kind,resource_key) DO UPDATE SET
+        allow_copy=excluded.allow_copy,allow_link=excluded.allow_link,all_members=excluded.all_members""",
+              (m["alliance_id"], gid, kind, str(key), int(allow_copy), int(allow_link), int(all_members)))
+    sid = c.execute("SELECT id FROM alliance_shares WHERE alliance_id=? AND owner_guild_id=? AND kind=? AND resource_key=?", (m["alliance_id"], gid, kind, str(key))).fetchone()[0]
+    c.execute("DELETE FROM alliance_share_recipients WHERE share_id=?", (sid,))
+    c.executemany("INSERT INTO alliance_share_recipients VALUES(?,?)", [(sid, x) for x in recipients])
+    current = c.execute("SELECT * FROM alliance_shares WHERE id=?", (sid,)).fetchone()
+    for link in c.execute("SELECT * FROM alliance_links WHERE share_id=?", (sid,)).fetchall():
+        if not _allowed(c, current, link["guild_id"], "link"):
+            _freeze_links(c, "id=?", (link["id"],))
+    return sid
 
 
 def revoke(gid, sid):

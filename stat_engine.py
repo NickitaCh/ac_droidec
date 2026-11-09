@@ -26,8 +26,27 @@ if _orig_normalize_char is not None:
 async def build_stat_calc(comlink) -> StatCalc:
     """Тянет statProgression/relicTierDefinition/equipment/... из Comlink и строит
     локальный калькулятор статов — тяжёлый блокирующий сетевой вызов, всегда через to_thread."""
-    game_data = await asyncio.to_thread(lambda: GameDataBuilder(comlink).build())
+    game_data = await asyncio.to_thread(lambda: CompleteGameDataBuilder(comlink).build())
     return StatCalc(game_data=game_data)
+
+
+class CompleteGameDataBuilder(GameDataBuilder):
+    """New units may have no 1-star definition; use their real metadata.
+
+    StatCalc's builder only reads metadata from rarity 1. Add a metadata-only
+    alias for such units, retaining growth tables at their actual rarities.
+    No lower-rarity growth values are invented.
+    """
+    @staticmethod
+    def _build_game_data(raw):
+        from services.units_sync import _canonical_units, _rarity
+        units = list(raw.get("units", []))
+        for unit in _canonical_units(units):
+            if _rarity(unit) != 1:
+                alias = dict(unit, rarity=1)
+                alias.pop("statProgressionId", None)
+                units.append(alias)
+        return GameDataBuilder._build_game_data(dict(raw, units=units))
 
 
 def project_unit_relic(unit: dict, target_relic_level: int) -> dict:
