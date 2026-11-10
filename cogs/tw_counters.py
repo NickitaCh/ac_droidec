@@ -10,6 +10,7 @@ channel_id) и нашу контру на него (автокомплит, за
 него, либо на конкретный вариант пака, если сообщение начинается со своего
 "## <вариант>" — см. _parse_counter_message)."""
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -310,7 +311,7 @@ class TWCounters(commands.Cog):
         gid = guild_cfg["id"]
         baselines = {}
         for key in ("threads", "messages"):
-            raw = database.get_bot_state(f"tw_sync_last_{key}", guild_id=gid)
+            raw = await asyncio.to_thread(database.get_bot_state, f"tw_sync_last_{key}", guild_id=gid)
             baselines[key] = int(raw) if raw else None
 
         def _is_suspect(s):
@@ -322,7 +323,7 @@ class TWCounters(commands.Cog):
         stats = await self._sync_guild_checked(guild_cfg, gid, baselines, _is_suspect, stats)
         public = {k: v for k, v in stats.items() if not k.startswith("_")}
         public["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        database.set_bot_state("tw_sync_result", json.dumps(public, ensure_ascii=False), guild_id=gid)
+        await asyncio.to_thread(database.set_bot_state, "tw_sync_result", json.dumps(public, ensure_ascii=False), guild_id=gid)
         return stats
 
     async def _sync_guild_checked(self, guild_cfg, gid, baselines, _is_suspect, stats) -> dict:
@@ -342,11 +343,11 @@ class TWCounters(commands.Cog):
 
         if not suspect:
             for key in baselines:
-                database.set_bot_state(f"tw_sync_last_{key}", str(stats[key]), guild_id=gid)
+                await asyncio.to_thread(database.set_bot_state, f"tw_sync_last_{key}", str(stats[key]), guild_id=gid)
             # Удалённые из форума посты/треды иначе навсегда оставались бы в
             # автокомплите /вг_ордер (синк только добавляет/обновляет). Чистим
             # лишь после полного прохода — неполный синк не должен стирать базу.
-            removed = database.prune_tw_counters(gid, seen_threads, seen_messages)
+            removed = await asyncio.to_thread(database.prune_tw_counters, gid, seen_threads, seen_messages)
             stats["removed"] = removed["counters"]
         return stats
 
@@ -372,7 +373,7 @@ class TWCounters(commands.Cog):
             stats["threads"] += 1
             stats["_seen_threads"].add(str(thread.id))
             tag_names = [t.name for t in getattr(thread, "applied_tags", [])]
-            database.upsert_tw_counter_thread(
+            await asyncio.to_thread(database.upsert_tw_counter_thread,
                 gid, str(thread.id), thread.name, tag=", ".join(tag_names) if tag_names else None
             )
             async for message in thread.history(limit=None):
@@ -395,9 +396,9 @@ class TWCounters(commands.Cog):
                 # пропускаем — ещё и чистим, если такая запись уже была сохранена
                 # прошлым синком.
                 if not parsed["parsed_ok"] and (message.content or "").strip() == thread.name.strip():
-                    database.delete_tw_counter(gid, str(message.id))
+                    await asyncio.to_thread(database.delete_tw_counter, gid, str(message.id))
                     continue
-                database.upsert_tw_counter(
+                await asyncio.to_thread(database.upsert_tw_counter,
                     gid, str(thread.id), str(message.id),
                     enemy_variant=parsed["enemy_variant"],
                     counter_leader=parsed["counter_leader"],
