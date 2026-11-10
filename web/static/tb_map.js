@@ -1,4 +1,17 @@
 (() => {
+  const phase = document.getElementById('tb-phase');
+  const atlas = document.querySelector('.tb-atlas');
+  const filter = () => {
+    document.querySelectorAll('.tb-stage').forEach(stage => {
+      stage.hidden = phase.value !== 'all' && stage.dataset.phase !== phase.value;
+    });
+    atlas.classList.toggle('tb-one-stage', phase.value !== 'all');
+  };
+  if (phase && atlas) {
+    if (window.matchMedia('(max-width: 550px)').matches) phase.value = phase.dataset.current;
+    phase.addEventListener('change', filter);
+    filter();
+  }
   const openMission = () => {
     const panel = document.getElementById(location.hash.slice(1));
     if (panel && panel.classList.contains('tb-mission')) panel.open = true;

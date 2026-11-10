@@ -8,9 +8,12 @@
   <p>Восход Империи · личные паки и тактика для БЗ и ОЗ.</p>
   <p class="muted">Видны только вам и сохраняются между ТБ. Выберите планету, затем миссию.</p>
 </section>
+<label class="tb-phase-picker" for="tb-phase">Этап карты
+  <select id="tb-phase" data-current="{{ selected.phase }}"><option value="all">Все этапы</option>{% for n in range(1, 7) %}<option value="{{ n }}">Этап {{ n }}</option>{% endfor %}</select>
+</label>
 <nav class="tb-atlas" aria-label="Планеты Восхода Империи">
 {% for stage in stages %}
-  <section class="tb-stage" aria-label="Этап {{ stage.number }}">
+  <section class="tb-stage" data-phase="{{ stage.number }}" aria-label="Этап {{ stage.number }}">
     <h2>Этап {{ stage.number }}</h2>
     {% for key, p in stage.planets %}
     <a class="tb-world tb-side-{{ p.side }}" href="/tb/map?planet={{ key|urlencode }}#planet"
