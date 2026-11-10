@@ -418,6 +418,22 @@
         </div>
         {% endif %}
 
+        {% if own_accounts is not none %}
+        <div class="widget wc-wide" id="tb-personal-map" data-tab="tb" data-not-all>
+            <div class="widget-header"><h2>🌌 Моя карта ТБ</h2></div>
+            <iframe id="tb-personal-map-frame" src="/tb/map?embedded=true" title="Моя карта ТБ — личные паки и тактика" loading="lazy" style="width:100%;height:650px;border:0;display:block"></iframe>
+            <script>
+            (() => {
+                const frame=document.getElementById('tb-personal-map-frame');
+                window.addEventListener('message',event=>{
+                    if(event.origin!==location.origin || event.source!==frame.contentWindow || event.data?.type!=='tb-map-height')return;
+                    const height=Number(event.data.height);
+                    if(Number.isFinite(height))frame.style.height=Math.max(300,Math.min(30000,height+8))+'px';
+                });
+            })();
+            </script>
+        </div>
+        {% endif %}
         {% if show_my_tb %}
         <div class="widget wc-wide" id="my-tb" data-tab="tb" data-not-all>
             <div class="widget-header">

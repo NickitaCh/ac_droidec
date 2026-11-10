@@ -45,24 +45,28 @@ def _data(user):
 
 @router.get("")
 async def page(request: Request, planet: str = "Mustafar", saved: bool = False,
-               mission: str = "general",
+               mission: str = "general", embedded: bool = False,
                user: dict = Depends(require_member_access)):
     lib, names, notes = await asyncio.to_thread(_data, user)
     if planet not in lib:
         raise HTTPException(404, "Планета не найдена")
     return templates.TemplateResponse(request, "tb_map.html", {
         "user": user, "lib": lib, "planet": planet, "selected": lib[planet],
-        "names": names, "notes": notes, "saved": saved, "mission": mission,
+        "names": names, "notes": notes, "saved": saved, "mission": mission, "embedded": embedded,
         "stages": [{"number": n, "planets": [(key, lib[key]) for key in tb_projection.phase_planets(n)
                                                  if key in lib]} for n in range(1, 7)]})
 
 
 @router.post("/save")
 async def save(planet: str = Form(...), mission: str = Form(...), body: str = Form("", max_length=4000),
+               embedded: bool = Form(False),
                user: dict = Depends(require_member_access)):
     lib, _, _ = await asyncio.to_thread(_data, user)
     if planet not in lib or mission not in {"general", *(m["id"] for m in lib[planet]["missions"])}:
         raise HTTPException(400, "Неизвестная планета или миссия")
     await asyncio.to_thread(tb_personal.save, str(user["discord_id"]), planet, mission, body)
-    return RedirectResponse("/tb/map?" + urlencode({"planet": planet, "mission": mission, "saved": "true"})
+    params = {"planet": planet, "mission": mission, "saved": "true"}
+    if embedded:
+        params["embedded"] = "true"
+    return RedirectResponse("/tb/map?" + urlencode(params)
                             + "#mission-" + mission, status_code=303)

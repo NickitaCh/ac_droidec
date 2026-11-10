@@ -94,6 +94,16 @@ class PersonalMapTests(unittest.TestCase):
             self.assertEqual(self.save('Чужая запись').status_code, 403)
         self.assertEqual(tb_personal.notes('alice'), {})
 
+    def test_embedded_navigation_and_save_keep_profile_layout(self):
+        response = self.client.get('/tb/map?embedded=true')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('class="sidebar"', response.text)
+        self.assertIn('name="embedded" value="true"', response.text)
+        self.assertIn('&amp;embedded=true#planet', response.text)
+        result = self.save('Пак из профиля', embedded='true')
+        self.assertIn('embedded=true', result.headers['location'])
+        self.assertIn('Пак из профиля</textarea>', self.client.get(result.headers['location']).text)
+
 
 if __name__ == '__main__':
     unittest.main()

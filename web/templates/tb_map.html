@@ -1,13 +1,13 @@
-{% extends "base.html" %}
+{% extends "tb_map_embed.html" if embedded else "base.html" %}
 {% block title %}Моя карта ТБ — Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="/static/tb_map.css?v=20261110">
-<section class="page-hero page-hero-light">
+{% if not embedded %}<section class="page-hero page-hero-light">
   <h1>Моя карта ТБ</h1>
   <p>Восход Империи · личные паки и тактика для БЗ и ОЗ.</p>
   <p class="muted">Видны только вам и сохраняются между ТБ. Выберите планету, затем миссию.</p>
-</section>
+</section>{% else %}<p class="muted">Восход Империи · личные паки и тактика. Памятки видны только вам и сохраняются между ТБ.</p>{% endif %}
 <label class="tb-phase-picker" for="tb-phase">Этап карты
   <select id="tb-phase" data-current="{{ selected.phase }}"><option value="all">Все этапы</option>{% for n in range(1, 7) %}<option value="{{ n }}">Этап {{ n }}</option>{% endfor %}</select>
 </label>
@@ -16,7 +16,7 @@
   <section class="tb-stage" data-phase="{{ stage.number }}" aria-label="Этап {{ stage.number }}">
     <h2>Этап {{ stage.number }}</h2>
     {% for key, p in stage.planets %}
-    <a class="tb-world tb-side-{{ p.side }}" href="/tb/map?planet={{ key|urlencode }}#planet"
+    <a class="tb-world tb-side-{{ p.side }}" href="/tb/map?planet={{ key|urlencode }}{{ '&embedded=true' if embedded }}#planet"
        {% if key == planet %}aria-current="page"{% endif %} style="--planet-color:{{ p.color }}">
       <span class="tb-orb" aria-hidden="true"></span>
       <span class="tb-world-name">{{ p.ru }}</span>
@@ -44,6 +44,7 @@
   <form method="post" action="/tb/map/save" class="tb-note-form">
     <input type="hidden" name="planet" value="{{ planet }}">
     <input type="hidden" name="mission" value="{{ mid }}">
+    {% if embedded %}<input type="hidden" name="embedded" value="true">{% endif %}
     <label for="note-{{ mid }}">{{ label }}</label>
     <textarea id="note-{{ mid }}" name="body" rows="5" maxlength="4000" placeholder="Пак: лидер, участники…&#10;Тактика, замены, что не забыть.">{{ notes.get((planet, mid), '') }}</textarea>
     <div class="tb-note-actions"><button type="submit">Сохранить</button><span class="muted">Пустая запись удаляет памятку.</span></div>
