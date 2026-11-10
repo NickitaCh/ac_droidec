@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Моя карта ТБ — Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/tb_map.css?v=20261110">
+<section class="page-hero page-hero-light">
+  <h1>Моя карта ТБ</h1>
+  <p>Восход Империи · личные паки и тактика для БЗ и ОЗ.</p>
+  <p class="muted">Видны только вам и сохраняются между ТБ. Выберите планету, затем миссию.</p>
+</section>
+<nav class="tb-atlas" aria-label="Планеты Восхода Империи">
+{% for stage in stages %}
+  <section class="tb-stage" aria-label="Этап {{ stage.number }}">
+    <h2>Этап {{ stage.number }}</h2>
+    {% for key, p in stage.planets %}
+    <a class="tb-world tb-side-{{ p.side }}" href="/tb/map?planet={{ key|urlencode }}#planet"
+       {% if key == planet %}aria-current="page"{% endif %} style="--planet-color:{{ p.color }}">
+      <span class="tb-orb" aria-hidden="true"></span>
+      <span class="tb-world-name">{{ p.ru }}</span>
+      <span class="tb-world-side">{{ p.side_label }}</span>
+      <span class="tb-world-meta">{{ p.missions|length }} мисс.{% if p.note_count %} · <span class="tb-note-count">✎ {{ p.note_count }}</span>{% endif %}</span>
+    </a>
+    {% endfor %}
+  </section>
+{% endfor %}
+</nav>
+<section class="panel tb-planet-panel" id="planet">
+  <div class="tb-planet-heading">
+    <div><span class="muted">Этап {{ selected.phase }} · {{ selected.side_label }}</span><h2>{{ selected.ru }}</h2></div>
+    <span class="tb-private">🔒 Личные памятки</span>
+  </div>
+  {% if saved %}<p class="tb-saved" role="status">Памятка сохранена.</p>{% endif %}
+  <nav class="tb-mission-nav" aria-label="Миссии планеты">
+    <a href="#mission-general">✎ Планета{% if notes.get((planet, 'general')) %} · есть запись{% endif %}</a>
+    {% for m in selected.missions %}<a href="#mission-{{ m.id }}" class="{% if m.type == 'fleet' %}fleet{% elif m.type != 'usual' %}special{% endif %}">
+      {{ '◈' if m.type == 'fleet' else '★' if m.type != 'usual' else '⚔' }} {{ m.label }} · {{ m.id }}{% if notes.get((planet, m.id)) %} ✎{% endif %}
+    </a>{% endfor %}
+  </nav>
+  <p class="muted tb-map-caption">Номера миссий — из общей базы отрядов.</p>
+  {% macro editor(mid, label) %}
+  <form method="post" action="/tb/map/save" class="tb-note-form">
+    <input type="hidden" name="planet" value="{{ planet }}">
+    <input type="hidden" name="mission" value="{{ mid }}">
+    <label for="note-{{ mid }}">{{ label }}</label>
+    <textarea id="note-{{ mid }}" name="body" rows="5" maxlength="4000" placeholder="Пак: лидер, участники…&#10;Тактика, замены, что не забыть.">{{ notes.get((planet, mid), '') }}</textarea>
+    <div class="tb-note-actions"><button type="submit">Сохранить</button><span class="muted">Пустая запись удаляет памятку.</span></div>
+  </form>
+  {% endmacro %}
+  <details class="tb-mission" id="mission-general" {% if mission == 'general' %}open{% endif %}>
+    <summary>✎ Общая памятка по планете{% if notes.get((planet, 'general')) %}<span class="tb-note-count">Есть запись</span>{% endif %}</summary>
+    <div class="tb-mission-body">{{ editor('general', 'Мои паки и заметки по планете') }}</div>
+  </details>
+  {% for m in selected.missions %}
+  <details class="tb-mission" id="mission-{{ m.id }}" {% if mission == m.id %}open{% endif %}>
+    <summary><span>{{ '◈' if m.type == 'fleet' else '★' if m.type != 'usual' else '⚔' }} {{ m.label }} · {{ m.id }}</span>{% if notes.get((planet, m.id)) %}<span class="tb-note-count">Есть запись</span>{% endif %}</summary>
+    <div class="tb-mission-body">
+      {% if m.removed_at %}<p class="muted">Миссия убрана из источника. Ваша памятка сохранена.</p>{% endif %}
+      {% if m.requirements %}<div class="tb-mission-requirements">{% for r in m.requirements %}<p>{{ r }}</p>{% endfor %}</div>{% endif %}
+      {% if m.enemies %}<details class="tb-enemies"><summary>Противники</summary>{% for e in m.enemies %}<p>{{ e }}</p>{% endfor %}</details>{% endif %}
+      {{ editor(m.id, 'Мой пак и тактика') }}
+      <details class="tb-suggestions"><summary>Взять отряд из общей базы</summary>
+        <div class="tb-squad-list">
+        {% for s in m.squads if not s.hidden %}
+          <article class="tb-squad">
+            <h3>{{ s.name or 'Отряд' }}</h3>
+            <div class="tb-squad-units">{% for u in s.units %}<div class="tb-squad-unit">
+              <img src="/unit-img/{{ u|urlencode }}" width="52" height="52" loading="lazy" alt="">
+              <span>{{ names.get(u, u) }}{% if loop.first %}<small>Лидер</small>{% endif %}</span>
+            </div>{% endfor %}</div>
+            {% if s.omicron %}<p class="muted">Омикроны: {% for u in s.omicron %}{{ names.get(u, u) }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+            {% if s.removed_at %}<p class="muted">Отряд убран из источника.</p>{% endif %}
+            <button type="button" class="tb-copy-squad" data-target="note-{{ m.id }}" data-pack="Пак: {% for u in s.units %}{{ names.get(u, u) }}{{ ' (лидер)' if loop.first }}{{ ', ' if not loop.last }}{% endfor %}">Добавить в мой пак</button>
+          </article>
+        {% else %}<p class="muted">В базе пока нет отрядов. Свой пак можно записать выше.</p>{% endfor %}
+        </div>
+      </details>
+    </div>
+  </details>
+  {% else %}<p class="muted">Миссии ещё не загружены. Паки можно записать в памятку по планете.</p>{% endfor %}
+  <p class="muted tb-map-caption">Общая база: swgoh.ru и правки вашей гильдии. Личный пак сохраняется только кнопкой «Сохранить».</p>
+</section>
+<script src="/static/tb_map.js?v=20261110" defer></script>
+{% endblock %}

@@ -1751,29 +1751,32 @@ class StatRequirementsCog(commands.Cog):
             return
         skill_info = await asyncio.to_thread(database.get_skill_display_info, [skill_id for _, _, _, skill_id, _ in hits])
         def load_guild_settings():
-            return {
-                gid: (feature_flags.is_enabled(gid, "omicron"), database.get_guild_config(gid))
-                for gid in {hit[4] for hit in hits}
-            }
+            settings = {}
+            for gid in {hit[4] for hit in hits}:
+                enabled = feature_flags.is_enabled(gid, "omicron")
+                cfg = database.get_guild_config(gid)
+                telegram = enabled and not (cfg or {}).get("omicron_channel_id") and outbox.guild_wants(gid, "omicrons")
+                settings[gid] = enabled, cfg, telegram
+            return settings
         guild_settings = await asyncio.to_thread(load_guild_settings)
         names_by_guild = {}
         channels_by_id: dict[int, object] = {}
         items_by_channel: dict[int, list[tuple[int, str]]] = {}
         guild_by_channel: dict[int, int] = {}
         for event_id, ally_code, base_id, skill_id, guild_id in hits:
-            enabled, guild_cfg = guild_settings[guild_id]
+            enabled, guild_cfg, telegram_enabled = guild_settings[guild_id]
             if not enabled:
                 continue
             channel_id = guild_cfg.get("omicron_channel_id") if guild_cfg else None
             if not channel_id:
                 # Гильдия без Discord-канала, но с Telegram-чатом (/notify «омикроны») —
                 # объявляем только туда и сразу помечаем, иначе событие висело бы вечно.
-                if outbox.guild_wants(guild_id, "omicrons"):
+                if telegram_enabled:
                     if guild_id not in names_by_guild:
-                        names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
-                    line = self._omicron_line(names_by_guild[guild_id].get(ally_code, ally_code), base_id, skill_id, skill_info, guild_id=guild_id)
-                    outbox.enqueue_guild(guild_id, "omicrons", line)
-                    database.mark_activity_event_announced(event_id)
+                        names_by_guild[guild_id] = await asyncio.to_thread(database.get_player_names, guild_id)
+                    line = await asyncio.to_thread(self._omicron_line, names_by_guild[guild_id].get(ally_code, ally_code), base_id, skill_id, skill_info, guild_id=guild_id)
+                    await asyncio.to_thread(outbox.enqueue_guild, guild_id, "omicrons", line)
+                    await asyncio.to_thread(database.mark_activity_event_announced, event_id)
                 continue
             channel_id = int(channel_id)
             guild_by_channel[channel_id] = guild_id
@@ -1799,10 +1802,10 @@ class StatRequirementsCog(commands.Cog):
             if channels_by_id[channel_id] is None:
                 continue
             if guild_id not in names_by_guild:
-                names_by_guild[guild_id] = {code: name for _, code, name in database.get_all_user_mappings(guild_id)}
+                names_by_guild[guild_id] = await asyncio.to_thread(database.get_player_names, guild_id)
             player_name = names_by_guild[guild_id].get(ally_code, ally_code)
             channel = channels_by_id[channel_id]
-            line = self._omicron_line(player_name, base_id, skill_id, skill_info, getattr(channel, "guild", None), guild_id=guild_id)
+            line = await asyncio.to_thread(self._omicron_line, player_name, base_id, skill_id, skill_info, getattr(channel, "guild", None), guild_id=guild_id)
             items_by_channel.setdefault(channel_id, []).append((event_id, line))
 
         for channel_id, items in items_by_channel.items():
@@ -1816,20 +1819,20 @@ class StatRequirementsCog(commands.Cog):
                     except Exception as e:
                         print(f"⚠️ [Омикрон] Не удалось отправить объединённое объявление в канал {channel_id}: {e}")
                         continue
-                    outbox.enqueue_guild(guild_id, "omicrons", chunk_text)
+                    await asyncio.to_thread(outbox.enqueue_guild, guild_id, "omicrons", chunk_text)
                     for event_id in chunk_event_ids:
-                        database.mark_activity_event_announced(event_id)
+                        await asyncio.to_thread(database.mark_activity_event_announced, event_id)
             else:
                 for event_id, line in items:
                     try:
                         await channel.send(line)
-                        database.mark_activity_event_announced(event_id)
+                        await asyncio.to_thread(database.mark_activity_event_announced, event_id)
                     except Exception as e:
                         print(f"⚠️ [Омикрон] Не удалось отправить объявление в канал {channel_id}: {e}")
                         continue
                     # В Telegram — вслед за Discord (только после успешной отправки, чтобы
                     # повторная попытка неотправленного не дублировала в Telegram).
-                    outbox.enqueue_guild(guild_id, "omicrons", line)
+                    await asyncio.to_thread(outbox.enqueue_guild, guild_id, "omicrons", line)
 
     @staticmethod
     def _omicron_line(player_name: str, base_id: str, skill_id: str, skill_info: dict, discord_guild=None, *, guild_id: int) -> str:

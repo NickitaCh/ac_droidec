@@ -421,12 +421,12 @@ class TWCounters(commands.Cog):
         """Кнопка «Синхронизировать» на сайте (/tw) пишет в bot_state tw_sync_request
         метку времени — веб не видит шлюз Discord, поэтому сам синк делает бот."""
         from services import bot_profiles
-        for guild_cfg in bot_profiles.served_guilds():
+        for guild_cfg in await asyncio.to_thread(bot_profiles.served_guilds):
             gid = guild_cfg["id"]
-            request = database.get_bot_state("tw_sync_request", guild_id=gid)
-            if not request or request == database.get_bot_state("tw_sync_request_done", guild_id=gid):
+            request = await asyncio.to_thread(database.get_bot_state, "tw_sync_request", guild_id=gid)
+            if not request or request == await asyncio.to_thread(database.get_bot_state, "tw_sync_request_done", guild_id=gid):
                 continue
-            database.set_bot_state("tw_sync_request_done", request, guild_id=gid)
+            await asyncio.to_thread(database.set_bot_state, "tw_sync_request_done", request, guild_id=gid)
             try:
                 stats = await self._sync_guild(guild_cfg)
                 if "threads" not in stats:  # канал не задан / не форум — тоже показать на сайте

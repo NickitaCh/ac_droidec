@@ -93,6 +93,7 @@
             {% endif %}
             {% if user and user.tier in ("officer", "member") %}
                 {{ nav_link("/me", "👤", "Мой профиль") }}
+                {% if user.tier == 'member' and user.guild_id %}{{ nav_link("/tb/map", "🌌", "Моя карта ТБ") }}{% endif %}
             {% endif %}
 
             {% set is_officer = user and user.tier == "officer" %}
@@ -105,6 +106,7 @@
                     {{ nav_link("/tb/platoons", "👥", "Взводы") }}
                     {{ nav_link("/tb/order", "📜", "Ордер", also=("/tb/order-plans",)) }}
                     {{ nav_link("/tb/squads", "🗡️", "Отряды для боёв") }}
+                    {{ nav_link("/tb/map", "🌌", "Моя карта") }}
                     {{ nav_link("/tb", "📄", "Итоги", exact=true, also=("/tb/player", "/tb/compare")) }}
                     {{ nav_link("/tb/missions", "🎯", "Бои и ОЗ") }}
                 {% endcall %}

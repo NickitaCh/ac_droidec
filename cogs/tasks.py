@@ -372,9 +372,9 @@ class TasksCog(commands.Cog):
         now_msk = datetime.now(MSK)
         today_key = now_msk.strftime("%Y-%m-%d")
 
-        for guild_cfg in bot_profiles.served_guilds():
+        for guild_cfg in await asyncio.to_thread(bot_profiles.served_guilds):
             gid = guild_cfg["id"]
-            if not feature_flags.is_enabled(gid, "tasks"):
+            if not await asyncio.to_thread(feature_flags.is_enabled, gid, "tasks"):
                 continue
             notify_time = guild_cfg.get("tasks_notify_time") or self.bot.TASKS_DEFAULT_NOTIFY_TIME
             try:

@@ -175,12 +175,12 @@ class RaidTicketsCog(commands.Cog):
     async def raid_tickets_loop(self):
         now = int(time.time())
         from services import bot_profiles
-        for cfg in bot_profiles.served_guilds():
+        for cfg in await asyncio.to_thread(bot_profiles.served_guilds):
             if not cfg.get("swgoh_guild_id"):
                 continue
-            if not (cfg.get("raid_tickets_channel_id") or outbox.guild_wants(cfg["id"], "raid_tickets")):
+            if not (cfg.get("raid_tickets_channel_id") or await asyncio.to_thread(outbox.guild_wants, cfg["id"], "raid_tickets")):
                 continue
-            if not feature_flags.is_enabled(cfg["id"], "raid_tickets"):
+            if not await asyncio.to_thread(feature_flags.is_enabled, cfg["id"], "raid_tickets"):
                 continue
             try:
                 await self._process_guild(cfg, now)

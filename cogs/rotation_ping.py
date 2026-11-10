@@ -1,3 +1,4 @@
+import asyncio
 import json
 import disnake
 from disnake.ext import commands, tasks
@@ -38,19 +39,19 @@ class RotationPing(commands.Cog):
         weekday = now_msk.weekday()
         hour = now_msk.hour
         minute = now_msk.minute
-        dst_correction = tb_schedule.effective_dst_offset_minutes(today_msk)
+        dst_correction = await asyncio.to_thread(tb_schedule.effective_dst_offset_minutes, today_msk)
 
-        if not self._is_ping_week(today_msk):
+        if not await asyncio.to_thread(self._is_ping_week, today_msk):
             return
 
         from services import bot_profiles
-        for guild_cfg in bot_profiles.served_guilds():
+        for guild_cfg in await asyncio.to_thread(bot_profiles.served_guilds):
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
             if not guild_cfg.get("ping_channel_id") or not guild_cfg.get("ping_role_id") or \
                     not guild_cfg.get("ping_schedule_json"):
                 continue
-            if not feature_flags.is_enabled(gid, "tb_ping"):
+            if not await asyncio.to_thread(feature_flags.is_enabled, gid, "tb_ping"):
                 continue
 
             try:

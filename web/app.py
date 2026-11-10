@@ -24,7 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
-from web.routes import admin, alliances, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_squads, telegram, tw_defense, tw_scout, unit_images
+from web.routes import admin, alliances, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_map, tb_squads, telegram, tw_defense, tw_scout, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -153,6 +153,7 @@ app.include_router(alliances.router, prefix="/alliances", tags=["alliances"])
 app.include_router(tw_defense.router, prefix="/tw/def", tags=["tw-defense"])
 app.include_router(tw_scout.router, prefix="/tw/scout", tags=["tw-scout"])
 app.include_router(tb_squads.router, prefix="/tb/squads", tags=["tb-squads"])
+app.include_router(tb_map.router, prefix="/tb/map", tags=["tb-map"])
 app.include_router(registration.router, prefix="/registration", tags=["registration"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(stat_plates.router, prefix="/plates", tags=["stat-plates"])
