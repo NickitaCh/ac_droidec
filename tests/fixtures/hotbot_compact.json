@@ -1,0 +1,53 @@
+[
+  {
+    "embeds": [
+      {
+        "type": "rich",
+        "title": "❌ TEO Nod: AC_CASSIAN · 1/19 · 18 failed",
+        "color": 16272983,
+        "fields": [
+          {
+            "name": "❌ КАССИАН [3 Failed]",
+            "value": "```md\n❌ Cassian Andor (Undercover) Speed: 252 (requires 300)\n❌ Cassian Andor (Undercover) Health: 63,833 (requires 110,000)\n✅ Cassian Andor (Undercover) Arrow primary: Speed (optional Speed)\n🔸 Cassian Andor (Undercover) Circle primary: Protection (optional Health)\n🔸 Cassian Andor (Undercover) Cross primary: Potency (optional Health)\n🔸 Cassian Andor (Undercover) Triangle primary: Critical Damage (optional Health)\n🔸 Cassian Andor (Undercover) mod sets: Health, Health, Health (optional Speed, Health)\n❌ Cassian Andor (Undercover) Relic: 1 (requires 7)\n```",
+            "inline": false
+          },
+          {
+            "name": "❌ ЛЮТЕН [4 Failed]",
+            "value": "```md\n❌ Luthen Rael Relic: 0 (requires 7)\n✅ Luthen Rael Arrow primary: Speed (optional Speed)\n✅ Luthen Rael Circle primary: Health (optional Health)\n🔸 Luthen Rael Cross primary: Defense (optional Potency)\n🔸 Luthen Rael Triangle primary: Protection (optional Health)\n🔸 Luthen Rael mod sets: Health, Speed (optional Speed, Potency)\n❌ Luthen Rael Speed: 233 (requires 320)\n❌ Luthen Rael Pot: 12.47 (requires 105)\n❌ Luthen Rael TotLife: 30,293 (requires 120,000)\n🔸 Luthen Rael Speed: 233 (optional 340)\n```",
+            "inline": false
+          },
+          {
+            "name": "❌ КЛЕЯ [4 Failed]",
+            "value": "```md\n❌ Kleya Marki Relic: 1 (requires 7)\n❌ Kleya Marki Triangle primary: Protection (requires Critical Damage)\n✅ Kleya Marki Arrow primary: Speed (optional Speed)\n🔸 Kleya Marki Circle primary: Protection (optional Health)\n🔸 Kleya Marki Cross primary: Potency (optional Offense)\n✅ Kleya Marki mod sets: Health, Offense (optional Offense, Health)\n❌ Kleya Marki Speed: 290 (requires 320)\n❌ Kleya Marki Dmg: 5,008 (requires 8,900)\n🔸 Kleya Marki Speed: 290 (optional 330)\n```",
+            "inline": false
+          },
+          {
+            "name": "❌ СИНТА_КАЗ [5 Failed]",
+            "value": "```md\n❌ Cinta Kaz Relic: 1 (requires 7)\n❌ Cinta Kaz Triangle primary: Offense (requires Critical Damage)\n✅ Cinta Kaz Arrow primary: Offense (optional Offense)\n✅ Cinta Kaz Circle primary: Health (optional Health)\n✅ Cinta Kaz Cross primary: Offense (optional Offense)\n🔸 Cinta Kaz mod sets: Health, Critical Damage (optional Offense, Health)\n❌ Cinta Kaz Speed: 254 (requires 260)\n❌ Cinta Kaz Dmg: 4,092 (requires 8,300)\n❌ Cinta Kaz Omicrons: 0 (requires 1)\n```",
+            "inline": false
+          },
+          {
+            "name": "❌ ВЕЛ_САРТА [2 Failed]",
+            "value": "```md\n❌ Vel Sartha Relic: 1 (requires 7)\n🔸 Vel Sartha Arrow primary: Speed (optional Protection)\n✅ Vel Sartha Circle primary: Protection (optional Protection)\n🔸 Vel Sartha Cross primary: Defense (optional Protection)\n🔸 Vel Sartha Triangle primary: Defense (optional Protection)\n✅ Vel Sartha mod sets: Health, Health, Health (optional Health, Defense)\n✅ Vel Sartha Speed: 224 (requires 220)\n❌ Vel Sartha Prot: 86,769 (requires 120,000)\n🔸 Vel Sartha Def: 44.69 (optional 65)\n```",
+            "inline": false
+          },
+          {
+            "name": "❌ Failed (18)",
+            "value": "```md\nКАССИАН · 3\n❌ Cassian Andor (Undercover) Speed: 252 (requires 300)\n❌ Cassian Andor (Undercover) Health: 63,833 (requires 110,000)\n❌ Cassian Andor (Undercover) Relic: 1 (requires 7)\nЛЮТЕН · 4\n❌ Luthen Rael Relic: 0 (requires 7)\n❌ Luthen Rael Speed: 233 (requires 320)\n❌ Luthen Rael Pot: 12.47 (requires 105)\n❌ Luthen Rael TotLife: 30,293 (requires 120,000)\nКЛЕЯ · 4\n❌ Kleya Marki Relic: 1 (requires 7)\n❌ Kleya Marki Triangle primary: Protection (requires Critical Damage)\n❌ Kleya Marki Speed: 290 (requires 320)\n❌ Kleya Marki Dmg: 5,008 (requires 8,900)\nСИНТА_КАЗ · 5\n❌ Cinta Kaz Relic: 1 (requires 7)\n❌ Cinta Kaz Triangle primary: Offense (requires Critical Damage)\n❌ Cinta Kaz Speed: 254 (requires 260)\n❌ Cinta Kaz Dmg: 4,092 (requires 8,300)\n❌ Cinta Kaz Omicrons: 0 (requires 1)\nВЕЛ_САРТА · 2\n❌ Vel Sartha Relic: 1 (requires 7)\n❌ Vel Sartha Prot: 86,769 (requires 120,000)\n```",
+            "inline": false
+          }
+        ],
+        "image": {
+          "url": "https://api.hotutils.com/images/hotbot_discord.png",
+          "proxy_url": "https://images-ext-1.discordapp.net/external/rz9EPvFbOW8EZqJppHxZEMTnGaM4YXsumk8eVqfxVTk/https/api.hotutils.com/images/hotbot_discord.png",
+          "width": 815,
+          "height": 40,
+          "content_type": "image/png",
+          "placeholder": "HSqDAYAAUDSnmMeKmt+p+OabhGWR9HU=",
+          "placeholder_version": 1,
+          "flags": 0
+        }
+      }
+    ]
+  }
+]

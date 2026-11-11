@@ -41,6 +41,9 @@ SUMMARY_FIELD = "Failed Test Summary"
 # Числовые статы HotBot → stat_name плейта. «Critical Chance» без уточнения решается по
 # плейту (если у персонажа уже есть Special — Special, иначе Physical), см. _resolve_crit.
 _STATS = {
+    "TotLife": "Total Life", "Total Life": "Total Life",
+    "Dmg": "Physical Damage", "Prot": "Protection", "Pot": "Potency",
+    "Def": "Armor",
     "Speed": "Speed", "Health": "Health", "Protection": "Protection",
     "Physical Damage": "Physical Damage", "Special Damage": "Special Damage",
     "Armor": "Armor", "Resistance": "Resistance", "Potency": "Potency", "Tenacity": "Tenacity",
@@ -131,13 +134,15 @@ def parse_messages(messages: list[dict]) -> dict:
     if not embeds or not any(e.get("fields") for e in embeds):
         raise HotbotImportError("В сообщении нет таблицы требований HotBot (нужен ответ на «templates test»).")
     title = (embeds[0].get("title") or "").strip()
-    player, _, template = re.sub(r"^[✅❌⚠️]\s*", "", title).rpartition(": ")
+    title = re.sub(r"\s*·\s*\d+/\d+\s*·\s*\d+ failed\s*$", "", title, flags=re.I)
+    player, _, template = re.sub(r"^[✅❌⚠️]+\s*", "", title).rpartition(": ")
     sections = []
     for embed in embeds:
         for field in embed.get("fields") or []:
             name = re.sub(r"^[✅❌⚠️]\s*", "", field.get("name") or "").strip()
-            if SUMMARY_FIELD in name:
+            if SUMMARY_FIELD in name or re.fullmatch(r"Failed\s*\(\d+\)", name, flags=re.I):
                 continue
+            name = re.sub(r"\s*\[\d+ Failed\]$", "", name, flags=re.I)
             name = re.sub(r"\.{3}$", "", name).strip()
             lines = [ln.strip() for ln in (field.get("value") or "").replace("```md", "").replace("```", "").splitlines()]
             lines = [ln for ln in lines if ln]
@@ -157,7 +162,7 @@ def _match_unit(text: str, names: list[str], by_name: dict) -> tuple[str | None,
 
 def parse_line(line: str, names: list[str], by_name: dict) -> dict | str:
     """Строка HotBot → требование (dict) либо причина, почему не переносится (str)."""
-    body = re.sub(r"^[✅❌⚠️]\s*", "", line)
+    body = re.sub(r"^[✅❌⚠️🔸]+\s*", "", line)
     priority = PRIORITY_REQUIRED
     if body.startswith("(Optional)"):
         priority, body = PRIORITY_OPTIONAL, body[len("(Optional)"):].strip()
@@ -165,6 +170,27 @@ def parse_line(line: str, names: list[str], by_name: dict) -> dict | str:
     if char is None:
         return "персонаж не найден в справочнике"
     item = {"line": body, "char": char, "priority": priority}
+
+    # HotBot's compact format (November 2026): the current value precedes
+    # parentheses; only the value inside parentheses defines the requirement.
+    if compact := re.fullmatch(r"(.+?):\s*(.*?)\s*\((requires|optional)\s+(.+)\)", rest):
+        label, actual, mode, target = compact.groups()
+        priority = PRIORITY_OPTIONAL if mode == "optional" else PRIORITY_REQUIRED
+        item["priority"] = priority
+        if label == "Omicrons":
+            return "указано число омикронов, но не способность — выберите омикрон вручную"
+        if label == "Relic":
+            rest = f"Relic Level[{actual}] is >= {target}"
+        elif label.endswith(" primary"):
+            rest = f"{label[:-8]} Primary[{actual}] is {target}"
+        elif label == "mod sets":
+            rest = f"[{actual}] Mod Set {target}"
+        else:
+            # A displayed operator is authoritative; an omitted operator means
+            # the minimum threshold used by the compact requires/optional form.
+            operator = re.match(r"^(>=|<=|>|<|=)\s*(.+)$", target)
+            op, value = operator.groups() if operator else (">=", target)
+            rest = f"{label}[{actual}] is {op} {value}"
 
     if m := _RELIC_RE.match(rest):
         if m.group(1) not in (">=", "<=", "="):
