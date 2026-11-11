@@ -17,6 +17,27 @@
     {% if e.notice %}<p><span class="badge badge-ok">{{ e.notice }}</span></p>{% endif %}
     {% if e.order_error %}<p class="error">{{ e.order_error }}</p>{% endif %}
     {% if e.error %}<p class="config-warning">{{ e.error }}</p>{% endif %}
+    <p id="tg-delivery-status" class="{{ 'error' if e.tg_delivery and e.tg_delivery.status == 'error' else 'muted' }}" {% if not e.tg_delivery %}hidden{% endif %}>
+        Последняя отправка ордера гильдии в Telegram: <span>{{ e.tg_delivery.message if e.tg_delivery else '' }}</span>
+    </p>
+    <script>
+    (() => {
+        const el = document.getElementById('tg-delivery-status');
+        const timer = setInterval(async () => {
+            if (!el.isConnected) { clearInterval(timer); return; }
+            try {
+                const response = await fetch('/tb/order/telegram-status');
+                if (!response.ok) return;
+                const result = await response.json();
+                el.hidden = !result;
+                if (result) {
+                    el.className = result.status === 'error' ? 'error' : 'muted';
+                    el.querySelector('span').textContent = result.message;
+                }
+            } catch (_) {}
+        }, 5000);
+    })();
+    </script>
 
     <p class="muted tbo-status">
         {% if e.current %}Идёт <strong>{{ e.current }} этап</strong> ВИ.{% else %}ВИ сейчас не идёт.{% endif %}
@@ -36,7 +57,7 @@
     <p class="tbo-source">
         {% if e.source %}Источник: <strong>{{ e.source_labels[e.source] }}</strong>{% if e.link %} · <a href="{{ e.link }}" target="_blank" rel="noopener">сообщение ↗</a>{% endif %}{% else %}У этого этапа пока нет текста — напишите его или перенесите из сообщения.{% endif %}
         {% if e.sent_discord %} · <span class="muted">в Discord: <span data-ts="{{ e.sent_discord }}"></span></span>{% endif %}
-        {% if e.sent_tg %} · <span class="muted">в Telegram: <span data-ts="{{ e.sent_tg }}"></span></span>{% endif %}
+        {% if e.sent_tg %} · <span class="muted">в очереди Telegram: <span data-ts="{{ e.sent_tg }}"></span></span>{% endif %}
     </p>
     {% if e.plan_bound %}
         {% if e.source == "generated" %}<p class="muted tbo-hint">Этап меняется вместе с планом. Сохраните свою правку — и план его больше не тронет.{% if e.sent_discord or e.sent_tg %} Этап уже отправлен — правки плана его не меняют.{% endif %}</p>

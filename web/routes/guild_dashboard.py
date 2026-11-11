@@ -329,6 +329,7 @@ async def _order_editor(request: Request, guild_id: int, guild_cfg: dict, plans:
         "order": order, "phase": phase, "current": current, "error": error,
         "phases": [{"phase": ph, "has": ph in blocks, "source": (blocks.get(ph) or {}).get("source")} for ph in range(1, 7)],
         "text": block.get("text") or "", "source": block.get("source"), "link": block.get("link"),
+        "tg_delivery": outbox.latest_delivery(guild_id, "tb_order"),
         "tg_text": row.get("tg_text") or "",
         "sent_discord": row.get("sent_discord_at"), "sent_tg": row.get("sent_tg_at"),
         "plan_bound": bool(tb_plan.plan_for_order(guild_id, order["id"])) and _auto_order(guild_id),
@@ -3404,6 +3405,8 @@ async def guild_settings(request: Request, user: dict = Depends(require_guild_ac
             for m in tg_outbox.relay_channels(user["guild_id"])
         ],
         "channel_options": tg_channel_options,
+        "deliveries": [{"label": label, **status} for kind, label in tg_outbox.KINDS.items()
+                       if (status := tg_outbox.latest_delivery(user["guild_id"], kind))],
     }
     tabs = sorted(dict.fromkeys(g["tab"] for g in groups), key=lambda t: SETTINGS_TAB_ORDER.index(t) if t in SETTINGS_TAB_ORDER else 99)
     return templates.TemplateResponse(request, "guild_settings.html", {
@@ -3645,3 +3648,9 @@ async def guild_access_remove(discord_id: str, user: dict = Depends(require_guil
     if not result.ok:
         return RedirectResponse(f"/access?{urlencode({'error': result.error})}", status_code=303)
     return RedirectResponse("/access", status_code=303)
+
+
+@router.get("/tb/order/telegram-status")
+async def tb_telegram_status(user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
+    from tg_bot import outbox
+    return outbox.latest_delivery(user["guild_id"], "tb_order")

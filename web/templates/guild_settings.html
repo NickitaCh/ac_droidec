@@ -147,6 +147,9 @@
             Можно запретить команды везде, выбрать разрешённые темы и добавить исключения для офицеров.
             Эти ограничения не меняют маршруты уведомлений ниже. В списках доступны темы, известные боту;
             старую тему можно добавить по ссылке через <code>/command_access</code>.</p></details>
+        {% for delivery in tg.deliveries %}
+        {% if delivery.status == 'error' %}<p class="error">{{ delivery.label }}: {{ delivery.message }}</p>{% endif %}
+        {% endfor %}
         <h4>Группы</h4>
         {% if tg.chats %}
             <table class="data cards-on-phone">

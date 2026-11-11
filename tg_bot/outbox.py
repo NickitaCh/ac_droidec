@@ -509,3 +509,41 @@ def remove_relay_channel(guild_id: int, relay_id: int):
     conn.execute("DELETE FROM tg_relay_channels WHERE id = ? AND guild_id = ?", (int(relay_id), int(guild_id)))
     conn.commit()
     conn.close()
+
+
+def delivery_error(error: str) -> str:
+    """Explain both historical raw API errors and new delivery failures."""
+    raw = error or ""
+    low = raw.lower()
+    if "topic_closed" in low:
+        return "Тема в Telegram закрыта. Откройте тему или разрешите боту писать в закрытые темы (права администратора). Затем отправьте сообщение повторно."
+    if "thread not found" in low or "topic_deleted" in low:
+        return "Тема в Telegram удалена или не найдена. Выберите существующую тему в Настройках → Telegram и отправьте сообщение повторно."
+    if any(x in low for x in ("chat not found", "channel_private", "bot was kicked", "not a member")):
+        return "Бот не имеет доступа к группе или каналу Telegram. Добавьте нужного бота в чат, проверьте права и выбранное место в Настройках → Telegram. Затем отправьте сообщение повторно."
+    if any(x in low for x in ("not enough rights", "chat_write_forbidden", "have no rights", "can't send")):
+        return "Боту запрещено отправлять сообщения в Telegram. Разрешите отправку в настройках группы или канала и отправьте сообщение повторно."
+    if "too many requests" in low:
+        match = re.search(r"retry after (\d+)", low)
+        wait = f" через {match.group(1)} сек." if match else " немного позже"
+        return f"Telegram ограничил частоту отправки. Повторите отправку{wait}"
+    if "устарело" in low:
+        return "Сообщение не отправлено: оно ожидало в очереди больше часа. Отправьте его повторно."
+    return "Не удалось доставить сообщение в Telegram: " + raw
+
+
+def latest_delivery(guild_id: int, kind: str) -> dict | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id, created_at, sent_at, error FROM tg_outbox WHERE guild_id=? AND kind=? ORDER BY id DESC LIMIT 1",
+            (guild_id, kind),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    item_id, created, sent, error = row
+    status = "pending" if sent is None else ("error" if error else "sent")
+    message = delivery_error(error) if error else ("Ожидает отправки в Telegram…" if sent is None else "Доставлено в Telegram.")
+    return {"id": item_id, "status": status, "message": message, "created_at": created}
