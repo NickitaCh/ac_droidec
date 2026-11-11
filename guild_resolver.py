@@ -115,22 +115,21 @@ def resolve_access(author_or_id) -> dict:
          guild_id всё равно пытаемся определить через регистрацию/грант — для
          гильдие-скоупленных команд типа /статы_требования).
       2. user_registration + закэшированный ранг (user_mapping.member_level).
-      3. Фолбэк, только если (2) ничего не дал — manual_access_grants (игроки
-         вне участвующих гильдий, выданные супер-админом).
+      3. manual_access_grants — повышает доступ, если его tier выше игрового.
+         При равенстве сохраняется регистрация. Гильдия и аккаунт всегда
+         берутся из одного источника с выбранным уровнем доступа.
       4. Иначе tier=None, guild_id=None — доступа нет вообще."""
     discord_id = _discord_id(author_or_id)
 
     is_admin = database.is_bot_admin(discord_id)
 
     best = _best_registration(discord_id)
+    grant = database.get_manual_grant(discord_id)
+    if grant is not None and (best is None or _TIER_RANK[grant["tier"]] > _TIER_RANK[best["tier"]]):
+        best = grant
     if best is not None:
         tier = "officer" if is_admin else best["tier"]
         return {"tier": tier, "guild_id": best["guild_id"], "is_super_admin": is_admin, "ally_code": best["ally_code"]}
-
-    grant = database.get_manual_grant(discord_id)
-    if grant is not None:
-        tier = "officer" if is_admin else grant["tier"]
-        return {"tier": tier, "guild_id": grant["guild_id"], "is_super_admin": is_admin, "ally_code": grant["ally_code"]}
 
     if is_admin:
         return {"tier": "officer", "guild_id": None, "is_super_admin": True, "ally_code": None}
