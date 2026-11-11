@@ -495,7 +495,7 @@ async def cmd_raidready(ctx: Ctx):
     from tg_bot.handlers import ALT_WORDS
     query, _, team = ctx.args.partition("|")
     if any(word.lower() in GUILD_WORDS for word in query.split()):
-        await ctx.reply("/raidready проверяет ваш аккаунт. Таблица гильдии доступна офицерам в Discord: /рейд готовность гильдия:True.")
+        await ctx.reply("/raidready проверяет ваш аккаунт. Таблица гильдии доступна офицерам в Discord: /рейд готовность гильдия:Да.")
         return
     relic, alt, words, levels = 7, False, [], []
     for word in query.split():

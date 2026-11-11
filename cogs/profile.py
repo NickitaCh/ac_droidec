@@ -4,6 +4,7 @@
 ежечасного синка, без запросов по каждому участнику. Расчёт — services/player_profile.py,
 картинка — services/profile_image.py. Доступно всем участникам (решение 2026-10-19)."""
 
+from services.discord_options import yes_no_param
 import asyncio
 import io
 
@@ -41,7 +42,7 @@ class ProfileCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="Только подключённая гильдия: итоги, средний игрок, статы ГЛ и меты"),
+        гильдия: bool = yes_no_param(default=False, description="Только подключённая гильдия: итоги, средний игрок, статы ГЛ и меты"),
     ):
         await inter.response.defer()
         guild_id = guild_resolver.resolve_guild_id(inter.author)

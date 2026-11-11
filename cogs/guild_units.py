@@ -4,6 +4,7 @@
 Логика — services/guild_units.py, картинка готовности — services/guild_units_image.py.
 Данные — публичный ростер гильдии, поэтому обе команды открыты всем участникам."""
 
+from services.discord_options import yes_no_param
 import asyncio
 import io
 
@@ -135,8 +136,8 @@ class GuildUnitsCog(commands.Cog):
         цель: str = commands.Param(description="ГЛ, флагман или персонаж из «Руководства»", autocomplete=autocomplete_guides),
         участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="Только подключённая гильдия: вся гильдия одной таблицей"),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        гильдия: bool = yes_no_param(default=False, description="Только подключённая гильдия: вся гильдия одной таблицей"),
     ):
         await inter.response.defer()
         guild_id = guild_resolver.resolve_guild_id(inter.author)
@@ -198,7 +199,7 @@ class GuildUnitsCog(commands.Cog):
         фракция: str = commands.Param(description="Принадлежность, профессия или вид", autocomplete=autocomplete_factions),
         участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
         guild_id = guild_resolver.resolve_guild_id(inter.author)

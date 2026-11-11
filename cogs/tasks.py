@@ -1,3 +1,4 @@
+from services.discord_options import yes_no_param
 import asyncio
 import disnake
 from disnake.ext import commands, tasks
@@ -442,8 +443,8 @@ class TasksCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         участник: disnake.User = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_CODE_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводка по всей гильдии вместо одного игрока"),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        гильдия: bool = yes_no_param(default=False, description="🔒 Офицеры: сводка по всей гильдии вместо одного игрока"),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 

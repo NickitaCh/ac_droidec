@@ -1,3 +1,4 @@
+from services.discord_options import yes_no_param
 from services.sync_queue import serialized_sync
 
 import asyncio
@@ -1612,8 +1613,8 @@ class DatacronRequirementsCog(commands.Cog):
         сезон: str = commands.Param(description="Сезон для проверки", autocomplete=autocomplete_datacron_season),
         участник: disnake.User = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_CODE_DESCRIPTION),
-        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: сводный отчёт по всей гильдии"),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        гильдия: bool = yes_no_param(default=False, description="🔒 Офицеры: сводный отчёт по всей гильдии"),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer(ephemeral=True)
         игрок = None

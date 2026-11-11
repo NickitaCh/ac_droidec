@@ -3,6 +3,7 @@
 последние несколько рейдов, поэтому цикл раз в 3 часа дописывает новые в базу, а
 история копится там. Логика — services/raids.py, страница — веб /raids."""
 
+from services.discord_options import yes_no_param
 import asyncio
 import io
 import json
@@ -204,8 +205,8 @@ class RaidsCog(commands.Cog):
         реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
         рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний гильдии или первый доступный)", autocomplete=autocomplete_raid_kinds),
         отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
-        альт: bool = commands.Param(default=False, description="Личная проверка второго привязанного аккаунта"),
-        гильдия: bool = commands.Param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),
+        альт: bool = yes_no_param(default=False, description="Личная проверка второго привязанного аккаунта"),
+        гильдия: bool = yes_no_param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),
     ):
         await inter.response.defer()
         guild_id = guild_resolver.resolve_guild_id(inter.author)

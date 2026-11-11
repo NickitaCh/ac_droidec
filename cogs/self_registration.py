@@ -1,3 +1,4 @@
+from services.discord_options import yes_no_param
 import tempfile
 
 import disnake
@@ -75,7 +76,7 @@ class SelfRegistrationCog(commands.Cog):
             default=None,
             description="[Офицер] Зарегистрировать другого участника вместо себя"
         ),
-        альт: bool = commands.Param(
+        альт: bool = yes_no_param(
             default=False,
             description="Добавить как второй аккаунт (альт), не заменяя основной"
         )

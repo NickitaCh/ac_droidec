@@ -13,6 +13,7 @@ services/unit_forecast_image.py. Игрок — свежий get_player: сво�
 /юнит и /юнит_прогноз, а новая команда снова станет /юнит_тест. После переключения — ручная
 синхронизация команд с Discord."""
 
+from services.discord_options import yes_no_param
 import asyncio
 import io
 import re
@@ -82,7 +83,7 @@ class UnitForecastCog(commands.Cog):
         гир: int = commands.Param(default=None, ge=1, le=13, description="Гир для прогноза (1–13)"),
         релик: int = commands.Param(default=None, ge=0, le=10, description="Реликвия для прогноза (0–10), ставит G13"),
         аликод: str = commands.Param(default=None, description="Код союзника любого игрока (пусто → вы)"),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
         is_ship = database.get_unit_types([_parse_bracket_id(юнит)]).get(_parse_bracket_id(юнит)) == "ship"
@@ -178,10 +179,10 @@ class UnitForecastCog(commands.Cog):
         аликод2: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
         аликод3: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
         аликод4: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
-        с_собой: bool = commands.Param(default=False, description="Добавить и вас (без других игроков вы и так в карточке)"),
-        альт: bool = commands.Param(default=False, description="Вместо вашего основного аккаунта — второй (альт)"),
-        обновить: bool = commands.Param(default=False, description="Свежие данные из игры вместо ежечасного обновления"),
-        includerokamora: bool = commands.Param(default=False, description="Добавить Rokamora"),
+        с_собой: bool = yes_no_param(default=False, description="Добавить и вас (без других игроков вы и так в карточке)"),
+        альт: bool = yes_no_param(default=False, description="Вместо вашего основного аккаунта — второй (альт)"),
+        обновить: bool = yes_no_param(default=False, description="Свежие данные из игры вместо ежечасного обновления"),
+        includerokamora: bool = yes_no_param(default=False, description="Добавить Rokamora"),
     ):
         await inter.response.defer()
         base_ids = list(dict.fromkeys(_parse_bracket_id(u) for u in (юнит, юнит2, юнит3, юнит4, юнит5) if u))

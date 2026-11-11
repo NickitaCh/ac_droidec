@@ -1,3 +1,4 @@
+from services.discord_options import yes_no_param
 from services.sync_queue import serialized_sync
 
 import asyncio
@@ -1864,7 +1865,7 @@ class StatRequirementsCog(commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         участник: disnake.User = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_CODE_DESCRIPTION),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer(ephemeral=True)
 
@@ -1990,13 +1991,13 @@ class StatRequirementsCog(commands.Cog):
         участник: disnake.User = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_USER_DESCRIPTION),
         аликод: str = commands.Param(default=None, description="🔒 Офицеры: " + guild_resolver.TARGET_CODE_DESCRIPTION),
         персонаж: str = commands.Param(default=None, description="Персонаж из плейта (если не указан — весь плейт)", autocomplete=autocomplete_stat_character),
-        обновить: bool = commands.Param(default=False, description="Обновить данные игрока из игры перед расчётом"),
-        гильдия: bool = commands.Param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
+        обновить: bool = yes_no_param(default=False, description="Обновить данные игрока из игры перед расчётом"),
+        гильдия: bool = yes_no_param(default=False, description="🔒 Офицеры: проверить всю гильдию вместо одного игрока"),
         сценарий: str = commands.Param(default=SCENARIO_RAW, description="Как сравнивать билд/модули с нормой плейта по релику", choices=SCENARIO_CHOICES),
         вариант: str = commands.Param(default=None, description="Форсировать вариант мод-билда вместо авто-детекта (не действует на персонажей без вариантов)", choices=FORCE_SCHEME_CHOICES),
-        с_отрядом: bool = commands.Param(default=False, description="Учитывать отряды плейта и отдельных персонажей (задаются на сайте). По умолчанию — все"),
-        только_кресты: bool = commands.Param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
-        альт: bool = commands.Param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
+        с_отрядом: bool = yes_no_param(default=False, description="Учитывать отряды плейта и отдельных персонажей (задаются на сайте). По умолчанию — все"),
+        только_кресты: bool = yes_no_param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
+        альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
         await inter.response.defer()
 
