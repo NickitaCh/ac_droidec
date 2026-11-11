@@ -57,8 +57,9 @@
                                             <button type="submit">Сохранить</button>
                                         </form>
                                     </details>
-                                    <form method="post" action="/plates/{{ p.name }}/delete"
+                                    <form method="post" action="/plates/delete"
                                           onsubmit="return confirm({% if p.is_modular %}'Удалить модульный плейт «{{ p.name }}»? Сами подключённые плейты не пострадают — удалится только состав ({{ p.req_count }} требований развёрнуто). Это необратимо.'{% else %}'Удалить плейт «{{ p.name }}» и все его требования ({{ p.req_count }})? Это необратимо.'{% endif %});">
+                                        <input type="hidden" name="plate_name" value="{{ p.name }}">
                                         <button type="submit" class="button-danger">Удалить</button>
                                     </form>
                                 </td>

@@ -83,6 +83,23 @@ class RecommendationTests(unittest.TestCase):
             second = Image.open(io.BytesIO(mod_scheme_image.render(model)))
         self.assertGreater(second.height, first.height)
 
+    def test_delete_imported_plate_with_slash_keeps_other_guild(self):
+        name = 'AC_CASSIAN · 5/19 · 14 failed'
+        for gid in (1, 2):
+            database.create_stat_plate(name, "", "x", guild_id=gid)
+            database.add_stat_requirement(name, "HUX", "Speed", ">=", 300, "required", None, "", "x", guild_id=gid)
+        page = self.client.get('/plates')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('action="/plates/delete"', page.text)
+        self.assertIn('name="plate_name" value="' + name + '"', page.text)
+        response = self.client.post('/plates/delete', data={'plate_name': name})
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers['location'], '/plates')
+        self.assertIsNone(database.get_stat_plate(name, 1))
+        self.assertEqual(database.count_stat_requirements_by_plate(name, 1), 0)
+        self.assertIsNotNone(database.get_stat_plate(name, 2))
+        self.assertEqual(database.count_stat_requirements_by_plate(name, 2), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

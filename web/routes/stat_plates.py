@@ -299,6 +299,13 @@ async def plates_squad_save(request: Request, plate_name: str, user: dict = Depe
     return RedirectResponse(f"/plates/{plate_name}", status_code=303)
 
 
+@router.post("/delete", response_class=HTMLResponse)
+async def plates_delete_form(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    form = await request.form()
+    database.delete_stat_plate(str(form.get("plate_name") or ""), guild_id=user["guild_id"])
+    return RedirectResponse("/plates", status_code=303)
+
+
 @router.post("/{plate_name}/delete", response_class=HTMLResponse)
 async def plates_delete(plate_name: str, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     database.delete_stat_plate(plate_name, guild_id=user["guild_id"])
