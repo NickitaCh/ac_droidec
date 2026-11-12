@@ -47,6 +47,18 @@ class HotbotImportTests(unittest.TestCase):
         r = self.parse('✅ Luthen Rael [Health, Speed] Mod Set Only Health, Speed')
         self.assertEqual(r['stat'], h.STAT_SET_ONLY)
 
+    def test_compact_damage_and_crit_aliases(self):
+        for label, stat, target in [('SDmg', 'Special Damage', 9400),
+                                    ('Dmg', 'Physical Damage', 11000),
+                                    ('Crit', 'Critical Chance', 60)]:
+            with self.subTest(label=label):
+                r = self.parse(f'✅ Luthen Rael {label}: 9,664 (requires {target:,})')
+                self.assertEqual((r['stat'], r['value'], r['priority']),
+                                 (stat, target, 'required'))
+        r = self.parse('❌ (Optional)Luthen Rael SDmg[9,664] is not >= 9,800')
+        self.assertEqual((r['stat'], r['value'], r['priority']),
+                         ('Special Damage', 9800, 'optional'))
+
 
 if __name__ == '__main__':
     unittest.main()

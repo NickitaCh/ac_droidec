@@ -42,7 +42,8 @@ SUMMARY_FIELD = "Failed Test Summary"
 # плейту (если у персонажа уже есть Special — Special, иначе Physical), см. _resolve_crit.
 _STATS = {
     "TotLife": "Total Life", "Total Life": "Total Life",
-    "Dmg": "Physical Damage", "Prot": "Protection", "Pot": "Potency",
+    "Dmg": "Physical Damage", "SDmg": "Special Damage",
+    "Crit": "Critical Chance", "Prot": "Protection", "Pot": "Potency",
     "Def": "Armor",
     "Speed": "Speed", "Health": "Health", "Protection": "Protection",
     "Physical Damage": "Physical Damage", "Special Damage": "Special Damage",
