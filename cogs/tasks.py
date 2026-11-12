@@ -512,7 +512,7 @@ class TasksCog(commands.Cog):
             if ally_code is None:
                 registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
                 if not registration:
-                    await inter.edit_original_response("❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация` или укажите участника.")
+                    await inter.edit_original_response("❌ Привяжите свой аккаунт через `/регистрация` или укажите участника.")
                     return
                 ally_code, игрок = registration
             else:

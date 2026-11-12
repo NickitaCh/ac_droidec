@@ -65,7 +65,7 @@ class ProfileCog(commands.Cog):
             account = public_checks.account(inter.author)
             if not account:
                 await inter.edit_original_response(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите участника или код союзника."
+                    "❌ Привяжите свой аккаунт через `/регистрация` или укажите участника либо код союзника."
                 )
                 return
             ally_code = account["ally_code"]
@@ -92,7 +92,7 @@ class ProfileCog(commands.Cog):
         cfg = database.get_guild_config(guild_id) or {}
         players = await asyncio.to_thread(pp.guild_players_from_cache, guild_id, self.bot.stat_calc, ctx)
         if not players:
-            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Данные игроков гильдии ещё не загружены. Они обновляются раз в час.")
             return
         guild_gp = await self._guild_gp(cfg.get("swgoh_guild_id"))
 

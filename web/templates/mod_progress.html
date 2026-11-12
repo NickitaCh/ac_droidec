@@ -7,13 +7,13 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Модули</p>
-                <h1>Прогресс модинга{% call ui.help(side="left") %}<p>Выберите плейт — бот запомнит его требования и сразу сделает первый снимок: кто из игроков что выполняет. Дальше снимки идут сами по выбранному периоду или по кнопке.</p><p>Сравнение «как есть», без подгона релика — как в /статы. Если плейт изменят, у трекера появится отметка «плейт изменён» с датой, и новые снимки пойдут по новым требованиям; старые остаются как были.</p>{% endcall %}</h1>
-                <p class="page-hero-lead">Как гильдия догоняет требования плейта — по датам.</p>
+                <h1>Прогресс модинга{% call ui.help(side="left") %}<p>Выберите плейт — бот сохранит его требования и результат первой проверки игроков. Следующие снимки создаются по расписанию или вручную.</p><p>Проверка идёт в режиме «как есть», как в /статы. После изменения плейта появится отметка с датой. Новые снимки учитывают новые требования, старые сохраняются.</p>{% endcall %}</h1>
+                <p class="page-hero-lead">Выполнение требований плейта в разные даты.</p>
             </div>
         </div>
     </section>
 
-    {% if error == "empty" %}<p class="config-warning">У этого плейта нет требований — следить не за чем.</p>{% endif %}
+    {% if error == "empty" %}<p class="config-warning">В этом плейте нет требований для проверки.</p>{% endif %}
 
     <div class="panel">
         <h2>Новый трекер</h2>
@@ -28,7 +28,7 @@
                     {% for days, label in periods.items() %}<option value="{{ days }}"{% if days == 7 %} selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </label>
-            <button type="submit">Создать и снять</button>
+            <button type="submit">Создать трекер</button>
         </form>
     </div>
 
@@ -45,7 +45,7 @@
                                 {% for d in t.changes %}<span class="badge badge-warn">плейт изменён {{ d }}</span> {% endfor %}</div></td>
                             <td data-label="Автоснимки"><div>{{ t.period_label }}</div></td>
                             <td data-label="Снимков"><div>{{ t.snapshots }}</div></td>
-                            <td data-label="Последний"><div>{% if t.running %}делается…{% else %}{{ t.last_snapshot_msk or "—" }}{% endif %}</div></td>
+                            <td data-label="Последний"><div>{% if t.running %}создаётся…{% else %}{{ t.last_snapshot_msk or "—" }}{% endif %}</div></td>
                         </tr>
                     {% endfor %}
                 </tbody>

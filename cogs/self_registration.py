@@ -36,7 +36,7 @@ class SelfRegistrationCog(commands.Cog):
                                        allow_reassign=allow_reassign, officer_guild_id=officer_guild_id,
                                        registered_by=registered_by)
         if not result.ok:
-            await inter.edit_original_response(content=f"❌ **Ошибка:** {result.error}")
+            await inter.edit_original_response(content=f"❌ {result.error}")
             return
 
         embed = disnake.Embed(
@@ -169,7 +169,7 @@ class SelfRegistrationCog(commands.Cog):
             ]
             lines.append("Остались привязаны:\n" + "\n".join(acc_lines))
         else:
-            lines.append("Больше никаких аккаунтов не привязано — при необходимости зарегистрируйтесь заново через `/регистрация`.")
+            lines.append("Привязанных аккаунтов больше нет. Привязать аккаунт — `/регистрация`.")
         await inter.edit_original_response(content="\n".join(lines))
 
     @commands.slash_command(
