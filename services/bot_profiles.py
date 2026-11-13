@@ -25,6 +25,7 @@ PROD_DISABLED = frozenset({
 })
 
 PROD_BLOCKED_PATHS = (
+    "/admin/game-lab",
     "/game-account",
     "/tw", "/steal-build", "/mod-analysis", "/mod-scan", "/mod-optimizer",
     "/mod-ku", "/farm", "/qa-checklist", "/omicron/phrases", "/admin/fun",

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Испытания игрового API — AC Droidec{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/game_lab.css?v=1">
+<div class="game-lab">
+    <div class="page-hero">
+        <h1>Испытания игрового API</h1>
+        <p>Приватные данные и возможности, для которых нужен вход в игру</p>
+    </div>
+    {% if message %}<p class="lab-message" role="status">{{ message }}</p>{% endif %}
+    <section class="card lab-account">
+        <div>
+            <span class="lab-eyebrow">Выбранный тестовый аккаунт</span>
+            <h2>{{ account.name }} <span class="lab-muted">{{ account.ally_code }}</span></h2>
+            <p>Уровень {{ account.level }} · {{ account.game_guild_name or 'Без гильдии' }}</p>
+            <p><span class="badge {{ 'badge-ok' if account.state == 'connected' else 'badge-warn' }}">{{ 'Игровая сессия подключена' if account.state == 'connected' else 'Последнее чтение не удалось' if account.state == 'error' else 'Нужна игровая сессия' }}</span></p>
+        </div>
+        <form method="get" action="/admin/game-lab" class="lab-picker">
+            <label for="lab-target">Аккаунты, добавленные к испытаниям</label>
+            <select id="lab-target" name="target">
+                {% for item in accounts %}<option value="{{ item.id }}" {% if item.id == account.id %}selected{% endif %}>{{ item.name }} · {{ item.ally_code }}</option>{% endfor %}
+            </select>
+            <button class="btn" type="submit">Выбрать</button>
+        </form>
+    </section>
+    <section class="card lab-live">
+        <div>
+            <h2>Проверка чтения</h2>
+            {% if account.summary %}
+            <p>Последнее успешное чтение: <strong>{{ read_at or 'время не сохранено' }}</strong>.</p>
+            <div class="lab-metrics"><div><strong>{{ account.summary.inventory_bytes }}</strong><span>байт инвентаря</span></div><div><strong>{{ account.summary.inventory_records }}</strong><span>записей в ответе</span></div></div>
+            {% else %}<p>Успешного чтения для этого аккаунта ещё нет.</p>{% endif %}
+            <p class="lab-muted">Проверяет выбранного игрока и получает приватный инвентарь. Разбор предметов пока не готов. Повтор — через минуту.</p>
+        </div>
+        <form method="post" action="/admin/game-lab/read">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+            <button class="btn btn-primary" type="submit" {% if account.state == 'unconnected' %}disabled{% endif %}>Прочитать данные {{ account.name }}</button>
+        </form>
+    </section>
+    <details class="card lab-enroll" {% if account.state == 'unconnected' %}open{% endif %}>
+        <summary>Добавить аккаунт или подключить сессию</summary>
+        <div class="lab-form-grid">
+            <form method="post" action="/admin/game-lab/add">
+                <h3>1. Добавить к испытаниям</h3>
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <label for="lab-code">Код союзника нового аккаунта</label>
+                <input id="lab-code" name="ally_code" placeholder="123-456-789" required maxlength="11" inputmode="numeric" autocomplete="off">
+                <label class="lab-check"><input class="checkbox" type="checkbox" name="consent" value="yes" required><span>Это мой аккаунт. Разрешаю добавить его к испытаниям и читать приватные данные после подключения сессии.</span></label>
+                <button class="btn" type="submit">Проверить игрока и добавить</button>
+                <p class="lab-muted">Имя, уровень и гильдия проверяются через Comlink. Регистрация в ботах и реальные гильдейские настройки сохраняются.</p>
+            </form>
+            <div>
+                <form method="post" action="/admin/game-lab/connect" enctype="multipart/form-data">
+                    <h3>2. Подключить {{ account.name }}</h3>
+                    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+                    <label for="lab-provider">Способ получения сессии</label>
+                    <select id="lab-provider" name="provider"><option value="ea">EA Connect</option><option value="google">Google</option></select>
+                    <label for="lab-session">Файл игровой сессии</label>
+                    <input id="lab-session" type="file" name="session_secret" accept=".json,.pb,.bin" required>
+                    <label class="lab-check"><input class="checkbox" type="checkbox" name="consent" value="yes" required><span>Разрешаю проверить эту сессию и сохранить её для тестового чтения.</span></label>
+                    <button class="btn btn-primary" type="submit">Проверить сессию и подключить</button>
+                </form>
+                {% if account.id == 'notest' %}<p class="lab-muted">notest использует ту же сессию, что и ваш подключённый тестовый альт.</p>{% endif %}
+                <p class="lab-muted">Добавление аликода не выполняет вход в игру. Сейчас подключается служебный файл после авторизации: protobuf-запрос GetInitialData или JSON с request.base64. Браузерный вход EA/Google ещё не реализован. Пароли и коды сюда вводить не нужно.</p>
+            </div>
+        </div>
+        {% if account.id != 'notest' %}
+        <form method="post" action="/admin/game-lab/remove" class="lab-remove">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+            <button class="btn" type="submit">Удалить {{ account.name }} из испытаний и стереть сессию</button>
+        </form>
+        {% endif %}
+    </details>
+    <div class="lab-catalog-head">
+        <h2>Возможности после входа</h2>
+        <p>Каталог по нашим проверкам клиента и прежним обзорам HotUtils / HotBot и swgoh.ru. Наличие раздела у другого сервиса не подтверждает, что мы уже умеем получать его данные.</p>
+        <p>У notest 2-й уровень и нет гильдии. Для ТБ, ВГ, рейдов и поздних режимов добавьте подходящий тестовый аккаунт выше. Действия, меняющие игру, пока представлены только описанием.</p>
+        <label for="lab-search">Поиск возможности</label><input id="lab-search" type="search" placeholder="Модули, фарм, ВГ…" autocomplete="off">
+        <div class="lab-filters" aria-label="Фильтр возможностей">
+            <button type="button" class="btn" data-lab-filter="all" aria-pressed="true">Все {{ capabilities|length }}</button>
+            <button type="button" class="btn" data-lab-filter="read" aria-pressed="false">Получение данных</button>
+            <button type="button" class="btn" data-lab-filter="write" aria-pressed="false">Действия в игре</button>
+        </div>
+        <p class="lab-muted" id="lab-count" role="status">Показано: {{ capabilities|length }}</p>
+    </div>
+    {% for group in groups %}
+    <section class="lab-group"><h2>{{ group }}</h2><div class="lab-grid">
+        {% for item in capabilities if item.group == group %}
+        <article class="card lab-capability" id="cap-{{ item.id }}" data-lab-state="{{ item.state }}">
+            <span class="badge {{ item.badge_class }}">{{ item.badge }}</span>
+            <h3>{{ item.title }}</h3><p>{{ item.description }}</p>
+            <p class="lab-limit">{{ item.limit }}</p>
+            <details><summary>Основание</summary><p>{{ item.source }}</p></details>
+        </article>
+        {% endfor %}
+    </div></section>
+    {% endfor %}
+</div>
+<script src="/static/game_lab.js?v=1" defer></script>
+{% endblock %}
