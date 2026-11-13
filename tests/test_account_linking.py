@@ -149,6 +149,13 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.get("/game-account/link?linked=foreign").status_code, 404)
             self.assertEqual(client.get("/game-account/link?linked=unknown").status_code, 404)
 
+    def test_auth_forms_do_not_load_session_recording(self):
+        with TestClient(self.app, base_url="https://swgoh-sng.ru") as client:
+            result = client.get("/game-account/link?alt=1")
+            self.assertEqual(result.status_code, 200)
+            self.assertNotIn("mc.yandex.ru", result.text)
+            self.assertNotIn("webvisor", result.text)
+
 
 if __name__ == "__main__":
     unittest.main()

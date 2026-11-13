@@ -3,7 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    {% if request.url.hostname == 'swgoh-sng.ru' %}
+    {% set is_account_auth = request.url.path.startswith('/game-account') or request.url.path.startswith('/admin/game-lab') %}
+    {% if request.url.hostname == 'swgoh-sng.ru' and not is_account_auth %}
     <!-- Yandex.Metrika counter -->
     <script>
         (function(m,e,t,r,i,k,a){
@@ -43,7 +44,7 @@
     <script src="/static/dashboard.js?v=20261102platoons" defer></script>
 </head>
 <body>
-    {% if request.url.hostname == 'swgoh-sng.ru' %}
+    {% if request.url.hostname == 'swgoh-sng.ru' and not is_account_auth %}
     <noscript><div><img src="https://mc.yandex.ru/watch/114105635" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
     {% endif %}
     <div class="app-shell">
