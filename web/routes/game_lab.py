@@ -19,7 +19,7 @@ def _scope(user):
         raise HTTPException(403, "Испытания доступны только суперадминам в тестовой версии.")
 
 
-def _render(request, user, target="notest", message=None):
+def _render(request, user, target="notest", message=None, probes=None, report=None):
     _scope(user)
     accounts = game_lab.accounts()
     selected = next((account for account in accounts if account["id"] == target), None)
@@ -37,7 +37,7 @@ def _render(request, user, target="notest", message=None):
     read_at = datetime.fromtimestamp(summary["read_at"], timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M МСК") if summary and summary.get("read_at") else None
     return templates.TemplateResponse(request=request, name="game_lab.html", context={
         "user": user, "accounts": accounts, "account": selected, "message": message,
-        "csrf": request.session["game_lab_csrf"], "capabilities": capabilities,
+        "csrf": request.session["game_lab_csrf"], "capabilities": capabilities, "probes": probes, "report": report,
         "groups": list(dict.fromkeys(item[1] for item in game_lab.CAPABILITIES)),
         "states": game_lab.STATES, "read_at": read_at,
         "ea_available": ea_connect.available(), "ea_pending": ea_connect.pending(user["discord_id"], target),
@@ -54,7 +54,7 @@ async def page(request: Request, target: str = "notest", user=Depends(require_su
 @router.post("/{action}")
 async def action(action: str, request: Request, user=Depends(require_super_admin)):
     _scope(user)
-    if action not in {"add", "read", "connect", "remove", "ea-start", "ea-finish", "ea-disconnect"}:
+    if action not in {"add", "read", "probe", "connect", "remove", "ea-start", "ea-finish", "ea-disconnect"}:
         raise HTTPException(404)
     form = await request.form(max_files=1, max_fields=8)
     csrf = form.get("csrf")
@@ -96,8 +96,14 @@ async def action(action: str, request: Request, user=Depends(require_super_admin
                                                 form.get("consent") == "yes", _get_comlink())
             return RedirectResponse("/admin/game-lab?target=" + target, status_code=303)
         if action == "read":
-            await game_lab.refresh(target)
-            return _render(request, user, target, "Данные прочитаны из игры. Изменений не выполняли.")
+            report = []
+            await game_lab.refresh(target, report=report)
+            return _render(request, user, target, "Данные прочитаны из игры.", report=report)
+        if action == "probe":
+            if not ea_connect.linked(target):
+                raise game_account.AccountError("Для этой проверки подключите аккаунт через EA.")
+            probes = await ea_connect.read(target, probes=True)
+            return _render(request, user, target, probes=probes)
         if action == "connect":
             session = form.get("session_secret")
             if not isinstance(session, UploadFile):

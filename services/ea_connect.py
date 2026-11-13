@@ -310,6 +310,7 @@ def _save(target, credentials, summary, previous_secret=None, pending_id=None):
         if game_secret is not None:
             now = time.time()
             conn.execute("INSERT OR REPLACE INTO game_account_sessions VALUES (?,?,?,?,?,?,?,?,?)", (owner, 1, row["ally_code"], "ea", game_secret, now, now, json.dumps(summary), "connected"))
+    return encrypted
 
 
 async def finish(owner, target, flow_id, code):
@@ -371,14 +372,17 @@ async def _finish_flow(owner, target, flow_id, code, row=None, is_alt=None, coml
         raise ga.AccountError("Не удалось завершить подключение EA. Начните вход заново.") from None
 
 
-async def read(target):
+async def read(target, *, probes=False, report=None):
     row = lab._row(target)
+    if (probes or report is not None) and not row["lab_visible"]:
+        raise ga.AccountError("Аккаунт не добавлен к испытаниям.")
     await lab._reserve(target)
     with _db() as conn:
         link = conn.execute("SELECT * FROM ea_account_links WHERE target=?", (target,)).fetchone()
     if not link or link["expected_id"] != row["player_id"]:
         raise ReconnectRequired("Подключите выбранный аккаунт через EA.")
     previous_secret = link["secret"]
+    read_options = {"report": report} if report is not None else {}
     try:
         credentials = json.loads(ga._cipher().decrypt(link["secret"]))
         if credentials["expected_id"] != row["player_id"]:
@@ -397,7 +401,7 @@ async def read(target):
             credentials = renewed
         request = base64.b64decode(credentials["read_request"])
         try:
-            summary = await ga.read_initial(request, row["player_id"])
+            summary = await ga.read_initial(request, row["player_id"], **read_options)
         except ga.SessionExpired:
             guest = base64.b64decode(credentials["guest_request"])
             payload = ga._one(ga.fields(guest), 6, 2)
@@ -405,9 +409,8 @@ async def read(target):
             player, token = _auth_result(await _game("AuthRpc", "DoAuthGuest", fresh), row["player_id"])
             request = _read_request(cfg, player, token, credentials["device"].encode())
             credentials["read_request"] = base64.b64encode(request).decode()
-            summary = await ga.read_initial(request, row["player_id"])
-        _save(target, credentials, summary, previous_secret=previous_secret)
-        return summary
+            summary = await ga.read_initial(request, row["player_id"], **read_options)
+        saved_secret = _save(target, credentials, summary, previous_secret=previous_secret)
     except Exception as error:
         with lab._db() as conn:
             conn.execute("UPDATE game_lab_accounts SET state='error' WHERE id=? AND EXISTS "
@@ -415,6 +418,21 @@ async def read(target):
         if isinstance(error, ga.AccountError):
             raise
         raise ga.AccountError("Не удалось восстановить доступ. Подключите аккаунт через EA заново.") from None
+    if not probes:
+        return summary
+
+    from services import game_read_probes
+
+    def is_current():
+        with _db() as conn:
+            return conn.execute(
+                "SELECT 1 FROM ea_account_links links "
+                "JOIN game_lab_accounts accounts ON accounts.id=links.target "
+                "WHERE links.target=? AND accounts.lab_visible=1 AND links.expected_id=? AND links.secret=?",
+                (target, row["player_id"], saved_secret),
+            ).fetchone() is not None
+
+    return await game_read_probes.run(request, row["player_id"], is_current=is_current)
 
 
 def disconnect(target):

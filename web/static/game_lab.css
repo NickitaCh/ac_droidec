@@ -41,6 +41,9 @@
 .lab-capability summary { cursor: pointer; }
 .lab-message { padding: 16px; border: 1px solid var(--border, #a1b2cf); border-radius: 12px; }
 .game-lab [hidden] { display: none !important; }
+.lab-read-rows { padding-inline-start: 1.2rem; overflow-wrap: anywhere; }
+.lab-read-rows li { margin-block: .35rem; }
+.lab-read-rows summary { cursor: pointer; }
 @media(max-width:1100px) { .lab-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:700px) {
   .lab-account,.lab-live { align-items:stretch; flex-direction:column; gap:12px; }

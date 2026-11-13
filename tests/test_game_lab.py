@@ -91,6 +91,30 @@ class LabTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.post("/admin/game-lab/UpdateMods", data={"csrf": csrf}).status_code, 404)
             read.assert_not_awaited()
 
+    def test_probe_form_checks_csrf_and_renders_results_for_selected_account(self):
+        with (TestClient(self.app) as client,
+              patch.object(route.ea_connect, "linked", return_value=True),
+              patch.object(route.ea_connect, "read", AsyncMock(return_value=[("ТБ", "Пустой ответ")])) as read):
+            csrf = self.csrf(client)
+            self.assertEqual(client.post("/admin/game-lab/probe", data={"csrf": "wrong"}).status_code, 403)
+            self.assertEqual(client.post("/admin/game-lab/probe", data={"csrf": csrf, "target": "missing"}).status_code, 404)
+            read.assert_not_awaited()
+            response = client.post("/admin/game-lab/probe", data={"csrf": csrf, "target": "notest"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Пустой ответ", response.text)
+            read.assert_awaited_once_with("notest", probes=True)
+
+    def test_read_form_renders_inventory_details_without_storing_them_in_session(self):
+        async def read(target, *, report):
+            self.assertEqual(target, "notest")
+            report.extend([("Инвентарь", [("Валюты · 1", [("Кристаллы", 291)])])])
+
+        with TestClient(self.app) as client, patch.object(lab, "refresh", side_effect=read):
+            response = client.post("/admin/game-lab/read", data={"csrf": self.csrf(client)})
+            self.assertIn("Кристаллы", response.text)
+            self.assertIn("291", response.text)
+            self.assertNotIn("Кристаллы", client.get("/admin/game-lab").text)
+
     async def test_pinned_notest_identity_and_fixed_refresh(self):
         with patch.object(ga, "_identity", return_value="main-account"), patch.object(ga, "refresh", AsyncMock()) as read:
             with self.assertRaises(ga.AccountError):

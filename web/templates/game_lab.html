@@ -1,7 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Испытания игрового API — AC Droidec{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/game_lab.css?v=3">
+{% macro read_rows(rows) %}
+<ul class="lab-read-rows">
+    {% for label, value in rows %}
+    <li>
+        {% if value is string or value is number %}
+        <strong>{{ label }}</strong> · {{ value }}
+        {% else %}
+        <details{% if label == 'Инвентарь' or label.startswith('Валюты ·') %} open{% endif %}><summary>{{ label }}{% if not value %} · пусто{% endif %}</summary>
+            {% if value %}{{ read_rows(value) }}{% endif %}
+        </details>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% endmacro %}
+<link rel="stylesheet" href="/static/game_lab.css?v=4">
 <div class="game-lab">
     <div class="page-hero">
         <h1>Испытания игрового API</h1>
@@ -30,13 +45,33 @@
             <p>Последнее успешное чтение: <strong>{{ read_at or 'время не сохранено' }}</strong>.</p>
             <div class="lab-metrics"><div><strong>{{ account.summary.inventory_bytes }}</strong><span>байт инвентаря</span></div><div><strong>{{ account.summary.inventory_records }}</strong><span>записей в ответе</span></div></div>
             {% else %}<p>Успешного чтения для этого аккаунта ещё нет.</p>{% endif %}
-            <p class="lab-muted">Проверяет выбранного игрока и получает приватный инвентарь. Разбор предметов пока не готов. Повтор — через минуту.</p>
+            <p class="lab-muted">Читает инвентарь, ресурсы и личные данные выбранного игрока. Повтор — через минуту.</p>
         </div>
         <form method="post" action="/admin/game-lab/read">
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
             <button class="btn btn-primary" type="submit" {% if account.state == 'unconnected' %}disabled{% endif %}>Прочитать данные {{ account.name }}</button>
         </form>
     </section>
+    {% if report %}
+    <section class="card lab-live">
+        <div><h2>Данные игрока</h2>{{ read_rows(report) }}</div>
+    </section>
+    {% endif %}
+    {% if account.ea_linked %}
+    <section class="card lab-live">
+        <div>
+            <h2>Проверка дополнительных данных</h2>
+            <p>Игровые наборы и фильтры модулей, Завоевание, рейд, ТБ, ВГ и Великая арена.</p>
+            {% if probes %}
+            {{ read_rows(probes) }}
+            {% endif %}
+        </div>
+        <form method="post" action="/admin/game-lab/probe">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+            <button class="btn" type="submit">Проверить запросы</button>
+        </form>
+    </section>
+    {% endif %}
     <details class="card lab-enroll" {% if account.state == 'unconnected' %}open{% endif %}>
         <summary>Добавить аккаунт или подключить сессию</summary>
         <div class="lab-form-grid">

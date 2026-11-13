@@ -160,14 +160,27 @@ def _unzip(raw):
     return result
 
 
-async def read_initial(raw, expected_id):
+async def read_initial(raw, expected_id, *, report=None):
     body = read_request(raw, expected_id)
+    response = await _read_payload(body, "PlayerRpc", "GetInitialData")
+    payload = fields(response)
+    if _one(payload, 1, 2) != expected_id.encode():
+        raise AccountError("Игра вернула другой аккаунт. Данные не сохранены.")
+    inventory = _one(payload, 5, 2)
+    if report is not None:
+        from services.game_read_decode import decode
+        report.extend(decode(response, "initial"))
+    return {"read_at": int(time.time()), "inventory_bytes": len(inventory),
+            "inventory_records": len(fields(inventory))}
+
+
+async def _read_payload(body, service, method, *, allow_empty=False):
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
             async with client.stream("POST", "https://sw-live.cgswprod.com/rpc", content=body,
                                      headers={"Content-Type": "application/x-protobuf",
-                                              "X-Rpc-Service-Name": "PlayerRpc",
-                                              "X-Rpc-Method-Name": "GetInitialData",
+                                              "X-Rpc-Service-Name": service,
+                                              "X-Rpc-Method-Name": method,
                                               "Accept-Encoding": "identity"}) as response:
                 if response.status_code != 200:
                     raise AccountError("Игра временно недоступна. Повторите позже.")
@@ -184,14 +197,10 @@ async def read_initial(raw, expected_id):
     if code == 5:
         raise SessionExpired("Игровая сессия завершилась. Нужно повторное подключение.")
     if code != 1:
-        raise AccountError(f"Игра отклонила чтение (код {code}). Автоматического входа нет.")
-    payload = fields(_unzip(_one(envelope, 4, 2)))
-    if _one(payload, 1, 2) != expected_id.encode():
-        raise AccountError("Игра вернула другой аккаунт. Данные не сохранены.")
-    inventory = _one(payload, 5, 2)
-    # Counts are deliberately technical until the inventory wire tags are verified.
-    return {"read_at": int(time.time()), "inventory_bytes": len(inventory),
-            "inventory_records": len(fields(inventory))}
+        raise AccountError(f"Игра отклонила чтение (код {code}).")
+    if allow_empty and not any(n == 4 for n, _, _ in envelope):
+        return b""
+    return _unzip(_one(envelope, 4, 2))
 
 
 def _identity(owner, guild_id, ally_code):
@@ -266,13 +275,13 @@ def status(owner, guild_id, profile, tier=None, *, ally_code=None):
             "summary": json.loads(row["summary"]) if row["summary"] else None, "state": row["state"]}
 
 
-async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
+async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None, report=None):
     require_pilot(owner, guild_id, profile, tier)
     ally_code = select_account(owner, guild_id, ally_code=ally_code)
     from services import ea_connect
     target = ea_connect.target_for_registration(owner, guild_id, ally_code)
     if target:
-        return await ea_connect.read(target)
+        return await ea_connect.read(target, **({"report": report} if report is not None else {}))
     now = time.time()
     with _db() as conn:
         row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?",
@@ -289,7 +298,8 @@ async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
         data = json.loads(_cipher().decrypt(row["secret"]))
         if data["player_id"] != expected:
             raise AccountError("Привязка аккаунта изменилась. Подключите сессию заново.")
-        summary = await read_initial(base64.b64decode(data["request"], validate=True), expected)
+        options = {"report": report} if report is not None else {}
+        summary = await read_initial(base64.b64decode(data["request"], validate=True), expected, **options)
     except AccountError:
         with _db() as conn:
             conn.execute("UPDATE game_account_sessions SET state='error' WHERE owner=? AND guild_id=? "
