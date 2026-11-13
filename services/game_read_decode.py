@@ -4,8 +4,13 @@ Only fields selected for the test lab are decoded. Unknown fields are counted,
 and their bytes are never rendered. '[]' marks a repeated embedded message.
 """
 from collections import Counter
+import sqlite3
+from datetime import datetime, timedelta, timezone
+import time
 
+import database
 from services import game_account as ga
+from services.game_gear_planner import CURRENCY_NAMES, ITEM_NAMES, unit_progress
 
 SCHEMAS = {
     "initial": {
@@ -19,8 +24,8 @@ SCHEMAS = {
     },
     "inventory": {
         1: ("Персонажи и корабли", "unit[]"), 2: ("Отряды", "squad[]"),
-        3: ("Флоты", "squad[]"), 5: ("Материалы и осколки", "item[]"),
-        9: ("Валюты", "currency[]"), 10: ("Снаряжение", "item[]"),
+        3: ("Флоты", "squad[]"), 5: ("Материалы и осколки", "stock"),
+        9: ("Валюты", "currency[]"), 10: ("Снаряжение", "stock"),
         13: ("Свободные модули", "mod[]"), 14: ("Жетоны ускорения", "token[]"),
     },
     "unit": {2: ("Персонаж или корабль", "text"), 8: ("Звёзды", "int"),
@@ -28,7 +33,6 @@ SCHEMAS = {
              21: ("Надетые модули", "mod[]"), 22: ("Реликвия", "relic")},
     "relic": {1: ("Уровень игры", "int")},
     "squad": {1: ("Ячейки отряда", "count"), 4: ("Тип", "int")},
-    "item": {1: ("Предмет", "text"), 2: ("Количество", "int"), 3: ("Бонус", "int")},
     "currency": {1: ("Валюта", "currency_name"), 2: ("Количество", "int"), 3: ("Бонус", "int")},
     "token": {2: ("Истекает", "int"), 3: ("Жетон", "text")},
     "mod": {2: ("Модуль", "mod_definition"), 4: ("Уровень", "int"), 5: ("Качество", "int"),
@@ -38,8 +42,8 @@ SCHEMAS = {
     "stat": {3: ("Характеристика", "stat_name"), 5: ("Масштабированное значение", "int"),
              6: ("Точное значение", "int")},
     "player": {3: ("Уровень", "int"), 4: ("Энергия", "energy[]"), 7: ("Имя", "text")},
-    "energy": {1: ("Тип энергии", "int"), 2: ("Метка восстановления", "int"),
-               3: ("Максимум", "int"), 4: ("Интервал восстановления", "int"), 6: ("Сверх лимита", "int")},
+    "energy": {1: ("Тип энергии", "energy_type"), 2: ("Метка восстановления", "timestamp"),
+               3: ("Лимит", "int"), 4: ("На одну единицу, сек.", "int"), 6: ("Сверх лимита", "int")},
     "event": {1: ("Событие", "text"), 3: ("Ключ названия", "text"), 7: ("Тип", "int"),
               10: ("Периоды", "event_period[]"), 12: ("Статус", "int")},
     "event_period": {2: ("Начало", "int"), 3: ("Конец", "int"), 14: ("Участвует", "bool")},
@@ -47,8 +51,12 @@ SCHEMAS = {
     "mail": {2: ("Ключ темы", "text"), 3: ("Тема", "text"), 6: ("Истекает", "int"),
              7: ("Вложения", "count"), 8: ("Тип", "int")},
     "store": {10: ("Поставки", "shipment[]")},
-    "shipment": {1: ("Тип", "int"), 2: ("Предложения", "shipment_item[]"), 3: ("Обновление", "int")},
-    "shipment_item": {12: ("Товар", "text"), 14: ("Стоимость", "count"), 17: ("Куплено", "bool")},
+    "shipment": {1: ("Магазин", "shipment_type"), 2: ("Предложения", "shipment_item[]"),
+                 3: ("Следующее обновление", "timestamp")},
+    "shipment_item": {12: ("ID предложения", "text"), 13: ("Товар", "bucket_item"),
+                      14: ("Цена", "bucket_item"), 17: ("Куплено", "bool")},
+    "bucket_item": {1: ("Предмет или валюта", "text"), 2: ("Тип", "int"),
+                    4: ("Минимум", "int"), 5: ("Максимум", "int")},
     "daily": {5: ("Номер награды", "int"), 7: ("Награды", "count"), 8: ("Получена", "bool"),
               9: ("Цикл", "text")},
     "challenge": {1: ("Задание", "text"), 2: ("Прогресс", "int"), 3: ("Цель", "int"),
@@ -58,7 +66,7 @@ SCHEMAS = {
             4: ("Сброс", "int")},
     "loadouts": {1: ("Вкладки", "tab[]")},
     "tab": {2: ("Вкладка", "text"), 3: ("Наборы", "loadout[]")},
-    "loadout": {2: ("Набор", "text"), 3: ("Модули в наборе", "count")},
+    "loadout": {2: ("Набор", "text"), 3: ("Модуль", "module_ref")},
     "filters": {1: ("Фильтры", "filter[]")},
     "filter": {2: ("Фильтр", "text"), 3: ("Только свободные", "bool"),
                4: ("Только вне наборов", "bool"), 5: ("Ячейка", "int"),
@@ -122,23 +130,56 @@ CURRENCIES = {
 }
 MAX_SHOWN = 100
 MAX_NODES = 3000
+ENERGY_TYPES = {1: "Обычная", 2: "Арена", 3: "Флот", 4: "Арена флотов",
+                5: "Кантина", 6: "Модули", 7: "Завоевание"}
+SHIPMENT_TYPES = dict(enumerate((
+    "Арена отрядов", "Поставки", "Галактическая война", "Кантина", "Арена флотов",
+    "Осколки", "Гильдия", "Модули", "События гильдии", "Еженедельные поставки",
+    "Великая арена", "Завоевание", "Датакроны", "Легенды", "Эпизод", "Эра", "Арена",
+), 1))
+MOSCOW = timezone(timedelta(hours=3))
 
 
-def decode(raw, schema):
+def decode(raw, schema, *, modules=None, inventory_complete=False):
     budget = [MAX_NODES]
     rows = ga.fields(raw)
     if schema == "initial":
         rows.sort(key=lambda row: row[0] != 5)
-    return _decode(rows, schema, budget)
+    return _decode(rows, schema, budget, (modules, inventory_complete))
 
 
-def _decode(fields, schema, budget):
+def _decode(fields, schema, budget, modules):
     spec = SCHEMAS[schema]
-    if schema == "inventory":
-        # Large rosters must not crowd out private balances and free mods.
-        priority = {9: 0, 5: 1, 10: 2, 13: 3, 14: 4}
-        fields = sorted(fields, key=lambda row: priority.get(row[0], 5))
     result = []
+    if schema == "inventory":
+        from services.game_mod_inventory import read_inventory
+        result.append(("Поиск по модулям", {"mod_inventory": read_inventory(fields)}))
+        result.extend(_equipment_stock(fields))
+        units = {}
+        stock = Counter()
+        for tag, wire, raw in fields:
+            if wire != 2 or tag not in (1, 9):
+                continue
+            try:
+                if tag == 1:
+                    unit = unit_progress(raw)
+                    if 1 <= unit[1] <= 13:
+                        units[unit[0]] = unit
+                else:
+                    rows = ga.fields(raw)
+                    if ga._one(rows, 1, 0) == 1:
+                        stock["GRIND"] += ga._one(rows, 2, 0)
+            except (ValueError, UnicodeError):
+                continue
+        if units:
+            for _, group in result:
+                if "stock_rows" in group:
+                    for _, item, quantity, _ in group["stock_rows"]:
+                        stock[item] += quantity
+            result.append(("Калькулятор по запасам", {"gear_plan": {"units": units, "stock": stock}}))
+        fields = [row for row in fields if row[0] not in (5, 10) or row[1] != 2]
+        priority = {9: 0, 13: 1, 14: 2}
+        fields = sorted(fields, key=lambda row: priority.get(row[0], 5))
     skipped = Counter()
     counts = Counter()
     occurrences = Counter()
@@ -156,7 +197,7 @@ def _decode(fields, schema, budget):
             continue
         budget[0] -= 1
         try:
-            decoded = _value(wire, value, kind, budget)
+            decoded = _value(wire, value, kind, budget, modules)
         except (UnicodeError, ga.AccountError, ValueError):
             skipped[number] += 1
             continue
@@ -168,6 +209,10 @@ def _decode(fields, schema, budget):
     for label, rows in groups.items():
         result.append((f"{label} · {len(rows)}", rows))
     result.extend(counts.items())
+    if schema == "bucket_item":
+        result = _shipment_amount(result)
+    if schema == "energy":
+        result = _energy_status(fields, result)
     for number, count in occurrences.items():
         if count > MAX_SHOWN:
             result.append((spec[number][0] + " · всего записей", count))
@@ -190,14 +235,27 @@ def _decode(fields, schema, budget):
     return result
 
 
-def _value(wire, value, kind, budget):
-    if kind in {"int", "bool", "currency_name", "stat_name"}:
+def _value(wire, value, kind, budget, modules):
+    if kind == "stock":
+        raise ValueError("Expected stock entry")
+    if kind in {"int", "bool", "currency_name", "stat_name", "timestamp", "energy_type", "shipment_type"}:
         if wire != 0:
             raise ValueError("Expected varint")
         if kind == "bool":
             return "Да" if value else "Нет"
         if kind == "currency_name":
             return CURRENCIES.get(value, f"Валюта №{value}")
+        if kind == "energy_type":
+            return ENERGY_TYPES.get(value, f"Тип №{value}")
+        if kind == "shipment_type":
+            return SHIPMENT_TYPES.get(value, f"Магазин №{value}")
+        if kind == "timestamp":
+            if not value:
+                return "Не указано"
+            seconds = _epoch_seconds(value)
+            if not 946_684_800 <= seconds < 4_102_444_800:
+                return f"Метка игры {value}"
+            return datetime.fromtimestamp(seconds, MOSCOW).strftime("%d.%m.%Y %H:%M МСК")
         if kind == "stat_name":
             from stat_engine import UNIT_STAT_RU
             return UNIT_STAT_RU.get(value, f"Характеристика №{value}")
@@ -215,4 +273,98 @@ def _value(wire, value, kind, budget):
         return definition
     if kind == "text":
         return value[:256].decode("utf-8")
-    return _decode(ga.fields(value), kind.removesuffix("[]"), budget)
+    if kind == "module_ref":
+        item_id = value.decode()
+        index, complete = modules
+        if index is None:
+            return item_id
+        mod = index.get(item_id)
+        if mod is None:
+            status = "отсутствует в инвентаре" if complete else "не найден среди распознанных модулей"
+            return f"{item_id} · {status}"
+        return f"{mod['slot_label']} · {mod['set_label']} · {mod['rarity']}★ · {mod['owner']}"
+    return _decode(ga.fields(value), kind.removesuffix("[]"), budget, modules)
+
+
+def _shipment_amount(result):
+    values = dict(result)
+    item_id = values.get("Предмет или валюта")
+    if not item_id:
+        return result
+    name = item_id
+    if values.get("Тип") == 3 or item_id in CURRENCY_NAMES:
+        name = CURRENCY_NAMES.get(item_id, item_id)
+    else:
+        shard = item_id.startswith("unitshard_")
+        try:
+            if shard:
+                base_id = item_id.removeprefix("unitshard_")
+                unit = database.get_game_unit_names([base_id]).get(base_id)
+                name = f"Осколки · {unit or base_id}"
+            else:
+                name = database.get_game_equipment_names([item_id]).get(item_id) or ITEM_NAMES.get(item_id, item_id)
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error):
+                raise
+    low, high = values.get("Минимум"), values.get("Максимум")
+    amount = low if high is None or low == high else high if low is None else f"{low}–{high}"
+    return [("Название", name)] + ([("Количество", amount)] if amount is not None else [])
+
+
+def _epoch_seconds(value):
+    return value // 1000 if value >= 100_000_000_000 else value
+
+
+def _energy_status(fields, result):
+    values = {tag: value for tag, wire, value in fields if wire == 0}
+    full_at, limit, interval = values.get(2), values.get(3), values.get(4)
+    if full_at is None or limit is None or not interval:
+        return result
+    # The game stores when energy reaches the cap, plus a separate overflow.
+    remaining = max(0, _epoch_seconds(full_at) - int(time.time()))
+    missing = (remaining + interval - 1) // interval
+    balance = max(0, limit - missing) + values.get(6, 0)
+    result.append(("Сейчас", balance))
+    if remaining:
+        seconds = (remaining - 1) % interval + 1
+        minutes, seconds = divmod(seconds, 60)
+        result.append(("Следующая единица через", f"{minutes} мин {seconds:02d} сек"))
+    return result
+
+
+def _equipment_stock(fields):
+    categories = {10: "Снаряжение и детали", 5: "Материалы и осколки"}
+    stock = {tag: {} for tag in categories}
+    unreadable = Counter()
+    for tag, wire, raw in fields:
+        if tag not in categories or wire != 2:
+            continue
+        try:
+            entry = ga.fields(raw)
+            item_id = ga._one(entry, 1, 2).decode()
+            if not item_id:
+                raise ValueError("Missing item ID")
+            quantities = {number: value for number, kind, value in entry if kind == 0}
+        except (ValueError, UnicodeError):
+            unreadable[tag] += 1
+            continue
+        quantity, bonus = stock[tag].get(item_id, (0, 0))
+        stock[tag][item_id] = (quantity + quantities.get(2, 0), bonus + quantities.get(3, 0))
+
+    item_ids = sorted(set().union(*stock.values()))
+    names = {}
+    try:
+        for start in range(0, len(item_ids), 500):
+            names.update(database.get_game_equipment_names(item_ids[start:start + 500]))
+    except sqlite3.OperationalError as error:
+        if "no such table: game_equipment" not in str(error):
+            raise
+
+    return [(label, {
+        "stock_rows": sorted(
+            [(names.get(item_id) or ITEM_NAMES.get(item_id, item_id), item_id, quantity, bonus)
+             for item_id, (quantity, bonus) in stock[tag].items()],
+            key=lambda row: (row[0].casefold(), row[1]),
+        ),
+        "unreadable": unreadable[tag],
+    }) for tag, label in categories.items()]

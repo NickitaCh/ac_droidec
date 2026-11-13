@@ -107,12 +107,16 @@ class LabTests(unittest.IsolatedAsyncioTestCase):
     def test_read_form_renders_inventory_details_without_storing_them_in_session(self):
         async def read(target, *, report):
             self.assertEqual(target, "notest")
-            report.extend([("Инвентарь", [("Валюты · 1", [("Кристаллы", 291)])])])
+            report.extend([("Инвентарь", [
+                ("Валюты · 1", [("Кристаллы", 291)]),
+                ("Снаряжение и детали", {"stock_rows": [("Деталь", "007", 8, 4)], "unreadable": 0}),
+            ])])
 
         with TestClient(self.app) as client, patch.object(lab, "refresh", side_effect=read):
             response = client.post("/admin/game-lab/read", data={"csrf": self.csrf(client)})
             self.assertIn("Кристаллы", response.text)
             self.assertIn("291", response.text)
+            self.assertIn('<th scope="row">Деталь<small>007</small></th><td>8</td><td>4</td>', response.text)
             self.assertNotIn("Кристаллы", client.get("/admin/game-lab").text)
 
     async def test_pinned_notest_identity_and_fixed_refresh(self):

@@ -7,7 +7,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import UploadFile
 
-from services import game_lab, game_account, ea_connect
+from services import game_lab, game_account, ea_connect, game_gear_planner
+import database
 from web.deps import require_super_admin
 
 router = APIRouter()
@@ -19,7 +20,7 @@ def _scope(user):
         raise HTTPException(403, "Испытания доступны только суперадминам в тестовой версии.")
 
 
-def _render(request, user, target="notest", message=None, probes=None, report=None):
+def _render(request, user, target="notest", message=None, probes=None, report=None, plan=None):
     _scope(user)
     accounts = game_lab.accounts()
     selected = next((account for account in accounts if account["id"] == target), None)
@@ -33,11 +34,17 @@ def _render(request, user, target="notest", message=None, probes=None, report=No
     request.session.setdefault("game_lab_csrf", secrets.token_urlsafe(32))
     capabilities = game_lab.catalog()
     summary = selected.get("summary")
+    inventory = dict(dict(report or []).get("Инвентарь", []))
+    units = inventory.get("Калькулятор по запасам", {}).get("gear_plan", {}).get("units", {})
+    names = database.get_game_unit_names(list(units))
+    plan_units = sorted(((key, names.get(key) or key, unit[1], unit[2]) for key, unit in units.items()),
+                        key=lambda row: row[1].casefold())
     from datetime import datetime, timezone, timedelta
     read_at = datetime.fromtimestamp(summary["read_at"], timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M МСК") if summary and summary.get("read_at") else None
     return templates.TemplateResponse(request=request, name="game_lab.html", context={
         "user": user, "accounts": accounts, "account": selected, "message": message,
         "csrf": request.session["game_lab_csrf"], "capabilities": capabilities, "probes": probes, "report": report,
+        "plan": plan, "plan_units": plan_units,
         "groups": list(dict.fromkeys(item[1] for item in game_lab.CAPABILITIES)),
         "states": game_lab.STATES, "read_at": read_at,
         "ea_available": ea_connect.available(), "ea_pending": ea_connect.pending(user["discord_id"], target),
@@ -54,7 +61,7 @@ async def page(request: Request, target: str = "notest", user=Depends(require_su
 @router.post("/{action}")
 async def action(action: str, request: Request, user=Depends(require_super_admin)):
     _scope(user)
-    if action not in {"add", "read", "probe", "connect", "remove", "ea-start", "ea-finish", "ea-disconnect"}:
+    if action not in {"add", "read", "plan", "probe", "connect", "remove", "ea-start", "ea-finish", "ea-disconnect"}:
         raise HTTPException(404)
     form = await request.form(max_files=1, max_fields=8)
     csrf = form.get("csrf")
@@ -68,6 +75,8 @@ async def action(action: str, request: Request, user=Depends(require_super_admin
         allowed |= {"ea_email", "consent"}
     if action == "ea-finish":
         allowed |= {"flow_id", "one_time_code"}
+    if action == "plan":
+        allowed |= {"unit", "goal"}
     if set(form) - allowed:
         raise HTTPException(400, "Неизвестные параметры формы.")
     target = form.get("target", "notest")
@@ -95,10 +104,28 @@ async def action(action: str, request: Request, user=Depends(require_super_admin
             target = await game_lab.add_account(user["discord_id"], str(form.get("ally_code", "")),
                                                 form.get("consent") == "yes", _get_comlink())
             return RedirectResponse("/admin/game-lab?target=" + target, status_code=303)
-        if action == "read":
+        if action in {"read", "plan"}:
+            if action == "plan":
+                goal = str(form.get("goal", ""))
+                unit_id = str(form.get("unit", ""))
+                if goal not in {f"G{i}" for i in range(1, 14)} | {f"R{i}" for i in range(1, 11)} or not unit_id:
+                    raise game_account.AccountError("Выберите персонажа и цель.")
             report = []
             await game_lab.refresh(target, report=report)
-            return _render(request, user, target, "Данные прочитаны из игры.", report=report)
+            plan = None
+            if action == "plan":
+                inventory = dict(dict(report).get("Инвентарь", []))
+                data = inventory.get("Калькулятор по запасам", {}).get("gear_plan", {})
+                unit = data.get("units", {}).get(unit_id)
+                try:
+                    if not unit:
+                        raise game_account.AccountError("В свежем инвентаре нет выбранного персонажа.")
+                    kind = "gear" if goal.startswith("G") else "relic"
+                    rows, recipes = game_gear_planner.calculate(unit, kind, int(goal[1:]), data["stock"])
+                    plan = {"rows": rows, "goal": goal, "unit": unit_id, "recipes": recipes, "gear": kind == "gear"}
+                except game_account.AccountError as error:
+                    return _render(request, user, target, str(error), report=report)
+            return _render(request, user, target, "Данные прочитаны из игры.", report=report, plan=plan)
         if action == "probe":
             if not ea_connect.linked(target):
                 raise game_account.AccountError("Для этой проверки подключите аккаунт через EA.")

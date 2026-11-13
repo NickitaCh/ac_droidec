@@ -21,7 +21,7 @@ RESPONSE_SCHEMAS = {
 }
 
 
-async def run(raw, expected_id, *, is_current):
+async def run(raw, expected_id, *, is_current, modules=None, inventory_complete=False):
     results = []
     for title, service, method, arguments in PROBES:
         if not is_current():
@@ -32,7 +32,10 @@ async def run(raw, expected_id, *, is_current):
         ])
         try:
             payload = await ga._read_payload(body, service, method, allow_empty=True)
-            decoded = game_read_decode.decode(payload, RESPONSE_SCHEMAS[method])
+            decoded = game_read_decode.decode(
+                payload, RESPONSE_SCHEMAS[method], modules=modules,
+                inventory_complete=inventory_complete,
+            )
         except ga.SessionExpired:
             results.append((title, "Сессия истекла. Остальные запросы остановлены."))
             break

@@ -5,7 +5,56 @@
 <ul class="lab-read-rows">
     {% for label, value in rows %}
     <li>
-        {% if value is string or value is number %}
+        {% if value is mapping and value.gear_plan is defined %}
+        <details open>
+            <summary>{{ label }}</summary>
+            <form method="post" action="/admin/game-lab/plan" class="lab-form-grid">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="target" value="{{ account.id }}">
+                <label>Персонаж<select name="unit" required>
+                    {% for key, name, gear, relic in plan_units %}
+                    <option value="{{ key }}"{% if plan and key == plan.unit %} selected{% endif %}>{{ name }} · G{{ gear }}{% if gear == 13 %} · R{{ relic }}{% endif %}</option>
+                    {% endfor %}
+                </select></label>
+                <label>Цель<select name="goal" required>
+                    <option value="">Выберите уровень</option>
+                    {% for prefix, levels in [('G', range(2, 14)), ('R', range(1, 11))] %}
+                    {% for level in levels %}{% set goal = prefix ~ level %}
+                    <option value="{{ goal }}"{% if plan and goal == plan.goal %} selected{% endif %}>{{ goal }}</option>
+                    {% endfor %}{% endfor %}
+                </select></label>
+                <button type="submit" class="btn">Обновить запасы и рассчитать</button>
+            </form>
+            {% if plan %}
+                {% if plan.rows %}
+                {% if plan.gear and not plan.recipes %}<p>Рецепты сборки появятся после синхронизации справочника. Сейчас показана нехватка готовых деталей.</p>{% endif %}
+                <table class="lab-stock">
+                    <thead><tr><th scope="col">Предмет</th><th scope="col">Нужно</th><th scope="col">Есть</th><th scope="col">Не хватает / собрать</th></tr></thead>
+                    <tbody>{% for name, needed, have, missing, craft in plan.rows %}
+                    <tr><th scope="row">{{ name }}</th><td>{{ needed }}</td><td>{{ have }}</td><td>{{ ('Собрать ' ~ craft) if craft else missing }}</td></tr>
+                    {% endfor %}</tbody>
+                </table>
+                {% else %}<p>Выбранный уровень уже достигнут.</p>{% endif %}
+            {% endif %}
+        </details>
+        {% elif value is mapping and value.mod_inventory is defined %}
+        {% with bank = value.mod_inventory %}{% include "game_mod_inventory.html" %}{% endwith %}
+        {% elif value is mapping %}
+        <details>
+            <summary>{{ label }} · {{ value.stock_rows|length }}</summary>
+            {% if value.stock_rows %}
+            <table class="lab-stock">
+                <thead><tr><th scope="col">Предмет</th><th scope="col">Количество</th><th scope="col">Бонус</th></tr></thead>
+                <tbody>
+                {% for name, item_id, quantity, bonus in value.stock_rows %}
+                <tr><th scope="row">{{ name }}{% if name != item_id %}<small>{{ item_id }}</small>{% endif %}</th><td>{{ quantity }}</td><td>{{ bonus }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% elif not value.unreadable %}<p>В ответе игры нет записей.</p>{% endif %}
+            {% if value.unreadable %}<p>Записей без расшифровки — {{ value.unreadable }}.</p>{% endif %}
+        </details>
+        {% elif value is string or value is number %}
         <strong>{{ label }}</strong> · {{ value }}
         {% else %}
         <details{% if label == 'Инвентарь' or label.startswith('Валюты ·') %} open{% endif %}><summary>{{ label }}{% if not value %} · пусто{% endif %}</summary>
@@ -16,7 +65,7 @@
     {% endfor %}
 </ul>
 {% endmacro %}
-<link rel="stylesheet" href="/static/game_lab.css?v=4">
+<link rel="stylesheet" href="/static/game_lab.css?v=5">
 <div class="game-lab">
     <div class="page-hero">
         <h1>Испытания игрового API</h1>
@@ -158,5 +207,5 @@
     </div></section>
     {% endfor %}
 </div>
-<script src="/static/game_lab.js?v=1" defer></script>
+<script src="/static/game_lab.js?v=3" defer></script>
 {% endblock %}

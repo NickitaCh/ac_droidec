@@ -44,6 +44,10 @@
 .lab-read-rows { padding-inline-start: 1.2rem; overflow-wrap: anywhere; }
 .lab-read-rows li { margin-block: .35rem; }
 .lab-read-rows summary { cursor: pointer; }
+.lab-stock { width: 100%; border-collapse: collapse; margin-block: .5rem; }
+.lab-stock th, .lab-stock td { padding: .4rem; border-bottom: 1px solid var(--border-strong); text-align: right; }
+.lab-stock th:first-child { text-align: left; }
+.lab-stock small { display: block; font-weight: normal; }
 @media(max-width:1100px) { .lab-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:700px) {
   .lab-account,.lab-live { align-items:stretch; flex-direction:column; gap:12px; }
