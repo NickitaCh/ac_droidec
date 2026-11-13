@@ -239,13 +239,28 @@ def raid_kinds() -> list[str]:
     return sorted(_raid_units_data())
 
 
+def raid_release_order(data: dict, previous: list[str] | None) -> list[str]:
+    """Сохраняет порядок обнаружения рейдов между обновлениями каталога."""
+    if previous is None:
+        # В старом кэше был только порядок узлов Comlink. Вышедшие анонсы новее.
+        released_previews = [release_of(raid_id, data) for raid_id in PREVIEW_RAIDS]
+        return [raid_id for raid_id in data if raid_id not in released_previews] + [
+            raid_id for raid_id in dict.fromkeys(released_previews) if raid_id is not None
+        ]
+    return list(dict.fromkeys([*previous, *data]))
+
+
 def default_readiness_raid(guild_id: int | None = None) -> str:
+    import json
     import database
     last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
     if last:
         return last[0]["raid_id"]
-    kinds = raid_kinds()
-    return "order66" if "order66" in kinds else (kinds[0] if kinds else "order66")
+    data = _raid_units_data()
+    released = {raid_id: entry for raid_id, entry in data.items() if entry.get("units") and not entry.get("preview")}
+    raw_order = database.get_bot_state(RAID_UNITS_STATE + "_order", guild_id=0)
+    order = raid_release_order(released, json.loads(raw_order) if raw_order else None)
+    return next((raid_id for raid_id in reversed(order) if raid_id in released), next(iter(data), "order66"))
 
 
 def readiness_requirements(raid: str | None = None, relic: int = 7, team: str | None = None,

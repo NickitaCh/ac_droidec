@@ -89,9 +89,14 @@ class RaidsCog(commands.Cog):
         data = rs.parse_raid_entry_units(campaigns, units, known)
         if data:
             old_raw = database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0)
+            old_data = json.loads(old_raw) if old_raw else {}
+            order_key = rs.RAID_UNITS_STATE + "_order"
+            raw_order = database.get_bot_state(order_key, guild_id=0)
+            previous = json.loads(raw_order) if raw_order else rs.raid_release_order(old_data or data, None)
+            database.set_bot_state(order_key, json.dumps(rs.raid_release_order(data, previous)), guild_id=0)
             database.set_bot_state(rs.RAID_UNITS_STATE, json.dumps(data), guild_id=0)
             if old_raw:  # на первом проходе «новыми» были бы все рейды
-                await self._announce_new_raids(set(json.loads(old_raw)), data)
+                await self._announce_new_raids(set(old_data), data)
             database.set_bot_state(rs.RAID_UNITS_STATE + "_at", str(time.time()), guild_id=0)
             summary = ", ".join("%s=%d" % (k, len(v["units"])) for k, v in data.items())
             print(f"⚔️ [Рейды] состав рейдов обновлён: {summary}")
@@ -203,7 +208,7 @@ class RaidsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
-        рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний гильдии или первый доступный)", autocomplete=autocomplete_raid_kinds),
+        рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний рейд гильдии или последний добавленный)", autocomplete=autocomplete_raid_kinds),
         отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
         альт: bool = yes_no_param(default=False, description="Личная проверка второго привязанного аккаунта"),
         гильдия: bool = yes_no_param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),

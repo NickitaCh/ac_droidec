@@ -73,6 +73,20 @@ class PersonalRaidReadinessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 raids.readiness_requirements(**kwargs)
 
+    def test_latest_added_raid_is_default_without_guild_results(self):
+        database.set_bot_state(raids.RAID_UNITS_STATE, json.dumps({
+            "droiddestruction": {"units": ["B"], "min_stars": 4},
+            "order66": {"units": ["A"], "min_stars": 5},
+            "future_raid": {"units": ["C"], "min_stars": 4},
+        }), guild_id=0)
+        with patch.object(database, "get_raid_results", return_value=[{"raid_id": "order66"}]):
+            self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "order66")
+        self.assertEqual(raids.readiness_requirements()["raid_id"], "droiddestruction")
+        order = raids.raid_release_order({"future_raid": {}, "order66": {}}, ["order66", "droiddestruction"])
+        database.set_bot_state(raids.RAID_UNITS_STATE + "_order", json.dumps(order), guild_id=0)
+        self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "future_raid")
+        self.assertEqual(raids.readiness_requirements("order66", guild_id=1)["raid_id"], "order66")
+
     def test_preview_names_order_and_notice_are_kept(self):
         plan = raids.readiness_requirements("droiddestruction")
         report = raids.personal_readiness(plan, {})
