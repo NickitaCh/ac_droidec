@@ -25,6 +25,7 @@ PROD_DISABLED = frozenset({
 })
 
 PROD_BLOCKED_PATHS = (
+    "/game-account",
     "/tw", "/steal-build", "/mod-analysis", "/mod-scan", "/mod-optimizer",
     "/mod-ku", "/farm", "/qa-checklist", "/omicron/phrases", "/admin/fun",
     "/admin/ai-models", "/admin/datacron-shorts", "/admin/unit-aliases",
@@ -92,6 +93,7 @@ def start_shared_loop(loop):
 
 def extension_available(name):
     return (worker_profile() or runtime_profile()) != "prod" or name not in {
+        "game_account",
         "antispam", "mod_scan", "tw_counters", "guild_compare",
     }
 

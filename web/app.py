@@ -24,6 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
+from web.routes import game_account
 from web.routes import admin, alliances, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_map, tb_squads, telegram, tw_defense, tw_scout, unit_images
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -146,6 +147,7 @@ static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.include_router(auth.router, tags=["auth"])
+app.include_router(game_account.router, prefix="/game-account", tags=["game-account"])
 app.include_router(dashboard.router, tags=["dashboard"])
 app.include_router(unit_images.router, tags=["unit-images"])
 app.include_router(guild_dashboard.router, tags=["guild-dashboard"])

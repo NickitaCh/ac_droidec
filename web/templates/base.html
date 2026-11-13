@@ -93,6 +93,9 @@
             {% endif %}
             {% if user and user.tier in ("officer", "member") %}
                 {{ nav_link("/me", "👤", "Мой профиль") }}
+                {% if user.bot_profile == 'test' and user.guild_id == 1 and user.tier == 'officer' %}
+                {{ nav_link("/game-account", "🔗", "Игровой аккаунт") }}
+                {% endif %}
             {% endif %}
 
             {% set is_officer = user and user.tier == "officer" %}

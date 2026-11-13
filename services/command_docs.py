@@ -36,7 +36,8 @@ def public_command_docs(profile=None):
     for section in COMMAND_DOCS:
         if profile == "prod" and section["title"] == "Территориальная война (ВГ)":
             continue
-        commands = [c for c in section["commands"] if c["access"] != "super_admin"]
+        commands = [c for c in section["commands"] if c["access"] != "super_admin"
+                    and not (profile == "prod" and c.get("test_only"))]
         if commands:
             sections.append({**section, "commands": commands})
     labels = {k: v for k, v in ACCESS_LABELS.items() if k != "super_admin"}
@@ -47,6 +48,8 @@ COMMAND_DOCS = [
         "title": "Регистрация",
         "intro": "Привязка своего Discord-аккаунта к коду союзника SWGOH — без этого команды вида «мой персонаж» не знают, кого имеют в виду.",
         "commands": [
+            {"name": "/игровой_аккаунт", "access": "officer", "test_only": True,
+             "desc": "Пилот только для офицеров АС в тестовом боте: статус своей игровой сессии, чтение инвентаря и отключение. Сессия подключается администратором с согласия владельца. Вход через сайт EA/Google ещё готовится; пароли и коды в Discord не передаются."},
             {"name": "/регистрация ally_code:", "access": "any",
              "desc": "Привязать себя к коду союзника. Бот проверит аккаунт через игру. Бесплатные /юнит, личная /готовность, /фракция, личный /профиль и личная /рейд готовность доступны даже без гильдии или вне подключённых гильдий. Гильдейские функции требуют доступа к подключённой гильдии. Команды без указания игрока берут ваш основной аккаунт."},
             {"name": "/регистрация ally_code: альт:Да", "access": "any",

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Игровой аккаунт — AC Droidec{% endblock %}
+{% block content %}
+<div class="page-hero"><h1>Игровой аккаунт</h1><p>Пилот для офицеров АС · тестовая версия</p></div>
+{% if message %}<p role="status">{{ message }}</p>{% endif %}
+<section class="card">
+    <h2>Подключение</h2>
+    <p><strong>EA Connect:</strong> вход и обновление токена проверены на тестовом аккаунте. Подключение через сайт ещё готовится.</p>
+    <p><strong>Google:</strong> проверен разовый вход с кодом из Android-игры. Вход через сайт и продление подключения ещё не готовы.</p>
+    <p>Для первого теста администратор подключает существующую сессию с согласия владельца. Пароли и коды в чат бота отправлять не нужно.</p>
+    <p>Новый вход может завершить сессию на телефоне. Здесь автоматического входа нет.</p>
+</section>
+<section class="card">
+    <h2>Проверка чтения</h2>
+    {% if account %}
+    <p>{{ account.ally_code }} · {{ 'EA Connect' if account.provider == 'ea' else 'Google' }} · {{ 'Подключён' if account.state == 'connected' else 'Последнее чтение не удалось' }}</p>
+    {% if account.summary %}<p>Последний полученный инвентарь: {{ account.summary.inventory_bytes }} байт, {{ account.summary.inventory_records }} записей. Это техническая проверка; разбор ресурсов и модулей ещё готовится.</p>{% endif %}
+    <form method="post" action="/game-account/read">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <p>Запросит приватный инвентарь из игры. Повторное чтение — не чаще раза в минуту.</p>
+        <button type="submit" class="btn btn-primary">Прочитать инвентарь</button>
+    </form>
+    <form method="post" action="/game-account/disconnect">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <p>Удалит сохранённую сессию у Дроидца. Привязки EA/Google в игре сохранятся.</p>
+        <button type="submit" class="btn">Отключить</button>
+    </form>
+    {% else %}<p>Сессия не подключена.</p>{% endif %}
+</section>
+{% endblock %}
