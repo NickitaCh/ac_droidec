@@ -20,8 +20,9 @@
 .lab-live > form { flex-shrink: 0; max-width: 280px; }
 .lab-enroll > summary { cursor: pointer; font-weight: 600; }
 .lab-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 32px; margin-top: 20px; }
-.lab-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; line-height: 1.45; }
-.lab-check input { margin-top: 4px; flex-shrink: 0; }
+.game-lab .lab-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; line-height: 1.45; }
+.game-lab .lab-check input[type=checkbox] { width:18px; height:18px; min-height:18px; margin:3px 0 0; flex:0 0 18px; }
+.game-lab .lab-check span { flex:1; min-width:0; }
 .lab-remove { padding-top: 16px; }
 .lab-technical { margin-top: 24px; }
 .lab-technical > summary { cursor:pointer; color:var(--fg-secondary); }

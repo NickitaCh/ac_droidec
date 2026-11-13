@@ -181,6 +181,16 @@ class LabTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(finish.await_args.args, ("admin", "notest", "flow", "123456"))
                 self.assertNotIn("123456", result.text)
 
+    async def test_personal_portal_connections_are_not_exposed_in_laboratory(self):
+        target = await self.add()
+        with lab._db() as conn:
+            conn.execute("UPDATE game_lab_accounts SET lab_visible=0 WHERE id=?", (target,))
+        with TestClient(self.app) as client, patch.object(lab, "refresh", AsyncMock()) as read:
+            csrf = self.csrf(client)
+            self.assertEqual(client.get("/admin/game-lab?target=" + target).status_code, 404)
+            self.assertEqual(client.post("/admin/game-lab/read", data={"csrf": csrf, "target": target}).status_code, 404)
+            read.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

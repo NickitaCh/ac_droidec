@@ -269,11 +269,10 @@ def status(owner, guild_id, profile, tier=None, *, ally_code=None):
 async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
     ally_code = select_account(owner, guild_id, ally_code=ally_code)
-    from services import game_lab
-    if str(owner) == game_lab.NOTEST_OWNER and guild_id == 1 and ally_code == game_lab.NOTEST_CODE:
-        from services import ea_connect
-        if ea_connect.linked("notest"):
-            return await ea_connect.read("notest")
+    from services import ea_connect
+    target = ea_connect.target_for_registration(owner, guild_id, ally_code)
+    if target:
+        return await ea_connect.read(target)
     now = time.time()
     with _db() as conn:
         row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?",
@@ -308,9 +307,9 @@ async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
 def disconnect(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
     ally_code = select_account(owner, guild_id, ally_code=ally_code)
-    from services import game_lab
-    if str(owner) == game_lab.NOTEST_OWNER and guild_id == 1 and ally_code == game_lab.NOTEST_CODE:
-        from services import ea_connect
-        ea_connect.disconnect("notest")
+    from services import ea_connect
+    target = ea_connect.target_for_registration(owner, guild_id, ally_code)
+    if target:
+        ea_connect.disconnect(target)
     with _db() as conn:
         conn.execute("DELETE FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?", (str(owner), guild_id, ally_code))

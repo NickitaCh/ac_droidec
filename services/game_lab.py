@@ -73,7 +73,13 @@ def _db():
             name TEXT NOT NULL, level INTEGER NOT NULL, game_guild_id TEXT NOT NULL,
             game_guild_name TEXT NOT NULL, added_by TEXT NOT NULL, added_at REAL NOT NULL,
             secret BLOB, provider TEXT, summary TEXT, state TEXT NOT NULL DEFAULT 'unconnected',
-            last_attempt REAL NOT NULL DEFAULT 0)""")
+            last_attempt REAL NOT NULL DEFAULT 0, lab_visible INTEGER NOT NULL DEFAULT 1)""")
+        if "lab_visible" not in {r[1] for r in conn.execute("PRAGMA table_info(game_lab_accounts)")}:
+            try:
+                conn.execute("ALTER TABLE game_lab_accounts ADD COLUMN lab_visible INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                if "lab_visible" not in {r[1] for r in conn.execute("PRAGMA table_info(game_lab_accounts)")}:
+                    raise
         conn.execute("INSERT OR IGNORE INTO game_lab_accounts "
                      "(id,ally_code,player_id,name,level,game_guild_id,game_guild_name,added_by,added_at) "
                      "VALUES ('notest',?,?, 'notest',2,'','',?,?)",
@@ -102,7 +108,7 @@ def _public(row):
 
 def accounts():
     with _db() as conn:
-        rows = conn.execute("SELECT * FROM game_lab_accounts ORDER BY id!='notest', added_at").fetchall()
+        rows = conn.execute("SELECT * FROM game_lab_accounts WHERE lab_visible=1 ORDER BY id!='notest', added_at").fetchall()
     return [_public(row) for row in rows]
 
 
@@ -136,10 +142,14 @@ async def add_account(owner, ally_code, consent, comlink):
             or not player.get("name")):
         raise ga.AccountError("Игрок не найден или его данные не совпадают с кодом.")
     with _db() as conn:
-        existing = conn.execute("SELECT id,player_id FROM game_lab_accounts WHERE ally_code=?", (code,)).fetchone()
+        existing = conn.execute("SELECT id,player_id,added_by,lab_visible FROM game_lab_accounts WHERE ally_code=?", (code,)).fetchone()
         if existing:
             if existing[1] != player["playerId"]:
                 raise ga.AccountError("Игрок не совпадает с уже добавленным тестовым аккаунтом.")
+            if not existing["lab_visible"]:
+                if existing["added_by"] != str(owner):
+                    raise ga.AccountError("Это личное подключение другого пользователя.")
+                conn.execute("UPDATE game_lab_accounts SET lab_visible=1 WHERE id=?", (existing["id"],))
             return existing[0]
         target_id = uuid.uuid4().hex
         conn.execute("INSERT INTO game_lab_accounts "

@@ -168,17 +168,20 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.patches[3].start()
 
-    async def test_discord_dm_alt_targets_selected_session(self):
+    async def test_discord_dm_opens_link_form_and_does_not_require_existing_alt(self):
         from cogs.game_account import GameAccountCog
         from unittest.mock import Mock
         inter = SimpleNamespace(author=SimpleNamespace(id=123), guild=None,
-                                response=SimpleNamespace(defer=AsyncMock(), is_done=lambda: True),
+                                response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
                                 edit_original_response=AsyncMock())
-        own = [("123456789", "Main", 1), ("986884832", "notest", 0)]
-        with patch.object(database, "get_user_registrations", return_value=own), patch.object(ga, "refresh", AsyncMock(return_value={"inventory_bytes": 10, "inventory_records": 2})) as read, patch.object(bot_profiles, "worker_profile", return_value="test"):
-            await GameAccountCog.account.callback(GameAccountCog(Mock()), inter, действие="прочитать", альт=True, аликод=None)
-            self.assertEqual(read.await_args.kwargs["ally_code"], "986884832")
-            self.assertIn("986884832", inter.edit_original_response.await_args.kwargs["content"])
+        with patch.object(ga, "select_account") as select, patch.object(ga, "refresh", AsyncMock()) as read, patch.object(bot_profiles, "worker_profile", return_value="test"):
+            await GameAccountCog.account.callback(GameAccountCog(Mock()), inter, альт=True)
+            payload = inter.response.send_message.await_args.kwargs
+            self.assertTrue(payload["ephemeral"])
+            self.assertEqual(payload["view"].children[0].url, "https://swgoh-sng.ru/game-account/link?alt=1")
+            self.assertEqual([o.name for o in GameAccountCog.account.body.options], ["альт"])
+            select.assert_not_called()
+            read.assert_not_awaited()
 
     async def test_rpc_checks_code_and_player_before_exposing_inventory(self):
         original_client = httpx.AsyncClient

@@ -12,9 +12,10 @@
 {% if message %}<p role="status">{{ message }}</p>{% endif %}
 <section class="card">
     <h2>Подключение</h2>
-    <p><strong>EA Connect:</strong> вход по почте и коду, сохранение доступа и восстановление сессии доступны в тестовой лаборатории суперадминов.</p>
+    <p><strong>EA Connect:</strong> вход по почте и коду, сохранение доступа и восстановление сессии.</p>
+    <p><a class="btn btn-primary" href="/game-account/link">Привязать основной аккаунт</a> <a class="btn" href="/game-account/link?alt=1">Привязать альт</a></p>
     <p><strong>Google:</strong> проверен разовый вход с кодом из Android-игры. Вход через сайт и продление подключения ещё не готовы.</p>
-    {% if user.is_super_admin %}<p><a href="/admin/game-lab">Подключить EA в испытаниях игрового API</a></p>{% else %}<p>Для подключения обратитесь к суперадмину. Пароли и коды в чат бота отправлять не нужно.</p>{% endif %}
+    {% if user.is_super_admin %}<p><a href="/admin/game-lab">Испытания игрового API</a></p>{% endif %}
     <p>Подключить можно основной аккаунт и альтов — у каждого своя сессия. Новый вход завершает предыдущую игровую сессию.</p>
 </section>
 <section class="card">

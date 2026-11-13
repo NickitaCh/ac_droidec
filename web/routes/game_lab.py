@@ -73,6 +73,8 @@ async def action(action: str, request: Request, user=Depends(require_super_admin
     target = form.get("target", "notest")
     if not isinstance(target, str):
         raise HTTPException(400)
+    if action != "add" and not any(item["id"] == target for item in game_lab.accounts()):
+        raise HTTPException(404, "Аккаунт не добавлен к испытаниям.")
     try:
         if action == "ea-start":
             await ea_connect.start(user["discord_id"], target, str(form.get("ea_email", "")), form.get("consent") == "yes")

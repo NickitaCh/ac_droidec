@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Привязать альт' if is_alt else 'Привязать аккаунт' }} — AC Droidec{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/game_lab.css?v=3">
+<div class="game-lab" style="max-width:720px">
+    <div class="page-hero"><h1>{{ 'Привязать альт' if is_alt else 'Привязать аккаунт' }}</h1><p>EA Connect · тестовая версия</p></div>
+    {% if message %}<p class="lab-message" role="status">{{ message }}</p>{% endif %}
+    {% if success %}
+    <section class="card">
+        <h2>Готово — {{ success.name }}</h2>
+        <p>{{ success.ally_code }} · {{ 'Альт привязан' if success.is_alt else 'Основной аккаунт подключён' }}</p>
+        <p>Доступ сохранён. При следующих проверках повторно вводить код не потребуется, пока EA сохраняет разрешение.</p>
+        <a href="/me" class="btn btn-primary">Мой профиль</a>
+    </section>
+    {% else %}
+    <section class="card">
+        {% if is_alt %}<p>После входа игрок будет определён автоматически и привязан как ваш альт. Основной аккаунт сохранится.</p>{% else %}<p>Введите почту EA, которая связана с вашим зарегистрированным основным аккаунтом.</p>{% endif %}
+        {% if ea_pending %}
+        <form method="post" action="/game-account/link/ea-finish">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="alt" value="{{ 1 if is_alt else 0 }}"><input type="hidden" name="flow_id" value="{{ ea_pending.id }}">
+            <label for="link-code">Код из письма EA</label>
+            <input id="link-code" name="one_time_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required autofocus>
+            <button type="submit" class="btn btn-primary">{{ 'Привязать альт' if is_alt else 'Подключить аккаунт' }}</button>
+        </form>
+        <details class="lab-technical"><summary>Отправить код заново или указать другую почту</summary>
+        {% endif %}
+        <form method="post" action="/game-account/link/ea-start">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="alt" value="{{ 1 if is_alt else 0 }}">
+            <label for="link-email">Почта EA Connect</label>
+            <input id="link-email" name="ea_email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
+            <label class="lab-check"><input class="checkbox" type="checkbox" name="consent" value="yes" required><span>Это мой аккаунт. Разрешаю сохранить доступ и восстанавливать сессию для проверок в тестовом боте.</span></label>
+            <button type="submit" class="btn btn-primary" {% if not ea_available %}disabled{% endif %}>Получить код EA</button>
+        </form>
+        {% if ea_pending %}</details>{% endif %}
+        {% if not ea_available %}<p class="lab-muted">Подключение EA временно недоступно. Попробуйте позже.</p>{% endif %}
+        <p class="lab-muted">Пароль не нужен. Почта должна быть подключена через EA Connect в самой игре. Доступ хранится зашифрованно.</p>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

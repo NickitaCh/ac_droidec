@@ -63,6 +63,22 @@ def linked(target):
         return bool(conn.execute("SELECT 1 FROM ea_account_links WHERE target=?", (target,)).fetchone())
 
 
+def target_for_registration(owner, guild_id, ally_code):
+    if guild_id != 1:
+        return None
+    conn = sqlite3.connect(database.DB_NAME, timeout=15)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"ea_account_links", "game_lab_accounts"} <= tables:
+            return None
+        row = conn.execute("SELECT l.id FROM game_lab_accounts l JOIN ea_account_links e ON e.target=l.id "
+                           "WHERE l.added_by=? AND l.ally_code=? AND l.player_id=e.expected_id",
+                           (str(owner), str(ally_code))).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def pending(owner, target):
     with _db() as conn:
         row = conn.execute("SELECT id,status FROM ea_browser_pending WHERE owner=? AND target=? AND expires>? "
@@ -72,6 +88,20 @@ def pending(owner, target):
 
 async def start(owner, target, email, consent):
     lab._row(target)
+    return await _start_flow(owner, target, email, consent)
+
+
+def registration_target(owner, is_alt):
+    return "registration:" + str(owner) + (":alt" if is_alt else ":main")
+
+
+async def start_registration(owner, is_alt, email, consent):
+    ga.require_pilot(owner, 1, "test")
+    return await _start_flow(owner, registration_target(owner, is_alt), email, consent,
+                             registration={"is_alt": bool(is_alt)})
+
+
+async def _start_flow(owner, target, email, consent, registration=None):
     if not consent:
         raise ga.AccountError("Разрешите EA-подключение и чтение выбранного тестового аккаунта.")
     cfg = config()
@@ -89,7 +119,8 @@ async def start(owner, target, email, consent):
         state = await ea_browser.start(cfg, email.strip())
         if state["stage"] != "code":
             raise ga.AccountError("EA не запросила код подтверждения. Начните вход заново.")
-        encrypted = ga._cipher().encrypt(json.dumps(state).encode())
+        stored = {"browser": state, "registration": registration} if registration is not None else state
+        encrypted = ga._cipher().encrypt(json.dumps(stored).encode())
         with _db() as conn:
             conn.execute("UPDATE ea_browser_pending SET secret=?,status='code' WHERE id=?", (encrypted, flow_id))
     except Exception as error:
@@ -218,7 +249,9 @@ def _read_request(cfg, player, token, device=None):
     return _envelope(template, "PlayerRpc", "GetInitialData", payload, (player, token), device)
 
 
-async def _import(cfg, tokens, expected):
+async def _import(cfg, tokens, expected, validate_preview=None):
+    if expected is None and validate_preview is None:
+        raise ga.AccountError("Не указан игрок для подключения.")
     uid, device = uuid.uuid4().hex.encode(), uuid.uuid4().hex.encode()
     template = cfg["guest_template"]
     rows = ga.fields(ga._one(ga.fields(base64.b64decode(template)), 6, 2))
@@ -230,8 +263,12 @@ async def _import(cfg, tokens, expected):
         raise ga.AccountError("Не удалось создать отдельное устройство для подключения.")
     preview_request = _envelope(guest_request, "PlayerRpc", "GetNucleusPlayerPreview", ga.pack([(2, 2, tokens["access"].encode())]), (guest, token))
     preview = ga.fields(await _game("PlayerRpc", "GetNucleusPlayerPreview", preview_request))
-    if (ga._one(preview, 5, 2).decode() != expected or ga._one(preview, 6, 2).decode() != tokens["nucleus"]):
+    preview_id = ga._one(preview, 5, 2).decode()
+    if (expected is not None and preview_id != expected) or ga._one(preview, 6, 2).decode() != tokens["nucleus"]:
         raise ga.AccountError("Эта почта EA связана с другим игроком. Выбранный аккаунт не подключён.")
+    if validate_preview is not None:
+        await validate_preview(preview_id)
+    expected = preview_id
     # This restores the selected existing account to our isolated device; never
     # call LinkNewEAConnect or link an EA identity to an existing game account.
     await _game("PlayerRpc", "LinkNucleusAccount", _envelope(guest_request, "PlayerRpc", "LinkNucleusAccount", b"", (guest, token)))
@@ -249,10 +286,12 @@ def _save(target, credentials, summary, previous_secret=None, pending_id=None):
         raise ga.AccountError("Выбранный тестовый аккаунт изменился.")
     encrypted = ga._cipher().encrypt(json.dumps(credentials).encode())
     game_secret = None
-    if target == "notest":
-        ga.require_pilot(lab.NOTEST_OWNER, 1, "test")
-        if ga._identity(lab.NOTEST_OWNER, 1, lab.NOTEST_CODE) != credentials["expected_id"]:
-            raise ga.AccountError("Привязка notest изменилась.")
+    owner = lab.NOTEST_OWNER if target == "notest" else row["added_by"]
+    own = database.get_user_registrations(owner, guild_id=1)
+    if target == "notest" or any(str(r[0]) == row["ally_code"] for r in own):
+        ga.require_pilot(owner, 1, "test")
+        if ga._identity(owner, 1, row["ally_code"]) != credentials["expected_id"]:
+            raise ga.AccountError("Привязка игрока изменилась.")
         request = base64.b64decode(credentials["read_request"])
         ga.read_request(request, credentials["expected_id"])
         game_secret = ga._cipher().encrypt(json.dumps({"request": credentials["read_request"], "player_id": credentials["expected_id"]}).encode())
@@ -270,13 +309,22 @@ def _save(target, credentials, summary, previous_secret=None, pending_id=None):
         conn.execute("INSERT OR REPLACE INTO ea_account_links VALUES (?,?,?,?)", (target, row["player_id"], encrypted, time.time()))
         if game_secret is not None:
             now = time.time()
-            conn.execute("INSERT OR REPLACE INTO game_account_sessions VALUES (?,?,?,?,?,?,?,?,?)", (lab.NOTEST_OWNER, 1, lab.NOTEST_CODE, "ea", game_secret, now, now, json.dumps(summary), "connected"))
+            conn.execute("INSERT OR REPLACE INTO game_account_sessions VALUES (?,?,?,?,?,?,?,?,?)", (owner, 1, row["ally_code"], "ea", game_secret, now, now, json.dumps(summary), "connected"))
 
 
 async def finish(owner, target, flow_id, code):
+    return await _finish_flow(owner, target, flow_id, code, row=lab._row(target))
+
+
+async def finish_registration(owner, is_alt, flow_id, code, comlink):
+    ga.require_pilot(owner, 1, "test")
+    return await _finish_flow(owner, registration_target(owner, is_alt), flow_id, code,
+                              is_alt=bool(is_alt), comlink=comlink)
+
+
+async def _finish_flow(owner, target, flow_id, code, row=None, is_alt=None, comlink=None):
     if not code.strip().isascii() or not code.strip().isdigit() or not 4 <= len(code.strip()) <= 10:
         raise ga.AccountError("Введите цифровой код из письма EA.")
-    row = lab._row(target)
     now = time.time()
     with _db() as conn:
         flow = conn.execute("SELECT * FROM ea_browser_pending WHERE id=? AND owner=? AND target=?", (flow_id, str(owner), target)).fetchone()
@@ -287,22 +335,34 @@ async def finish(owner, target, flow_id, code):
             raise ga.AccountError("Код уже проверяется.")
     try:
         state = json.loads(ga._cipher().decrypt(flow["secret"]))
-        result = await ea_browser.finish(state, code)
+        registration = state.get("registration")
+        if row is None and (registration != {"is_alt": is_alt} or target != registration_target(owner, is_alt)):
+            raise ga.AccountError("Тип привязки изменился. Начните вход заново.")
+        result = await ea_browser.finish(state.get("browser", state), code)
         if result["stage"] == "code":
             with _db() as conn:
                 conn.execute("UPDATE ea_browser_pending SET status='code',secret=? WHERE id=?",
-                             (ga._cipher().encrypt(json.dumps(result).encode()), flow_id))
+                             (ga._cipher().encrypt(json.dumps({"browser": result, "registration": registration} if registration is not None else result).encode()), flow_id))
             raise ga.AccountError("EA не приняла код. Проверьте последнее письмо и повторите ввод.")
         if result["stage"] != "complete":
             raise ga.AccountError("EA не завершила вход. Начните подключение заново.")
-        await lab._reserve(target)
         cfg = config()
         tokens = await _exchange(cfg, result["longlive"])
-        credentials, summary = await _import(cfg, tokens, row["player_id"])
+        if row is not None:
+            await lab._reserve(target)
+            credentials, summary = await _import(cfg, tokens, row["player_id"])
+        else:
+            from services import account_linking
+            player = {}
+            async def validate(preview_id):
+                player.update(await account_linking.validate_player(owner, is_alt, preview_id, comlink))
+            credentials, summary = await _import(cfg, tokens, None, validate_preview=validate)
+            # Only register after the private read has verified the same player.
+            target = account_linking.enroll(owner, is_alt, player, pending_id=flow_id, pending_target=target)
         _save(target, credentials, summary, pending_id=flow_id)
         with _db() as conn:
             conn.execute("DELETE FROM ea_browser_pending WHERE id=?", (flow_id,))
-        return summary
+        return {**summary, "target": target} if row is None else summary
     except Exception as error:
         with _db() as conn:
             conn.execute("DELETE FROM ea_browser_pending WHERE id=? AND status='checking'", (flow_id,))
