@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Испытания игрового API — AC Droidec{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/game_lab.css?v=1">
+<link rel="stylesheet" href="/static/game_lab.css?v=2">
 <div class="game-lab">
     <div class="page-hero">
         <h1>Испытания игрового API</h1>
@@ -13,7 +13,7 @@
             <span class="lab-eyebrow">Выбранный тестовый аккаунт</span>
             <h2>{{ account.name }} <span class="lab-muted">{{ account.ally_code }}</span></h2>
             <p>Уровень {{ account.level }} · {{ account.game_guild_name or 'Без гильдии' }}</p>
-            <p><span class="badge {{ 'badge-ok' if account.state == 'connected' else 'badge-warn' }}">{{ 'Игровая сессия подключена' if account.state == 'connected' else 'Последнее чтение не удалось' if account.state == 'error' else 'Нужна игровая сессия' }}</span></p>
+            <p><span class="badge {{ 'badge-ok' if account.state == 'connected' else 'badge-warn' }}">{{ 'Игровая сессия подключена' if account.state == 'connected' else 'Последнее чтение не удалось' if account.state == 'error' else 'Нужна игровая сессия' }}</span>{% if account.ea_linked %} <span class="badge badge-ok">Доступ EA сохранён</span>{% endif %}</p>
         </div>
         <form method="get" action="/admin/game-lab" class="lab-picker">
             <label for="lab-target">Аккаунты, добавленные к испытаниям</label>
@@ -50,8 +50,34 @@
                 <p class="lab-muted">Имя, уровень и гильдия проверяются через Comlink. Регистрация в ботах и реальные гильдейские настройки сохраняются.</p>
             </form>
             <div>
+                <h3>2. Войти через EA — {{ account.name }}</h3>
+                {% if ea_pending %}
+                <form method="post" action="/admin/game-lab/ea-finish">
+                    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+                    <input type="hidden" name="flow_id" value="{{ ea_pending.id }}">
+                    <label for="ea-code">Код из последнего письма EA</label>
+                    <input id="ea-code" name="one_time_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required autofocus>
+                    <button class="btn btn-primary" type="submit">Подтвердить и подключить</button>
+                    <p class="lab-muted">Код действует ограниченное время. Для повторной отправки начните вход ниже.</p>
+                </form>
+                {% endif %}
+                <form method="post" action="/admin/game-lab/ea-start">
+                    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+                    <label for="ea-email">Почта EA Connect, подключённая в игре</label>
+                    <input id="ea-email" name="ea_email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com">
+                    <label class="lab-check"><input class="checkbox" type="checkbox" name="consent" value="yes" required><span>Разрешаю подключить {{ account.name }} через EA, сохранить доступ и восстанавливать игровую сессию для тестового чтения.</span></label>
+                    <button class="btn btn-primary" type="submit" {% if not ea_available %}disabled{% endif %}>{{ 'Отправить новый код EA' if ea_pending else 'Получить код EA' }}</button>
+                </form>
+                {% if not ea_available %}<p class="lab-muted">Подключение EA ещё настраивается на сервере.</p>{% endif %}
+                <p class="lab-muted">Пароль не нужен. После подтверждения кодом доступ хранится зашифрованно. При следующих запросах Дроидец использует текущую сессию или восстанавливает её; повторный код потребуется при отзыве доступа EA. Google пока не поддерживает такое продление.</p>
+                {% if account.ea_linked %}
+                <form method="post" action="/admin/game-lab/ea-disconnect">
+                    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+                    <button class="btn" type="submit">Удалить сохранённый доступ EA</button>
+                </form>
+                {% endif %}
+                <details class="lab-technical"><summary>Служебный импорт сессии</summary>
                 <form method="post" action="/admin/game-lab/connect" enctype="multipart/form-data">
-                    <h3>2. Подключить {{ account.name }}</h3>
                     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
                     <label for="lab-provider">Способ получения сессии</label>
                     <select id="lab-provider" name="provider"><option value="ea">EA Connect</option><option value="google">Google</option></select>
@@ -61,7 +87,8 @@
                     <button class="btn btn-primary" type="submit">Проверить сессию и подключить</button>
                 </form>
                 {% if account.id == 'notest' %}<p class="lab-muted">notest использует ту же сессию, что и ваш подключённый тестовый альт.</p>{% endif %}
-                <p class="lab-muted">Добавление аликода не выполняет вход в игру. Сейчас подключается служебный файл после авторизации: protobuf-запрос GetInitialData или JSON с request.base64. Браузерный вход EA/Google ещё не реализован. Пароли и коды сюда вводить не нужно.</p>
+                <p class="lab-muted">Для технических проверок: protobuf-запрос GetInitialData или JSON с request.base64. Вход через EA выше файла не требует.</p>
+                </details>
             </div>
         </div>
         {% if account.id != 'notest' %}

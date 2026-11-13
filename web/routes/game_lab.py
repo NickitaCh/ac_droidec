@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import UploadFile
 
-from services import game_lab, game_account
+from services import game_lab, game_account, ea_connect
 from web.deps import require_super_admin
 
 router = APIRouter()
@@ -40,6 +40,7 @@ def _render(request, user, target="notest", message=None):
         "csrf": request.session["game_lab_csrf"], "capabilities": capabilities,
         "groups": list(dict.fromkeys(item[1] for item in game_lab.CAPABILITIES)),
         "states": game_lab.STATES, "read_at": read_at,
+        "ea_available": ea_connect.available(), "ea_pending": ea_connect.pending(user["discord_id"], target),
     }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
@@ -53,7 +54,7 @@ async def page(request: Request, target: str = "notest", user=Depends(require_su
 @router.post("/{action}")
 async def action(action: str, request: Request, user=Depends(require_super_admin)):
     _scope(user)
-    if action not in {"add", "read", "connect", "remove"}:
+    if action not in {"add", "read", "connect", "remove", "ea-start", "ea-finish", "ea-disconnect"}:
         raise HTTPException(404)
     form = await request.form(max_files=1, max_fields=8)
     csrf = form.get("csrf")
@@ -63,12 +64,30 @@ async def action(action: str, request: Request, user=Depends(require_super_admin
     allowed = {"csrf", "ally_code", "consent"} if action == "add" else {"csrf", "target"}
     if action == "connect":
         allowed |= {"provider", "session_secret", "consent"}
+    if action == "ea-start":
+        allowed |= {"ea_email", "consent"}
+    if action == "ea-finish":
+        allowed |= {"flow_id", "one_time_code"}
     if set(form) - allowed:
         raise HTTPException(400, "Неизвестные параметры формы.")
     target = form.get("target", "notest")
     if not isinstance(target, str):
         raise HTTPException(400)
     try:
+        if action == "ea-start":
+            await ea_connect.start(user["discord_id"], target, str(form.get("ea_email", "")), form.get("consent") == "yes")
+            return _render(request, user, target, "EA отправила код. Введите код из последнего письма.")
+        if action == "ea-finish":
+            await ea_connect.finish(user["discord_id"], target, str(form.get("flow_id", "")), str(form.get("one_time_code", "")))
+            return _render(request, user, target, "EA подключена. Доступ сохранён; игровая сессия будет восстанавливаться при следующих запросах.")
+        if action == "ea-disconnect":
+            ea_connect.disconnect(target)
+            if target == "notest":
+                game_account.disconnect(game_lab.NOTEST_OWNER, 1, "test", ally_code=game_lab.NOTEST_CODE)
+            else:
+                with game_lab._db() as conn:
+                    conn.execute("UPDATE game_lab_accounts SET secret=NULL,provider=NULL,state='unconnected',summary=NULL WHERE id=?", (target,))
+            return _render(request, user, target, "Сохранённый доступ удалён. Для дальнейшего чтения понадобится новое подключение.")
         if action == "add":
             from web.routes.registration import _get_comlink
             target = await game_lab.add_account(user["discord_id"], str(form.get("ally_code", "")),

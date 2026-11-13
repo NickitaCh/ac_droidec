@@ -110,11 +110,13 @@ def current(target_id="notest"):
     row = _row(target_id)
     result = _public(row)
     result["summary"] = json.loads(row["summary"]) if row["summary"] else None
+    from services import ea_connect
+    result["ea_linked"] = ea_connect.linked(target_id)
     if target_id == "notest":
         if ga._identity(NOTEST_OWNER, 1, NOTEST_CODE) != NOTEST_PLAYER_ID:
             raise ga.AccountError("Сессия notest не совпадает с закреплённым тестовым игроком.")
         session = ga.status(NOTEST_OWNER, 1, "test", ally_code=NOTEST_CODE)
-        result["state"] = session["state"] if session else "unconnected"
+        result["state"] = "error" if result["ea_linked"] and row["state"] == "error" else session["state"] if session else "unconnected"
         result["summary"] = session["summary"] if session else None
         result["provider"] = session["provider"] if session else None
     return result
@@ -173,12 +175,17 @@ async def connect(target_id, provider, raw, consent):
     if target_id == "notest":
         if ga._identity(NOTEST_OWNER, 1, NOTEST_CODE) != NOTEST_PLAYER_ID:
             raise ga.AccountError("Привязка notest не соответствует тестовому игроку.")
-        return await ga.provision(NOTEST_OWNER, 1, "test", NOTEST_CODE, provider, request, consent=True)
+        summary = await ga.provision(NOTEST_OWNER, 1, "test", NOTEST_CODE, provider, request, consent=True)
+        from services import ea_connect
+        ea_connect.disconnect(target_id)
+        return summary
     summary = await ga.read_initial(request, row["player_id"])
     secret = cipher.encrypt(request)
     with _db() as conn:
         conn.execute("UPDATE game_lab_accounts SET secret=?,provider=?,summary=?,state='connected' WHERE id=?",
                      (secret, provider, json.dumps(summary), target_id))
+    from services import ea_connect
+    ea_connect.disconnect(target_id)
     return summary
 
 
@@ -193,6 +200,9 @@ async def _reserve(target_id):
 
 async def refresh(target_id="notest"):
     row = _row(target_id)
+    from services import ea_connect
+    if ea_connect.linked(target_id):
+        return await ea_connect.read(target_id)
     if target_id == "notest":
         current(target_id)  # verifies the pinned identity before touching the session
         return await ga.refresh(NOTEST_OWNER, 1, "test", ally_code=NOTEST_CODE)
@@ -219,6 +229,8 @@ def remove(target_id):
         raise ga.AccountError("Основной тестовый аккаунт notest закреплён на странице.")
     with _db() as conn:
         conn.execute("DELETE FROM game_lab_accounts WHERE id=?", (target_id,))
+    from services import ea_connect
+    ea_connect.disconnect(target_id)
 
 
 def catalog():

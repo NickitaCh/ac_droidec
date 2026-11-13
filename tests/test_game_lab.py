@@ -64,7 +64,8 @@ class LabTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(lab.NOTEST_PLAYER_ID, result.text)
             self.assertEqual(result.headers["cache-control"], "no-store")
             self.assertEqual(result.text.count('class="card lab-capability"'), 28)
-            self.assertIn("Браузерный вход EA/Google ещё не реализован", result.text)
+            self.assertIn('name="ea_email"', result.text)
+            self.assertIn("Вход через EA выше файла не требует", result.text)
             self.assertEqual(client.get("/admin/game-lab?ally_code=881789523").status_code, 400)
             self.assertEqual(client.get("/admin/game-lab?target=881789523").status_code, 404)
 
@@ -163,6 +164,22 @@ class LabTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("private-session-token", result.text)
                 self.assertNotIn("secret", lab.current(target))
                 self.assertEqual(read.await_count, 1)
+
+    def test_ea_email_code_forms_keep_actor_and_target(self):
+        from services import ea_connect
+        with TestClient(self.app) as client, patch.object(ea_connect, "available", return_value=True):
+            csrf = self.csrf(client)
+            with patch.object(ea_connect, "start", AsyncMock(return_value="flow")) as start, patch.object(ea_connect, "pending", return_value={"id": "flow"}):
+                result = client.post("/admin/game-lab/ea-start", data={"csrf": csrf, "target": "notest", "ea_email": "test@example.com", "consent": "yes"})
+                self.assertEqual(result.status_code, 200)
+                self.assertIn('name="one_time_code"', result.text)
+                self.assertNotIn("test@example.com", result.text)
+                self.assertEqual(start.await_args.args, ("admin", "notest", "test@example.com", True))
+            with patch.object(ea_connect, "finish", AsyncMock(return_value={})) as finish:
+                result = client.post("/admin/game-lab/ea-finish", data={"csrf": csrf, "target": "notest", "flow_id": "flow", "one_time_code": "123456"})
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(finish.await_args.args, ("admin", "notest", "flow", "123456"))
+                self.assertNotIn("123456", result.text)
 
 
 if __name__ == "__main__":

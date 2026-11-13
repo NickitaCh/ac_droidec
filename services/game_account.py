@@ -25,6 +25,10 @@ class AccountError(ValueError):
     pass
 
 
+class SessionExpired(AccountError):
+    pass
+
+
 def require_pilot(owner, guild_id, profile, tier=None):
     access = guild_resolver.resolve_access(str(owner))
     # Do not let web guild switching, view-as or the prod worker broaden access.
@@ -178,7 +182,7 @@ async def read_initial(raw, expected_id):
     envelope = fields(_unzip(b"".join(chunks)))
     code = _one(envelope, 5, 0)
     if code == 5:
-        raise AccountError("Игровая сессия завершилась. Нужно повторное подключение; автоматического входа нет.")
+        raise SessionExpired("Игровая сессия завершилась. Нужно повторное подключение.")
     if code != 1:
         raise AccountError(f"Игра отклонила чтение (код {code}). Автоматического входа нет.")
     payload = fields(_unzip(_one(envelope, 4, 2)))
@@ -231,13 +235,22 @@ async def provision(owner, guild_id, profile, ally_code, provider, request_bytes
     expected = _identity(owner, guild_id, ally_code)
     cipher = _cipher()
     summary = await read_initial(request_bytes, expected)
+    store_verified_session(owner, guild_id, ally_code, provider, request_bytes, summary)
+    return summary
+
+
+def store_verified_session(owner, guild_id, ally_code, provider, request_bytes, summary):
+    """Internal persistence after a successful identity-checked read."""
+    require_pilot(owner, guild_id, "test")
+    expected = _identity(owner, guild_id, ally_code)
+    read_request(request_bytes, expected)
+    cipher = _cipher()
     secret = cipher.encrypt(json.dumps({"request": base64.b64encode(request_bytes).decode(),
                                         "player_id": expected}).encode())
     with _db() as conn:
         conn.execute("INSERT OR REPLACE INTO game_account_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                      (str(owner), guild_id, str(ally_code), provider, secret, time.time(),
                       time.time(), json.dumps(summary), "connected"))
-    return summary
 
 
 def status(owner, guild_id, profile, tier=None, *, ally_code=None):
@@ -256,6 +269,11 @@ def status(owner, guild_id, profile, tier=None, *, ally_code=None):
 async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
     ally_code = select_account(owner, guild_id, ally_code=ally_code)
+    from services import game_lab
+    if str(owner) == game_lab.NOTEST_OWNER and guild_id == 1 and ally_code == game_lab.NOTEST_CODE:
+        from services import ea_connect
+        if ea_connect.linked("notest"):
+            return await ea_connect.read("notest")
     now = time.time()
     with _db() as conn:
         row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?",
@@ -290,5 +308,9 @@ async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
 def disconnect(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
     ally_code = select_account(owner, guild_id, ally_code=ally_code)
+    from services import game_lab
+    if str(owner) == game_lab.NOTEST_OWNER and guild_id == 1 and ally_code == game_lab.NOTEST_CODE:
+        from services import ea_connect
+        ea_connect.disconnect("notest")
     with _db() as conn:
         conn.execute("DELETE FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?", (str(owner), guild_id, ally_code))

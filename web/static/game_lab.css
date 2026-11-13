@@ -23,6 +23,8 @@
 .lab-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; line-height: 1.45; }
 .lab-check input { margin-top: 4px; flex-shrink: 0; }
 .lab-remove { padding-top: 16px; }
+.lab-technical { margin-top: 24px; }
+.lab-technical > summary { cursor:pointer; color:var(--fg-secondary); }
 .lab-catalog-head { margin: 28px 0 20px; }
 .lab-catalog-head > p { max-width: 1000px; }
 .lab-catalog-head input { max-width: 480px !important; }

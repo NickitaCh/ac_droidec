@@ -212,7 +212,7 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
         with TestClient(app) as client:
             response = client.get("/game-account")
             self.assertEqual(response.status_code, 200)
-            self.assertIn("вход и обновление токена", response.text)
+            self.assertIn("вход по почте и коду", response.text)
             self.assertIn("через сайт и продление", response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
             self.assertEqual(client.post("/game-account/disconnect", data={"csrf": "wrong"}).status_code, 403)
