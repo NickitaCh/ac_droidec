@@ -178,8 +178,9 @@ def _compare_req_text(stat_name: str, operator: str, compare_base_id: str, offse
 @router.get("", response_class=HTMLResponse)
 async def plates_list(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     rows = database.get_all_stat_plates_detailed(guild_id=user["guild_id"])
+    visible = set(database.get_all_stat_requirement_plates(guild_id=user["guild_id"], bot_visible_only=True))
     plates = [
-        {"name": name, "description": description, "is_modular": bool(is_modular), "char_count": char_count, "req_count": req_count}
+        {"name": name, "description": description, "is_modular": bool(is_modular), "char_count": char_count, "req_count": req_count, "bot_visible": name in visible}
         for name, description, is_modular, char_count, req_count in rows
     ]
     return templates.TemplateResponse(request, "plates.html", {
@@ -247,6 +248,16 @@ async def plates_import_submit(request: Request, user: dict = Depends(feature_fl
         ctx["result"] = result
     ctx.update(plan=plan, selected=hotbot_import.default_selection(plan), counts=hotbot_import.plan_counts(plan))
     return templates.TemplateResponse(request, "plates_import.html", ctx)
+
+
+@router.post("/bot-visibility", response_class=HTMLResponse)
+async def plates_bot_visibility(
+    plate_name: str = Form(...),
+    visible: bool = Form(False),
+    user: dict = Depends(feature_flags.require_feature("stat_requirements")),
+):
+    database.set_stat_plate_bot_visibility(plate_name, visible, guild_id=user["guild_id"])
+    return RedirectResponse("/plates", status_code=303)
 
 
 @router.post("/create", response_class=HTMLResponse)

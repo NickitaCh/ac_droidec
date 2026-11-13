@@ -43,6 +43,14 @@
                                 <td class="num">{{ p.char_count }}</td>
                                 <td class="num">{{ p.req_count }}</td>
                                 <td class="row-actions">
+                                    <form method="post" action="/plates/bot-visibility">
+                                        <input type="hidden" name="plate_name" value="{{ p.name }}">
+                                        <label class="checkbox" title="Выбор плейта в Telegram и Discord. В составе модульных плейтов учитывается всегда.">
+                                            <input type="checkbox" name="visible" value="true" {% if p.bot_visible %}checked{% endif %} onchange="this.form.requestSubmit()">
+                                            Показывать в боте
+                                        </label>
+                                        <noscript><button type="submit">Сохранить</button></noscript>
+                                    </form>
                                     <details>
                                         <summary class="link-btn">переименовать</summary>
                                         <form method="post" action="/plates/{{ p.name }}/rename" class="inline-form">

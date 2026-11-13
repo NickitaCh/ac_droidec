@@ -1346,7 +1346,7 @@ async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, 
     guild_id = guild_resolver.autocomplete_guild_id(inter)
     if guild_id is None:
         return []
-    plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
+    plates = database.get_all_stat_requirement_plates(guild_id=guild_id, bot_visible_only=True)
     if not plates:
         return ["❌ Список плейтов пуст."]
     search = string.lower().strip()

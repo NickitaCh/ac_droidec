@@ -101,9 +101,9 @@ async def cmd_stats(ctx: Ctx):
         return
     text, (guild_mode, only_failed, refresh, up, full, squad_only) = _split_flags(
         ctx.args, GUILD_WORDS, FAILED_WORDS, REFRESH_WORDS, UP_WORDS, FULL_WORDS, SQUAD_WORDS)
-    plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
+    plates = database.get_all_stat_requirement_plates(guild_id=guild_id, bot_visible_only=True)
     if not plates:
-        await ctx.reply("У гильдии нет плейтов — их заводят офицеры на сайте.")
+        await ctx.reply("Нет плейтов для выбора — офицеры могут включить их на сайте в разделе «Плейты».")
         return
     plate, target_text, candidates = _match_plate(text, plates)
     state = {

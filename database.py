@@ -4599,6 +4599,10 @@ def _ensure_stat_plates_table(cursor):
             SELECT 1, name, description, created_by, created_at FROM stat_plates_old
         """)
         cursor.execute("DROP TABLE stat_plates_old")
+    try:
+        cursor.execute("ALTER TABLE stat_plates ADD COLUMN bot_visible INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
     # Плейты изначально создавались неявно — первым /статы_требования добавить с новым
     # именем. Подтягиваем такие "исторические" плейты в таблицу, иначе они не попадут
     # в список/переименование/удаление, хоть и продолжат работать в автодополнении.
@@ -5264,7 +5268,7 @@ def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1
 
 
 @refresh_before("plate")
-def get_all_stat_requirement_plates(guild_id: int = 1):
+def get_all_stat_requirement_plates(guild_id: int = 1, bot_visible_only: bool = False):
     """Все известные плейты гильдии — и зарегистрированные через /статы_требования создать
     (даже пустые), и "исторические" (существующие только как plate_name у требований)."""
     conn = sqlite3.connect(DB_NAME)
@@ -5278,8 +5282,30 @@ def get_all_stat_requirement_plates(guild_id: int = 1):
         ORDER BY 1
     """, (guild_id, guild_id))
     rows = [r[0] for r in cursor.fetchall()]
+    if bot_visible_only:
+        cursor.execute("SELECT name FROM stat_plates WHERE guild_id = ? AND bot_visible = 0", (guild_id,))
+        hidden = {r[0] for r in cursor.fetchall()}
+        rows = [name for name in rows if name not in hidden]
     conn.close()
     return rows
+
+
+def set_stat_plate_bot_visibility(plate_name: str, visible: bool, guild_id: int = 1) -> bool:
+    """Локальная настройка меню бота; требования и ссылки модульных плейтов не меняются."""
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        cursor = conn.cursor()
+        _ensure_stat_requirements_table(cursor)
+        _ensure_stat_plates_table(cursor)
+        cursor.execute(
+            "UPDATE stat_plates SET bot_visible = ? WHERE guild_id = ? AND name = ?",
+            (int(visible), guild_id, plate_name),
+        )
+        updated = cursor.rowcount > 0
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
 
 
 @refresh_before("plate")
