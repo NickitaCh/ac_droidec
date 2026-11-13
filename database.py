@@ -2693,6 +2693,9 @@ def get_all_registrations_for_discord_id(discord_id: str) -> list[tuple[int, str
     )
     rows = cursor.fetchall()
     conn.close()
+    from services import test_accounts
+    seen = {(r[0], r[1]) for r in rows}
+    rows.extend(r for r in test_accounts.registrations(discord_id) if (r[0], r[1]) not in seen)
     return rows
 
 
@@ -2744,6 +2747,10 @@ def get_user_registrations(discord_id: str, guild_id: int = 1):
     )
     rows = cursor.fetchall()
     conn.close()
+    from services import test_accounts
+    seen = {r[0] for r in rows}
+    rows.extend((code, name, 0) for gid, code, name, _main in test_accounts.registrations(discord_id)
+                if gid == guild_id and code not in seen)
     return rows
 
 
@@ -2814,6 +2821,8 @@ def delete_user_registration(discord_id: str, ally_code: str, guild_id: int = 1)
     )
     conn.commit()
     conn.close()
+    from services import test_accounts
+    test_accounts.revoke_registration(discord_id, guild_id, ally_code)
 
 
 # =====================================================================

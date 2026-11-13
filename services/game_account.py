@@ -40,11 +40,22 @@ def require_pilot(owner, guild_id, profile, tier=None):
 def _db():
     conn = sqlite3.connect(database.DB_NAME, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("BEGIN IMMEDIATE")
     conn.execute("""CREATE TABLE IF NOT EXISTS game_account_sessions (
         owner TEXT NOT NULL, guild_id INTEGER NOT NULL, ally_code TEXT NOT NULL,
         provider TEXT NOT NULL, secret BLOB NOT NULL, consent_at REAL NOT NULL,
         last_attempt REAL NOT NULL DEFAULT 0, summary TEXT, state TEXT NOT NULL,
-        PRIMARY KEY (owner, guild_id))""")
+        PRIMARY KEY (owner, guild_id, ally_code))""")
+    primary_key = [r[1] for r in conn.execute("PRAGMA table_info(game_account_sessions)") if r[5]]
+    if primary_key == ["owner", "guild_id"]:
+        conn.execute("ALTER TABLE game_account_sessions RENAME TO game_account_sessions_single")
+        conn.execute("""CREATE TABLE game_account_sessions (
+            owner TEXT NOT NULL, guild_id INTEGER NOT NULL, ally_code TEXT NOT NULL,
+            provider TEXT NOT NULL, secret BLOB NOT NULL, consent_at REAL NOT NULL,
+            last_attempt REAL NOT NULL DEFAULT 0, summary TEXT, state TEXT NOT NULL,
+            PRIMARY KEY (owner, guild_id, ally_code))""")
+        conn.execute("INSERT INTO game_account_sessions SELECT * FROM game_account_sessions_single")
+        conn.execute("DROP TABLE game_account_sessions_single")
     conn.commit()
     try:
         with conn:
@@ -186,7 +197,26 @@ def _identity(owner, guild_id, ally_code):
     for player_id, (code, _name) in database.get_roster_by_player_id(guild_id).items():
         if str(code) == str(ally_code):
             return player_id
+    from services import test_accounts
+    test_player_id = test_accounts.player_id(owner, guild_id, ally_code)
+    if test_player_id:
+        return test_player_id
     raise AccountError("Аккаунт отсутствует в текущем составе АС.")
+
+
+def select_account(owner, guild_id, *, alt=False, ally_code=None):
+    """Select a registered main/alt, never silently fall back to a different session."""
+    own = database.get_user_registrations(str(owner), guild_id=guild_id)
+    if ally_code:
+        if str(ally_code) not in {str(r[0]) for r in own}:
+            raise AccountError("Можно выбрать только свой зарегистрированный аккаунт.")
+        return str(ally_code)
+    candidates = [r for r in own if bool(r[2]) != bool(alt)]
+    if not candidates:
+        raise AccountError("Второй аккаунт не найден." if alt else "Основной аккаунт не зарегистрирован.")
+    if len(candidates) > 1:
+        raise AccountError("У вас несколько альтов — укажите код союзника.")
+    return str(candidates[0][0])
 
 
 async def provision(owner, guild_id, profile, ally_code, provider, request_bytes, *, consent=False):
@@ -210,11 +240,12 @@ async def provision(owner, guild_id, profile, ally_code, provider, request_bytes
     return summary
 
 
-def status(owner, guild_id, profile, tier=None):
+def status(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
+    ally_code = select_account(owner, guild_id, ally_code=ally_code)
     with _db() as conn:
         row = conn.execute("SELECT ally_code, provider, summary, state FROM game_account_sessions "
-                           "WHERE owner=? AND guild_id=?", (str(owner), guild_id)).fetchone()
+                           "WHERE owner=? AND guild_id=? AND ally_code=?", (str(owner), guild_id, ally_code)).fetchone()
     if not row:
         return None
     _identity(owner, guild_id, row["ally_code"])
@@ -222,18 +253,19 @@ def status(owner, guild_id, profile, tier=None):
             "summary": json.loads(row["summary"]) if row["summary"] else None, "state": row["state"]}
 
 
-async def refresh(owner, guild_id, profile, tier=None):
+async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
+    ally_code = select_account(owner, guild_id, ally_code=ally_code)
     now = time.time()
     with _db() as conn:
-        row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=?",
-                           (str(owner), guild_id)).fetchone()
+        row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?",
+                           (str(owner), guild_id, ally_code)).fetchone()
         if row is None:
             raise AccountError("Игровой аккаунт ещё не подключён.")
         expected = _identity(owner, guild_id, row["ally_code"])
         # Atomic lease works across bot/web processes and also limits failures.
         changed = conn.execute("UPDATE game_account_sessions SET last_attempt=? WHERE owner=? "
-                               "AND guild_id=? AND last_attempt<=?", (now, str(owner), guild_id, now - COOLDOWN))
+                               "AND guild_id=? AND ally_code=? AND last_attempt<=?", (now, str(owner), guild_id, ally_code, now - COOLDOWN))
         if not changed.rowcount:
             raise AccountError("Повторное чтение доступно через минуту.")
     try:
@@ -244,18 +276,19 @@ async def refresh(owner, guild_id, profile, tier=None):
     except AccountError:
         with _db() as conn:
             conn.execute("UPDATE game_account_sessions SET state='error' WHERE owner=? AND guild_id=? "
-                         "AND secret=?", (str(owner), guild_id, row["secret"]))
+                         "AND ally_code=? AND secret=?", (str(owner), guild_id, ally_code, row["secret"]))
         raise
     except Exception:
         raise AccountError("Не удалось открыть игровую сессию. Требуется повторное подключение.") from None
     with _db() as conn:
         conn.execute("UPDATE game_account_sessions SET summary=?, state='connected' "
-                     "WHERE owner=? AND guild_id=? AND secret=?",
-                     (json.dumps(summary), str(owner), guild_id, row["secret"]))
+                     "WHERE owner=? AND guild_id=? AND ally_code=? AND secret=?",
+                     (json.dumps(summary), str(owner), guild_id, ally_code, row["secret"]))
     return summary
 
 
-def disconnect(owner, guild_id, profile, tier=None):
+def disconnect(owner, guild_id, profile, tier=None, *, ally_code=None):
     require_pilot(owner, guild_id, profile, tier)
+    ally_code = select_account(owner, guild_id, ally_code=ally_code)
     with _db() as conn:
-        conn.execute("DELETE FROM game_account_sessions WHERE owner=? AND guild_id=?", (str(owner), guild_id))
+        conn.execute("DELETE FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?", (str(owner), guild_id, ally_code))
