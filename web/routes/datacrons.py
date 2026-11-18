@@ -56,7 +56,8 @@ from cogs.datacron_requirements import (
     MAX_SQUAD_UNITS,
     _parse_stat_pair_params,
 )
-from services import datacron_catalog, feature_flags
+from services import datacron_catalog, datacron_costs, feature_flags
+from web.deps import require_member_access
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -83,6 +84,36 @@ async def _safe_catalog():
     except Exception as e:
         print(f"⚠️ [web] Каталог датакронов недоступен: {e}")
         return None
+
+
+@router.get('/calculator', response_class=HTMLResponse)
+async def datacron_calculator(request: Request, season: str = '', level3: str = '',
+                              level6: str = '', level9: str = '', focused: str = '',
+                              user: dict = Depends(require_member_access)):
+    counts = {3: level3, 6: level6, 9: level9}
+    costs, totals, error = {}, None, None
+    try:
+        costs = await asyncio.to_thread(datacron_costs.get_catalog, _get_comlink())
+    except Exception:
+        error = 'Рецепты ДК временно недоступны. Попробуйте позже.'
+    if costs:
+        season = season or next(iter(costs))
+        if season not in costs:
+            error = 'Выберите сезон из списка.'
+        elif request.query_params:
+            try:
+                if any(value and (not value.isascii() or not value.isdigit() or len(value) > 3)
+                       for value in counts.values()):
+                    raise ValueError('Укажите от 0 до 999 обычных ДК каждого уровня.')
+                totals = datacron_costs.calculate(costs[season], {
+                    level: int(value or 0) for level, value in counts.items()
+                }, focused)
+            except ValueError as exc:
+                error = str(exc)
+    return templates.TemplateResponse(request, 'datacron_calculator.html', {
+        'user': user, 'costs': costs, 'season': season, 'counts': counts,
+        'focused': focused, 'totals': totals, 'error': error,
+    })
 
 
 def _stat_pairs_from_form(stat_ids: list, values: list):

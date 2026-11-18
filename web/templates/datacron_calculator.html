@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Калькулятор ресурсов ДК — AC Droidec{% endblock %}
+{% block content %}
+<section class="page-hero"><h1>Калькулятор ресурсов ДК</h1>
+    <p>Стоимость прокачки с нулевого уровня по рецептам выбранного сезона. Рероллы не входят в расчёт.</p>
+</section>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if costs %}
+<form class="panel" method="get" action="/datacrons/calculator">
+    <label>Сезон <select name="season">
+        {% for key in costs %}<option value="{{ key }}" {% if key == season %}selected{% endif %}>{{ key }}</option>{% endfor %}
+    </select></label>
+    {% for level, count in counts.items() %}
+    <label>Обычные ДК до уровня {{ level }}
+        <input type="number" name="level{{ level }}" min="0" max="999" value="{{ count }}" placeholder="0">
+    </label>
+    {% endfor %}
+    <label>Уровни спец-ДК через запятую
+        <input name="focused" value="{{ focused }}" placeholder="8, 14" maxlength="500">
+    </label>
+    <button type="submit">Посчитать</button>
+</form>
+{% endif %}
+{% if totals %}
+<div class="panel"><h2>Ресурсы для сезона {{ season }}</h2>
+    <table class="data"><thead><tr><th>Ресурс</th><th>Количество</th></tr></thead>
+    {% set icons = costs[season].get('icons', {}) %}
+    <tbody>{% for label, qty in totals %}
+        <tr><td>{% if icons.get(label) %}
+            <img src="/datacron-resource-img/{{ icons[label]|urlencode }}" alt="" width="32" height="32"
+                 style="object-fit:contain;vertical-align:middle;margin-inline-end:.5rem">
+        {% endif %}{{ label }}</td><td>{{ '{:,}'.format(qty).replace(',', ' ') }}</td></tr>
+    {% endfor %}</tbody></table>
+</div>
+{% endif %}
+{% endblock %}
