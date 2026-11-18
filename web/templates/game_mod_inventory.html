@@ -1,0 +1,35 @@
+<details data-mod-inventory open>
+    <summary>Поиск по модулям · {{ bank.modules|length }}</summary>
+    {% if bank.unreadable %}<p>Записей без расшифровки — {{ bank.unreadable }}.</p>{% endif %}
+    {% if bank.modules %}
+    <div class="lab-form-grid">
+        <label>Где находится<select data-mod-location><option value="">Все</option><option value="free">Свободные</option><option value="equipped">Надетые</option></select></label>
+        <label>Комплект<select data-mod-set><option value="">Все</option>{% for id, name in bank.sets %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+        <label>Ячейка<select data-mod-slot><option value="">Все</option>{% for id, name in bank.slots %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+        <label>Основная характеристика<select data-mod-primary><option value="">Все</option>{% for id, name in bank.stats %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+        <label>Дополнительная характеристика<select data-mod-secondary><option value="">Все</option>{% for id, name in bank.stats %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+        <label>Минимум дополнительной характеристики<input data-mod-min type="number" step="any" disabled></label>
+    </div>
+    <p data-mod-count role="status">Найдено — {{ bank.modules|length }}</p>
+    <div data-mod-export data-columns="{{ bank.csv_columns|tojson|forceescape }}">
+        <button type="button" class="btn" data-mod-download="all">Скачать все модули CSV</button>
+        <button type="button" class="btn" data-mod-download="filtered">Скачать результаты CSV</button>
+        <p role="status" data-mod-export-status></p>
+    </div>
+    <table class="lab-stock lab-mod-stock">
+        <thead><tr><th scope="col">Модуль</th><th scope="col">Характеристики</th></tr></thead>
+        <tbody>
+        {% set stat_names = dict(bank.stats) %}
+        {% for mod in bank.modules %}
+        <tr data-mod-row data-location="{{ 'equipped' if mod.assigned else 'free' }}" data-set="{{ mod.set_id }}" data-slot="{{ mod.slot_key or '' }}" data-primary="{{ mod.primary.stat_id if mod.primary else '' }}" data-secondaries="{{ mod.secondaries|tojson|forceescape }}" data-csv="{{ mod.csv_row|tojson|forceescape }}">
+            <th scope="row">{{ mod.slot_label }} · {{ mod.set_label }} · {{ mod.rarity }}★<small>{{ mod.owner }}{% if mod.level is not none %} · Ур. {{ mod.level }}{% endif %}</small></th>
+            <td>
+                {% if mod.primary %}<strong>{{ stat_names.get(mod.primary.stat_id, mod.primary.name) }} {{ '%g'|format(mod.primary.value) }}</strong>{% endif %}
+                {% for stat in mod.secondaries %}<small>{{ stat_names.get(stat.stat_id, stat.name) }} {{ '%g'|format(stat.value) }}</small>{% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p>В ответе игры нет модулей для поиска.</p>{% endif %}
+</details>

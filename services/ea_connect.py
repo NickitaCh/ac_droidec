@@ -382,6 +382,8 @@ async def read(target, *, probes=False, report=None):
     if not link or link["expected_id"] != row["player_id"]:
         raise ReconnectRequired("Подключите выбранный аккаунт через EA.")
     previous_secret = link["secret"]
+    if probes and report is None:
+        report = []
     read_options = {"report": report} if report is not None else {}
     try:
         credentials = json.loads(ga._cipher().decrypt(link["secret"]))
@@ -432,7 +434,13 @@ async def read(target, *, probes=False, report=None):
                 (target, row["player_id"], saved_secret),
             ).fetchone() is not None
 
-    return await game_read_probes.run(request, row["player_id"], is_current=is_current)
+    inventory = dict(dict(report).get("Инвентарь", []))
+    bank = inventory.get("Поиск по модулям", {}).get("mod_inventory")
+    modules = {mod["id"]: mod for mod in bank["modules"] if mod["id"]} if bank else None
+    # An undecoded module may still be present in the inventory.
+    complete = bank is not None and not bank["unreadable"] and len(modules) == len(bank["modules"])
+    return await game_read_probes.run(request, row["player_id"], is_current=is_current,
+                                      modules=modules, inventory_complete=complete)
 
 
 def disconnect(target):

@@ -27,6 +27,7 @@ scavengerConversionSet, см. sync_equipment) в game_scavenger_recipes.
 from services.sync_queue import serialized_sync
 
 import asyncio
+import json
 import re
 
 import database
@@ -287,6 +288,18 @@ async def sync_equipment(comlink) -> int:
     # (10 тиров), не завязана на game_equipment/scavenger-таблицы этой функции напрямую.
     try:
         recipe_data = await asyncio.to_thread(comlink.get_game_data, items=str(RECIPE_DEFINITIONS_FLAG))
+        equipment_recipe_ids = {item["id"]: item["recipeId"] for item in equipment_list
+                                if item.get("id") and item.get("recipeId")}
+        recipe_ids = set(equipment_recipe_ids.values())
+        recipes = {recipe["id"]: recipe.get("ingredients") or [] for recipe in recipe_data.get("recipe") or []
+                   if recipe.get("id") in recipe_ids}
+        crafting = {
+            item_id: [(part["id"], part["minQuantity"]) for part in recipes.get(recipe_id, [])
+                      if part.get("id") and part.get("minQuantity", 0) > 0]
+            for item_id, recipe_id in equipment_recipe_ids.items()
+        }
+        if recipes:
+            database.set_bot_state("inventory_gear_crafting", json.dumps(crafting), guild_id=0)
         relic_recipes = {}
         for r in recipe_data.get("recipe") or []:
             m = _RELIC_PROMOTION_RECIPE_RE.match(r.get("id") or "")
