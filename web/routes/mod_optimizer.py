@@ -24,6 +24,7 @@ from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_ac
 from web.deps import require_member_access
 
 router = APIRouter()
+loadouts_router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 _jobs = set()
 _log = logging.getLogger(__name__)
@@ -241,7 +242,23 @@ async def _apply(token, user, code, data):
 
 @router.get("", response_class=HTMLResponse)
 async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_optimizer_access)):
-    return _render(request, _optimizer_context(user, plan, ally_code))
+    context = _optimizer_context(user, plan, ally_code)
+    if plan and _is_loadout(context['plan']):
+        return RedirectResponse('/mod-loadouts?plan=' + context['plan']['id'], status_code=303)
+    return _render(request, context)
+
+
+@loadouts_router.get("", response_class=HTMLResponse)
+async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_optimizer_access)):
+    context = _optimizer_context(user, plan, ally_code)
+    if plan and not _is_loadout(context['plan']):
+        return RedirectResponse('/mod-optimizer?plan=' + context['plan']['id'], status_code=303)
+    context['loadouts_page'] = True
+    return _render(request, context)
+
+
+def _is_loadout(job):
+    return job['state'] == 'saved' or job['data'].get('preset_restore', False)
 
 
 def _optimizer_context(user, plan='', ally_code=''):
@@ -279,7 +296,8 @@ def _optimizer_context(user, plan='', ally_code=''):
         if not plan:
             context['locked'] = plans.get_locks(user['discord_id'], user['guild_id'], code)
         context['selected_code'] = code
-        context['saved_items'] = plans.saved(user['discord_id'], user['guild_id'], code)
+        if not plan or _is_loadout(context['plan']):
+            context['saved_items'] = plans.saved(user['discord_id'], user['guild_id'], code)
         context['game_connected'] = bool(game_account_readonly._connection(str(user['discord_id']), code))
         names = dict(context['accounts'])
         context['player_name'] = context['self_player_name'] = names.get(code, code)
@@ -299,14 +317,17 @@ async def optimizer_save(request: Request, plan: str = Form(), csrf: str = Form(
     owner, guild_id = user['discord_id'], user['guild_id']
     try:
         job = plans.get(plan, owner, guild_id)
+        if _is_loadout(job):
+            raise ValueError('Выберите готовый результат оптимизатора.')
         game_account.select_account(str(owner), guild_id, ally_code=job['ally_code'])
         plans.save_result(plan, owner, guild_id, name.strip())
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
-    return RedirectResponse('/mod-optimizer?plan=saved-' + plan, status_code=303)
+    return RedirectResponse('/mod-loadouts?plan=saved-' + plan, status_code=303)
 
 
-@router.post('/baseline')
+@router.post('/baseline', include_in_schema=False)
+@loadouts_router.post('/baseline')
 async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: str = Form(),
                              name: str = Form(default='', max_length=80), characters: list[str] = Form(default=[]),
                              scope: str = Form(default=''), action: str = Form(default='save'),
@@ -349,7 +370,7 @@ async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: st
         return _render(request, context)
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
-    return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
+    return RedirectResponse('/mod-loadouts?plan=' + token, status_code=303)
 
 
 def _baseline_context(user, code, name, selected, scope, action):
@@ -366,12 +387,14 @@ def _baseline_context(user, code, name, selected, scope, action):
         saved_items=plans.saved(user['discord_id'], guild_id, code),
         locked=plans.get_locks(user['discord_id'], guild_id, code), game_connected=True,
         baseline_name=name, baseline_characters=selected, baseline_scope=scope, baseline_action=action,
+        loadouts_page=True,
         login_warning=game_account.LOGIN_WARNING,
     )
     return context
 
 
-@router.post('/restore')
+@router.post('/restore', include_in_schema=False)
+@loadouts_router.post('/restore')
 async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Form(),
                             scope: str = Form(default='all'), characters: list[str] = Form(default=[]),
                             reconnect: bool = Form(default=False),
@@ -415,15 +438,15 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
         plans.finish(token, 'ready', preview)
     except game_account.ConnectionRequired as error:
         context = _optimizer_context(user, plan)
-        context.update(restore_characters=set(characters), restore_scope=scope)
+        context.update(loadouts_page=True, restore_characters=set(characters), restore_scope=scope)
         if isinstance(error, game_account.SessionExpired) and not reconnect:
             context['restore_retry'] = True
         else:
-            context.update(game_connected=False, restore_link=True)
+            context['game_connected'] = False
         return _render(request, context)
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
-    return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
+    return RedirectResponse('/mod-loadouts?plan=' + token, status_code=303)
 
 
 @router.post("", response_class=HTMLResponse)
@@ -523,6 +546,7 @@ async def optimizer_run(
 
 
 @router.post('/apply')
+@loadouts_router.post('/apply')
 async def optimizer_apply(request: Request, plan: str = Form(), csrf: str = Form(),
                           confirm: bool = Form(default=False), user: dict = Depends(require_optimizer_access)):
     _csrf(request, csrf)
@@ -538,4 +562,5 @@ async def optimizer_apply(request: Request, plan: str = Form(), csrf: str = Form
     except ValueError as error:
         raise HTTPException(409, str(error)) from None
     _spawn(_apply(plan, dict(user), job['ally_code'], data))
-    return RedirectResponse('/mod-optimizer?plan=' + plan, status_code=303)
+    path = '/mod-loadouts' if data.get('preset_restore') else '/mod-optimizer'
+    return RedirectResponse(path + '?plan=' + job['id'], status_code=303)

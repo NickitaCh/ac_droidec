@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Оптимизатор модулей — AC Droidec{% endblock %}
+{% block title %}{{ 'Подборки модулей' if loadouts_page else 'Оптимизатор модулей' }} — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="/static/mod_optimizer.css?v=20261118loadouts">
@@ -41,11 +41,20 @@
 {% endmacro %}
 <div class="mo-workspace">
 <section class="page-hero"><div class="page-hero-top"><div>
-    <p class="page-hero-eyebrow">Модули и статы</p><h1>Оптимизатор модулей</h1>
-    <p class="page-hero-lead">Сборки по плейтам из всех модулей аккаунта.</p>
+    <p class="page-hero-eyebrow">Модули и статы</p>
+    {% if loadouts_page %}<h1>Подборки модулей</h1>
+    <p class="page-hero-lead">Сохраняйте текущие сборки персонажей и возвращайтесь к ним после ремода.</p>
+    {% else %}<h1>Оптимизатор модулей</h1>
+    <p class="page-hero-lead">Сборки по плейтам из всех модулей аккаунта.</p>{% endif %}
 </div></div></section>
-<nav class="mo-section-nav" aria-label="Оптимизатор">
-    <a href="#mo-settings">Параметры</a><a href="#mo-presets">Раскладки</a>{% if results is not none %}<a href="#mo-results">Результат и статы</a>{% endif %}
+<nav class="mo-section-nav" aria-label="Модули">
+    {% if loadouts_page %}
+    <a href="/mod-loadouts{% if self_ally_code %}?ally_code={{ self_ally_code }}{% endif %}">Все подборки</a>
+    <a href="/mod-optimizer{% if self_ally_code %}?ally_code={{ self_ally_code }}{% endif %}">Оптимизатор</a>
+    {% else %}
+    <a href="#mo-settings">Параметры</a>{% if results is not none %}<a href="#mo-results">Результат и статы</a>{% endif %}
+    <a id="mo-presets" href="/mod-loadouts{% if self_ally_code %}?ally_code={{ self_ally_code }}{% endif %}">Подборки модулей</a>
+    {% endif %}
 </nav>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if plan and plan.state in ('running', 'applying') %}
@@ -54,7 +63,7 @@
     <p>{% if plan.state == 'running' %}Расчёт может занять несколько минут. Вкладку можно закрыть и вернуться по этой ссылке.{% else %}Каждая операция проверяется по данным игры. Не меняйте модули до завершения.{% endif %}</p>
     {% if completed_steps %}<p>Проверено операций: {{ completed_steps }}.</p>{% endif %}
     {% if in_flight %}<p>Операция {{ in_flight.step }} из {{ in_flight.total }}.</p>{% endif %}
-    <a href="/mod-optimizer?plan={{ plan.id }}">Обновить статус</a>
+    <a href="{{ '/mod-loadouts' if loadouts_page else '/mod-optimizer' }}?plan={{ plan.id }}">Обновить статус</a>
 </div>
 <script>setTimeout(() => location.reload(), 5000);</script>
 {% else %}
@@ -62,8 +71,10 @@
 {% if plan and plan.state == 'partial' %}
 <div class="panel"><h2>Применение остановлено</h2><p>Проверено операций: {{ completed_steps|default(0) }}. Повторно применить этот план нельзя.</p>
 {% if in_flight %}<p>Последняя отправленная операция: {{ in_flight.step }} из {{ in_flight.total }}. Её результат требует проверки.</p>{% endif %}
-<a href="/mod-optimizer?ally_code={{ self_ally_code }}">Начать новый расчёт по текущей расстановке</a></div>
+{% if loadouts_page %}<a href="/mod-loadouts?plan={{ saved_preset_id }}#mo-saved">К сохранённой раскладке</a>
+{% else %}<a href="/mod-optimizer?ally_code={{ self_ally_code }}">Начать новый расчёт по текущей расстановке</a>{% endif %}</div>
 {% endif %}
+{% if not loadouts_page %}
 <div class="panel" id="mo-settings">
     <details class="mo-settings-fold" {% if results is none %}open{% endif %}><summary>Параметры подбора</summary>
     {% if accounts|length > 1 %}
@@ -129,9 +140,26 @@
         </details>
     </form>
 </details></div>
+{% else %}
+<div class="panel">
+    {% if accounts|length > 1 %}
+    <form method="get" action="/mod-loadouts"><label>Аккаунт
+        <select name="ally_code" onchange="this.form.submit()">{% for code, name in accounts %}<option value="{{ code }}" {% if code == self_ally_code|string %}selected{% endif %}>{{ name }} · {{ code }}</option>{% endfor %}</select>
+    </label><noscript><button>Выбрать</button></noscript></form>
+    {% elif self_ally_code %}<p>{{ self_player_name }} · {{ self_ally_code }}</p>
+    {% else %}<p>Сначала зарегистрируйте игровой аккаунт.</p>{% endif %}
+</div>
 {% if self_ally_code %}
-<div class="panel" id="mo-presets"><details {% if results is none %}open{% endif %}><summary>Сохранённые раскладки</summary>
-    {% if game_connected %}<form method="post" action="/mod-optimizer/baseline">
+<div class="panel"><h2>Сохранённые подборки</h2>
+    {% if saved_items %}<ul>{% for item in saved_items %}
+        <li><a href="/mod-loadouts?plan={{ item.id }}#mo-saved">{{ item.name or ('Baseline' if item.kind == 'baseline' else 'Подбор') }}</a>
+            {% if item.scope == 'all' %} · Весь ростер{% elif item.scope == 'selected' %} · Выборка{% endif %}
+            {% if item.unit_count is not none %} · Персонажей: {{ item.unit_count }}{% endif %}
+            · <time data-saved-at="{{ item.created }}"></time></li>
+    {% endfor %}</ul>{% else %}<p>Сохранённых подборок пока нет.</p>{% endif %}
+</div>
+<div class="panel" id="mo-presets"><details {% if not saved_items or baseline_notice or baseline_retry %}open{% endif %}><summary>Новая подборка из игры</summary>
+    {% if game_connected %}<form method="post" action="/mod-loadouts/baseline">
         <input type="hidden" name="csrf" value="{{ game_csrf }}">
         <input type="hidden" name="ally_code" value="{{ self_ally_code }}">
         <label>Название раскладки <input name="name" maxlength="80" value="{{ baseline_name|default('') }}" placeholder="Например, Рейд или Обычная"></label>
@@ -147,20 +175,16 @@
             <button name="action" value="refresh" class="button-secondary">Обновить список из игры</button>
         </div>
         {% endif %}
-    </form>{% elif baseline_retry %}
-    <p class="error" role="alert">Для сохранения раскладки нужно заново подключить аккаунт EA.</p>
+    </form>{% else %}
+    <p>Для сохранения раскладки подключите аккаунт EA.</p>
     <p><a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></p>
     {% endif %}
-    {% if saved_items %}<ul>{% for item in saved_items %}
-        <li><a href="/mod-optimizer?plan={{ item.id }}#mo-saved">{{ item.name or ('Baseline' if item.kind == 'baseline' else 'Подбор') }}</a>
-            {% if item.scope == 'all' %} · Весь ростер{% elif item.scope == 'selected' %} · Выборка{% endif %}
-            {% if item.unit_count is not none %} · Персонажей: {{ item.unit_count }}{% endif %}
-            · <time data-saved-at="{{ item.created }}"></time></li>
-    {% endfor %}</ul>{% endif %}
-</details></div>
+    </details>
+</div>
 {% endif %}
-{% if plan and plan.state == 'saved' and game_connected and (baseline is defined or game_source) %}
-<form class="panel" id="mo-saved" method="post" action="/mod-optimizer/restore">
+{% if plan and plan.state == 'saved' and (baseline is defined or game_source) %}
+{% if game_connected %}
+<form class="panel" id="mo-saved" method="post" action="/mod-loadouts/restore">
     <h2>Восстановить раскладку{% if preset_name %} · {{ preset_name }}{% endif %}</h2>
     <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
     {% if baseline_targets %}{{ preset_picker(baseline_targets, baseline_saved_counts, restore_characters|default(()), restore_scope|default('all'), 'Выбрать из раскладки') }}{% endif %}
@@ -171,9 +195,10 @@
     <button data-preset-submit>Посмотреть, что нужно переодеть</button>
     {% endif %}
 </form>
-{% elif restore_link %}
+{% else %}
 <div class="panel" id="mo-saved"><p role="alert">Для восстановления раскладки заново подключите EA.</p>
     <a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></div>
+{% endif %}
 {% endif %}
 {% if baseline is defined %}
 <div class="panel"><h2>{{ preset_name or 'Baseline' }} · {{ baseline|length }} модулей</h2>
@@ -188,7 +213,7 @@
 {% if preset_restore %}
 <div class="panel" id="mo-restore">
     <h2>Переодевание{% if preset_name %} · {{ preset_name }}{% endif %}</h2>
-    <p><a href="/mod-optimizer?plan={{ saved_preset_id }}#mo-saved">К сохранённой раскладке</a></p>
+    <p><a href="/mod-loadouts?plan={{ saved_preset_id }}#mo-saved">К сохранённой раскладке</a></p>
     {% if restore_moves %}
     <ul>{% for move in restore_moves %}
         <li><details><summary>{{ move.name }} — {{ 'снять' if move.remove else 'надеть' }} {{ move.mods|length }}{% if move.donor %} · донор вне выборки{% endif %}</summary>
@@ -196,7 +221,7 @@
         </details></li>
     {% endfor %}</ul>
     {% if plan.state == 'ready' and can_apply and not dry_run and not plan.expired %}
-    <form method="post" action="/mod-optimizer/apply">
+    <form method="post" action="/mod-loadouts/apply">
         <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
         <p>Снятие и перенос модулей могут стоить игровых кредитов.</p>
         <button name="confirm" value="1">Переодеть модули в игре</button>
@@ -205,8 +230,10 @@
     {% elif plan.expired and plan.state == 'ready' %}<p>Предпросмотр устарел. Откройте пресет и проверьте перестановки заново.</p>{% endif %}
     {% else %}<p>Текущая раскладка уже совпадает с пресетом.</p>{% endif %}
 </div>
-{% elif results is not none %}
-<div class="panel" id="mo-results"><h2>Результат подбора</h2>
+{% endif %}
+{% endif %}
+{% if results is not none and not preset_restore %}
+<div class="panel" id="{{ 'mo-saved' if loadouts_page and not game_source else 'mo-results' }}"><h2>Результат подбора{% if loadouts_page and preset_name %} · {{ preset_name }}{% endif %}</h2>
     <p>{{ mods_total }} модулей · {{ player_name }} · плейтов {% if relic_mode == 'plate' %}по прогнозу {% endif %}выполнено: <strong>{{ plates_passed|length }} из {{ plates_total }}</strong>.</p>
     {% if relic_mode == 'plate' %}<p>Результат учитывает будущий ап до обязательной реликвии активной схемы. Кнопка применения переставляет только модули; персонажей нужно прокачать отдельно.</p>{% endif %}
     {% if plates_passed %}<p>{{ plates_passed|join(', ') }}</p>{% endif %}
@@ -237,8 +264,9 @@
         <div class="mo-picker-row"><button type="button" data-mo-prev aria-label="Предыдущий персонаж">‹</button>
         <select id="mo-character-select">{% for r in results %}<option value="{{ loop.index0 }}" data-name="{{ r.char_name }}">{{ '❌' if r.failed|selectattr('priority', 'equalto', 'required')|list or not r.owned else '✅' }} {{ r.char_name }} · {{ r.plate }}</option>{% endfor %}</select>
         <button type="button" data-mo-next aria-label="Следующий персонаж">›</button></div>
-    </div><p data-mo-goals-changed hidden role="status">Цели изменены — нужен пересчёт.</p>
+    </div>{% if not loadouts_page %}<p data-mo-goals-changed hidden role="status">Цели изменены — нужен пересчёт.</p>
     <button form="mo-run" name="source" value="game" {% if not game_connected %}disabled{% endif %}>Пересчитать из игры</button>
+    {% endif %}
 </div>
 {% set edited = namespace(ids=[]) %}
 {% for r in results %}
@@ -254,7 +282,7 @@
     {% set goal = 'Цель' if req.priority != 'required' else 'Минимум' if req.editable_id and req.operator == '>=' else 'Лимит' if req.editable_id and req.operator == '<=' else 'Норма' %}
     <tr><td data-label="Требование">{{ '✅' if req.ok else '❌' if req.priority == 'required' else '○' }} {{ req.label or req.stat_name }}<small class="muted"> · {{ req.plate }}{% if req.priority != 'required' %} · необязательно{% endif %}</small></td><td data-label="До">{{ req.before_fmt }}</td><td data-label="{{ 'После апа' if r.projected else 'После' }}"><span>{{ req.current_fmt }}{% if r.projected %}<br><small class="muted">На R{{ r.current_relic }}: {{ req.now_fmt }}</small>{% endif %}</span></td>
     <td data-label="{{ goal }}">{{ goal }}: {{ req.threshold_fmt }}
-        {% if req.editable_id and req.editable_id not in edited.ids %}
+        {% if not loadouts_page and req.editable_id and req.editable_id not in edited.ids %}
         {% set edited.ids = edited.ids + [req.editable_id] %}
         <div class="mo-stat-control" data-mo-stat data-default="{{ req.threshold }}" data-before="{{ req.before if req.before is number else req.threshold }}" data-current="{{ req.current if req.current is number else req.threshold }}" data-stat="{{ req.stat_name }}">
             <input type="range" data-mo-range aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · ползунок">

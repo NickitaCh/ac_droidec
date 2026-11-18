@@ -40,6 +40,7 @@ class OptimizerWebTests(unittest.TestCase):
         self.app = FastAPI()
         self.app.add_middleware(SessionMiddleware, secret_key='local-test')
         self.app.include_router(route.router, prefix='/mod-optimizer')
+        self.app.include_router(route.loadouts_router, prefix='/mod-loadouts')
         self.app.dependency_overrides[require_member_access] = lambda: self.user
 
     def tearDown(self):
@@ -78,6 +79,7 @@ class OptimizerWebTests(unittest.TestCase):
             self.user.update(changes)
             with TestClient(self.app) as client, patch.object(route, '_spawn') as spawn:
                 self.assertEqual(client.get('/mod-optimizer').status_code, 404)
+                self.assertEqual(client.get('/mod-loadouts').status_code, 404)
                 self.assertEqual(client.post('/mod-optimizer', data={'plates': 'P'}).status_code, 404)
                 self.assertEqual(client.post('/mod-optimizer/apply', data={'plan': 'anything', 'csrf': 'x', 'confirm': '1'}).status_code, 404)
                 spawn.assert_not_called()
@@ -132,9 +134,15 @@ class OptimizerWebTests(unittest.TestCase):
             csrf = self.csrf(client)
             saved = client.post('/mod-optimizer/save', data={'csrf': csrf, 'plan': token}, follow_redirects=False)
             self.assertEqual(saved.status_code, 303)
+            self.assertTrue(saved.headers['location'].startswith('/mod-loadouts?plan=saved-'))
             with plans._db() as db:
                 db.execute('DELETE FROM mod_optimizer_plans WHERE id=?', (token,))
-            self.assertIn('Результат подбора', client.get(saved.headers['location']).text)
+            saved_page = client.get(saved.headers['location'])
+            self.assertIn('<h1>Подборки модулей</h1>', saved_page.text)
+            self.assertIn('Результат подбора', saved_page.text)
+            self.assertNotIn('id="mo-run"', saved_page.text)
+            legacy = client.get('/mod-optimizer?plan=saved-' + token, follow_redirects=False)
+            self.assertEqual(legacy.headers['location'], saved.headers['location'])
             with self.assertRaises(ValueError):
                 plans.get('saved-' + token, 'other', 1)
             with patch.object(actions, 'snapshot', new=AsyncMock(return_value={'mods': [mod]})) as snapshot:
@@ -185,6 +193,10 @@ class OptimizerWebTests(unittest.TestCase):
                 draft = str(preview.url).split('plan=')[1]
                 self.assertEqual(client.post('/mod-optimizer/apply', data={'csrf': csrf, 'plan': draft}).status_code, 400)
                 apply.assert_not_awaited()
+                with patch.object(route, '_spawn', side_effect=lambda coroutine: coroutine.close()):
+                    applied = client.post('/mod-loadouts/apply', data={'csrf': csrf, 'plan': draft, 'confirm': '1'},
+                                          follow_redirects=False)
+                    self.assertEqual(applied.headers['location'], '/mod-loadouts?plan=' + draft)
             data = plans.get(draft, 'owner', 1)['data']
             self.assertEqual(data['fingerprint'], 'fresh')
             self.assertEqual(data['results'][0]['used_mods'][0]['equipped_to'], 'B')
@@ -199,20 +211,27 @@ class OptimizerWebTests(unittest.TestCase):
         second = {'unit_ids': units, 'mods': [{**mod, 'equipped_to': 'B'}]}
         with TestClient(self.app) as client, patch.object(route.database, 'get_unit_types', return_value={'SHIP': 'ship'}):
             form = {'csrf': self.csrf(client), 'ally_code': '123456789'}
+            optimizer = client.get('/mod-optimizer')
+            self.assertIn('href="/mod-loadouts"', optimizer.text)
+            self.assertNotIn('Сохранённые подборки', optimizer.text)
+            loadouts = client.get('/mod-loadouts')
+            self.assertIn('action="/mod-loadouts/baseline"', loadouts.text)
+            self.assertNotIn('Параметры подбора', loadouts.text)
             with patch.object(actions, 'snapshot', new=AsyncMock(side_effect=[first, second, second])) as read:
-                self.assertEqual(client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected'}).status_code, 409)
-                full = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'all', 'name': 'Обычная'},
+                self.assertEqual(client.post('/mod-loadouts/baseline', data={**form, 'scope': 'selected'}).status_code, 409)
+                full = client.post('/mod-loadouts/baseline', data={**form, 'scope': 'all', 'name': 'Обычная'},
                                    follow_redirects=False)
-                refresh = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected',
+                refresh = client.post('/mod-loadouts/baseline', data={**form, 'scope': 'selected',
                                       'action': 'refresh', 'characters': 'B', 'name': 'Рейд'})
                 self.assertIn('name="characters" value="B" checked', refresh.text)
                 self.assertNotIn('name="characters" value="SHIP"', refresh.text)
                 self.assertIn('· 1/6', refresh.text)
                 self.assertEqual(len(plans.saved('owner', 1, '123456789')), 1)
-                partial = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected',
+                partial = client.post('/mod-loadouts/baseline', data={**form, 'scope': 'selected',
                                       'characters': 'B', 'name': 'Рейд'}, follow_redirects=False)
                 self.assertEqual(read.await_count, 3)
         self.assertEqual((full.status_code, partial.status_code), (303, 303))
+        self.assertTrue(full.headers['location'].startswith('/mod-loadouts?plan='))
         original = plans.get(full.headers['location'].split('plan=')[1], 'owner', 1)['data']
         raid = plans.get(partial.headers['location'].split('plan=')[1], 'owner', 1)['data']
         self.assertEqual(original['preset_units'], ['A', 'B'])
@@ -229,10 +248,11 @@ class OptimizerWebTests(unittest.TestCase):
         snap = {'unit_ids': {'A': 'a', 'B': 'b'}, 'mods': [mod], 'fingerprint': 'now', 'connection': 'same'}
         with TestClient(self.app) as client, patch.object(actions, 'snapshot', new=AsyncMock(return_value=snap)):
             form = {'csrf': self.csrf(client), 'plan': token, 'scope': 'selected'}
-            self.assertEqual(client.post('/mod-optimizer/restore', data={**form, 'characters': 'C'}).status_code, 409)
-            preview = client.post('/mod-optimizer/restore', data={**form, 'characters': 'B'})
+            self.assertEqual(client.post('/mod-loadouts/restore', data={**form, 'characters': 'C'}).status_code, 409)
+            preview = client.post('/mod-loadouts/restore', data={**form, 'characters': 'B'})
+            self.assertEqual(preview.url.path, '/mod-loadouts')
             self.assertIn('B — снять 1', preview.text)
-            self.assertNotIn('action="/mod-optimizer/apply"', preview.text)
+            self.assertNotIn('action="/mod-loadouts/apply"', preview.text)
             draft = str(preview.url).split('plan=')[1]
             data = plans.get(draft, 'owner', 1)['data']
             self.assertEqual(data['results'], [{'owned': True, 'base_id': 'B', 'used_mods': []}])
