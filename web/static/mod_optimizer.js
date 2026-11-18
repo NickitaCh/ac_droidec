@@ -1,4 +1,57 @@
 (() => {
+    const normalize = value => value.toLocaleLowerCase('ru').replaceAll('ё', 'е').trim();
+    document.querySelectorAll('[data-preset-picker]').forEach(picker => {
+        const selection = picker.querySelector('[data-preset-selection]');
+        const rows = [...picker.querySelectorAll('[data-preset-row]')];
+        const search = picker.querySelector('[data-preset-search]');
+        const slots = picker.querySelector('[data-preset-slots]');
+        const checkedOnly = picker.querySelector('[data-preset-checked]');
+        const submit = picker.closest('form').querySelector('[data-preset-submit]');
+        const select = picker.querySelector('[data-preset-select]');
+        const clear = picker.querySelector('[data-preset-clear]');
+        const count = picker.querySelector('[data-preset-count]');
+        const empty = picker.querySelector('[data-preset-empty]');
+        const update = () => {
+            const partial = picker.querySelector('input[name=scope]:checked').value === 'selected';
+            const query = normalize(search?.value ?? '');
+            const filter = slots?.value;
+            let checked = 0;
+            let visible = 0;
+            let uncheckedVisible = 0;
+            rows.forEach(row => {
+                const input = row.querySelector('input');
+                const used = Number(row.dataset.slots);
+                const match = used === 0 ? 'empty' : used === 6 ? 'full' : 'partial';
+                row.hidden = !normalize(row.dataset.name).includes(query) ||
+                    Boolean(filter && filter !== match) || Boolean(checkedOnly?.checked && !input.checked);
+                if (input.checked) checked++;
+                if (!row.hidden) {
+                    visible++;
+                    if (!input.checked) uncheckedVisible++;
+                }
+            });
+            selection.hidden = !partial;
+            if (submit) submit.disabled = partial && !checked;
+            if (count) {
+                count.textContent = `Выбрано ${checked} из ${rows.length}`;
+                empty.hidden = visible > 0;
+                select.disabled = !uncheckedVisible;
+                clear.disabled = !checked;
+            }
+        };
+        picker.querySelectorAll('[data-preset-tools], [data-preset-batch]').forEach(el => { el.hidden = false; });
+        picker.addEventListener('input', update);
+        picker.addEventListener('change', update);
+        select?.addEventListener('click', () => {
+            rows.filter(row => !row.hidden).forEach(row => { row.querySelector('input').checked = true; });
+            update();
+        });
+        clear?.addEventListener('click', () => {
+            rows.forEach(row => { row.querySelector('input').checked = false; });
+            update();
+        });
+        update();
+    });
     const picker = document.getElementById('mo-character-select');
     const cards = [...document.querySelectorAll('[data-mo-character]')];
     if (picker && cards.length) {
@@ -6,7 +59,6 @@
         const next = document.querySelector('[data-mo-next]');
         const search = document.getElementById('mo-character-search');
         const options = [...picker.options];
-        const normalize = value => value.toLocaleLowerCase('ru').replaceAll('ё', 'е').trim();
         let matches = options;
         let selected = 0;
         const key = 'mo-character:' + location.pathname + location.search;

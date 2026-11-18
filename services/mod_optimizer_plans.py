@@ -95,7 +95,10 @@ def get(token, owner, guild_id):
 def saved(owner, guild_id, code):
     with _db() as db:
         return [dict(row) for row in db.execute(
-            """SELECT id, kind, created, json_extract(data, '$.preset_name') AS name
+            """SELECT id, kind, created, json_extract(data, '$.preset_name') AS name,
+                      json_extract(data, '$.preset_scope') AS scope,
+                      CASE WHEN json_type(data, '$.preset_units') = 'array'
+                           THEN json_array_length(data, '$.preset_units') END AS unit_count
                FROM mod_optimizer_saved WHERE owner=? AND guild_id=? AND ally_code=? ORDER BY created DESC""",
             (str(owner), guild_id, str(code)))]
 
@@ -114,27 +117,33 @@ def save_result(token, owner, guild_id, name=''):
                     json.dumps(data, ensure_ascii=False)))
 
 
-def save_baseline(owner, guild_id, code, mods, *, name='', units=None):
+def save_baseline(owner, guild_id, code, mods, *, name='', units=None, scope=None):
     token = secrets.token_urlsafe(24)
     with _db() as db:
         db.execute('INSERT INTO mod_optimizer_saved VALUES (?,?,?,?,?,?,?)',
                    (token, str(owner), guild_id, str(code), time.time(), 'baseline',
-                    json.dumps({'baseline': mods, 'preset_name': name, 'preset_units': units}, ensure_ascii=False)))
+                    json.dumps({'baseline': mods, 'preset_name': name, 'preset_units': units,
+                                'preset_scope': scope}, ensure_ascii=False)))
     return token
 
 
-def restore_results(preset, snapshot):
+def baseline_units(preset):
+    return set(preset.get('preset_units') or ()) | {
+        mod['equipped_to'] for mod in preset['baseline'] if mod.get('equipped_to')
+    }
+
+
+def restore_results(preset, snapshot, *, selected=None):
     """Build the exact saved assignment using the account's current copies of the mods."""
     mods = {m['id']: m for m in snapshot['mods']}
     if 'baseline' in preset:
-        equipped = [m for m in preset['baseline'] if m.get('equipped_to')]
-        grouped = {}
-        for mod in equipped:
-            grouped.setdefault(mod['equipped_to'], []).append(mod)
-        # Include targets whose slots were empty when the snapshot was saved.
-        known = set(preset.get('preset_units') or grouped)
-        current = {m['equipped_to'] for m in mods.values() if m.get('equipped_to')}
-        desired = {base: grouped.get(base, []) for base in sorted(set(grouped) | (known & current))}
+        known = baseline_units(preset)
+        if selected is not None and (not selected or selected - known):
+            raise ValueError('Выберите персонажей из этой раскладки.')
+        desired = {base: [] for base in sorted(known if selected is None else selected)}
+        for mod in preset['baseline']:
+            if mod.get('equipped_to') in desired:
+                desired[mod['equipped_to']].append(mod)
     else:
         desired = {r['base_id']: r['used_mods'] for r in preset.get('results', []) if r.get('owned')}
     if not desired:

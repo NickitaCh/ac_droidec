@@ -5,6 +5,7 @@ Game credentials never enter jobs, HTML, URLs or browser storage.
 """
 
 from pathlib import Path
+from collections import Counter
 import secrets
 import asyncio
 import logging
@@ -140,8 +141,9 @@ def _base_context(user: dict, guild_id: int) -> dict:
     return context
 
 
-def _characters(code):
-    roster = database.get_player_units(code)
+def _characters(code, roster=None):
+    if roster is None:
+        roster = database.get_player_units(code)
     types = database.get_unit_types(list(roster))
     ids = [base for base in roster if types.get(base) != 'ship']
     names = database.get_game_unit_names(ids)
@@ -239,6 +241,10 @@ async def _apply(token, user, code, data):
 
 @router.get("", response_class=HTMLResponse)
 async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_optimizer_access)):
+    return _render(request, _optimizer_context(user, plan, ally_code))
+
+
+def _optimizer_context(user, plan='', ally_code=''):
     context = _base_context(user, user["guild_id"])
     code = ally_code or context['self_ally_code']
     if plan:
@@ -251,8 +257,14 @@ async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', 
         context['dry_run'] = bool(job['data'].get('dry_run', True)) or not can_apply(user)
         context['plan'] = job
         if 'baseline' in job['data']:
-            ids = sorted({m['equipped_to'] for m in job['data']['baseline'] if m['equipped_to']})
-            context['baseline_names'] = database.get_game_unit_names(ids) if ids else {}
+            ids = plans.baseline_units(job['data'])
+            names = database.get_game_unit_names(sorted(ids)) if ids else {}
+            context['baseline_targets'] = sorted(
+                ((base, names.get(base, base)) for base in ids), key=lambda row: (row[1].casefold(), row[0]))
+            context['baseline_groups'] = {base: [] for base in ids}
+            for mod in job['data']['baseline']:
+                context['baseline_groups'].setdefault(mod.get('equipped_to') or '', []).append(mod)
+            context['baseline_saved_counts'] = {base: len(group) for base, group in context['baseline_groups'].items()}
         context['error'] = job['message'] if job['state'] in ('error', 'partial') else None
         if (job['data'].get('game_source') and job['state'] == 'error'
                 and job['message'] == 'Игровая сессия завершилась. Нужно повторное подключение.'):
@@ -276,7 +288,7 @@ async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', 
         context['login_warning'] = game_account.LOGIN_WARNING
         allowed = {base for base, _ in context['characters']}
         context['locked'] = [base for base in context['locked'] if base in allowed]
-    return _render(request, context)
+    return context
 
 
 @router.post('/save')
@@ -297,44 +309,74 @@ async def optimizer_save(request: Request, plan: str = Form(), csrf: str = Form(
 @router.post('/baseline')
 async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: str = Form(),
                              name: str = Form(default='', max_length=80), characters: list[str] = Form(default=[]),
+                             scope: str = Form(default=''), action: str = Form(default='save'),
                              reconnect: bool = Form(default=False),
                              user: dict = Depends(require_optimizer_access)):
     _csrf(request, csrf)
     owner, guild_id = user['discord_id'], user['guild_id']
+    code = ally_code
+    scope = scope or ('selected' if characters else 'all')
+    selected = set(characters)
     try:
         code = game_account.select_account(str(owner), guild_id, ally_code=ally_code)
+        if scope not in ('all', 'selected') or action not in ('save', 'refresh'):
+            raise ValueError('Выберите действие и состав раскладки.')
+        if action == 'save' and scope == 'selected' and not selected:
+            raise ValueError('Выберите хотя бы одного персонажа.')
         if reconnect:
             await game_account.reconnect(str(owner), guild_id, user['bot_profile'], user['tier'],
                                          code, optimizer_read=True)
         snap = await game_mod_actions.snapshot(user, code, read_only=True)
-        selected = set(characters)
-        units = set(snap.get('unit_ids', {}))
-        if selected - units:
+        equipped = Counter(mod['equipped_to'] for mod in snap['mods'] if mod.get('equipped_to'))
+        live_chars = sorted(_characters(code, {*snap.get('unit_ids', {}), *equipped}), key=lambda row: row[1].casefold())
+        units = {base for base, _ in live_chars}
+        if action == 'refresh':
+            context = _baseline_context(user, code, name, selected & units, scope, action)
+            context.update(characters=live_chars, baseline_counts=equipped,
+                           baseline_live=True,
+                           baseline_notice='Список персонажей обновлён из игры.')
+            return _render(request, context)
+        if scope == 'selected' and selected - units:
             raise ValueError('Некоторые персонажи недоступны. Обновите страницу.')
+        targets = selected if scope == 'selected' else units
         mods = [{**mod, 'equipped_to': mod.get('equipped_to') or '', 'summary': _mod_summary(mod)}
-                for mod in snap['mods'] if not selected or mod.get('equipped_to') in selected]
-        token = plans.save_baseline(owner, guild_id, code, mods, name=name.strip(), units=sorted(selected or units))
+                for mod in snap['mods'] if scope == 'all' or mod.get('equipped_to') in targets]
+        token = plans.save_baseline(owner, guild_id, code, mods, name=name.strip(), units=sorted(targets), scope=scope)
     except game_account.ConnectionRequired as error:
-        context = _base_context(user, guild_id)
-        context.update(
-            self_ally_code=code, self_player_name=dict(context['accounts']).get(code, code),
-            characters=_characters(code), saved_items=plans.saved(owner, guild_id, code),
-            game_connected=isinstance(error, game_account.SessionExpired) and not reconnect,
-            baseline_retry=True, baseline_name=name, baseline_characters=set(characters),
-            login_warning=game_account.LOGIN_WARNING,
-        )
+        context = _baseline_context(user, code, name, selected, scope, action)
+        context.update(game_connected=isinstance(error, game_account.SessionExpired) and not reconnect,
+                       baseline_retry=True)
         return _render(request, context)
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
     return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
 
 
+def _baseline_context(user, code, name, selected, scope, action):
+    guild_id = user['guild_id']
+    context = _base_context(user, guild_id)
+    characters = dict(_characters(code))
+    missing = selected - characters.keys()
+    if missing:
+        characters.update({base: base for base in missing})
+        characters.update(database.get_game_unit_names(sorted(missing)))
+    context.update(
+        self_ally_code=code, self_player_name=dict(context['accounts']).get(code, code),
+        characters=sorted(characters.items(), key=lambda row: row[1].casefold()),
+        saved_items=plans.saved(user['discord_id'], guild_id, code),
+        locked=plans.get_locks(user['discord_id'], guild_id, code), game_connected=True,
+        baseline_name=name, baseline_characters=selected, baseline_scope=scope, baseline_action=action,
+        login_warning=game_account.LOGIN_WARNING,
+    )
+    return context
+
+
 @router.post('/restore')
 async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Form(),
+                            scope: str = Form(default='all'), characters: list[str] = Form(default=[]),
+                            reconnect: bool = Form(default=False),
                             user: dict = Depends(require_optimizer_access)):
     _csrf(request, csrf)
-    if not can_apply(user):
-        raise HTTPException(403, 'Для этого аккаунта доступно сохранение и просмотр пресетов.')
     owner, guild_id = user['discord_id'], user['guild_id']
     try:
         preset = plans.get(plan, owner, guild_id)
@@ -342,21 +384,43 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
         data = preset['data']
         if preset['state'] != 'saved' or ('baseline' not in data and not data.get('game_source')):
             raise ValueError('Выберите сохранённую раскладку с игрового аккаунта.')
-        game_account.require_pilot(str(owner), guild_id, user['bot_profile'], user['tier'])
+        if scope not in ('all', 'selected') or (scope == 'selected' and not characters):
+            raise ValueError('Выберите хотя бы одного персонажа для переодевания.')
+        if scope == 'selected' and 'baseline' not in data:
+            raise ValueError('Частичное переодевание доступно для раскладки из игры.')
+        mutable = can_apply(user)
+        if mutable:
+            try:
+                game_account.require_pilot(str(owner), guild_id, user['bot_profile'], user['tier'])
+            except game_account.AccountError:
+                mutable = False
+        if reconnect:
+            await game_account.reconnect(str(owner), guild_id, user['bot_profile'], user['tier'],
+                                         code, optimizer_read=True)
         snap = await game_mod_actions.snapshot(user, code, read_only=True)
-        results = plans.restore_results(data, snap)
+        results = plans.restore_results(data, snap, selected=set(characters) if scope == 'selected' else None)
         locked = plans.get_locks(owner, guild_id, code)
         moves = game_mod_actions.operations(snap['mods'], results, set(locked))
+        targets = {result['base_id'] for result in results}
         names = database.get_game_unit_names(sorted({op['unit'] for op in moves}))
         by_id = {mod['id']: mod for mod in snap['mods']}
         preview = {'results': results, 'preset_restore': True, 'preset_name': data.get('preset_name'),
-                   'game_source': True, 'dry_run': False, 'fingerprint': snap['fingerprint'],
+                   'saved_preset_id': plan, 'game_source': True, 'dry_run': not mutable, 'fingerprint': snap['fingerprint'],
                    'connection': snap['connection'], 'locked': locked, 'operation_count': len(moves),
                    'restore_moves': [{'name': names.get(op['unit'], op['unit']), 'remove': bool(op['remove']),
+                                      'donor': op['unit'] not in targets,
                                       'mods': [_mod_summary(by_id[mid]) for mid in op['remove'] + op['equip']]}
                                      for op in moves]}
         token = plans.create(owner, guild_id, code, preview)
         plans.finish(token, 'ready', preview)
+    except game_account.ConnectionRequired as error:
+        context = _optimizer_context(user, plan)
+        context.update(restore_characters=set(characters), restore_scope=scope)
+        if isinstance(error, game_account.SessionExpired) and not reconnect:
+            context['restore_retry'] = True
+        else:
+            context.update(game_connected=False, restore_link=True)
+        return _render(request, context)
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
     return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)

@@ -2,7 +2,43 @@
 {% block title %}Оптимизатор модулей — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/mod_optimizer.css?v=20261118search">
+<link rel="stylesheet" href="/static/mod_optimizer.css?v=20261118loadouts">
+{% macro preset_picker(rows, counts=none, selected=(), scope='all', partial_label='Выбранные персонажи') %}
+<fieldset class="mo-preset-picker" data-preset-picker>
+    <legend>Состав раскладки</legend>
+    <div class="mo-preset-controls">
+        <label class="checkbox"><input type="radio" name="scope" value="all" {% if scope == 'all' %}checked{% endif %}>Все персонажи</label>
+        <label class="checkbox"><input type="radio" name="scope" value="selected" {% if scope == 'selected' %}checked{% endif %}>{{ partial_label }}</label>
+    </div>
+    <div data-preset-selection>
+        {% if rows %}
+        <div class="mo-preset-controls" data-preset-tools hidden>
+            <label>Поиск<input type="search" data-preset-search autocomplete="off" placeholder="Имя персонажа"></label>
+            {% if counts is not none %}
+            <label>Слоты<select data-preset-slots>
+                <option value="">Любые</option><option value="full">Все заняты</option>
+                <option value="partial">Часть занята</option><option value="empty">Все пусты</option>
+            </select></label>
+            {% endif %}
+            <label class="checkbox"><input type="checkbox" data-preset-checked>Только выбранные</label>
+        </div>
+        <div class="mo-preset-controls" data-preset-batch hidden>
+            <button type="button" class="button-secondary" data-preset-select>Выбрать найденных</button>
+            <button type="button" class="button-secondary" data-preset-clear>Снять все отметки</button>
+            <span class="muted" data-preset-count role="status"></span>
+        </div>
+        <p class="muted" data-preset-empty hidden>Персонажи не найдены.</p>
+        <div class="mo-options mo-lock-list">{% for key, name in rows %}
+            {% set count = counts.get(key, 0) if counts is not none else none %}
+            <label class="checkbox" data-preset-row data-name="{{ name }} {{ key }}" data-slots="{{ count if count is not none else '' }}">
+                <input type="checkbox" name="characters" value="{{ key }}" {% if key in selected %}checked{% endif %}>
+                <span>{{ name }}{% if count is not none %} <small class="muted">· {{ count }}/6</small>{% endif %}</span>
+            </label>
+        {% endfor %}</div>
+        {% else %}<p class="muted">Обновите список из игры, чтобы выбрать персонажей.</p>{% endif %}
+    </div>
+</fieldset>
+{% endmacro %}
 <div class="mo-workspace">
 <section class="page-hero"><div class="page-hero-top"><div>
     <p class="page-hero-eyebrow">Модули и статы</p><h1>Оптимизатор модулей</h1>
@@ -98,57 +134,74 @@
     {% if game_connected %}<form method="post" action="/mod-optimizer/baseline">
         <input type="hidden" name="csrf" value="{{ game_csrf }}">
         <input type="hidden" name="ally_code" value="{{ self_ally_code }}">
-        <label>Название пресета <input name="name" maxlength="80" value="{{ baseline_name|default('') }}" placeholder="Например, рейд"></label>
-        {% if characters %}<details {% if baseline_characters %}open{% endif %}><summary>Выбрать персонажей</summary>
-            <p>Оставьте список пустым, чтобы сохранить раскладку всего аккаунта (Baseline).</p>
-            <div class="mo-options mo-lock-list">{% for key, name in characters %}
-                <label class="checkbox"><input type="checkbox" name="characters" value="{{ key }}" {% if key in baseline_characters|default([]) %}checked{% endif %}>{{ name }}</label>
-            {% endfor %}</div>
-        </details>{% endif %}
+        <label>Название раскладки <input name="name" maxlength="80" value="{{ baseline_name|default('') }}" placeholder="Например, Рейд или Обычная"></label>
+        {% if baseline_notice %}<p role="status">{{ baseline_notice }}</p>{% endif %}
+        {{ preset_picker(characters, baseline_counts|default(none), baseline_characters|default(()), baseline_scope|default('all')) }}
         {% if baseline_retry %}
         <p class="error" role="alert">Игровая сессия завершилась. {{ login_warning }}</p>
-        <button name="reconnect" value="true">Войти заново и сохранить раскладку</button>
-        {% else %}<button>Сохранить текущую раскладку</button>{% endif %}
+        <input type="hidden" name="action" value="{{ baseline_action }}">
+        <button name="reconnect" value="true" {% if baseline_action == 'save' %}data-preset-submit{% endif %}>{% if baseline_action == 'refresh' %}Войти заново и обновить список{% else %}Войти заново и сохранить раскладку{% endif %}</button>
+        {% else %}
+        <div class="mo-preset-controls">
+            <button name="action" value="save" data-preset-submit>Сохранить новую раскладку из игры</button>
+            <button name="action" value="refresh" class="button-secondary">Обновить список из игры</button>
+        </div>
+        {% endif %}
     </form>{% elif baseline_retry %}
     <p class="error" role="alert">Для сохранения раскладки нужно заново подключить аккаунт EA.</p>
     <p><a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></p>
     {% endif %}
     {% if saved_items %}<ul>{% for item in saved_items %}
-        <li><a href="/mod-optimizer?plan={{ item.id }}">{{ item.name or ('Baseline' if item.kind == 'baseline' else 'Подбор') }}</a>
+        <li><a href="/mod-optimizer?plan={{ item.id }}#mo-saved">{{ item.name or ('Baseline' if item.kind == 'baseline' else 'Подбор') }}</a>
+            {% if item.scope == 'all' %} · Весь ростер{% elif item.scope == 'selected' %} · Выборка{% endif %}
+            {% if item.unit_count is not none %} · Персонажей: {{ item.unit_count }}{% endif %}
             · <time data-saved-at="{{ item.created }}"></time></li>
     {% endfor %}</ul>{% endif %}
 </details></div>
 {% endif %}
-{% if plan and plan.state == 'saved' and can_apply and game_connected and (baseline is defined or game_source) %}
-<form class="panel" method="post" action="/mod-optimizer/restore">
+{% if plan and plan.state == 'saved' and game_connected and (baseline is defined or game_source) %}
+<form class="panel" id="mo-saved" method="post" action="/mod-optimizer/restore">
+    <h2>Восстановить раскладку{% if preset_name %} · {{ preset_name }}{% endif %}</h2>
     <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
-    <button>Посмотреть, что нужно переодеть</button>
+    {% if baseline_targets %}{{ preset_picker(baseline_targets, baseline_saved_counts, restore_characters|default(()), restore_scope|default('all'), 'Выбрать из раскладки') }}{% endif %}
+    {% if restore_retry %}
+    <p class="error" role="alert">Игровая сессия завершилась. {{ login_warning }}</p>
+    <button name="reconnect" value="true" data-preset-submit>Войти заново и проверить перестановки</button>
+    {% else %}
+    <button data-preset-submit>Посмотреть, что нужно переодеть</button>
+    {% endif %}
 </form>
+{% elif restore_link %}
+<div class="panel" id="mo-saved"><p role="alert">Для восстановления раскладки заново подключите EA.</p>
+    <a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></div>
 {% endif %}
 {% if baseline is defined %}
 <div class="panel"><h2>{{ preset_name or 'Baseline' }} · {{ baseline|length }} модулей</h2>
-    {% for group in baseline|groupby('equipped_to', default='') %}
-    <details><summary>{{ baseline_names.get(group.grouper, group.grouper) or 'Свободный склад' }} · {{ group.list|length }}</summary>
-        <ul>{% for mod in group.list %}<li>{{ mod.summary }}{% if mod.locked %} · 🔒{% endif %}</li>{% endfor %}</ul>
+    {% for key, name in baseline_targets + ([('', 'Свободный склад')] if '' in baseline_groups else []) %}
+    <details><summary>{{ name }} · {{ baseline_groups[key]|length }}</summary>
+        {% if baseline_groups[key] %}<ul>{% for mod in baseline_groups[key] %}<li>{{ mod.summary }}{% if mod.locked %} · 🔒{% endif %}</li>{% endfor %}</ul>
+        {% else %}<p>Пустые слоты.</p>{% endif %}
     </details>
     {% endfor %}
 </div>
 {% endif %}
 {% if preset_restore %}
-<div class="panel">
+<div class="panel" id="mo-restore">
     <h2>Переодевание{% if preset_name %} · {{ preset_name }}{% endif %}</h2>
+    <p><a href="/mod-optimizer?plan={{ saved_preset_id }}#mo-saved">К сохранённой раскладке</a></p>
     {% if restore_moves %}
     <ul>{% for move in restore_moves %}
-        <li><details><summary>{{ move.name }} — {{ 'снять' if move.remove else 'надеть' }} {{ move.mods|length }}</summary>
+        <li><details><summary>{{ move.name }} — {{ 'снять' if move.remove else 'надеть' }} {{ move.mods|length }}{% if move.donor %} · донор вне выборки{% endif %}</summary>
             <ul>{% for mod in move.mods %}<li>{{ mod }}</li>{% endfor %}</ul>
         </details></li>
     {% endfor %}</ul>
-    {% if plan.state == 'ready' and can_apply and not plan.expired %}
+    {% if plan.state == 'ready' and can_apply and not dry_run and not plan.expired %}
     <form method="post" action="/mod-optimizer/apply">
         <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
-        <label class="checkbox"><input type="checkbox" name="confirm" value="1" required>Подтверждаю снятие и перенос модулей. Игра может списать кредиты.</label>
-        <button>Переодеть модули в игре</button>
+        <p>Снятие и перенос модулей могут стоить игровых кредитов.</p>
+        <button name="confirm" value="1">Переодеть модули в игре</button>
     </form>
+    {% elif dry_run %}<p>Для этого аккаунта доступен предпросмотр.</p>
     {% elif plan.expired and plan.state == 'ready' %}<p>Предпросмотр устарел. Откройте пресет и проверьте перестановки заново.</p>{% endif %}
     {% else %}<p>Текущая раскладка уже совпадает с пресетом.</p>{% endif %}
 </div>
@@ -271,5 +324,5 @@ if (orderPairs) {
     });
 }
 </script>
-<script src="/static/mod_optimizer.js?v=20261118search" defer></script>
+<script src="/static/mod_optimizer.js?v=20261118loadouts" defer></script>
 {% endblock %}

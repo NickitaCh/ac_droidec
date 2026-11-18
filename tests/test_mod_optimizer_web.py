@@ -191,6 +191,53 @@ class OptimizerWebTests(unittest.TestCase):
             with patch.object(actions, 'snapshot', new=AsyncMock(return_value={**fresh, 'mods': []})):
                 self.assertEqual(client.post('/mod-optimizer/restore', data={'csrf': csrf, 'plan': token}).status_code, 409)
 
+    def test_refresh_and_save_different_loadouts_after_in_game_changes(self):
+        mod = {'id': 'm1', 'equipped_to': 'A', 'slot_id': 1, 'set_id': 1, 'set_name': 'Health',
+               'primary': {'name': 'Health', 'unit_stat_id': 1, 'is_percent': True, 'value': 5}}
+        units = {'A': 'a', 'B': 'b', 'SHIP': 'ship'}
+        first = {'unit_ids': units, 'mods': [mod, {**mod, 'id': 'loose', 'equipped_to': None}]}
+        second = {'unit_ids': units, 'mods': [{**mod, 'equipped_to': 'B'}]}
+        with TestClient(self.app) as client, patch.object(route.database, 'get_unit_types', return_value={'SHIP': 'ship'}):
+            form = {'csrf': self.csrf(client), 'ally_code': '123456789'}
+            with patch.object(actions, 'snapshot', new=AsyncMock(side_effect=[first, second, second])) as read:
+                self.assertEqual(client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected'}).status_code, 409)
+                full = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'all', 'name': 'Обычная'},
+                                   follow_redirects=False)
+                refresh = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected',
+                                      'action': 'refresh', 'characters': 'B', 'name': 'Рейд'})
+                self.assertIn('name="characters" value="B" checked', refresh.text)
+                self.assertNotIn('name="characters" value="SHIP"', refresh.text)
+                self.assertIn('· 1/6', refresh.text)
+                self.assertEqual(len(plans.saved('owner', 1, '123456789')), 1)
+                partial = client.post('/mod-optimizer/baseline', data={**form, 'scope': 'selected',
+                                      'characters': 'B', 'name': 'Рейд'}, follow_redirects=False)
+                self.assertEqual(read.await_count, 3)
+        self.assertEqual((full.status_code, partial.status_code), (303, 303))
+        original = plans.get(full.headers['location'].split('plan=')[1], 'owner', 1)['data']
+        raid = plans.get(partial.headers['location'].split('plan=')[1], 'owner', 1)['data']
+        self.assertEqual(original['preset_units'], ['A', 'B'])
+        self.assertEqual({mod['id'] for mod in original['baseline']}, {'m1', 'loose'})
+        self.assertEqual(raid['preset_units'], ['B'])
+        self.assertEqual(raid['baseline'][0]['equipped_to'], 'B')
+
+    def test_partial_restore_of_empty_slots_can_be_previewed_by_member(self):
+        self.user.update(tier='member', is_super_admin=False)
+        mod = {'id': 'm1', 'equipped_to': 'B', 'slot_id': 1, 'set_id': 1, 'set_name': 'Health',
+               'primary': {'name': 'Health', 'unit_stat_id': 1, 'is_percent': True, 'value': 5}}
+        token = plans.save_baseline('owner', 1, '123456789', [{**mod, 'id': 'missing', 'equipped_to': 'A'}],
+                                    units=['A', 'B'])
+        snap = {'unit_ids': {'A': 'a', 'B': 'b'}, 'mods': [mod], 'fingerprint': 'now', 'connection': 'same'}
+        with TestClient(self.app) as client, patch.object(actions, 'snapshot', new=AsyncMock(return_value=snap)):
+            form = {'csrf': self.csrf(client), 'plan': token, 'scope': 'selected'}
+            self.assertEqual(client.post('/mod-optimizer/restore', data={**form, 'characters': 'C'}).status_code, 409)
+            preview = client.post('/mod-optimizer/restore', data={**form, 'characters': 'B'})
+            self.assertIn('B — снять 1', preview.text)
+            self.assertNotIn('action="/mod-optimizer/apply"', preview.text)
+            draft = str(preview.url).split('plan=')[1]
+            data = plans.get(draft, 'owner', 1)['data']
+            self.assertEqual(data['results'], [{'owned': True, 'base_id': 'B', 'used_mods': []}])
+            self.assertTrue(data['dry_run'])
+
     def test_member_dry_run_is_forced_and_direct_apply_is_forbidden(self):
         self.user.update(tier='member', is_super_admin=False)
         with TestClient(self.app) as client:
