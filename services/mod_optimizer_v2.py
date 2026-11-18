@@ -173,7 +173,7 @@ def _rank(c):
             c['optional_matched'], -c['moves'])
 
 
-def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicron_tiers=None, seconds=SEARCH_SECONDS, relic_mode='current'):
+def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicron_tiers=None, seconds=SEARCH_SECONDS, relic_mode='current', slow_candidate=False):
     """Diverse seeds + exact coordinate descent, preserving resource alternatives.
 
     Mod contributions are ranked by one-mod StatCalc deltas, not by adding raw HP
@@ -212,7 +212,10 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
     # One-mod deltas capture flat vs % scaling and the unit's actual base.
     scoring_unit = evaluation_unit(unit, rows, current, relic_mode)
     naked = final_stats(calc, scoring_unit, [])
-    names = sorted({r[3] for group in rows.values() for r in group if r[3] in naked})
+    stat_names = {r[3] for group in rows.values() for r in group}
+    if slow_candidate:
+        stat_names.add('Speed')
+    names = sorted(stat_names & naked.keys())
     deltas = {}
     for slot in by_slot.values():
         for m in slot:
@@ -226,6 +229,8 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
         weights[r[3]] += sign / max(abs(r[5]), abs(naked.get(r[3], 0)), 1)
     rng = random.Random(base_id)
     modes = [dict(weights)] + [{n: 1 / max(abs(naked[n]), 1)} for n in names]
+    if slow_candidate and 'Speed' in naked:
+        modes.insert(0, {'Speed': -1})
     modes += [{n: w * rng.uniform(.2, 2.5) for n, w in weights.items()} for _ in range(8)]
     seeds = [current] if len(current) == 6 else []
     preferred_primaries = defaultdict(set)
@@ -290,8 +295,12 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
     ordered = sorted(cache.values(), key=_rank, reverse=True)
     # Reserve diversity: a purely top-N cut makes all builds share rare mods.
     kept = [baseline]
+    if slow_candidate and 'Speed' in naked:
+        slowest = min(ordered, key=lambda c: c['final_stats']['Speed'])
+        if slowest is not baseline:
+            kept.append(slowest)
     for c in ordered:
-        if c is not baseline and len(kept) < BUILD_LIMIT // 2:
+        if c not in kept and len(kept) < BUILD_LIMIT // 2:
             kept.append(c)
     used = Counter(mid for c in kept for mid in c['mod_ids'])
     rest = [c for c in ordered if c not in kept]
@@ -436,7 +445,7 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
     return chosen, optimal
 
 
-async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force_refresh=False, *, units_override=None, relic_mode='current', thresholds=None):
+async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force_refresh=False, *, units_override=None, relic_mode='current', thresholds=None, turn_order=()):
     if relic_mode not in ('current', 'plate'):
         raise ValueError('Выберите расчёт по текущей реликвии или по реликвии плейта.')
     validate_inventory(mods)
@@ -460,6 +469,15 @@ async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force
                         matched.add(key)
         if matched != thresholds.keys():
             raise ValueError('Изменённое требование больше недоступно в выбранных плейтах.')
+    order_group = 'Порядок ходов'
+    while order_group in members:
+        order_group += ' ·'
+    for faster, slower in turn_order:
+        if faster == slower or faster not in rows or slower not in rows:
+            raise ValueError('Для порядка ходов выберите двух разных персонажей из выбранных плейтов.')
+        rows[faster].setdefault(order_group, []).append(
+            (None, order_group, faster, 'Speed', '>=', 1, 'required',
+             None, None, None, None, None, None, slower, None))
     # Refresh once for the whole account, never once per character.
     if force_refresh and units_override is None:
         from services import activity_diff
@@ -478,17 +496,22 @@ async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force
         unit = units_override.get(b) if units_override is not None else (database.get_player_unit(code, b) or (None, None))[0]
         if unit:
             units[b] = unit
+    if any(faster not in units or slower not in units for faster, slower in turn_order):
+        raise ValueError('Оба персонажа из правила порядка ходов должны быть в актуальном ростере.')
     missing_donors = set(equipped) - set(units)
     if missing_donors:
         raise ValueError('Ростер неполный: обновите данные игрока перед расчётом.')
     tiers = database.get_skill_omicron_tiers(list({r[11] for group in rows.values() for rs in group.values() for r in rs if r[3] == 'Omicron'}))
+
+    slower_units = {slower for _, slower in turn_order}
 
     def run():
         before = {b: final_stats(calc, u, equipped[b]) for b, u in units.items()}
         modeled_before = {**before, **{b: final_stats(calc, evaluation_unit(units[b], group, equipped[b], relic_mode), equipped[b])
                                       for b, group in rows.items() if b in units}}
         pool = [m for m in mods if m.get('equipped_to') not in locked]
-        candidates = {b: search(calc, b, units[b], group, pool, equipped[b], modeled_before, b in locked, tiers, relic_mode=relic_mode)
+        candidates = {b: search(calc, b, units[b], group, pool, equipped[b], modeled_before, b in locked, tiers,
+                                relic_mode=relic_mode, slow_candidate=b in slower_units)
                       for b, group in rows.items() if b in units}
         chosen, optimal = solve(candidates, members, rows, units, before, tiers) if candidates else ({}, True)
         first_choice = chosen
@@ -498,7 +521,8 @@ async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force
                 continue
             reserved = {mid for key, c in chosen.items() if key != b for mid in c['mod_ids']}
             extra = search(calc, b, units[b], rows[b], [m for m in pool if m['id'] not in reserved], equipped[b],
-                           {**modeled_before, **{key: c['final_stats'] for key, c in chosen.items()}}, omicron_tiers=tiers, seconds=2, relic_mode=relic_mode)
+                           {**modeled_before, **{key: c['final_stats'] for key, c in chosen.items()}},
+                           omicron_tiers=tiers, seconds=2, relic_mode=relic_mode, slow_candidate=b in slower_units)
             known = {c['mod_ids'] for c in candidates[b]}
             candidates[b].extend(c for c in extra if c['mod_ids'] not in known)
         if candidates:

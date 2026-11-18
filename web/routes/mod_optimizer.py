@@ -160,10 +160,10 @@ def _spawn(coro):
     task.add_done_callback(_jobs.discard)
 
 
-async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None):
+async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=()):
     dry_run = bool(dry_run) or not can_apply(user)
     data = {'selected_plates': plates, 'locked': locked, 'game_source': source == 'game', 'ally_code': code,
-            'relic_mode': relic_mode, 'dry_run': dry_run, 'thresholds': thresholds or {}}
+            'relic_mode': relic_mode, 'dry_run': dry_run, 'thresholds': thresholds or {}, 'turn_order': turn_order}
     try:
         data['requirements_fingerprint'] = plans.requirements_fingerprint(plates, user['guild_id'])
         if source == 'game':
@@ -180,7 +180,8 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
         results, passed, optimal, donors = await mod_optimizer_v2.optimize(
             comlink, calc, plates, code, mods, user['guild_id'], locked, force_refresh,
             units_override=snap['roster'] if source == 'game' else None, relic_mode=relic_mode,
-            **({'thresholds': thresholds} if thresholds else {}))
+            **({'thresholds': thresholds} if thresholds else {}),
+            **({'turn_order': turn_order} if turn_order else {}))
         _enrich_results(results)
         _preview_moves(results, mods)
         for donor in donors:
@@ -195,7 +196,7 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
             data['operation_count'] = len(ops)
         if plans.requirements_fingerprint(plates, user['guild_id']) != data['requirements_fingerprint']:
             raise ValueError('Требования плейтов изменились во время расчёта. Запустите новый Dry run.')
-        data.update(results=results, plates_passed=passed, plates_total=len({p for r in results for p in r['plates']}),
+        data.update(results=results, plates_passed=passed, plates_total=len({p for r in results for p in r['plates']} & set(plates)),
                     mods_total=len(mods), solver_timed_out=not optimal, donors=donors)
         plans.finish(token, 'ready', data)
     except asyncio.CancelledError:
@@ -373,6 +374,8 @@ async def optimizer_run(
     locked: list[str] = Form(default=[]),
     relic_mode: str = Form(default='current'),
     dry_run: bool = Form(default=False),
+    faster: list[str] = Form(default=[]),
+    slower: list[str] = Form(default=[]),
     user: dict = Depends(require_optimizer_access),
 ):
     guild_id = user["guild_id"]
@@ -398,6 +401,13 @@ async def optimizer_run(
         context['game_connected'] = bool(game_account_readonly._connection(str(user['discord_id']), code))
         context['link_path'] = game_account.link_path(str(user['discord_id']), guild_id, code)
         context['login_warning'] = game_account.LOGIN_WARNING
+        if len(faster) != len(slower) or len(faster) > 10:
+            raise ValueError('Можно задать до 10 правил порядка ходов.')
+        turn_order = list(dict.fromkeys((a, b) for a, b in zip(faster, slower) if a or b))
+        context['turn_order'] = turn_order
+        allowed = {base for base, _ in context['characters']}
+        if any(a == b or a not in allowed or b not in allowed for a, b in turn_order):
+            raise ValueError('В каждом правиле порядка ходов выберите двух разных персонажей.')
         if not plates:
             raise ValueError("Выберите хотя бы один плейт.")
         if not set(plates) <= set(context['plates']):
@@ -437,13 +447,14 @@ async def optimizer_run(
         else:
             raise ValueError('Выберите чтение из игры или загрузите CSV.')
         token = plans.create(user['discord_id'], guild_id, code, {'selected_plates': plates, 'locked': locked,
-                             'relic_mode': relic_mode, 'dry_run': dry_run})
+                             'relic_mode': relic_mode, 'dry_run': dry_run, 'turn_order': turn_order})
         plans.set_locks(user['discord_id'], guild_id, code, locked)
     except ValueError as error:
         context['error'] = str(error)
         return _render(request, context)
     _spawn(_calculate(token, dict(user), plates, code, source, raw_csv, locked, force_refresh, relic_mode, dry_run,
-                      reconnect=reconnect, **({'thresholds': thresholds} if thresholds else {})))
+                      reconnect=reconnect, **({'thresholds': thresholds} if thresholds else {}),
+                      **({'turn_order': turn_order} if turn_order else {})))
     return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
 
 

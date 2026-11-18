@@ -38,9 +38,30 @@
     <form id="mo-run" method="post" action="/mod-optimizer" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value="{{ game_csrf }}">
         <input type="hidden" name="ally_code" value="{{ self_ally_code or '' }}">
+        {% macro order_pair(first='', second='') %}
+        <div data-order-pair>
+            {% for field, label, selected in [('faster', 'Ходит раньше', first), ('slower', 'Ходит позже', second)] %}
+            <label>{{ label }}
+                <select name="{{ field }}">
+                    <option value="">Выберите персонажа</option>
+                    {% for key, name in characters %}<option value="{{ key }}" {% if key == selected %}selected{% endif %}>{{ name }}</option>{% endfor %}
+                </select>
+            </label>
+            {% endfor %}
+            <button type="button" class="button-secondary" data-order-remove>Удалить правило</button>
+        </div>
+        {% endmacro %}
         <fieldset><legend>Плейты</legend>
         <div class="mo-options">{% for p in plates %}<label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>{{ p }}</label>{% else %}<p>Сначала создайте плейты в <a href="/plates">разделе требований</a>.</p>{% endfor %}</div>
         </fieldset>
+        {% if characters %}
+        <details {% if turn_order %}open{% endif %}><summary>Порядок ходов</summary>
+            <p class="muted">Выберите двух персонажей из выбранных плейтов. Первый должен быть быстрее второго минимум на 1.</p>
+            <div id="mo-order-pairs">{% for first, second in turn_order|default([]) %}{{ order_pair(first, second) }}{% endfor %}</div>
+            <template id="mo-order-template">{{ order_pair() }}</template>
+            <button type="button" class="button-secondary" id="mo-order-add">Добавить правило</button>
+        </details>
+        {% endif %}
         <label>Реликвия для подбора
             <select name="relic_mode">
                 <option value="current" {% if relic_mode != 'plate' %}selected{% endif %}>Текущая прокачка</option>
@@ -221,10 +242,34 @@ document.querySelectorAll('[data-saved-at]').forEach(el => {
 document.getElementById('mo-lock-search')?.addEventListener('input',e=>{
  const q=e.target.value.toLocaleLowerCase();document.querySelectorAll('[data-lock-name]').forEach(el=>el.hidden=!el.dataset.lockName.includes(q));
 });
-document.querySelectorAll('input[name=locked],input[name=plates],select[name=relic_mode],input[name=dry_run],input[name^=threshold_]').forEach(el=>el.addEventListener('change',()=>{
+function requireRecalculation() {
  const button=document.getElementById('mo-apply');if(button){button.disabled=true;document.getElementById('mo-changed').hidden=false;}
+}
+document.querySelectorAll('input[name=locked],input[name=plates],select[name=relic_mode],input[name=dry_run],input[name^=threshold_]').forEach(el=>el.addEventListener('change',()=>{
+ requireRecalculation();
  const summary=document.querySelector('.mo-locks summary');if(summary)summary.textContent='Заблокированные персонажи · '+document.querySelectorAll('input[name=locked]:checked').length;
 }));
+const orderPairs = document.getElementById('mo-order-pairs');
+const orderAdd = document.getElementById('mo-order-add');
+if (orderPairs) {
+    const updateOrderLimit = () => { orderAdd.disabled = orderPairs.children.length >= 10; };
+    updateOrderLimit();
+    orderAdd.addEventListener('click', () => {
+        const pair = document.getElementById('mo-order-template').content.cloneNode(true);
+        orderPairs.append(pair);
+        orderPairs.lastElementChild.querySelector('select').focus();
+        updateOrderLimit();
+    });
+    orderPairs.addEventListener('change', requireRecalculation);
+    orderPairs.addEventListener('click', event => {
+        if (event.target.matches('[data-order-remove]')) {
+            event.target.closest('[data-order-pair]').remove();
+            updateOrderLimit();
+            orderAdd.focus();
+            requireRecalculation();
+        }
+    });
+}
 </script>
 <script src="/static/mod_optimizer.js?v=20261118search" defer></script>
 {% endblock %}

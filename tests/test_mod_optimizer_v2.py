@@ -306,6 +306,24 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             requirements.assert_not_called()
             stats.assert_not_called()
 
+    async def test_turn_order_changes_allocation_and_keeps_plate_totals(self):
+        mods = [mod(f'{b}{s}', s, b, speed=5) for b in ('A', 'B') for s in range(1, 7)]
+        mods.append(mod('faster-arrow', 2, speed=20))
+        units = {b: {'currentTier': 13} for b in ('A', 'B')}
+        with patch.object(engine.database, 'get_stat_requirement_characters', return_value=['A', 'B']), \
+                patch.object(engine.database, 'get_stat_requirements', side_effect=lambda *args, **kwargs: [row(value=120)]), \
+                patch.object(engine.database, 'get_unit_types', return_value={}), \
+                patch.object(engine.database, 'get_skill_omicron_tiers', return_value={}), \
+                patch.object(engine.database, 'get_game_unit_name', side_effect=lambda b: b), \
+                patch.object(engine.stat_engine, 'calc_final_stats', calc):
+            results, passed, _, _ = await engine.optimize(
+                None, None, ['P'], '123', mods, 1, units_override=units, turn_order=[('A', 'B')])
+        self.assertEqual(passed, ['P'])
+        faster = next(result for result in results if result['base_id'] == 'A')
+        comparison = next(req for req in faster['passed'] if req['compare'] == 'B')
+        self.assertGreaterEqual(comparison['current'], comparison['threshold'])
+        self.assertEqual(comparison['before'], 130)
+
     async def test_comparison_uses_each_characters_future_relic(self):
         from swgoh_comlink import StatCalc
         real_calc = StatCalc(json.loads((Path(__file__).parent / 'fixtures/mod_optimizer_statcalc.json').read_text()))
