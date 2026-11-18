@@ -1,34 +1,34 @@
 {% extends "base.html" %}
-{% import "_tw.html" as twui %}
+{% import "_squads.html" as squadsui %}
 {% import "_game.html" as game %}
-{% block title %}Деф-паки ВГ — AC Droidec{% endblock %}
+{% block title %}Отряды — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {% call twui.tw_hero("Деф-паки", "squads", "Паки для дефа с требованиями к юнитам. Бот проверяет ростеры гильдии и считает, кто может их поставить.") %}
+    {% call squadsui.hero("Отряды", "Библиотека составов гильдии с требованиями и заменами. Проверяйте доступность по ростерам и используйте отряды в планах ВГ.") %}
         <div class="hero-kpis">
-            <div class="hero-kpi"><span class="hero-kpi-value">{{ squads|selectattr("combat_type", "equalto", "character")|list|length }}</span><span class="hero-kpi-label">наземных паков</span></div>
+            <div class="hero-kpi"><span class="hero-kpi-value">{{ squads|selectattr("combat_type", "equalto", "character")|list|length }}</span><span class="hero-kpi-label">наземных отрядов</span></div>
             <div class="hero-kpi"><span class="hero-kpi-value">{{ squads|selectattr("combat_type", "equalto", "ship")|list|length }}</span><span class="hero-kpi-label">флотов</span></div>
             <div class="hero-kpi"><span class="hero-kpi-value">{{ roster_size }}</span><span class="hero-kpi-label">игроков в ростере</span></div>
         </div>
     {% endcall %}
 
-    {% if saved %}<p class="dash-flash">Пак «{{ saved }}» сохранён.</p>{% endif %}
+    {% if saved %}<p class="dash-flash">Отряд «{{ saved }}» сохранён.</p>{% endif %}
     {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
     {% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
 
     <div class="twdef-toolbar">
-        <a class="button" href="/tw/def/squads/new">+ Новый пак</a>
-        <a class="button button-secondary" href="/tw/def/squads/import">Загрузить библиотеку</a>
-        {% if squads %}<a class="button button-secondary" href="/tw/def/squads/export">Экспорт паков</a>{% endif %}
+        <a class="button" href="/squads/new">+ Новый отряд</a>
+        <a class="button button-secondary" href="/squads/import">Загрузить библиотеку</a>
+        {% if squads %}<a class="button button-secondary" href="/squads/export">Экспорт отрядов</a>{% endif %}
         {% if squads %}<input type="search" class="twdef-search" data-twdef-filter=".twdef-squad-card" placeholder="Поиск по названию или юниту…">{% endif %}
         <span class="muted twdef-sync">Ростеры обновлены: {{ last_sync or "—" }} (UTC)</span>
     </div>
 
     {% if not squads %}
-        <p class="empty-state">Паков пока нет. Создайте первый: укажите юнитов по слотам и минимальные требования (релик, звёзды, зеты, омикрон, скорость). Потом паки расставляются по зонам на странице «Расстановка дефа».</p>
+        <p class="empty-state">Отрядов пока нет. Создайте первый: укажите состав, замены и требования. Сохранённые отряды также доступны в планировщике защиты ВГ.</p>
     {% endif %}
 
-    {% for kind, title in [("character", "Наземные паки"), ("ship", "Флот")] %}
+    {% for kind, title in [("character", "Наземные отряды"), ("ship", "Флот")] %}
         {% set group = squads|selectattr("combat_type", "equalto", kind)|list %}
         {% if group %}
             <h2 class="twdef-section-title">{{ title }}</h2>
@@ -72,10 +72,10 @@
                         {% endif %}
                         {% if s.note %}<p class="twdef-note">{{ s.note }}</p>{% endif %}
                         <footer class="twdef-squad-actions">
-                            <a class="button button-secondary" href="/tw/def/squads/{{ s.id }}/edit">Изменить</a>
-                            <form method="post" action="/tw/def/squads/{{ s.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия</button></form>
-                            <form method="post" action="/tw/def/squads/{{ s.id }}/delete" class="twdef-inline"
-                                  onsubmit="return confirm('Удалить пак «{{ s.name }}»? Уже сделанные расстановки останутся.');">
+                            <a class="button button-secondary" href="/squads/{{ s.id }}/edit">Изменить</a>
+                            <form method="post" action="/squads/{{ s.id }}/copy" class="twdef-inline"><button type="submit" class="button-secondary">Копия</button></form>
+                            <form method="post" action="/squads/{{ s.id }}/delete" class="twdef-inline"
+                                  onsubmit="return confirm('Удалить отряд «{{ s.name }}»? Уже сделанные расстановки останутся.');">
                                 <button type="submit" class="button-danger">Удалить</button>
                             </form>
                         </footer>
@@ -86,5 +86,5 @@
     {% endfor %}
 
     {% include "_tw_def_picker.html" %}
-    <script src="/static/tw_def.js?v=20261102" defer></script>
+    <script src="/static/tw_def.js?v=20261117squads" defer></script>
 {% endblock %}

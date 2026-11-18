@@ -5,10 +5,11 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 {{ tw.tw_hero("Командный центр", "command") }}
+{% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}<a class="button button-secondary" href="/game-account/events/tw{% if plan %}?plan={{ plan.id }}{% endif %}">ВГ сейчас</a>{% endif %}
 {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
 {% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}
 {% if not plan %}
-<section class="panel tw-empty"><h2>Подготовим следующую войну</h2><p>Создайте план защиты, выберите соперника и задайте стратегию.</p><a class="button" href="/tw/def/plans">Создать первый план</a><a href="/tw/def/squads">Библиотека паков →</a></section>
+<section class="panel tw-empty"><h2>Подготовим следующую войну</h2><p>Создайте план защиты, выберите соперника и задайте стратегию.</p><a class="button" href="/tw/def/plans">Создать первый план</a><a href="/squads">Библиотека паков →</a></section>
 {% else %}
 <form method="get" action="/tw" class="tw-work-form tw-plan-pick"><label>План войны<select name="plan" onchange="this.form.submit()">{% for p in plans %}<option value="{{ p.id }}"{% if p.id == plan.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><button type="submit" class="button-secondary">Открыть</button><a href="/tw/def/plans">Все планы →</a></form>
 {{ tw.plan_nav(plan, "overview", workspace) }}
@@ -41,7 +42,7 @@
 {% if result %}<section class="panel"><div class="panel-title">Результат этой ВГ</div><p class="tw-result-score">{{ '{:,}'.format(result[1]).replace(',', ' ') }} <span>:</span> {{ '{:,}'.format(result[2]).replace(',', ' ') }}</p><p>{{ 'Победа' if result[9] == 'win' else 'Поражение' if result[9] == 'loss' else 'Ничья' }} · {{ result[4] }}</p></section>{% endif %}
 <details class="panel"{% if not workspace.opponent %} open{% endif %}><summary class="panel-title">Параметры ВГ</summary>
 <form method="post" action="/tw/def/plans/{{ plan.id }}/campaign" class="tw-work-form">{{ tw.revision_input(revision) }}
-    <div class="tw-form-grid"><label>Соперник<select name="opponent"><option value="">Не выбран</option>{% if workspace.opponent %}<option value="{{ workspace.opponent }}" selected>{{ workspace.opponent_name }}</option>{% endif %}{% for o in recent %}{% if o.id != workspace.opponent %}<option value="{{ o.id }}">{{ opponent_label(o) }}</option>{% endif %}{% endfor %}</select></label>
+    <div class="tw-form-grid"><label>Соперник<select name="opponent"><option value="">Не выбран</option>{% if workspace.opponent %}<option value="{{ workspace.opponent }}" selected>{{ workspace.opponent_name }}</option>{% endif %}{% if current_opponent and current_opponent.id != workspace.opponent %}<option value="{{ current_opponent.id }}">Текущая ВГ · {{ current_opponent.name }}</option>{% endif %}{% for o in recent if o.id != workspace.opponent and (not current_opponent or o.id != current_opponent.id) %}<option value="{{ o.id }}">{{ opponent_label(o) }}</option>{% endfor %}</select></label>
     <label>Или код союзника / ID гильдии<input name="opponent_code" maxlength="80" placeholder="123-456-789"></label>
     <label>Этап<select name="phase">{% for key, label in phases.items() %}<option value="{{ key }}"{% if key == workspace.phase %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
     <label>Связать с результатом<select name="result_start"><option value="">Пока нет результата</option>{% for r in results if r.opponent == workspace.opponent %}<option value="{{ r.start }}"{% if r.start|string == workspace.result_start|string %} selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></label></div>

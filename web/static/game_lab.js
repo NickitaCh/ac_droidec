@@ -51,6 +51,7 @@
     });
   }
   const search = root.querySelector('#lab-search');
+  if (!search) return;
   const cards = [...root.querySelectorAll('[data-lab-state]')];
   let mode = 'all';
   function update() {

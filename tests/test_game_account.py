@@ -16,7 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import database
 from services import bot_profiles, game_account as ga, test_accounts
 from web.routes import game_account as route
-from web.deps import require_officer_access
+from web.deps import require_member_access, require_officer_access
 
 
 def request_bytes(player="player"):
@@ -168,13 +168,15 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.patches[3].start()
 
-    async def test_discord_dm_opens_link_form_and_does_not_require_existing_alt(self):
+    async def test_member_discord_dm_opens_link_form_and_does_not_require_existing_alt(self):
         from cogs.game_account import GameAccountCog
         from unittest.mock import Mock
         inter = SimpleNamespace(author=SimpleNamespace(id=123), guild=None,
                                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
                                 edit_original_response=AsyncMock())
-        with patch.object(ga, "select_account") as select, patch.object(ga, "refresh", AsyncMock()) as read, patch.object(bot_profiles, "worker_profile", return_value="test"):
+        with patch("guild_resolver.resolve_access", return_value={"guild_id": 1, "tier": "member"}), \
+                patch.object(ga, "select_account") as select, patch.object(ga, "refresh", AsyncMock()) as read, \
+                patch.object(bot_profiles, "worker_profile", return_value="test"):
             await GameAccountCog.account.callback(GameAccountCog(Mock()), inter, альт=True)
             payload = inter.response.send_message.await_args.kwargs
             self.assertTrue(payload["ephemeral"])
@@ -212,11 +214,14 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(route.router, prefix="/game-account")
         app.dependency_overrides[require_officer_access] = lambda: {
             "discord_id": "owner", "guild_id": 1, "bot_profile": "test", "tier": "officer", "username": "Officer"}
+        app.dependency_overrides[require_member_access] = app.dependency_overrides[require_officer_access]
         with TestClient(app) as client:
-            response = client.get("/game-account")
+            response = client.get("/game-account", follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertTrue(response.headers["location"].endswith("#ea-connection"))
+            response = client.get("/game-account/link")
             self.assertEqual(response.status_code, 200)
-            self.assertIn("вход по почте и коду", response.text)
-            self.assertIn("через сайт и продление", response.text)
+            self.assertIn("Привязать EA", response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
             self.assertEqual(client.post("/game-account/disconnect", data={"csrf": "wrong"}).status_code, 403)
         self.assertFalse(bot_profiles.path_available("/game-account", "prod"))

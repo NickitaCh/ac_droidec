@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% import "_tb.html" as tbui with context %}
+{% block title %}ТБ сейчас — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    {{ tbui.tb_hero("ТБ сейчас", "live") }}
+    {% if not selected %}
+        {% with refresh_url = "/tb/live", watch_url = "/tb/live/watch" %}
+            {% include "_game_watch.html" %}
+        {% endwith %}
+    {% else %}
+        <a href="/tb/live">Последний снимок</a>
+    {% endif %}
+    <p id="tb-live-feedback" role="status"></p>
+    <div id="tb-live-state"{% if watch and watch.status != "ended" and not selected %} data-watch-active{% endif %}>
+        {% if error %}<p class="error" role="status">{{ error }}</p>{% endif %}
+        {% if captured %}<p class="muted">Снимок {{ captured }} МСК{% if stale %} · время этапа прошло{% endif %}</p>{% endif %}
+        {% if state %}
+            <h2>Этап {{ state.phase }} · до {{ end }} МСК</h2>
+            {% if state.order_name %}<p>Ордер на момент снимка: {{ state.order_name }}</p>{% endif %}
+            {% if state.order_name and not stale and not selected %}
+                <details class="panel" id="personal-preview" data-live-details="personal">
+                    <summary>Предпросмотр моих взводов</summary>
+                    {% if personal %}
+                        <p class="muted">План и заполнение на момент снимка. Ростер проверяется по последнему обновлению сайта.</p>
+                        <div class="table-scroll"><table class="data">
+                            <thead><tr><th>Куда</th><th>Юнит</th><th>Ячейка</th><th>Ростер</th></tr></thead>
+                            <tbody>{% for row in personal %}<tr>
+                                <td>{{ row.planet }} · взвод {{ row.operation }}</td><td>{{ row.unit }}</td><td>{{ row.status }}</td>
+                                <td>{{ "Есть" if row.in_roster else "Нет" if row.in_roster is not none else "Нет данных" }}</td>
+                            </tr>{% endfor %}</tbody>
+                        </table></div>
+                    {% else %}<p>Незакрытых назначений по сверенным взводам открытых зон нет.</p>{% endif %}
+                </details>
+            {% endif %}
+            {% for zone in zones %}
+                <section class="panel">
+                    <h3>{{ zone.name }}{% if zone.stars is not none %} · {{ zone.stars }} ★{% endif %}</h3>
+                    <p>{% if zone.points is not none %}{{ "{:,}".format(zone.points).replace(",", " ") }} очков{% if zone.change %} ({{ "%+d"|format(zone.change) }}){% endif %} · {% endif %}{{ zone.filled }} из {{ zone.slots }} ячеек взводов</p>
+                    {% if zone.missions %}
+                        <details data-live-details="{{ zone.id }}-missions">
+                            <summary>Боевые миссии · {{ zone.missions|length }}</summary>
+                            <ul>{% for mission in zone.missions %}
+                                <li>Миссия {{ mission.id.split("_strike")[-1]|int or loop.index }}{% if mission.players is not none %} · участников {{ mission.players }}{% endif %}</li>
+                            {% endfor %}</ul>
+                        </details>
+                    {% endif %}
+                    {% if zone.special %}
+                        <details data-live-details="{{ zone.id }}-special">
+                            <summary>Особые миссии · {{ zone.special|length }}</summary>
+                            <ul>{% for mission in zone.special %}
+                                <li>Миссия {{ loop.index }}{% if mission.players is not none %} · участников {{ mission.players }}{% endif %}{% if mission.wins is not none %} · побед {{ mission.wins }}{% endif %}</li>
+                            {% endfor %}</ul>
+                        </details>
+                    {% endif %}
+                    {% if zone.operations %}
+                    <details data-live-details="{{ zone.id }}-operations">
+                        <summary>Взводы</summary>
+                        {% for op in zone.operations %}
+                            <h4>Взвод {{ op.number or loop.index }} · {{ op.filled }} из {{ op.slots|length }}</h4>
+                            {% if op.order %}
+                                <details data-live-details="{{ zone.id }}-order-{{ op.number or loop.index }}">
+                                    <summary>По ордеру {{ op.order_done }} из {{ op.order|length }}</summary>
+                                    <div class="table-scroll">
+                                        <table class="data">
+                                            <thead><tr><th>Юнит</th><th>Кто по ордеру</th><th>Статус</th></tr></thead>
+                                            <tbody>{% for unit, player, status in op.order %}<tr><td>{{ unit }}</td><td>{{ player }}</td><td>{{ status }}</td></tr>{% endfor %}</tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            {% elif op.order is none and state.order_name %}
+                                <p class="muted">Состав взвода не удалось сверить с ордером.</p>
+                            {% endif %}
+                            <ul>{% for unit, donor, name in op.slots %}<li>{{ unit }}{% if donor %} · {{ name }}{% endif %}</li>{% endfor %}</ul>
+                        {% endfor %}
+                    </details>
+                    {% endif %}
+                </section>
+            {% else %}<p class="empty-state">В снимке нет открытых зон.</p>{% endfor %}
+            {% if players %}
+            <details class="panel" data-live-details="players">
+                <summary>Очки игроков · {{ players|length }}</summary>
+                <table class="data">
+                    <thead><tr><th>Игрок</th><th>Очки за ТБ</th></tr></thead>
+                    <tbody>{% for name, score in players %}<tr><td>{{ name }}</td><td>{{ "{:,}".format(score).replace(",", " ") }}</td></tr>{% endfor %}</tbody>
+                </table>
+            </details>
+            {% endif %}
+        {% elif captured %}
+            <p class="empty-state">На момент снимка игра не вернула активную ТБ.</p>
+        {% elif not error %}
+            <p class="empty-state">Обновите данные, чтобы получить первый снимок.</p>
+        {% endif %}
+        {% if history %}
+            <details class="panel" data-live-details="history">
+                <summary>Последние снимки</summary>
+                <ul>{% for stamp, time, phase in history %}
+                    <li><a href="/tb/live?snapshot={{ stamp }}">{{ time }} МСК{% if phase %} · этап {{ phase }}{% endif %}</a></li>
+                {% endfor %}</ul>
+            </details>
+        {% endif %}
+    </div>
+    {% if not selected %}
+    <script src="/static/game_live.js" defer></script>
+    {% endif %}
+{% endblock %}

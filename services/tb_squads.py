@@ -43,6 +43,23 @@ def _our_planet(name_en: str) -> str | None:
         (p for p in ours if key and (key in p.lower() or p.lower().split()[0] == key.split()[0])), None)
 
 
+def _mission_enemies(mission):
+    waves = []
+    for wave in mission.get("enemyWaves") or []:
+        names = []
+        for unit in wave.get("units") or []:
+            name = unit.get("name")
+            if not name:
+                continue
+            count = unit.get("count") or 1
+            names.append(f"{name} ×{count}" if count > 1 else name)
+        if names:
+            number = wave.get("wave")
+            text = ", ".join(names)
+            waves.append(f"Волна {number}: {text}" if number else text)
+    return waves or mission.get("enemies") or []
+
+
 def parse(raw: dict) -> dict:
     """Ответ /api/tbmap → {planet: {phase, bonus, missions: [{id, type, label, requirements,
     enemies, squads: [{key, name, units, omicron, video}]}]}}."""
@@ -74,7 +91,8 @@ def parse(raw: dict) -> dict:
                                    "video": s.get("videoUrl") or ""})
             missions.append({
                 "id": m.get("missionId") or "", "type": m["type"], "label": MISSION_TYPES[m["type"]],
-                "requirements": m.get("requirements") or [], "enemies": m.get("enemies") or [],
+                "position": m.get("position"),
+                "requirements": m.get("requirements") or [], "enemies": _mission_enemies(m),
                 "squads": squads,
             })
         missions.sort(key=lambda m: (m["type"] == "fleet", m["label"] != "Бой", m["id"]))

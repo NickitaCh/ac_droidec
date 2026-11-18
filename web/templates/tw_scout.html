@@ -16,16 +16,17 @@
 {%- endmacro %}
 
 {% block content %}
-    {{ twui.tw_hero("Разведка", "scout", "Своя гильдия против соперника: сводка, участники по рангу и плейты гильдии на обеих сторонах. Текущего соперника игра без входа в аккаунт не показывает — выберите из прошлых ВГ или введите код союзника любого его участника.") }}
+    {{ twui.tw_hero("Разведка", "scout", "Сводка, участники по рангу и плейты обеих гильдий.") }}
 
     {% if plan %}{{ twui.plan_nav(plan, "scout", workspace) }}{% endif %}
     <form method="get" action="/tw/scout" class="filter-row panel scout-pick">
         {% if plan %}<input type="hidden" name="plan" value="{{ plan.id }}">{% endif %}
-        {% if recent %}
-        <label>Из прошлых ВГ
+        {% if current or recent %}
+        <label>Соперник
             <select name="opp" onchange="this.form.querySelector('[name=opp_code]').value=''; this.form.submit()">
                 <option value="">— выберите —</option>
-                {% for o in recent %}<option value="{{ o.id }}" {% if lookup and lookup.swgoh_guild_id == o.id %}selected{% endif %}>{{ label(o) }}</option>{% endfor %}
+                {% if current %}<option value="{{ current.id }}"{% if opp == current.id %} selected{% endif %}>Текущая ВГ · {{ current.name }}</option>{% endif %}
+                {% for o in recent if not current or o.id != current.id %}<option value="{{ o.id }}" {% if lookup and lookup.swgoh_guild_id == o.id %}selected{% endif %}>{{ label(o) }}</option>{% endfor %}
             </select>
         </label>
         {% endif %}

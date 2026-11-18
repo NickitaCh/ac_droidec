@@ -1,0 +1,39 @@
+{% if stats_result and stats_result.loading %}
+    <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — попробуйте через минуту.</p>
+{% elif stats_result is not none %}
+    {% if not stats_result.results %}
+        <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
+    {% else %}
+        <div class="panel">
+            <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
+            {% if not stats_result.failed_required %}
+                <p class="empty-state">✅ Все обязательные статы в норме.</p>
+            {% else %}
+                <div class="table-scroll">
+                    <table class="data">
+                        <thead><tr><th>Персонаж</th><th>Стат</th><th>Сейчас</th><th>Нужно</th></tr></thead>
+                        <tbody>
+                            {% for item in stats_result.failed_required %}
+                                <tr>
+                                    <td>{{ item.char_name }}</td>
+                                    <td>{{ item.stat }}</td>
+                                    <td>{{ item.current }}</td>
+                                    <td>{{ item.requirement }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+        {% for r in stats_result.results %}
+            <div class="panel">
+                <div class="panel-title">
+                    <span>{{ r.char_name }}</span>
+                    <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
+                </div>
+                <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endif %}

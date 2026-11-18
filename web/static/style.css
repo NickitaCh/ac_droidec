@@ -2566,7 +2566,7 @@ dialog.twdef-picker::backdrop { background: rgba(0, 0, 0, 0.5); }
 .docs-command-list li[hidden], .docs-section[hidden], .docs-filter-empty[hidden] { display: none !important; }
 
 /* Иконки деталей снаряжения/материалов (/equip-img) — попапы ресурсов, фарм. */
-.equip-icon { width: 2em; height: 2em; border-radius: 6px; object-fit: contain; vertical-align: middle; margin-right: 0.4em; flex: 0 0 auto; }
+.equip-icon { width: 2em; height: 2em; object-fit: contain; vertical-align: middle; margin-right: 0.4em; flex: 0 0 auto; }
 .equip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35em; }
 .equip-list li { display: flex; align-items: center; gap: 0.15em; }
 .equip-list .equip-qty { margin-left: auto; padding-left: 0.75em; font-variant-numeric: tabular-nums; color: var(--fg-secondary); white-space: nowrap; }

@@ -2853,6 +2853,21 @@ async def player_mod_grade_unit(request: Request, ally_code: str, base_id: str, 
     return templates.TemplateResponse(request, "_player_mod_grade_unit.html", {"u": data})
 
 
+@router.get("/player/{ally_code}/stats-check", response_class=HTMLResponse)
+async def player_card_saved_stats(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
+    if user.get("tier") != "officer" and ally_code not in {account[0] for account in own_accounts(user)}:
+        raise HTTPException(status_code=403)
+    guild_id = user["guild_id"]
+    card = dashboard_data.get_player_card(guild_id, ally_code)
+    if card is None or card.departed_at:
+        raise HTTPException(status_code=404)
+    plate = database.get_bot_state(f"player_card_stats_plate:{ally_code}", guild_id=guild_id) or ""
+    result = await _run_player_stats_check(guild_id, ally_code, card.player_name, plate, False) if plate else None
+    return templates.TemplateResponse(request, "player_card_stats.html", {
+        "stats_result": result, "selected_plate": plate,
+    })
+
+
 @router.get("/player/{ally_code}", response_class=HTMLResponse)
 async def player_card(request: Request, ally_code: str, user: dict = Depends(require_member_access)):
     guild_id = user["guild_id"]
@@ -2866,14 +2881,8 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     if card is None:
         raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
 
-    # ---- Статы: выпадашка из уже сохранённых плейтов. Последний выбор + его результат
-    # переживают рефреш и видны любому другому офицеру, открывшему эту же карточку —
-    # persist через bot_state (guild_id-скоуп уже встроен в get/set_bot_state, ключ
-    # дополнительно несёт ally_code, т.к. состояние своё у каждой карточки). Явная отправка
-    # формы (ключ "plate" ЕСТЬ в query, даже пустой — значит выбрали "— выберите —") эту
-    # память перезаписывает; открытие страницы без параметров ("голый" /player/<код>) —
-    # читает её и сразу пересчитывает, чтобы показать актуальные данные под сохранённым
-    # выбором, а не замороженный текст с прошлого раза.
+    # Сохранённый плейт проверяется при открытии вкладки, чтобы карточка
+    # не ждала калькулятор. Явный запуск из формы проверяем сразу.
     stats_plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     stats_state_key = f"player_card_stats_plate:{ally_code}"
     if "plate" in request.query_params:
@@ -2886,7 +2895,9 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     if selected_scheme not in ("", "1", "2"):
         selected_scheme = ""
     stats_result = None
-    if selected_plate and not card.departed_at:
+    stats_deferred = bool(selected_plate and not card.departed_at and "plate" not in request.query_params
+                          and not force_refresh and not selected_scheme)
+    if selected_plate and not card.departed_at and not stats_deferred:
         forced_scheme = int(selected_scheme) if selected_scheme else None
         stats_result = await _run_player_stats_check(guild_id, ally_code, card.player_name, selected_plate, force_refresh, forced_scheme=forced_scheme)
 
@@ -2930,7 +2941,7 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     return templates.TemplateResponse(request, "player_card.html", {
         "user": user, "card": card,
         "stats_plates": stats_plates, "selected_plate": selected_plate,
-        "force_refresh": force_refresh, "stats_result": stats_result,
+        "force_refresh": force_refresh, "stats_result": stats_result, "stats_deferred": stats_deferred,
         "selected_scheme": selected_scheme, "scheme_choices": SCHEME_LABELS.items(),
         "datacron_seasons": datacron_seasons, "selected_season": selected_season, "datacron_result": datacron_result,
         "datacron_priority_order": DATACRON_PRIORITY_ORDER,

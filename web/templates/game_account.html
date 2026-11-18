@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Игровой аккаунт — AC Droidec{% endblock %}
+{% block title %}Подключение к игре — AC Droidec{% endblock %}
 {% block content %}
-<div class="page-hero"><h1>Игровой аккаунт</h1><p>Пилот для офицеров АС · тестовая версия</p></div>
+<p><a href="/me">← Мой профиль</a></p>
+<div class="page-hero"><h1>Подключение к игре</h1><p>EA Connect · тестовая версия</p></div>
+<p>Подключите свой аккаунт для чтения модулей, личных данных ВА и Завоевания и расчёта фарма по запасам.</p>
 <form method="get" action="/game-account" class="card">
     <label for="game-account-code">Ваш аккаунт</label>
     <select id="game-account-code" name="ally_code">
@@ -10,31 +12,33 @@
     <button type="submit" class="btn">Выбрать</button>
 </form>
 {% if message %}<p role="status">{{ message }}</p>{% endif %}
+{% if selected_code %}
+<section class="card">
+    <h2>Данные игрока</h2>
+    <a class="btn" href="/game-account/modules?ally_code={{ selected_code }}">Модули из игры</a>
+    <a class="btn" href="/game-account/personal/arena?ally_code={{ selected_code }}">Великая арена</a>
+    <a class="btn" href="/game-account/personal/conquest?ally_code={{ selected_code }}">Завоевание</a>
+    <a class="btn" href="/farm">Фарм по запасам</a>
+</section>
+{% endif %}
 <section class="card">
     <h2>Подключение</h2>
     <p><strong>EA Connect:</strong> вход по почте и коду, сохранение доступа и восстановление сессии.</p>
     <p><a class="btn btn-primary" href="/game-account/link">Привязать основной аккаунт</a> <a class="btn" href="/game-account/link?alt=1">Привязать альт</a></p>
-    <p><strong>Google:</strong> проверен разовый вход с кодом из Android-игры. Вход через сайт и продление подключения ещё не готовы.</p>
     {% if user.is_super_admin %}<p><a href="/admin/game-lab">Испытания игрового API</a></p>{% endif %}
     <p>Подключить можно основной аккаунт и альтов — у каждого своя сессия. Новый вход завершает предыдущую игровую сессию.</p>
 </section>
-<section class="card">
-    <h2>Проверка чтения</h2>
+{% if account or reconnect_path %}<section class="card">
+    <h2>Сохранённое подключение</h2>
+    {% if reconnect_path %}<p><a class="btn btn-primary" href="{{ reconnect_path }}">Переподключить через EA</a></p>{% endif %}
     {% if account %}
     <p>{{ account.ally_code }} · {{ 'EA Connect' if account.provider == 'ea' else 'Google' }} · {{ 'Подключён' if account.state == 'connected' else 'Последнее чтение не удалось' }}</p>
-    {% if account.summary %}<p>Последний полученный инвентарь: {{ account.summary.inventory_bytes }} байт, {{ account.summary.inventory_records }} записей. Это техническая проверка; разбор ресурсов и модулей ещё готовится.</p>{% endif %}
-    <form method="post" action="/game-account/read">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="ally_code" value="{{ selected_code }}">
-        <p>Запросит приватный инвентарь из игры. Повторное чтение — не чаще раза в минуту.</p>
-        <button type="submit" class="btn btn-primary">Прочитать инвентарь</button>
-    </form>
     <form method="post" action="/game-account/disconnect">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="ally_code" value="{{ selected_code }}">
         <p>Удалит сохранённую сессию у Дроидца. Привязки EA/Google в игре сохранятся.</p>
         <button type="submit" class="btn">Отключить</button>
     </form>
-    {% else %}<p>Сессия не подключена.</p>{% endif %}
-</section>
+    {% endif %}
+</section>{% endif %}
 {% endblock %}

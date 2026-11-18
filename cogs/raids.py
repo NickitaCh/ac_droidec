@@ -203,7 +203,7 @@ class RaidsCog(commands.Cog):
         await inter.edit_original_response(content="\n".join(lines)[:2000],
                                            file=disnake.File(io.BytesIO(png), filename=f"raid_{raid['raid_id']}.png"))
 
-    @raid_group.sub_command(name="готовность", description="Личная готовность к рейду; вся гильдия — только офицерам")
+    @raid_group.sub_command(name="готовность", description="Готовность к рейду; чужой игрок и вся гильдия — только офицерам")
     async def raid_readiness(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -212,9 +212,14 @@ class RaidsCog(commands.Cog):
         отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
         альт: bool = yes_no_param(default=False, description="Личная проверка второго привязанного аккаунта"),
         гильдия: bool = yes_no_param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),
+        участник: disnake.User = commands.Param(default=None, description=guild_resolver.TARGET_USER_DESCRIPTION),
+        аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
     ):
         await inter.response.defer()
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        if (участник is not None or аликод is not None) and (альт or гильдия):
+            await guild_resolver.send_denied(inter, "❌ «участник» и «аликод» нельзя сочетать с «альт» или «гильдия».")
+            return
         if гильдия:
             if альт:
                 await guild_resolver.send_denied(inter, "❌ «альт» — личная проверка; не указывайте вместе с «гильдия».")
@@ -231,7 +236,14 @@ class RaidsCog(commands.Cog):
             await inter.edit_original_response(f"❌ {error}")
             return
         if not гильдия:
-            await self._personal_readiness(inter, plan, guild_id, альт)
+            code, name, error = guild_resolver.target_player(участник, аликод, guild_id)
+            if not error and code:
+                error = guild_resolver.self_only_error(inter.author, guild_id, code)
+            if error:
+                await guild_resolver.send_denied(inter, error)
+                return
+            account = {"ally_code": code, "name": name} if code else public_checks.account(inter.author, alt=альт)
+            await self._personal_readiness(inter, plan, guild_id, account)
             return
         рейд, entry, names, teams, grouped = (plan[k] for k in ("raid_id", "entry", "names", "teams", "requirements"))
         r = await asyncio.to_thread(guild_units.readiness_grid, guild_id, grouped)
@@ -260,8 +272,7 @@ class RaidsCog(commands.Cog):
             file=disnake.File(io.BytesIO(png), filename=f"raid_ready_{рейд}.png"),
         )
 
-    async def _personal_readiness(self, inter, plan: dict, guild_id: int | None, alt: bool):
-        account = public_checks.account(inter.author, alt=alt)
+    async def _personal_readiness(self, inter, plan: dict, guild_id: int | None, account: dict | None):
         if not account:
             await inter.edit_original_response("❌ Аккаунт не найден — привяжите его через `/регистрация` (второй — с «альт: True»).")
             return

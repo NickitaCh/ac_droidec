@@ -70,6 +70,26 @@ class EaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit._clean_value("one_time_code", "123456"), "***")
         self.assertEqual(audit._clean_value("ea_email", "test@example.com"), "***")
 
+    async def test_game_rejection_identifies_stage_without_logging_private_payload(self):
+        response = ga.pack([(4, 2, b"private-response-token"), (5, 0, 9), (6, 0, 149)])
+        class ResponseStream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield response
+        original = httpx.AsyncClient
+        for method, stage in [("DoAuthGuest", "вход устройства"),
+                              ("GetNucleusPlayerPreview", "поиск аккаунта EA"),
+                              ("LinkNucleusAccount", "импорт аккаунта EA")]:
+            service = "AuthRpc" if method == "DoAuthGuest" else "PlayerRpc"
+            with patch.object(ea.httpx, "AsyncClient", side_effect=lambda **kw: original(
+                    transport=httpx.MockTransport(lambda req: httpx.Response(200, stream=ResponseStream())), **kw)):
+                with self.assertLogs(ea.__name__, level="WARNING") as logs:
+                    with self.assertRaisesRegex(ga.AccountError, stage):
+                        await ea._game(service, method, b"private-request-token")
+            output = " ".join(logs.output)
+            self.assertIn(method, output)
+            self.assertIn("149", output)
+            self.assertNotIn("private", output)
+
     async def test_unexpected_redirect_and_challenge_are_not_followed(self):
         for location in ["https://evil.example/collect", "http://signin.ea.com/login", "https://signin.ea.com@evil.example/"]:
             original = httpx.AsyncClient

@@ -470,7 +470,7 @@ def _build_ilp(candidates_by_char: dict, plate_members: dict, char_owned: dict):
     return prob, y, charpass_expr, platepass
 
 
-async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code: str, all_mods: list[dict], guild_id: int = 1, force_refresh: bool = False) -> list[dict]:
+async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code: str, all_mods: list[dict], guild_id: int = 1, force_refresh: bool = False, *, compare_current: bool = False) -> list[dict]:
     """Главная точка входа для веб-роута. Собирает персонажей всех выбранных плейтов (с
     объединёнными требованиями, если персонаж встречается в нескольких — см.
     _merge_thresholds), генерирует кандидатов-билдов на каждого (generate_candidate_builds) и
@@ -511,7 +511,20 @@ async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code:
             for base_id, info in char_info.items() if info["owned"]
         }
 
+    def _current_stats():
+        equipped = {}
+        for mod in all_mods:
+            if mod["equipped_to"]:
+                equipped.setdefault(mod["equipped_to"], []).append(_to_equipped_stat_mod(mod))
+        return {
+            base_id: stat_engine.calc_final_stats(
+                stat_calc, {**info["unit"], "equippedStatMod": equipped.get(base_id, [])},
+            )
+            for base_id, info in char_info.items() if info["owned"]
+        }
+
     candidates_by_char = await asyncio.to_thread(_gen_all)
+    before_by_char = await asyncio.to_thread(_current_stats) if compare_current else {}
 
     char_owned = {base_id: info["owned"] for base_id, info in char_info.items()}
     prob, y, charpass_expr, platepass = _build_ilp(candidates_by_char, plate_members, char_owned)
@@ -551,7 +564,9 @@ async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code:
             for r in stat_thresholds:
                 cur = final_stats.get(r["stat_name"])
                 ok = cur is not None and _compare(cur, r["operator"], r["threshold"])
-                (passed if ok else failed).append({**r, "current": cur})
+                (passed if ok else failed).append({
+                    **r, "current": cur, "before": before_by_char.get(base_id, {}).get(r["stat_name"]),
+                })
             mods_used = chosen["mods"]
             reason = None
 

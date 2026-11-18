@@ -261,6 +261,7 @@ async def sync_equipment(comlink) -> int:
     locations_by_base_id = {**equipment_locations, **material_locations}
 
     database.upsert_game_equipment(equipment_to_db)
+    database.save_equipment_icon_styles(equipment_list + material_list)
     database.prune_game_equipment(equipment_to_db.keys())
     database.set_all_equipment_locations(locations_by_base_id)
 

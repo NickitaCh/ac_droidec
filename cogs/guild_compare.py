@@ -1,6 +1,6 @@
 """/вг_соперник — своя гильдия против соперника картинкой (как HotBot `/compare guild` /
-C3PO `tw enemy quality`). Соперник — из прошлых ВГ (подсказка) или по коду союзника
-любого его участника; его ростеры берутся из игры прямо сейчас (запрос на каждого
+C3PO `tw enemy quality`). Без аргументов используется соперник из свежего снимка ВГ.
+Можно явно выбрать прошлую ВГ или код союзника; ростеры берутся из игры (запрос на каждого
 участника), своя гильдия — из кэшей ежечасного синка. Расчёт — services/guild_compare.py
 и services/player_profile.py, картинка — services/guild_compare_image.py."""
 
@@ -13,7 +13,7 @@ from disnake.ext import commands
 import database
 import guild_resolver
 import stat_engine
-from services import guild_compare as gc
+from services import bot_profiles, guild_compare as gc
 from services import guild_compare_image
 from services import player_profile as pp
 
@@ -51,14 +51,21 @@ class GuildCompareCog(commands.Cog):
         guild_id = await guild_resolver.require_feature(inter, "tw_order")
         if guild_id is None:
             return
-        if bool(соперник) == bool(аликод):
-            await inter.edit_original_response("❌ Укажите соперника: выберите гильдию из прошлых ВГ или код союзника любого её участника.")
+        if соперник and аликод:
+            await inter.edit_original_response("❌ Укажите одного соперника: гильдию или код союзника.")
             return
+        opponent_id = соперник
+        if not (соперник or аликод):
+            current = (await asyncio.to_thread(gc.current_opponent, guild_id)
+                       if bot_profiles.current_profile() == "test" else None)
+            if not current:
+                await inter.edit_original_response("❌ Снимка текущей ВГ с соперником пока нет. Выберите гильдию из прошлых ВГ или укажите код союзника.")
+                return
+            opponent_id = current["id"]
         if not await stat_engine.wait_stat_calc(self.bot, inter):
             await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
             return
 
-        opponent_id = соперник
         if аликод:
             ally_code = guild_resolver.normalize_ally_code(аликод)
             if ally_code is None:

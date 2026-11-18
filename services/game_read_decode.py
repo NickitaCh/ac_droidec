@@ -156,6 +156,7 @@ def _decode(fields, schema, budget, modules):
         result.append(("Поиск по модулям", {"mod_inventory": read_inventory(fields)}))
         result.extend(_equipment_stock(fields))
         units = {}
+        stars = {}
         stock = Counter()
         for tag, wire, raw in fields:
             if wire != 2 or tag not in (1, 9):
@@ -163,6 +164,7 @@ def _decode(fields, schema, budget, modules):
             try:
                 if tag == 1:
                     unit = unit_progress(raw)
+                    stars[unit[0]] = next((value for tag, kind, value in ga.fields(raw) if (tag, kind) == (8, 0)), 0)
                     if 1 <= unit[1] <= 13:
                         units[unit[0]] = unit
                 else:
@@ -176,7 +178,7 @@ def _decode(fields, schema, budget, modules):
                 if "stock_rows" in group:
                     for _, item, quantity, _ in group["stock_rows"]:
                         stock[item] += quantity
-            result.append(("Калькулятор по запасам", {"gear_plan": {"units": units, "stock": stock}}))
+            result.append(("Калькулятор по запасам", {"gear_plan": {"units": units, "stock": stock, "stars": stars}}))
         fields = [row for row in fields if row[0] not in (5, 10) or row[1] != 2]
         priority = {9: 0, 13: 1, 14: 2}
         fields = sorted(fields, key=lambda row: priority.get(row[0], 5))

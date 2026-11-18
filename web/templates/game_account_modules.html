@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Модули из игры — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/game_lab.css">
+<section class="page-hero">
+    <h1>Модули из игры</h1>
+    <a class="hero-link" href="/player/{{ ally_code }}">Мой профиль</a>
+</section>
+<main class="game-lab">
+    <form class="filter-row" action="/game-account/modules" method="post">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="ally_code" value="{{ ally_code }}">
+        {% if connection_action %}{% include "_game_connection.html" %}
+        {% else %}<button type="submit">Прочитать склад модулей</button>{% endif %}
+    </form>
+    {% if error %}<p class="error" role="status">{{ error }}</p>{% endif %}
+    {% if bank is not none %}
+        <div class="panel">{% include "game_mod_inventory.html" %}</div>
+    {% endif %}
+</main>
+<script src="/static/game_lab.js" defer></script>
+{% endblock %}

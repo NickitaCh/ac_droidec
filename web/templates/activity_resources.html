@@ -84,7 +84,7 @@
 
             function renderList(heading, items) {
                 if (!items.length) return "";
-                const rows = items.map((it) => `<li><img class="equip-icon" src="/equip-img/${encodeURIComponent(it.id)}" alt="" loading="lazy" width="32" height="32"><span>${escapeHtml(it.name)}</span><span class="equip-qty">× ${it.qty}</span></li>`).join("");
+                const rows = items.map((it) => `<li><img class="equip-icon" src="/equip-img/${encodeURIComponent(it.id)}?v=2" alt="" loading="lazy" width="32" height="32"><span>${escapeHtml(it.name)}</span><span class="equip-qty">× ${it.qty}</span></li>`).join("");
                 return `<div class="stat-problem-char"><div class="stat-problem-char-title">${heading}</div><ul class="equip-list">${rows}</ul></div>`;
             }
 

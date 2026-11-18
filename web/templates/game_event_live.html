@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <h1>{{ title }}</h1>
+        <a class="hero-link" href="{{ '/tw' if kind == 'tw' else '/raids' }}">К разделу</a>
+    </section>
+    {% set event_url = "/game-account/events/" ~ kind %}
+    {% set query = "?plan=" ~ plan.id if plan else "" %}
+    {% with refresh_url = event_url ~ query, watch_url = event_url ~ "/watch" ~ query %}
+        {% include "_game_watch.html" %}
+    {% endwith %}
+    <p id="tb-live-feedback" role="status"></p>
+    <div id="tb-live-state"{% if watch and watch.status != "ended" %} data-watch-active{% endif %}>
+        {% if error %}<p class="error">{{ error }}</p>{% endif %}
+        {% if cached %}<p class="muted">Снимок {{ clock(cached.at) }} МСК</p>{% endif %}
+        {% if kind == "tw" and cached.data %}
+            <h2>Раунд {{ cached.data.round }} · до {{ clock(cached.data.end) }} МСК</h2>
+            {% if cached.data.opponent_guild and cached.data.opponent_guild.id %}
+            <p>Соперник — <strong>{{ cached.data.opponent_guild.name or cached.data.opponent_guild.id }}</strong> · <a href="/tw/scout?opp={{ cached.data.opponent_guild.id|urlencode }}">Открыть разведку</a></p>
+            {% endif %}
+            {% for side, zones in [("Своя гильдия", cached.data.own), ("Соперник", cached.data.opponent)] %}
+                {% if zones %}
+                    <div class="panel">
+                        <h3>{{ side }}</h3>
+                        <div class="table-scroll"><table class="data">
+                            <thead><tr><th>Зона</th><th>Выставлено / мест</th><th>Побеждено</th><th>Очки</th></tr></thead>
+                            <tbody>{% for z in zones %}<tr><td>{{ z.id }}</td>
+                                <td>{{ z.deployed if z.deployed is not none else "—" }} / {{ z.capacity if z.capacity is not none else "—" }}</td>
+                                <td>{{ z.defeated if z.defeated is not none else "—" }}</td>
+                                <td>{{ z.points if z.points is not none else "—" }}</td></tr>{% endfor %}</tbody>
+                        </table></div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        {% elif kind == "raid" and cached.data %}
+            {% for raid in cached.data.active %}
+                <div class="panel">
+                    <h2>{{ raid.id or "Текущий рейд" }}</h2>
+                    <p>До {{ clock(raid.end) }} МСК · очки гильдии {{ raid.points if raid.points is not none else "—" }}</p>
+                    {% if raid.players %}
+                        <table class="data"><thead><tr><th>Игрок</th><th>Очки</th><th>Попытки</th></tr></thead>
+                            <tbody>{% for player in raid.players %}<tr><td>{{ roster.get(player.id, (none, "Игрок вне ростера"))[1] }}</td>
+                                <td>{{ player.points if player.points is not none else "—" }}</td>
+                                <td>{{ player.attempts if player.attempts is not none else "—" }}</td></tr>{% endfor %}</tbody>
+                        </table>
+                    {% endif %}
+                </div>
+            {% else %}<p>Игра не вернула активный рейд.</p>{% endfor %}
+        {% elif cached %}
+            <p>Игра не вернула активную ВГ.</p>
+        {% elif not error %}
+            <p class="empty-state">Обновите данные, чтобы получить первый снимок.</p>
+        {% endif %}
+        {% if plan %}
+            <section class="panel" id="personal-preview">
+                <h2>Моя защита · {{ plan.name }}</h2>
+                <p class="muted">Проверка состава по сохранённому ростеру. Соответствие игровых зон плану и доступность юнитов для размещения ещё нужно проверить на активной ВГ.</p>
+                {% for entry in preview %}
+                    <h3>{{ entry.zone }} · {{ entry.squad }}</h3>
+                    <p>{{ entry.units|join(", ") or "Нет состава" }}</p>
+                    {% for datacron in entry.datacrons %}<p>{{ datacron }}</p>{% endfor %}
+                    {% for issue in entry.issues %}<p class="error">{{ issue }}</p>{% endfor %}
+                {% else %}<p>В этом плане у основного аккаунта нет назначений.</p>{% endfor %}
+            </section>
+        {% endif %}
+    </div>
+    <script src="/static/game_live.js" defer></script>
+{% endblock %}

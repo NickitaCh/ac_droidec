@@ -61,6 +61,8 @@ async def protect_plan(request: Request, user: dict = Depends(_require)):
 
 
 router = APIRouter(dependencies=[Depends(protect_plan)])
+# Shared guild library, independent of the TW plan navigation.
+squads_router = APIRouter(dependencies=[Depends(protect_plan)])
 
 
 def _with_reserves(plan, assignments, roster, library):
@@ -204,6 +206,7 @@ def _squad_view(squad: dict, roster: engine.Roster | None = None) -> dict:
 # Библиотека паков
 # =====================================================================
 @router.get("/squads", response_class=HTMLResponse)
+@squads_router.get("", response_class=HTMLResponse)
 async def squads_page(request: Request, user: dict = Depends(_require)):
     guild_id = user["guild_id"]
     squads = database.list_tw_def_squads(guild_id)
@@ -229,6 +232,7 @@ async def squads_page(request: Request, user: dict = Depends(_require)):
 
 
 @router.get("/squads/export")
+@squads_router.get("/export")
 async def squads_export(user: dict = Depends(_require)):
     payload = tw_def_library.export_library(user["guild_id"])
     return Response(json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json",
@@ -236,11 +240,13 @@ async def squads_export(user: dict = Depends(_require)):
 
 
 @router.get("/squads/import", response_class=HTMLResponse)
+@squads_router.get("/import", response_class=HTMLResponse)
 async def squads_import_page(request: Request, user: dict = Depends(_require)):
     return templates.TemplateResponse(request, "tw_def_import.html", {"user": user})
 
 
 @router.post("/squads/import", response_class=HTMLResponse)
+@squads_router.post("/import", response_class=HTMLResponse)
 async def squads_import(request: Request, library: UploadFile | None = File(None),
                         payload: str = Form(""), apply: str = Form(""), user: dict = Depends(_require)):
     context = {"user": user}
@@ -287,12 +293,14 @@ def _editor_context(user: dict, squad: dict, errors: list) -> dict:
 
 
 @router.get("/squads/new", response_class=HTMLResponse)
+@squads_router.get("/new", response_class=HTMLResponse)
 async def squad_new(request: Request, user: dict = Depends(_require)):
     _warm_stat_calc()
     return templates.TemplateResponse(request, "tw_def_squad_edit.html", _editor_context(user, _editor_payload(None), []))
 
 
 @router.get("/squads/{squad_id}/edit", response_class=HTMLResponse)
+@squads_router.get("/{squad_id}/edit", response_class=HTMLResponse)
 async def squad_edit(squad_id: int, request: Request, user: dict = Depends(_require)):
     _warm_stat_calc()
     squad = database.get_tw_def_squad(user["guild_id"], squad_id)
@@ -302,6 +310,7 @@ async def squad_edit(squad_id: int, request: Request, user: dict = Depends(_requ
 
 
 @router.post("/squads/save", response_class=HTMLResponse)
+@squads_router.post("/save", response_class=HTMLResponse)
 async def squad_save(
     request: Request,
     squad_id: str = Form(""),
@@ -345,23 +354,25 @@ async def squad_save(
         return templates.TemplateResponse(request, "tw_def_squad_edit.html", _editor_context(user, draft, errors),
                                           status_code=400)
     database.save_tw_def_squad(guild_id, sid, name, combat_type, slots, note.strip() or None, _who(user), dc)
-    return _redirect("/tw/def/squads", saved=name)
+    return _redirect("/squads", saved=name)
 
 
 @router.post("/squads/{squad_id}/copy", response_class=HTMLResponse)
+@squads_router.post("/{squad_id}/copy", response_class=HTMLResponse)
 async def squad_copy(squad_id: int, user: dict = Depends(_require)):
     squad = database.get_tw_def_squad(user["guild_id"], squad_id)
     if not squad:
         raise HTTPException(404, "Пак не найден.")
     new_id = database.save_tw_def_squad(user["guild_id"], None, f"{squad['name']} (копия)", squad["combat_type"],
                                         squad["slots"], squad.get("note"), _who(user), squad.get("datacron"))
-    return RedirectResponse(f"/tw/def/squads/{new_id}/edit", status_code=303)
+    return RedirectResponse(f"/squads/{new_id}/edit", status_code=303)
 
 
 @router.post("/squads/{squad_id}/delete", response_class=HTMLResponse)
+@squads_router.post("/{squad_id}/delete", response_class=HTMLResponse)
 async def squad_delete(squad_id: int, user: dict = Depends(_require)):
     database.delete_tw_def_squad(user["guild_id"], squad_id)
-    return _redirect("/tw/def/squads")
+    return _redirect("/squads")
 
 
 @router.get("/api/units", response_class=JSONResponse)
@@ -886,7 +897,8 @@ async def command_page(request: Request, user: dict = Depends(_require)):
     ctx = {"user": user, "guild_name": (database.get_guild_config(guild_id) or {}).get("name") or "Мы",
            "plans": plans, "plan": plan, "phases": work.PHASES,
            "error": request.query_params.get("error"), "message": request.query_params.get("message"),
-           "recent": guild_compare.load_recent_opponents(guild_id), "opponent_label": guild_compare.opponent_label}
+           "recent": guild_compare.load_recent_opponents(guild_id), "opponent_label": guild_compare.opponent_label,
+           "current_opponent": guild_compare.current_opponent(guild_id) if user.get("bot_profile") == "test" else None}
     if plan:
         ws = work.workspace(guild_id, plan["id"])
         assignments = database.get_tw_def_assignments(guild_id, plan["id"])

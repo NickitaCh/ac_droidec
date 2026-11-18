@@ -21,9 +21,11 @@ RESPONSE_SCHEMAS = {
 }
 
 
-async def run(raw, expected_id, *, is_current, modules=None, inventory_complete=False):
+async def run(raw, expected_id, *, is_current, modules=None, inventory_complete=False, territory_only=False):
     results = []
     for title, service, method, arguments in PROBES:
+        if territory_only and title not in ("ТБ", "ВГ"):
+            continue
         if not is_current():
             raise ga.AccountError("Подключение изменилось. Проверка остановлена.")
         rows = ga.fields(ga.read_request(raw, expected_id))

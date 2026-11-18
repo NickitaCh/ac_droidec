@@ -3,6 +3,7 @@
 Provider onboarding is deliberately separate: a site Google identity is not a
 game session. No login, refresh, linking, mod changes or automatic retries here.
 """
+import asyncio
 import base64
 import json
 import sqlite3
@@ -25,8 +26,35 @@ class AccountError(ValueError):
     pass
 
 
-class SessionExpired(AccountError):
+class ConnectionRequired(AccountError):
     pass
+
+
+class SessionExpired(ConnectionRequired):
+    pass
+
+
+LOGIN_WARNING = "Новый вход может завершить игру на вашем устройстве."
+
+
+def link_path(owner, guild_id, ally_code):
+    registrations = database.get_user_registrations(owner, guild_id=guild_id)
+    is_alt = any(str(code) == str(ally_code) and not main for code, _, main in registrations)
+    return f"/game-account/link?alt={int(is_alt)}"
+
+
+async def reconnect(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False):
+    from services import ea_connect, game_lab
+
+    authorize = require_account_read if optimizer_read else require_pilot
+    authorize(owner, guild_id, profile, tier)
+    code = select_account(owner, guild_id, ally_code=ally_code)
+    target = ea_connect.target_for_registration(owner, guild_id, code)
+    if not target:
+        raise ConnectionRequired("Подключите аккаунт через EA.")
+    if game_lab._row(target)["player_id"] != _identity(owner, guild_id, code):
+        raise ConnectionRequired("Подключите выбранный аккаунт через EA заново.")
+    await ea_connect.read(target, guild_id=guild_id)
 
 
 def require_pilot(owner, guild_id, profile, tier=None):
@@ -38,6 +66,22 @@ def require_pilot(owner, guild_id, profile, tier=None):
     from services import bot_profiles
     if bot_profiles.guild_profile(1) != "test":
         raise AccountError("Пилот доступен только в тестовой версии.")
+
+
+def require_account_read(owner, guild_id, profile, tier=None):
+    """Allow personal reads for members of guilds served by TEST."""
+    if guild_id == 1 and profile == "test":
+        try:
+            require_pilot(owner, guild_id, profile, tier)
+            return
+        except AccountError:
+            pass
+    access = guild_resolver.resolve_access(str(owner))
+    from services import bot_profiles
+    if (profile != 'test' or guild_id is None or access.get('guild_id') != guild_id
+            or access.get('tier') not in ('member', 'officer')
+            or tier not in (None, 'member', 'officer') or bot_profiles.guild_profile(guild_id) != 'test'):
+        raise AccountError('Подключение доступно участникам гильдий тестового бота.')
 
 
 @contextmanager
@@ -160,16 +204,21 @@ def _unzip(raw):
     return result
 
 
-async def read_initial(raw, expected_id, *, report=None):
+async def read_initial(raw, expected_id, *, report=None, supplies=None):
     body = read_request(raw, expected_id)
     response = await _read_payload(body, "PlayerRpc", "GetInitialData")
     payload = fields(response)
     if _one(payload, 1, 2) != expected_id.encode():
         raise AccountError("Игра вернула другой аккаунт. Данные не сохранены.")
     inventory = _one(payload, 5, 2)
-    if report is not None:
+    if report is not None or supplies is not None:
         from services.game_read_decode import decode
-        report.extend(decode(response, "initial"))
+        if report is not None:
+            report.extend(await asyncio.to_thread(decode, response, "initial"))
+        if supplies is not None:
+            # Give the player and store their own decode budget after the roster.
+            supply_payload = pack(row for row in payload if row[0] in (2, 18))
+            supplies.extend(await asyncio.to_thread(decode, supply_payload, "initial"))
     return {"read_at": int(time.time()), "inventory_bytes": len(inventory),
             "inventory_records": len(fields(inventory))}
 
@@ -195,7 +244,7 @@ async def _read_payload(body, service, method, *, allow_empty=False):
     envelope = fields(_unzip(b"".join(chunks)))
     code = _one(envelope, 5, 0)
     if code == 5:
-        raise SessionExpired("Игровая сессия завершилась. Нужно повторное подключение.")
+        raise SessionExpired("Войдите в игру заново.")
     if code != 1:
         raise AccountError(f"Игра отклонила чтение (код {code}).")
     if allow_empty and not any(n == 4 for n, _, _ in envelope):
@@ -287,7 +336,7 @@ async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None, report
         row = conn.execute("SELECT * FROM game_account_sessions WHERE owner=? AND guild_id=? AND ally_code=?",
                            (str(owner), guild_id, ally_code)).fetchone()
         if row is None:
-            raise AccountError("Игровой аккаунт ещё не подключён.")
+            raise ConnectionRequired("Подключите аккаунт через EA.")
         expected = _identity(owner, guild_id, row["ally_code"])
         # Atomic lease works across bot/web processes and also limits failures.
         changed = conn.execute("UPDATE game_account_sessions SET last_attempt=? WHERE owner=? "
@@ -306,7 +355,7 @@ async def refresh(owner, guild_id, profile, tier=None, *, ally_code=None, report
                          "AND ally_code=? AND secret=?", (str(owner), guild_id, ally_code, row["secret"]))
         raise
     except Exception:
-        raise AccountError("Не удалось открыть игровую сессию. Требуется повторное подключение.") from None
+        raise ConnectionRequired("Подключите аккаунт через EA заново.") from None
     with _db() as conn:
         conn.execute("UPDATE game_account_sessions SET summary=?, state='connected' "
                      "WHERE owner=? AND guild_id=? AND ally_code=? AND secret=?",

@@ -1,0 +1,44 @@
+.mo-workspace{max-width:1480px;margin:0 auto}
+.mo-section-nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
+.mo-section-nav a{padding:8px 14px;border:1px solid var(--border);border-radius:999px;text-decoration:none}
+.mo-workspace .panel{scroll-margin-top:20px}
+.mo-workspace #mo-run{display:grid;gap:14px}
+.mo-workspace #mo-run,.mo-workspace #mo-run>*{min-width:0;max-width:100%;box-sizing:border-box}
+.mo-workspace select,.mo-workspace input:not([type=checkbox]):not([type=radio]){max-width:100%;box-sizing:border-box}
+.mo-workspace #mo-run>label select{width:100%}
+.mo-workspace #mo-run>p{margin:0}
+.mo-workspace fieldset{border:1px solid var(--border);border-radius:12px;padding:16px}
+.mo-workspace .mo-options{gap:8px}
+.mo-workspace .mo-options label{padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin:0}
+.mo-workspace .mo-options label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.mo-recalculate{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 20px;margin:20px 0;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.mo-recalculate p{margin:4px 0 0}.mo-recalculate button{flex-shrink:0}
+.mo-character-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.mo-character-heading img{border-radius:50%;object-fit:cover;flex-shrink:0}
+.mo-character-heading>div{min-width:0;flex:1}.mo-character-heading h3{margin:0;overflow-wrap:anywhere}
+.mo-character-heading .badge{flex-shrink:0}
+.mo-stat-control{display:grid;gap:8px;margin-top:10px;min-width:160px;max-width:320px}
+.mo-stat-control input[type=range]{width:100%;min-width:0;margin:0;padding:0;height:28px;accent-color:var(--accent);cursor:pointer;border:0;box-shadow:none;background:transparent}
+.mo-stat-value{display:flex;gap:6px;align-items:center}.mo-stat-value input[type=number]{min-width:0;width:100%;margin:0;box-sizing:border-box}
+.mo-stat-value button{flex-shrink:0;min-width:40px;padding:8px;margin:0}
+.mo-stat-control[data-changed=true]{border-left:3px solid var(--accent);padding-left:8px}
+@media(max-width:700px){.mo-recalculate{flex-direction:column;align-items:stretch;padding:14px}.mo-recalculate button{width:100%;white-space:normal}.mo-stat-control{min-width:0;width:100%;max-width:none}.mo-character-heading{flex-wrap:wrap}.mo-character-heading .badge{margin-left:auto}.mo-workspace fieldset{padding:12px}}
+@media(max-width:700px){.mo-character td:has([data-mo-stat]){display:block!important;text-align:left!important}.mo-character td:has([data-mo-stat])::before{display:none!important}}
+
+.mo-workspace .page-hero{padding:16px 20px;margin-bottom:12px}
+.mo-workspace .page-hero-lead,.mo-workspace .page-hero-eyebrow{display:none}
+.mo-workspace .panel{padding:16px;margin-bottom:12px}
+.mo-settings-fold>summary,#mo-presets>details>summary,.mo-donors>summary{font-weight:600;cursor:pointer}
+.mo-settings-fold[open]>summary,#mo-presets>details[open]>summary{margin-bottom:14px}
+.mo-recalculate{position:sticky;top:8px;z-index:20;flex-wrap:wrap;padding:10px 14px;gap:8px 16px;box-shadow:0 3px 12px #0002}
+.mo-character-picker{flex:1;min-width:0}.mo-character-picker label{margin:0 0 4px;font-size:.85rem}
+.mo-character-picker input[type=search]{width:100%;margin:0 0 6px}
+.mo-picker-row{display:flex;gap:6px;align-items:center}.mo-picker-row select{flex:1;min-width:0;width:100%;margin:0}
+.mo-picker-row button{margin:0;padding:6px 12px}.mo-recalculate>[data-mo-goals-changed]{flex-basis:100%;order:3;font-size:.85rem}
+.mo-workspace [hidden]{display:none!important}
+.mo-character-heading{margin-bottom:8px;gap:8px}.mo-character-heading img{width:36px;height:36px}
+.mo-character p{margin:8px 0}.mo-character table td,.mo-character table th{padding:8px}
+.mo-stat-control{gap:3px;margin-top:4px;min-width:120px;max-width:260px}
+.mo-stat-value input[type=number]{padding:5px 8px}.mo-stat-value button{padding:5px;min-width:32px}
+@media(max-width:56em){.mo-recalculate{top:58px}}
+@media(max-width:700px){.mo-recalculate{flex-direction:row;align-items:center}.mo-character-picker{flex-basis:100%}.mo-picker-row button{width:auto}.mo-recalculate>button{padding:8px}.mo-character table td{padding:6px 8px}}

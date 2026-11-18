@@ -3,19 +3,48 @@
 Обе стороны считаются одной и той же сводкой /профиль (services/player_profile.py):
 своя — по кэшам ежечасного синка, соперник — свежими get_player по каждому участнику.
 
-Текущего соперника по ВГ игра без входа в аккаунт не показывает (territoryWarStatus
-пуст), поэтому соперник — по коду союзника любого его участника или из прошлых ВГ:
+Текущий соперник берётся из авторизованного снимка ВГ. Без снимка можно использовать
+код союзника любого его участника или выбрать соперника из прошлых ВГ:
 guild.recentTerritoryWarResult[].opponentGuildProfile (проверено вживую 2026-10-20),
 их запоминает cogs/raids.py в том же цикле, что и рейды (тот же ответ get_guild)."""
 
 import json
 from datetime import datetime
+import time
 from zoneinfo import ZoneInfo
 
 import database
 
 MSK = ZoneInfo("Europe/Moscow")
 STATE_OPPONENTS = "tw_recent_opponents"
+STATE_CURRENT_OPPONENT = "tw_current_opponent"
+
+
+def save_current_opponent(guild_id: int, home: dict, opponent: dict, event_id: str, end: float) -> None:
+    expected = (database.get_guild_config(guild_id) or {}).get("swgoh_guild_id")
+    if not expected or home.get("id") != expected or opponent.get("id") in (None, "", expected):
+        return
+    if event_id and end > time.time():
+        database.set_bot_state(STATE_CURRENT_OPPONENT, json.dumps({
+            "id": opponent["id"], "name": opponent.get("name") or opponent["id"],
+            "event_id": event_id, "home_id": expected, "end": end,
+        }, ensure_ascii=False), guild_id=guild_id)
+
+
+def current_opponent(guild_id: int) -> dict | None:
+    raw = database.get_bot_state(STATE_CURRENT_OPPONENT, guild_id=guild_id)
+    if not raw:
+        return None
+    try:
+        row = json.loads(raw)
+    except ValueError:
+        return None
+    expected = (database.get_guild_config(guild_id) or {}).get("swgoh_guild_id")
+    if expected and isinstance(row, dict) and row.get("home_id") == expected and row.get("id"):
+        end = row.get("end")
+        if isinstance(end, (int, float)) and end > time.time():
+            return row
+    return None
 
 
 def recent_opponents(resp: dict) -> list[dict]:

@@ -5,7 +5,7 @@ import time
 
 import database
 
-KEY = "shared_datacron_catalog_v1"
+KEY = "shared_datacron_catalog_v3"
 TTL = 12 * 60 * 60
 
 

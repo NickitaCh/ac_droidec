@@ -34,15 +34,20 @@ def _selected_plates(guild_id: int) -> list[str]:
 @router.get("", response_class=HTMLResponse)
 async def scout_page(request: Request, opp: str = "", user: dict = Depends(_require)):
     guild_id = user["guild_id"]
-    plan_id = request.query_params.get("plan") or database.get_bot_state("tw_active_plan", guild_id=guild_id)
+    explicit_plan = request.query_params.get("plan")
+    plan_id = explicit_plan or database.get_bot_state("tw_active_plan", guild_id=guild_id)
     plan = database.get_tw_def_plan(guild_id, int(plan_id)) if str(plan_id).isdigit() else None
     ws = tw_workspace.workspace(guild_id, plan["id"]) if plan else None
-    if not opp and ws:
-        opp = ws["opponent"]
+    current = guild_compare.current_opponent(guild_id) if user.get("bot_profile") == "test" else None
+    if not opp:
+        saved_opponent = (ws or {}).get("opponent")
+        opp = current["id"] if current and not explicit_plan else (saved_opponent or "")
+        if plan and saved_opponent and saved_opponent != opp:
+            plan, ws = None, None
     opp = opp.strip()
     all_plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     selected = [p for p in _selected_plates(guild_id) if p in all_plates]
-    ctx = {"user": user, "opp": opp, "recent": guild_compare.load_recent_opponents(guild_id),
+    ctx = {"user": user, "opp": opp, "recent": guild_compare.load_recent_opponents(guild_id), "current": current,
            "label": guild_compare.opponent_label, "plates": all_plates, "selected_plates": selected,
            "plate_sizes": {p: len(database.get_stat_requirement_characters(p, guild_id=guild_id)) for p in all_plates},
            "report": None, "progress": None, "error": request.query_params.get("error"), "lookup": None,

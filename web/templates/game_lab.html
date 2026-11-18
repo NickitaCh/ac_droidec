@@ -98,6 +98,7 @@
         </div>
         <form method="post" action="/admin/game-lab/read">
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ account.id }}">
+            {% if account.ea_linked %}<p>Если понадобится новый вход, игра на вашем устройстве может завершиться.</p>{% endif %}
             <button class="btn btn-primary" type="submit" {% if account.state == 'unconnected' %}disabled{% endif %}>Прочитать данные {{ account.name }}</button>
         </form>
     </section>
@@ -141,6 +142,7 @@
                     <input type="hidden" name="flow_id" value="{{ ea_pending.id }}">
                     <label for="ea-code">Код из последнего письма EA</label>
                     <input id="ea-code" name="one_time_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required autofocus>
+                    <p>Новый вход может завершить игру на вашем устройстве.</p>
                     <button class="btn btn-primary" type="submit">Подтвердить и подключить</button>
                     <p class="lab-muted">Код действует ограниченное время. Для повторной отправки начните вход ниже.</p>
                 </form>

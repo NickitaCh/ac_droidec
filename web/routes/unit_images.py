@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse, RedirectResponse
 
 import database
+from services import equipment_icons
 
 router = APIRouter()
 
@@ -20,6 +21,7 @@ CDN_URL = "https://game-assets.swgoh.gg/textures/{name}.png"
 FALLBACK_URL = "/static/img/game/portrait-fallback.svg"
 _BASE_ID_RE = re.compile(r"^[A-Z0-9_]{1,64}$")
 _TEXTURE_RE = re.compile(r"^tex\.[A-Za-z0-9_-]{1,80}$")  # бывают дефис (tex.charui_ig-90) и заглавные
+_DATACRON_RESOURCE_RE = re.compile(r"tex\.icon_datacrons_(?:currency|upgrade_[a-z0-9_]{1,40})")
 _CACHE_HEADERS = {"Cache-Control": "public, max-age=604800"}
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -39,26 +41,24 @@ async def _download(name: str, dest: Path) -> bool:
     return True
 
 
-EQUIP_CACHE_DIR = Path("cache/equip_img")
-_EQUIP_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
-
-
 @router.get("/equip-img/{base_id}")
 async def equipment_image(base_id: str):
-    """Иконка детали снаряжения/материала реликвии по game_equipment.icon_key — тот же
-    принцип, что у портретов: скачать с CDN один раз и отдавать из кэша."""
-    if not _EQUIP_ID_RE.match(base_id):
+    path = await asyncio.to_thread(equipment_icons.path_for, base_id)
+    if path is None:
         return RedirectResponse(FALLBACK_URL)
-    path = EQUIP_CACHE_DIR / f"{base_id}.png"
-    if path.exists():
-        return FileResponse(path, media_type="image/png", headers=_CACHE_HEADERS)
-    name = await asyncio.to_thread(database.get_equipment_icon, base_id)
-    if not name or not _TEXTURE_RE.match(name):
+    return FileResponse(path, media_type="image/png", headers=_CACHE_HEADERS)
+
+
+@router.get("/datacron-resource-img/{name}")
+async def datacron_resource_image(name: str):
+    if not _DATACRON_RESOURCE_RE.fullmatch(name):
         return RedirectResponse(FALLBACK_URL)
-    lock = _locks.setdefault(f"equip:{base_id}", asyncio.Lock())
-    async with lock:
-        if not path.exists() and not await _download(name, path):
-            return RedirectResponse(FALLBACK_URL)
+    path = CACHE_DIR / "datacron_resources" / f"{name}.png"
+    if not path.exists():
+        lock = _locks.setdefault(name, asyncio.Lock())
+        async with lock:
+            if not path.exists() and not await _download(name, path):
+                return RedirectResponse(FALLBACK_URL)
     return FileResponse(path, media_type="image/png", headers=_CACHE_HEADERS)
 
 

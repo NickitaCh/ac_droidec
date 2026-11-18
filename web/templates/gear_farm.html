@@ -7,7 +7,7 @@
         <div class="page-hero-top">
             <div>
                 <p class="page-hero-eyebrow">Прокачка</p>
-                <h1>Фарм деталей{% call ui.help(side="left") %}Картинка от бота C3PO (<code>inventory unit</code>) со списком недостающих деталей → на каких битвах их фармить. Список распознаёт ИИ, места фарма — из игровых данных.{% endcall %}</h1>
+                <h1>Фарм деталей{% call ui.help(side="left") %}Калькулятор учитывает запасы подключённого игрового аккаунта и показывает, каких деталей и материалов не хватает до выбранной цели.{% endcall %}</h1>
             </div>
         </div>
     </section>
@@ -16,6 +16,111 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
+    {% if inventory_link %}<p class="error" role="alert">Для расчёта по запасам требуется привязка EA.</p><p><a class="btn btn-primary" href="/me#ea-connection">Привязать EA в профиле</a></p>{% endif %}
+    {% if inventory_csrf %}
+        <div class="panel">
+            <div class="panel-title"><span>По запасам игрового аккаунта</span></div>
+            {% if inventory_retry %}
+            <form method="post" action="{{ inventory_retry.path }}">
+                <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                {% for name, value in inventory_retry.fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+                {% with connection_action=inventory_retry.connection_action, login_warning=inventory_retry.login_warning, link_path=inventory_retry.link_path %}
+                    {% include "_game_connection.html" %}
+                {% endwith %}
+            </form>
+            {% endif %}
+            <form method="post" action="/farm/inventory" class="filter-row">
+                <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                <div>Персонаж
+                    <div class="unit-search" data-live-search data-required="true" data-url="/me/api/units" data-value-field="base_id" data-label-field="name">
+                        <input type="text" class="unit-search-input" aria-label="Персонаж" placeholder="Начните вводить имя…" autocomplete="off" required>
+                        <input type="hidden" name="base_id" class="unit-search-value">
+                        <div class="unit-search-results"></div>
+                    </div>
+                </div>
+                <label>Цель
+                    <select name="kind"><option value="gear">Снаряжение</option><option value="relic">Реликвия</option></select>
+                </label>
+                <label>Уровень <input type="number" name="target" min="1" max="13" value="13" required></label>
+                <details>
+                    <summary>Добавить вторую цель</summary>
+                    <div class="filter-row">
+                        <div>Персонаж
+                            <div class="unit-search" data-live-search data-required="false" data-url="/me/api/units" data-value-field="base_id" data-label-field="name">
+                                <input type="text" class="unit-search-input" aria-label="Второй персонаж" placeholder="Начните вводить имя…" autocomplete="off">
+                                <input type="hidden" name="extra_base_id" class="unit-search-value">
+                                <div class="unit-search-results"></div>
+                            </div>
+                        </div>
+                        <label>Цель
+                            <select name="extra_kind"><option value="gear">Снаряжение</option><option value="relic">Реликвия</option></select>
+                        </label>
+                        <label>Уровень <input type="number" name="extra_target" min="1" max="13" value="13"></label>
+                    </div>
+                </details>
+                <button type="submit">Рассчитать по запасам</button>
+            </form>
+            {% if guide_options %}
+                <form method="post" action="/farm/guide" class="filter-row">
+                    <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                    <label>Цель из «Руководства»
+                        <select name="guide_id" required><option value="">Выберите цель</option>
+                            {% for option in guide_options %}<option value="{{ option.base_id }}">{{ option.name }}{% if option.entry %} · условия входа{% endif %}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit">Рассчитать по «Руководству»</button>
+                </form>
+            {% endif %}
+            {% if inventory_error %}<p class="error">{{ inventory_error }}</p>{% endif %}
+            {% if inventory_result %}
+                <h2>{{ inventory_result.guide or inventory_result.goals|join(" · ") }}</h2>
+                {% if inventory_result.guide and inventory_result.goals %}
+                    <details><summary>Целевые уровни персонажей</summary>
+                        <ul>{% for goal in inventory_result.goals %}<li>{{ goal }}</li>{% endfor %}</ul>
+                    </details>
+                {% endif %}
+                {% if inventory_result.energy %}
+                    <p class="muted">{% for energy in inventory_result.energy if 'Сейчас' in energy %}{{ energy.get("Тип энергии", "Энергия") }} {{ energy["Сейчас"] }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+                {% endif %}
+                {% if inventory_result.goals %}
+                {% for key, title in [('gear', 'Снаряжение'), ('relic', 'Материалы реликвий')] if key == 'gear' or inventory_result.show_relic %}
+                    <h3>{{ title }}</h3>
+                    {% if inventory_result.sections[key] %}
+                        <div class="table-scroll"><table class="data">
+                            <thead><tr><th>Предмет</th><th>Есть / нужно</th><th>Не хватает</th><th>Источник</th></tr></thead>
+                            <tbody>
+                            {% for name, needed, stock, missing, craft, locations, item in inventory_result.sections[key] %}
+                                <tr><td><img class="equip-icon" src="/equip-img/{{ item }}?v=2" alt="" loading="lazy" width="32" height="32">{{ name }}</td><td>{{ stock }} / {{ needed }}</td><td>{{ missing or craft }}</td>
+                                    <td>{% if craft %}Изготовление{% else %}{{ locations|join(', ') or 'Нет данных' }}{% endif %}</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table></div>
+                    {% else %}
+                        <p>По рассчитанным целям всё есть.</p>
+                    {% endif %}
+                {% endfor %}
+                {% else %}<p>Для доступных требований расчёт снаряжения и реликвий не нужен.</p>{% endif %}
+                {% if inventory_result.blockers %}
+                    <h3>Другие требования</h3>
+                    <ul>{% for blocker in inventory_result.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>
+                {% endif %}
+                {% if inventory_result.offers %}
+                    <h3>В текущих поставках</h3>
+                    <div class="table-scroll"><table class="data">
+                        <thead><tr><th>Предмет</th><th>Количество</th><th>Цена</th><th>Магазин</th></tr></thead>
+                        <tbody>{% for offer in inventory_result.offers %}<tr>
+                            <td>{{ offer.item.get("Название", "—") }}</td><td>{{ offer.item.get("Количество", "—") }}</td>
+                            <td>{{ offer.price.get("Количество", "—") }} {{ offer.price.get("Название", "") }}</td><td>{{ offer.store or "—" }}</td>
+                        </tr>{% endfor %}</tbody>
+                    </table></div>
+                {% endif %}
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="panel"><p>Для расчёта фарма по запасам <a href="/me#ea-connection">привяжите EA в профиле</a> основного аккаунта.</p></div>
+    {% endif %}
+
+    {% if image_farm_allowed and user.is_super_admin %}
     <div class="panel" style="max-width: 40em;">
         <div class="panel-title"><span>Картинка C3PO</span></div>
         <form method="post" action="/farm" enctype="multipart/form-data">
@@ -37,12 +142,13 @@
             <div class="panel-title"><span>Результат</span></div>
             {% if job.state == "running" %}
                 <p class="badge badge-neutral">⏳ Распознаю картинку…</p>
-                <script>setTimeout(() => location.reload(), 6000);</script>
+                {% if request.method == "GET" %}<script>setTimeout(() => location.reload(), 6000);</script>{% endif %}
             {% elif job.state == "error" %}
                 <p class="badge badge-danger" style="white-space: normal;">❌ {{ result_html }}</p>
             {% else %}
                 <p class="farm-result">{{ result_html }}</p>
             {% endif %}
         </div>
+    {% endif %}
     {% endif %}
 {% endblock %}

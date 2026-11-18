@@ -3,6 +3,7 @@ import json
 
 import database
 import tw_def_engine as engine
+from services import hotutils_squads
 
 MAX_BYTES = 1024 * 1024
 MAX_SQUADS = 200
@@ -27,6 +28,8 @@ def preview(raw: str, guild_id: int) -> list[dict]:
     squads = data.get("squads")
     if not isinstance(squads, list) or not 1 <= len(squads) <= MAX_SQUADS:
         raise ValueError("В библиотеке должно быть от 1 до 200 паков.")
+    if data.get('format') == 'hotutils-squads':
+        squads = [hotutils_squads.convert(s) for s in squads]
     existing = {s["name"].casefold() for s in database.list_tw_def_squads(guild_id)}
     result, seen = [], set()
     for i, squad in enumerate(squads):
@@ -51,7 +54,7 @@ def preview(raw: str, guild_id: int) -> list[dict]:
         seen.add(name.casefold())
         result.append({"index": i, "name": name, "combat_type": kind, "slots": normalized,
                        "note": str(squad.get("note") or "")[:4000], "exists": name.casefold() in existing,
-                       "slot_labels": labels})
+                       "slot_labels": labels, "source": squad.get('source')})
     return result
 
 
@@ -74,6 +77,8 @@ def import_selected(raw: str, guild_id: int, selected: set[int], user: str) -> i
                     (guild_id, s["name"], s["combat_type"], json.dumps(s["slots"], ensure_ascii=False),
                      s["note"], user, user))
                 count += 1
+                if s.get('source'):
+                    hotutils_squads.save_source(cursor, guild_id, cursor.lastrowid, s['source'])
         return count
     finally:
         conn.close()

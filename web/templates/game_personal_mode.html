@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} из игры — AC Droidec{% endblock %}
+{% block content %}
+<div class="page-hero">
+    <h1>{{ title }}</h1>
+    <a class="hero-link" href="/player/{{ ally_code }}">Мой профиль</a>
+</div>
+<section class="card">
+    <nav aria-label="Личные режимы">
+        {% for key, label in modes.items() %}
+        <a class="btn" href="/game-account/personal/{{ key }}?ally_code={{ ally_code }}"{% if key == mode %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+        {% if mode == "conquest" %}<a class="btn" href="/conquest">Калькулятор Завоевания</a>{% endif %}
+    </nav>
+    <form action="/game-account/personal/{{ mode }}" method="post">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="ally_code" value="{{ ally_code }}">
+        {% if connection_action %}{% include "_game_connection.html" %}
+        {% else %}<button type="submit" class="btn btn-primary">Обновить из игры</button>{% endif %}
+    </form>
+    {% if error %}<p class="error" role="status">{{ error }}</p>{% endif %}
+    {% if loaded and snapshot is none %}<p role="status">Игра не вернула активное событие для этого аккаунта.</p>{% endif %}
+</section>
+
+{% if snapshot and mode == "arena" %}
+<section class="card">
+    <h2>Участие</h2>
+    <p>{{ "Вы участвуете в событии" if snapshot.joined else "Вы не записаны на событие" }}</p>
+    <dl>
+        {% if snapshot.rating is not none %}<dt>Рейтинг</dt><dd>{{ snapshot.rating }}</dd>{% endif %}
+        {% if snapshot.league is not none %}<dt>Лига</dt><dd>{{ snapshot.league }}</dd>{% endif %}
+        {% if snapshot.division is not none %}<dt>Дивизион</dt><dd>{{ snapshot.division }}</dd>{% endif %}
+        {% if snapshot.match_end %}<dt>Конец текущего матча</dt><dd>{{ snapshot.match_end }}</dd>{% endif %}
+    </dl>
+</section>
+{% set current = snapshot.matches|selectattr('current')|first|default(none) %}
+{% if current %}
+<section class="card">
+    <h2>Расстановка текущего матча</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%, 20rem),1fr));gap:1rem">
+        {% for label, zones in (("Моя защита", current.home), ("Зоны атаки", current.away)) %}
+        <div>
+            <h3>{{ label }}</h3>
+            {% for zone in zones %}
+            <section class="panel">
+                <h4>Зона {{ loop.index }}</h4>
+                <p>Выставлено {{ zone.placed }}{% if zone.capacity is not none %} из {{ zone.capacity }}{% endif %}
+                    {% if zone.defeated is not none %} · побеждено {{ zone.defeated }}{% endif %}</p>
+                {% if zone.teams %}
+                <ol>
+                    {% for team in zone.teams %}
+                        <li>
+                        {% for unit in team.units %}
+                        <span title="{{ team.names[loop.index0] }}"><img src="/unit-img/{{ unit|urlencode }}" width="36" height="36" loading="lazy" alt="{{ team.names[loop.index0] }}"></span>
+                        {% endfor %}
+                        {{ team.names|join(" · ") if team.names else "Состав скрыт игрой" }}
+                        {% if team.defends %}<span class="muted"> · удержано атак: {{ team.defends }}</span>{% endif %}</li>
+                    {% endfor %}
+                </ol>
+                {% else %}
+                <p>{{ "Игра не передала составы" if zone.placed or label == "Зоны атаки" else "Пусто" }}</p>
+                {% endif %}
+            </section>
+            {% else %}
+            <p>Игра пока не раскрыла эти зоны.</p>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% if snapshot.matches %}
+<section class="card">
+    <h2>Матчи</h2>
+    <table>
+        <thead><tr><th scope="col">Матч</th><th scope="col">Соперник</th><th scope="col">Раунд</th><th scope="col">Конец раунда</th></tr></thead>
+        <tbody>
+        {% for match in snapshot.matches %}
+        <tr><td>{{ match.number if match.number is not none else "—" }}{% if match.current %} · текущий{% endif %}</td><td>{{ match.opponent or "—" }}</td>
+            <td>{{ match.round if match.round is not none else "—" }}</td><td>{{ match.round_end or "—" }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% elif snapshot and mode == "conquest" %}
+<section class="card">
+    <h2>Состояние Завоевания</h2>
+    <dl>
+        {% if snapshot.difficulty is not none %}<dt>Сложность</dt><dd>{{ snapshot.difficulty }}</dd>{% endif %}
+        {% if "Сейчас" in snapshot.energy %}<dt>Энергия</dt><dd>{{ snapshot.energy["Сейчас"] }}</dd>{% endif %}
+        {% if "Следующая единица через" in snapshot.energy %}<dt>До следующей единицы энергии</dt><dd>{{ snapshot.energy["Следующая единица через"] }}</dd>{% endif %}
+        <dt>Диски</dt><dd>{{ snapshot.equipped_disks }} установлено · {{ snapshot.available_disks }} свободно</dd>
+        <dt>Пропуск</dt><dd>{{ "Активен" if snapshot.pass_active else "Не активен" }}</dd>
+    </dl>
+</section>
+{% if snapshot.sectors %}
+<section class="card">
+    <h2>Прогресс по секторам</h2>
+    <table>
+        <thead><tr><th scope="col">Сектор</th><th scope="col">Узлы с прогрессом</th><th scope="col">Узлы в ответе</th></tr></thead>
+        <tbody>
+        {% for sector in snapshot.sectors %}<tr><td>{{ sector.id }}</td><td>{{ sector.completed }}</td><td>{{ sector.nodes }}</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% if snapshot.stamina %}
+<section class="card">
+    <h2>Выносливость</h2>
+    <table>
+        <thead><tr><th scope="col">Персонаж</th><th scope="col">Остаток</th></tr></thead>
+        <tbody>
+        {% for unit in snapshot.stamina %}<tr><td>{{ unit.name }}</td><td>{{ unit.value }}</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

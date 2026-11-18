@@ -99,6 +99,7 @@ TARGET_LABEL_OVERRIDES = {
     "lightside": "ForceAlignment_Light",
     "darthmaul": "UNIT_MAUL_NAME",
     "generalgrievous": "UNIT_GRIEVOUS_NAME",
+    "generalveers": "UNIT_VEERS_GENERAL_NAME",
     "t3-m4": "UNIT_T3_M4_NAME",
     "ahsokatano_snips": "UNIT_AHSOKATANO_NAME_V2",
 }
@@ -420,6 +421,28 @@ def refresh_catalog_shorts(catalog):
     return catalog
 
 
+def _focused_effects(template, affix_sets, loc_kv, desc_keys, rule_categories):
+    effects = {}
+    for tier in template.get("tier", []):
+        for affix_set_id in tier.get("affixTemplateSetId", []):
+            for affix in affix_sets.get(affix_set_id, {}).get("affix", []):
+                ability_id = affix.get("abilityId")
+                if not ability_id:
+                    continue
+                desc = _resolve_ability_desc(ability_id, loc_kv, desc_keys)
+                if not desc:
+                    continue
+                text = _clean_ability_text(desc)
+                if "{0}" in text:
+                    target_key = (affix.get("targetRule") or "").removeprefix("target_datacron_")
+                    target = _resolve_target_label(target_key, loc_kv, rule_categories)
+                    if not target or target == target_key:
+                        continue
+                    text = _fill_target(text, target)
+                effects.setdefault(str(tier["id"]), {})[ability_id] = text
+    return effects
+
+
 async def _fetch_datacron_cache(comlink) -> dict:
     from services import shared_datacron_catalog
     shared = await asyncio.to_thread(shared_datacron_catalog.load)
@@ -460,6 +483,7 @@ async def _refresh_datacron_cache(comlink) -> dict:
             # ability_id -> {"level", "full" (полный текст с "{0}"), "branches"}.
             "abilities": {},
             "focused": {},  # character_key -> (label, max_tier)
+            "focused_effects": {},  # template ID -> level -> ability ID -> localized text
         }
 
     for template in game_data.get("datacronTemplate", []):
@@ -469,6 +493,9 @@ async def _refresh_datacron_cache(comlink) -> dict:
 
         if template.get("focused"):
             tid = str(template.get("id", ""))
+            seasons[set_id]["focused_effects"][tid] = _focused_effects(
+                template, affix_sets, loc_kv, desc_keys, rule_categories,
+            )
             if tid.endswith("_upgraded"):
                 # Дублирующее определение того же фокусного ДК — не встречается
                 # в реальных данных игроков (templateId там всегда без суффикса).
@@ -523,6 +550,7 @@ async def _refresh_datacron_cache(comlink) -> dict:
             "display_name": data["display_name"],
             "entries": data["entries"],
             "abilities": data["abilities"],
+            "focused_effects": data["focused_effects"],
         }
         result_seasons[set_id]["focused"] = sorted(
             [(char_key, label, max_tier) for char_key, (label, max_tier) in data["focused"].items()],

@@ -42,8 +42,21 @@ class PersonalRaidReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.db.stop()
         self.tmp.cleanup()
 
-    async def run_command(self, relic=7, raid="order66", team=None, alt=False, guild=False):
-        await RaidsCog.raid_readiness.callback(self.cog, self.inter, relic, raid, team, alt, guild)
+    async def run_command(self, relic=7, raid="order66", team=None, alt=False, guild=False, member=None, code=None):
+        await RaidsCog.raid_readiness.callback(self.cog, self.inter, relic, raid, team, alt, guild, member, code)
+
+    async def test_foreign_roster_is_read_only_for_officer(self):
+        other = '987654321'
+        with patch.object(guild_resolver, 'resolve_guild_id', return_value=1), \
+             patch.object(guild_resolver, 'is_officer_for_resolved_guild', return_value=False):
+            await self.run_command(code=other)
+        self.cards._card_players.assert_not_awaited()
+        self.inter.followup.send.assert_awaited()
+        with patch.object(guild_resolver, 'resolve_guild_id', return_value=1), \
+             patch.object(guild_resolver, 'is_officer_for_resolved_guild', return_value=True), \
+             patch.object(guild_units_image, 'render_player', return_value=b'png'):
+            await self.run_command(code=other)
+        self.cards._card_players.assert_awaited_once_with([other], 1, False)
 
     def test_personal_statuses_respect_stars_relic_offset_and_missing_units(self):
         plan = raids.readiness_requirements("order66", 7)

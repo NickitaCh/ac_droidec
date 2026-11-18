@@ -72,6 +72,14 @@
                     <span class="muted">{{ "основной" if is_main else "альт" }}</span>{% if not loop.last %} · {% endif %}
                 {% endfor %}
             </p>
+            {% if user.bot_profile == 'test' and user.guild_id %}
+            <div id="ea-connection">
+                {% for code, name, is_main in own_accounts if code == card.ally_code %}
+                <a class="link-btn" href="/game-account/link?alt={{ 0 if is_main else 1 }}">Привязать EA</a>
+                {% endfor %}
+                <span class="muted">— для функций, которым нужен вход в игру</span>
+            </div>
+            {% endif %}
             {% if alt_added %}<p class="badge badge-ok">✅ Альт «{{ alt_added }}» привязан.</p>{% endif %}
             {% if alt_error %}<p class="error">{{ alt_error }}</p>{% endif %}
             <details>
@@ -290,7 +298,7 @@
                             <div class="stat-problem-char-title">{{ title }}</div>
                             <ul class="equip-list">
                                 {% for it in items %}
-                                    <li><img class="equip-icon" src="/equip-img/{{ it.id }}" alt="" loading="lazy" width="32" height="32"><span>{{ it.name }}</span><span class="equip-qty">× {{ it.qty }}</span></li>
+                                    <li><img class="equip-icon" src="/equip-img/{{ it.id }}?v=2" alt="" loading="lazy" width="32" height="32"><span>{{ it.name }}</span><span class="equip-qty">× {{ it.qty }}</span></li>
                                 {% endfor %}
                             </ul>
                         </div>
@@ -674,44 +682,10 @@
                 <button type="submit">Проверить</button>
             </form>
 
-            {% if stats_result and stats_result.loading %}
-                <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — попробуйте через минуту.</p>
-            {% elif stats_result is not none %}
-                {% if not stats_result.results %}
-                    <p class="empty-state">В плейте «{{ selected_plate }}» нет сохранённых требований ни для одного персонажа.</p>
-                {% else %}
-                    <div class="panel">
-                        <div class="panel-title"><span>⚠️ Итог: обязательные статы (с пересчётом на текущий релик)</span></div>
-                        {% if not stats_result.failed_required %}
-                            <p class="empty-state">✅ Все обязательные статы в норме.</p>
-                        {% else %}
-                            <div class="table-scroll">
-                                <table class="data">
-                                    <thead><tr><th>Персонаж</th><th>Стат</th><th>Сейчас</th><th>Нужно</th></tr></thead>
-                                    <tbody>
-                                        {% for item in stats_result.failed_required %}
-                                            <tr>
-                                                <td>{{ item.char_name }}</td>
-                                                <td>{{ item.stat }}</td>
-                                                <td>{{ item.current }}</td>
-                                                <td>{{ item.requirement }}</td>
-                                            </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% endif %}
-                    </div>
-                    {% for r in stats_result.results %}
-                        <div class="panel">
-                            <div class="panel-title">
-                                <span>{{ r.char_name }}</span>
-                                <span class="panel-hint">{{ r.matched }}/{{ r.total }}{% if r.updated_at %} · данные: {{ r.updated_at }}{% endif %}</span>
-                            </div>
-                            <pre style="white-space: pre; overflow-x: auto; font-family: monospace; margin: 0;">{{ r.block }}</pre>
-                        </div>
-                    {% endfor %}
-                {% endif %}
+            {% if stats_deferred %}
+            <div id="player-card-stats" data-url="/player/{{ card.ally_code }}/stats-check" aria-live="polite"></div>
+            {% else %}
+                {% include "player_card_stats.html" %}
             {% endif %}
         </div>
 
@@ -756,11 +730,26 @@
             if (a.dataset.filter !== "all" && !widgets.some(w => w.dataset.tab === a.dataset.filter)) a.remove();
         });
         nav.hidden = false;
+        const stats = document.querySelector("#player-card-stats");
+        let statsRequested = false;
+        async function loadStats() {
+            if (!stats || statsRequested) return;
+            statsRequested = true;
+            stats.textContent = "Проверяем сохранённый плейт…";
+            try {
+                const response = await fetch(stats.dataset.url);
+                if (!response.ok || response.redirected) throw new Error(response.status);
+                stats.innerHTML = await response.text();
+            } catch {
+                stats.textContent = "Не удалось загрузить результат. Нажмите «Проверить», чтобы повторить.";
+            }
+        }
         function apply(key) {
             if (!nav.querySelector(`[data-filter="${key}"]`)) key = "all";
             nav.querySelectorAll("[data-filter]").forEach(a => a.classList.toggle("active", a.dataset.filter === key));
             // data-not-all — тяжёлые виджеты только на своей вкладке, не во «Все»
             widgets.forEach(w => { w.hidden = key === "all" ? w.hasAttribute("data-not-all") : w.dataset.tab !== key; });
+            if (key === "checks") loadStats();
             try { localStorage.setItem("playerCardTab", key); } catch (_) {}
         }
         nav.addEventListener("click", e => {

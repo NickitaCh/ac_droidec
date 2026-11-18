@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware.sessions import SessionMiddleware
 
 import database
-from services import tb_personal, tb_squads
+from services import tb_atlas, tb_personal, tb_squads
 from web.deps import require_member_access
 from web.routes import tb_map
 
@@ -58,10 +58,80 @@ class PersonalMapTests(unittest.TestCase):
         self.assertEqual(tb_personal.notes('alice')[('Mustafar', 'c1')], 'Мой пак')
         self.assertEqual(tb_personal.notes('bob')[('Mustafar', 'c1')], 'Пак Боба')
 
+    def test_map_uses_catalog_sides_and_keeps_mission_keys(self):
+        parsed = tb_squads.parse({'planets': [{'nameEn': 'Mustafar', 'phase': 1, 'missions': [
+            {'missionId': 'c1', 'type': 'usual', 'position': 'left'},
+            {'missionId': 'c3', 'type': 'usual', 'position': 'right'},
+            {'missionId': 'c6', 'type': 'fleet', 'position': 'right'},
+        ]}]})
+        database.set_bot_state(tb_squads.BASE_KEY, json.dumps({'planets': parsed}), guild_id=0)
+        result = self.save('Мой второй бой', mission='c3')
+        html = self.client.get(result.headers['location']).text
+        left = html.split('class="tb-mission-lane tb-mission-left">')[1].split('</div>')[0]
+        right = html.split('class="tb-mission-lane tb-mission-right">')[1].split('</div>')[0]
+        self.assertIn('href="#mission-c1"', left)
+        self.assertIn('Наземный бой 1', left)
+        self.assertIn('href="#mission-c3" class="tb-mission-node tb-node-usual" aria-current="true"', right)
+        self.assertIn('Наземный бой 2', right)
+        self.assertIn('Бой флота', right)
+        self.assertIn('Есть памятка', right)
+        self.assertIn('Мой второй бой</textarea>', html)
+
+    def test_all_battle_variants_open_with_their_mission_pins(self):
+        for event, (zones, pins) in {
+            "rote": (20, 0), "geo-light": (12, 29), "geo-dark": (11, 28),
+            "hoth-light": (15, 27), "hoth-dark": (16, 29),
+        }.items():
+            with self.subTest(event=event):
+                response = self.client.get(f'/tb/map?embedded=true&event={event}')
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.text.count('class="tb-world tb-side-'), zones)
+                self.assertEqual(response.text.count('class="tb-map-pin '), pins)
+                self.assertIn(f'img/tb/{tb_atlas.EVENTS[event]["background"]}.webp', response.text)
+
+    def test_rote_planet_replaces_overview_with_surface_and_pins(self):
+        page = self.client.get('/tb/map?planet=Mustafar&embedded=true')
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn('id="atlas"', page.text)
+        self.assertIn('img/tb/surfaces/mustafar.webp', page.text)
+        self.assertIn('class="tb-surface-pin" href="#mission-c1"', page.text)
+        self.assertIn('mission-usual.png', page.text)
+        self.assertIn('id="tb-mission-dialog"', page.text)
+        self.assertIn('href="/tb/map?embedded=true#atlas"', page.text)
+        self.assertEqual(set(tb_atlas.ROTE_MISSION_PINS), {
+            tb_atlas.ROTE_ART_NAMES.get(key, key.lower()) for key in tb_atlas.ROTE_COORDINATES
+        })
+
+    def test_enemy_waves_override_outdated_free_text(self):
+        raw = {'planets': [{'nameEn': 'Geonosis', 'missions': [
+            {'missionId': 'c2', 'type': 'usual', 'enemies': ['Wave 1: Reek'],
+             'enemyWaves': [{'wave': 1, 'units': [{'name': 'Аклай', 'count': 1}]}]},
+            {'missionId': 'c3', 'type': 'usual', 'enemies': ['Противник из старого каталога']},
+        ]}]}
+        missions = tb_squads.parse(raw)['Geonosis']['missions']
+        self.assertEqual(missions[0]['enemies'], ['Волна 1: Аклай'])
+        self.assertEqual(missions[1]['enemies'], ['Противник из старого каталога'])
+
+    def test_legacy_mission_link_and_note_keep_the_battle_selected(self):
+        event = 'geo-dark'
+        zones = tb_atlas.legacy_zones(event)
+        planet = next(reversed(zones))
+        mission = zones[planet]['missions'][0]['id']
+        page = self.client.get(f'/tb/map?event={event}&embedded=true')
+        self.assertIn(f'&amp;event={event}&amp;mission={mission}&amp;embedded=true#mission-{mission}', page.text)
+        fields = {'planet': planet, 'mission': mission, 'body': 'Памятка Джеонозиса', 'embedded': 'true'}
+        self.assertEqual(self.client.post('/tb/map/save', data={**fields, 'event': 'hoth-dark'}).status_code, 400)
+        saved = self.client.post('/tb/map/save', data={**fields, 'event': event})
+        self.assertEqual(saved.status_code, 303)
+        self.assertIn(f'event={event}', saved.headers['location'])
+        html = self.client.get(saved.headers['location']).text
+        self.assertIn('Памятка Джеонозиса</textarea>', html)
+        self.assertIn('Есть памятка', html)
+
     def test_save_escape_delete_and_return_to_mission(self):
         r = self.save('<script>alert(1)</script>')
         self.assertIn('mission=c1', r.headers['location'])
-        self.assertTrue(r.headers['location'].endswith('#mission-c1'))
+        self.assertTrue(r.headers['location'].endswith('#mission-map'))
         html = self.client.get(r.headers['location']).text
         self.assertIn('&lt;script&gt;', html)
         self.assertNotIn('<script>alert(1)</script>', html)

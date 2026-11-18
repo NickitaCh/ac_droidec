@@ -7,7 +7,7 @@
             <div>
                 <p class="page-hero-eyebrow">Модули и статы</p>
                 <h1>Оптимизатор модулей</h1>
-                <p class="page-hero-lead">Загружаешь CSV со всеми своими модулями — и для каждого персонажа выбранных плейтов инструмент подбирает лучший набор из 6 модулей из общего пула (включая уже надетые на других персонажах), стараясь не ломать сеты и закрыть нормы плейта. Статы считаются на РЕАЛЬНОЙ реликвии/шестерне персонажа прямо сейчас, без проекции на релик плейта — если не хватает реликвии, это будет явно видно в отчёте.</p>
+                <p class="page-hero-lead">Подбирает модули для персонажей выбранных плейтов из общего пула с учётом текущего снаряжения и реликвий.</p>
             </div>
         </div>
     </section>
@@ -27,9 +27,10 @@
     <div class="panel" style="max-width: 44em;">
         <div class="panel-title"><span>Параметры</span></div>
         <form method="post" action="/mod-optimizer" enctype="multipart/form-data">
+            {% if game_available %}<input type="hidden" name="csrf" value="{{ game_csrf }}">{% endif %}
             <label>
                 Файл с модулями (CSV)
-                <input type="file" name="mods_file" accept=".csv" required>
+                <input type="file" name="mods_file" accept=".csv"{% if not game_available %} required{% endif %}>
             </label>
 
             <label>Плейты</label>
@@ -55,19 +56,21 @@
                 {% if self_ally_code %}Игрок: {{ self_player_name }} ({{ self_ally_code }}){% else %}⚠️ Ваш аккаунт не привязан через /регистрация — сначала зарегистрируйтесь.{% endif %}
             </p>
 
-            <button type="submit">Рассчитать</button>
+            <button type="submit" name="source" value="csv">Рассчитать по CSV</button>
+            {% if game_available %}<button type="submit" name="source" value="game">Рассчитать по модулям из игры</button>{% endif %}
         </form>
     </div>
 
     {% if loading %}
         <p class="empty-state">⏳ Калькулятор статов ещё загружается (первая сборка после старта веб-процесса) — обновите страницу через минуту.</p>
     {% elif results is not none %}
-        <h2>Результат ({{ mods_total }} модулей в файле, игрок: {{ player_name }})</h2>
+        <h2>Результат ({{ mods_total }} модулей{% if game_source %} из игры{% else %} в файле{% endif %}, игрок: {{ player_name }})</h2>
         <p class="muted">
             Плейтов пройдено целиком: <strong>{{ plates_passed|length }}/{{ plates_total }}</strong>{% if plates_passed %} — {{ plates_passed|join(", ") }}{% endif %}.
             Это глобально оптимальный (не жадный) подбор — солвер сам решает, кому какие модули отдать, чтобы пройти максимум плейтов целиком, а не по порядку персонажей.
             {% if solver_timed_out %}⚠️ Солвер упёрся в лимит времени — показан лучший найденный вариант, не факт что доказанно оптимальный.{% endif %}
         </p>
+        {% if mods_skipped %}<p class="muted">Не удалось включить в подбор {{ mods_skipped }} модулей.</p>{% endif %}
         {% if not results %}
             <p class="empty-state">В выбранных плейтах нет ни одного персонажа с сохранёнными требованиями.</p>
         {% endif %}
@@ -93,18 +96,27 @@
 
                     {% if r.passed or r.failed %}
                         <table class="data-table">
-                            <thead><tr><th>Стат</th><th>Норма</th><th>Сейчас</th><th></th></tr></thead>
+                            <thead><tr><th>Стат</th><th>Норма</th>{% if game_source and not mods_skipped %}<th>До</th>{% endif %}<th>После подбора</th><th></th></tr></thead>
                             <tbody>
                                 {% for req in r.passed %}
-                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td><td>{{ req.current_fmt }}</td><td>✅</td></tr>
+                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td>{% if game_source and not mods_skipped %}<td>{{ req.before_fmt }}</td>{% endif %}<td>{{ req.current_fmt }}</td><td>✅</td></tr>
                                 {% endfor %}
                                 {% for req in r.failed %}
-                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td><td>{{ req.current_fmt }}</td><td>❌</td></tr>
+                                    <tr><td>{{ req.stat_name }}</td><td>{{ req.threshold_fmt }}</td>{% if game_source and not mods_skipped %}<td>{{ req.before_fmt }}</td>{% endif %}<td>{{ req.current_fmt }}</td><td>❌</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     {% endif %}
 
+                    {% if r.moves %}
+                        <h3>Предпросмотр перестановки</h3>
+                        <div class="table-scroll">
+                            <table class="data">
+                                <thead><tr><th>Модуль</th><th>Откуда взять</th><th>Что снимается с {{ r.char_name }}</th></tr></thead>
+                                <tbody>{% for move in r.moves %}<tr><td>{{ move.mod }}</td><td>{{ move.source }}</td><td>{{ move.replaced or "—" }}{% if move.locked %} · модуль заблокирован{% endif %}</td></tr>{% endfor %}</tbody>
+                            </table>
+                        </div>
+                    {% endif %}
                     {% if r.mods_summary %}
                         <p class="panel-hint" style="margin-bottom: 0.2em;">Предложенные модули:</p>
                         <ul class="muted" style="margin-top: 0;">

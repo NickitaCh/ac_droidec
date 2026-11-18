@@ -4,9 +4,10 @@
 {% macro unit_strip(units, kind=None) -%}<span class="twdef-units">{% for u in units %}<span class="twdef-unit{% if kind == 'ship' and loop.index in (2, 5) %} twdef-unit-gap{% endif %}" title="{{ u.name }}{% if u.badge %} · {{ u.badge }}{% endif %}">{{ game.portrait(u.base_id, 'xs') }}{% if u.badge %}<span class="twdef-unit-badge">{{ u.badge }}</span>{% endif %}</span>{% endfor %}</span>{%- endmacro %}
 {% block content %}
 {{ tw.tw_hero(plan.name, 'plans') }}{{ tw.plan_nav(plan, 'defense', workspace) }}
+{% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}<a class="button button-secondary" href="/game-account/events/tw?plan={{ plan.id }}">Предпросмотр моей защиты</a>{% endif %}
 {% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}{% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
 {% if warning %}{% include "_tw_def_calc_wait.html" %}{% endif %}
-{% if not has_squads %}<p class="config-warning">Добавьте первый пак в <a href="/tw/def/squads/new">библиотеку</a>.</p>{% endif %}
+{% if not has_squads %}<p class="config-warning">Добавьте первый пак в <a href="/squads/new">библиотеку</a>.</p>{% endif %}
 <div class="tw-defense-head"><div><span class="tw-eyebrow">План защиты{% if workspace.opponent_name %} · {{ workspace.opponent_name }}{% endif %}</span><h2>{{ assigned_total }} <small>из {{ capacity_total }} отрядов</small></h2><p class="muted">{{ players_used }} из {{ players_total }} игроков в защите · ростеры {{ last_sync or 'не загружены' }} UTC</p></div><a class="button" href="/tw/def/plans/{{ plan.id }}/strategy">Стратегия и общий подбор →</a></div>
 {% if plan.note %}<p class="twdef-note">{{ plan.note }}</p>{% endif %}
 <div class="tw-defense-toolbar"><div class="tw-view-tabs" aria-label="Вид защиты">{% for key, label in [('map','Карта'),('players','Игроки'),('problems','Проблемы')] %}<a href="?view={{ key }}" data-tw-view="{{ key }}" class="{{ 'active' if view == key else '' }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}{% if key == 'problems' %}<span>{{ issues|length }}</span>{% endif %}</a>{% endfor %}</div><div class="tw-inline-form"><a class="button button-secondary" href="/tw/def/plans/{{ plan.id }}/text">Текст плана</a><a class="button" href="/tw/def/plans/{{ plan.id }}/notify">Рассылка заданий</a></div></div>

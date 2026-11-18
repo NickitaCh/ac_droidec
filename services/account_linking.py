@@ -7,8 +7,8 @@ import database
 from services import game_account as ga, game_lab as lab, test_accounts
 
 
-async def validate_player(owner, is_alt, preview_id, comlink):
-    ga.require_pilot(owner, 1, "test")
+async def validate_player(owner, is_alt, preview_id, comlink, *, guild_id=1):
+    ga.require_account_read(owner, guild_id, "test")
     try:
         player = await asyncio.to_thread(comlink.get_player, player_id=preview_id)
     except Exception:
@@ -17,7 +17,7 @@ async def validate_player(owner, is_alt, preview_id, comlink):
     if (not player or player.get("playerId") != preview_id or not player.get("name")
             or len(code) != 9 or any(c not in "123456789" for c in code)):
         raise ga.AccountError("EA и игра вернули несовпадающие данные игрока.")
-    main = database.get_user_registration(str(owner), guild_id=1)
+    main = database.get_user_registration(str(owner), guild_id=guild_id)
     if not main:
         raise ga.AccountError("Сначала зарегистрируйте основной аккаунт в боте.")
     if is_alt and code == str(main[0]):
@@ -36,10 +36,10 @@ async def validate_player(owner, is_alt, preview_id, comlink):
     return player
 
 
-def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None):
-    ga.require_pilot(owner, 1, "test")
+def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None, guild_id=1):
+    ga.require_account_read(owner, guild_id, "test")
     code = str(player["allyCode"])
-    main = database.get_user_registration(str(owner), guild_id=1)
+    main = database.get_user_registration(str(owner), guild_id=guild_id)
     if not main or (is_alt and str(main[0]) == code) or (not is_alt and str(main[0]) != code):
         raise ga.AccountError("Основной аккаунт изменился. Начните привязку заново.")
     with test_accounts._db():
@@ -50,7 +50,7 @@ def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None):
                 "SELECT 1 FROM ea_browser_pending WHERE id=? AND owner=? AND target=? AND status='checking' AND expires>?",
                 (pending_id, str(owner), pending_target, time.time())).fetchone():
             raise ga.AccountError("Подключение отменено или истекло. Начните его заново.")
-        current_main = conn.execute("SELECT ally_code FROM user_registration WHERE guild_id=1 AND discord_id=? ORDER BY is_main DESC LIMIT 1", (str(owner),)).fetchone()
+        current_main = conn.execute("SELECT ally_code FROM user_registration WHERE guild_id=? AND discord_id=? ORDER BY is_main DESC LIMIT 1", (guild_id, str(owner))).fetchone()
         if not current_main or (is_alt and current_main[0] == code) or (not is_alt and current_main[0] != code):
             raise ga.AccountError("Основной аккаунт изменился. Начните привязку заново.")
         if (conn.execute("SELECT 1 FROM user_registration WHERE ally_code=? AND discord_id!=?", (code, str(owner))).fetchone()
@@ -66,7 +66,7 @@ def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None):
                          (target, code, player["playerId"], player["name"], int(player.get("level") or 0),
                           str(player.get("guildId") or ""), str(player.get("guildName") or ""), str(owner), time.time()))
         if is_alt:
-            conn.execute("INSERT OR REPLACE INTO test_account_links VALUES (?,?,?,?,?)", (1, str(owner), code, player["playerId"], player["name"]))
+            conn.execute("INSERT OR REPLACE INTO test_account_links VALUES (?,?,?,?,?)", (guild_id, str(owner), code, player["playerId"], player["name"]))
         if pending_id is not None:
             conn.execute("UPDATE ea_browser_pending SET target=? WHERE id=?", (target, pending_id))
     return target

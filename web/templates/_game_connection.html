@@ -1,0 +1,7 @@
+{% if connection_action == 'login' %}
+    <p>{{ login_warning }}</p>
+    <button type="submit" name="reconnect" value="1" class="btn btn-primary">Войти и обновить</button>
+{% elif connection_action == 'link' %}
+    <p class="error" role="alert">Для этой функции требуется привязка EA.</p>
+    <a class="btn btn-primary" href="{{ '/player/' ~ (ally_code or self_ally_code) if ally_code or self_ally_code else '/me' }}#ea-connection">Привязать EA в профиле</a>
+{% endif %}

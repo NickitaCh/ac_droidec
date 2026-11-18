@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Оптимизатор модулей — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/mod_optimizer.css?v=20261118search">
+<div class="mo-workspace">
+<section class="page-hero"><div class="page-hero-top"><div>
+    <p class="page-hero-eyebrow">Модули и статы</p><h1>Оптимизатор модулей</h1>
+    <p class="page-hero-lead">Сборки по плейтам из всех модулей аккаунта.</p>
+</div></div></section>
+<nav class="mo-section-nav" aria-label="Оптимизатор">
+    <a href="#mo-settings">Параметры</a><a href="#mo-presets">Раскладки</a>{% if results is not none %}<a href="#mo-results">Результат и статы</a>{% endif %}
+</nav>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if plan and plan.state in ('running', 'applying') %}
+<div class="panel" role="status">
+    <h2>{% if plan.state == 'running' %}Идёт подбор{% else %}Применение расстановки{% endif %}</h2>
+    <p>{% if plan.state == 'running' %}Расчёт может занять несколько минут. Вкладку можно закрыть и вернуться по этой ссылке.{% else %}Каждая операция проверяется по данным игры. Не меняйте модули до завершения.{% endif %}</p>
+    {% if completed_steps %}<p>Проверено операций: {{ completed_steps }}.</p>{% endif %}
+    {% if in_flight %}<p>Операция {{ in_flight.step }} из {{ in_flight.total }}.</p>{% endif %}
+    <a href="/mod-optimizer?plan={{ plan.id }}">Обновить статус</a>
+</div>
+<script>setTimeout(() => location.reload(), 5000);</script>
+{% else %}
+{% if plan and plan.state == 'complete' %}<p role="status">{{ plan.message }}</p>{% endif %}
+{% if plan and plan.state == 'partial' %}
+<div class="panel"><h2>Применение остановлено</h2><p>Проверено операций: {{ completed_steps|default(0) }}. Повторно применить этот план нельзя.</p>
+{% if in_flight %}<p>Последняя отправленная операция: {{ in_flight.step }} из {{ in_flight.total }}. Её результат требует проверки.</p>{% endif %}
+<a href="/mod-optimizer?ally_code={{ self_ally_code }}">Начать новый расчёт по текущей расстановке</a></div>
+{% endif %}
+<div class="panel" id="mo-settings">
+    <details class="mo-settings-fold" {% if results is none %}open{% endif %}><summary>Параметры подбора</summary>
+    {% if accounts|length > 1 %}
+    <form method="get" action="/mod-optimizer"><label>Аккаунт
+        <select name="ally_code" onchange="this.form.submit()">{% for code, name in accounts %}<option value="{{ code }}" {% if code == self_ally_code|string %}selected{% endif %}>{{ name }} · {{ code }}</option>{% endfor %}</select>
+    </label><noscript><button>Выбрать</button></noscript></form>
+    {% else %}<p>{{ self_player_name }} · {{ self_ally_code or 'Сначала зарегистрируйте аккаунт' }}</p>{% endif %}
+    <form id="mo-run" method="post" action="/mod-optimizer" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ game_csrf }}">
+        <input type="hidden" name="ally_code" value="{{ self_ally_code or '' }}">
+        <fieldset><legend>Плейты</legend>
+        <div class="mo-options">{% for p in plates %}<label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>{{ p }}</label>{% else %}<p>Сначала создайте плейты в <a href="/plates">разделе требований</a>.</p>{% endfor %}</div>
+        </fieldset>
+        <label>Реликвия для подбора
+            <select name="relic_mode">
+                <option value="current" {% if relic_mode != 'plate' %}selected{% endif %}>Текущая прокачка</option>
+                <option value="plate" {% if relic_mode == 'plate' %}selected{% endif %}>С учётом будущего апа до реликвии плейта</option>
+            </select>
+        </label>
+        <p class="muted">Во втором режиме, например, сборка для R1 подбирается по статам на требуемом R7. Уже более высокая реликвия сохраняется.</p>
+        <details class="mo-locks"><summary>Заблокированные персонажи · {{ locked|length }}</summary>
+            <p class="muted">Их сборки сохраняются. Модули этих персонажей не участвуют в подборе.</p>
+            <label>Найти персонажа<input type="search" id="mo-lock-search" autocomplete="off"></label>
+            <div class="mo-options mo-lock-list">{% for key, name in characters %}<label class="checkbox" data-lock-name="{{ name|lower }} {{ key|lower }}"><input type="checkbox" name="locked" value="{{ key }}" {% if key in locked %}checked{% endif %}>{{ name }}</label>{% endfor %}</div>
+        </details>
+        <p class="muted">Модули с незаблокированных доноров можно снимать. Все затронутые персонажи и ухудшения показаны в результате.</p>
+        <label class="checkbox"><input type="checkbox" name="dry_run" value="1" {% if dry_run|default(true) or not can_apply %}checked{% endif %} {% if not can_apply %}disabled{% endif %}>Dry run — без перестановки модулей в игре</label>
+        {% if not can_apply %}<p class="muted">Игрокам доступен только просмотр результата. Применение в игре отключено.</p>{% endif %}
+        {% if connection_action == 'login' and game_connected %}
+        <p>{{ login_warning }}</p>
+        <p><button type="submit" name="source" value="reconnect">Переподключить и запустить расчёт</button></p>
+        {% elif connection_action == 'link' or not game_connected %}
+        {% if self_ally_code %}<p class="error" role="alert">Для подбора модулей из игры требуется привязка EA.</p><p><a class="btn btn-primary" href="/player/{{ self_ally_code }}#ea-connection">Привязать EA в профиле</a></p>{% endif %}
+        {% else %}
+        <p><button type="submit" name="source" value="game">Dry run — подобрать из игры</button></p>
+        {% endif %}
+        <p class="muted">Dry run не переставляет модули. Применение доступно отдельной кнопкой после проверки результата.</p>
+        <details><summary>Расчёт по CSV</summary>
+            <label>Файл с модулями<input type="file" name="mods_file" accept=".csv"></label>
+            <label class="checkbox"><input type="checkbox" name="force_refresh" value="1">Обновить ростер перед расчётом</label>
+            <button type="submit" name="source" value="csv">Dry run по CSV</button>
+        </details>
+    </form>
+</details></div>
+{% if self_ally_code %}
+<div class="panel" id="mo-presets"><details {% if results is none %}open{% endif %}><summary>Сохранённые раскладки</summary>
+    {% if game_connected %}<form method="post" action="/mod-optimizer/baseline">
+        <input type="hidden" name="csrf" value="{{ game_csrf }}">
+        <input type="hidden" name="ally_code" value="{{ self_ally_code }}">
+        <label>Название пресета <input name="name" maxlength="80" value="{{ baseline_name|default('') }}" placeholder="Например, рейд"></label>
+        {% if characters %}<details {% if baseline_characters %}open{% endif %}><summary>Выбрать персонажей</summary>
+            <p>Оставьте список пустым, чтобы сохранить раскладку всего аккаунта (Baseline).</p>
+            <div class="mo-options mo-lock-list">{% for key, name in characters %}
+                <label class="checkbox"><input type="checkbox" name="characters" value="{{ key }}" {% if key in baseline_characters|default([]) %}checked{% endif %}>{{ name }}</label>
+            {% endfor %}</div>
+        </details>{% endif %}
+        {% if baseline_retry %}
+        <p class="error" role="alert">Игровая сессия завершилась. {{ login_warning }}</p>
+        <button name="reconnect" value="true">Войти заново и сохранить раскладку</button>
+        {% else %}<button>Сохранить текущую раскладку</button>{% endif %}
+    </form>{% elif baseline_retry %}
+    <p class="error" role="alert">Для сохранения раскладки нужно заново подключить аккаунт EA.</p>
+    <p><a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></p>
+    {% endif %}
+    {% if saved_items %}<ul>{% for item in saved_items %}
+        <li><a href="/mod-optimizer?plan={{ item.id }}">{{ item.name or ('Baseline' if item.kind == 'baseline' else 'Подбор') }}</a>
+            · <time data-saved-at="{{ item.created }}"></time></li>
+    {% endfor %}</ul>{% endif %}
+</details></div>
+{% endif %}
+{% if plan and plan.state == 'saved' and can_apply and game_connected and (baseline is defined or game_source) %}
+<form class="panel" method="post" action="/mod-optimizer/restore">
+    <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
+    <button>Посмотреть, что нужно переодеть</button>
+</form>
+{% endif %}
+{% if baseline is defined %}
+<div class="panel"><h2>{{ preset_name or 'Baseline' }} · {{ baseline|length }} модулей</h2>
+    {% for group in baseline|groupby('equipped_to', default='') %}
+    <details><summary>{{ baseline_names.get(group.grouper, group.grouper) or 'Свободный склад' }} · {{ group.list|length }}</summary>
+        <ul>{% for mod in group.list %}<li>{{ mod.summary }}{% if mod.locked %} · 🔒{% endif %}</li>{% endfor %}</ul>
+    </details>
+    {% endfor %}
+</div>
+{% endif %}
+{% if preset_restore %}
+<div class="panel">
+    <h2>Переодевание{% if preset_name %} · {{ preset_name }}{% endif %}</h2>
+    {% if restore_moves %}
+    <ul>{% for move in restore_moves %}
+        <li><details><summary>{{ move.name }} — {{ 'снять' if move.remove else 'надеть' }} {{ move.mods|length }}</summary>
+            <ul>{% for mod in move.mods %}<li>{{ mod }}</li>{% endfor %}</ul>
+        </details></li>
+    {% endfor %}</ul>
+    {% if plan.state == 'ready' and can_apply and not plan.expired %}
+    <form method="post" action="/mod-optimizer/apply">
+        <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
+        <label class="checkbox"><input type="checkbox" name="confirm" value="1" required>Подтверждаю снятие и перенос модулей. Игра может списать кредиты.</label>
+        <button>Переодеть модули в игре</button>
+    </form>
+    {% elif plan.expired and plan.state == 'ready' %}<p>Предпросмотр устарел. Откройте пресет и проверьте перестановки заново.</p>{% endif %}
+    {% else %}<p>Текущая раскладка уже совпадает с пресетом.</p>{% endif %}
+</div>
+{% elif results is not none %}
+<div class="panel" id="mo-results"><h2>Результат подбора</h2>
+    <p>{{ mods_total }} модулей · {{ player_name }} · плейтов {% if relic_mode == 'plate' %}по прогнозу {% endif %}выполнено: <strong>{{ plates_passed|length }} из {{ plates_total }}</strong>.</p>
+    {% if relic_mode == 'plate' %}<p>Результат учитывает будущий ап до обязательной реликвии активной схемы. Кнопка применения переставляет только модули; персонажей нужно прокачать отдельно.</p>{% endif %}
+    {% if plates_passed %}<p>{{ plates_passed|join(', ') }}</p>{% endif %}
+    <p class="muted">Показана лучшая найденная расстановка. Невыполненная норма не означает, что подходящей сборки не существует.</p>
+    {% if solver_timed_out %}<p class="muted">Поиск распределения завершился без доказанного оптимума среди найденных сборок.</p>{% endif %}
+    {% if plan.state in ('ready', 'complete') %}<form method="post" action="/mod-optimizer/save">
+        <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
+        <label>Название пресета <input name="name" maxlength="80" placeholder="Например, AC-All"></label>
+        <button>Сохранить подбор как пресет</button>
+    </form>{% endif %}
+    {% if game_source and can_apply and not dry_run and plan.state == 'ready' %}
+        {% if plan.expired %}<p>План устарел. Запустите новый Dry run.</p>
+        {% elif operation_count %}
+        <form method="post" action="/mod-optimizer/apply">
+            <input type="hidden" name="csrf" value="{{ game_csrf }}"><input type="hidden" name="plan" value="{{ plan.id }}">
+            <label class="checkbox"><input type="checkbox" name="confirm" value="1" required>Применить показанные перестановки, включая снятие модулей с доноров</label>
+            <p class="muted">За снятие модулей игра списывает кредиты. При изменении инвентаря потребуется новый расчёт.</p>
+            <p id="mo-changed" hidden>Параметры изменены. Запустите новый Dry run.</p>
+            <button type="submit" id="mo-apply">Применить расстановку в игре</button>
+        </form>
+        {% else %}<p>Перестановки не нужны.</p>{% endif %}
+    {% endif %}
+</div>
+<div class="mo-recalculate" id="mo-recalculate">
+    <div class="mo-character-picker" hidden data-mo-picker>
+        <label for="mo-character-select">Персонаж · {{ results|length }}</label>
+        <input id="mo-character-search" type="search" aria-label="Найти персонажа" placeholder="Найти персонажа" autocomplete="off">
+        <div class="mo-picker-row"><button type="button" data-mo-prev aria-label="Предыдущий персонаж">‹</button>
+        <select id="mo-character-select">{% for r in results %}<option value="{{ loop.index0 }}" data-name="{{ r.char_name }}">{{ '❌' if r.failed|selectattr('priority', 'equalto', 'required')|list or not r.owned else '✅' }} {{ r.char_name }} · {{ r.plate }}</option>{% endfor %}</select>
+        <button type="button" data-mo-next aria-label="Следующий персонаж">›</button></div>
+    </div><p data-mo-goals-changed hidden role="status">Цели изменены — нужен пересчёт.</p>
+    <button form="mo-run" name="source" value="game" {% if not game_connected %}disabled{% endif %}>Пересчитать из игры</button>
+</div>
+{% set edited = namespace(ids=[]) %}
+{% for r in results %}
+{% set required_passed = r.passed|selectattr('priority', 'equalto', 'required')|list|length %}
+{% set required_failed = r.failed|selectattr('priority', 'equalto', 'required')|list|length %}
+<div class="panel mo-character" data-mo-character="{{ loop.index0 }}">
+    <div class="mo-character-heading"><img src="/unit-img/{{ r.base_id }}" alt="" width="48" height="48" loading="lazy"><div><h3>{{ r.char_name }}{% if r.locked %} · 🔒{% endif %}</h3><span class="muted">{{ r.plate }}</span></div><span class="badge {{ 'badge-ok' if not required_failed and r.owned else 'badge-warn' }}">Обязательные: {{ required_passed }} из {{ required_passed + required_failed }}</span></div>
+    {% if r.reason %}<p>{{ r.reason }}</p>{% endif %}
+    {% if r.owned %}
+    <p>Текущая реликвия: R{{ r.current_relic }}.{% if r.projected %} Подбор на R{{ r.target_relic }}.{% endif %} Необязательные цели: {{ r.passed|length - required_passed }} из {{ r.passed|length + r.failed|length - required_passed - required_failed }}.</p>
+    <div class="table-scroll"><table class="data cards-on-phone"><thead><tr><th>Требование</th><th>До</th><th>{{ 'После апа' if r.projected else 'После' }}</th><th>Минимум / цель</th></tr></thead><tbody>
+    {% for req in r.failed + r.passed %}
+    {% set goal = 'Цель' if req.priority != 'required' else 'Минимум' if req.editable_id and req.operator == '>=' else 'Лимит' if req.editable_id and req.operator == '<=' else 'Норма' %}
+    <tr><td data-label="Требование">{{ '✅' if req.ok else '❌' if req.priority == 'required' else '○' }} {{ req.label or req.stat_name }}<small class="muted"> · {{ req.plate }}{% if req.priority != 'required' %} · необязательно{% endif %}</small></td><td data-label="До">{{ req.before_fmt }}</td><td data-label="{{ 'После апа' if r.projected else 'После' }}"><span>{{ req.current_fmt }}{% if r.projected %}<br><small class="muted">На R{{ r.current_relic }}: {{ req.now_fmt }}</small>{% endif %}</span></td>
+    <td data-label="{{ goal }}">{{ goal }}: {{ req.threshold_fmt }}
+        {% if req.editable_id and req.editable_id not in edited.ids %}
+        {% set edited.ids = edited.ids + [req.editable_id] %}
+        <div class="mo-stat-control" data-mo-stat data-default="{{ req.threshold }}" data-before="{{ req.before if req.before is number else req.threshold }}" data-current="{{ req.current if req.current is number else req.threshold }}" data-stat="{{ req.stat_name }}">
+            <input type="range" data-mo-range aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · ползунок">
+            <div class="mo-stat-value"><input form="mo-run" type="number" step="any" name="threshold_{{ req.editable_id }}"
+                   aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · {{ req.plate }}"
+                   placeholder="{{ req.threshold }}" value="{{ (thresholds|default({})).get(req.editable_id|string, '') }}">
+            <button type="button" class="button-secondary" data-mo-reset aria-label="Вернуть норму плейта · {{ r.char_name }} · {{ req.label }}">↺</button></div>
+        </div>
+        {% endif %}
+    </td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if r.moves %}<details><summary>Перестановки · {{ r.moves|length }}</summary>
+        {% for move in r.moves %}<p><strong>{{ move.mod }}</strong><br>Откуда: {{ move.source }}{% if move.replaced %}<br>Снимается: {{ move.replaced }}{% endif %}</p>{% endfor %}
+    </details>{% else %}<p class="muted">Сборка сохраняется.</p>{% endif %}
+    {% endif %}
+</div>
+{% endfor %}
+{% if donors %}<details class="panel mo-donors"><summary>Затронутые доноры · {{ donors|length }}</summary>
+{% for d in donors %}<div class="panel"><h3>{{ d.name }}</h3><p>Снимается модулей: {{ d.removed }}.{% if d.lost_sets %} Теряются комплекты: {{ d.lost_sets|join(', ') }}.{% endif %}</p>
+<div class="table-scroll"><table class="data cards-on-phone"><thead><tr><th>Характеристика</th><th>До</th><th>После</th></tr></thead><tbody>{% for r in d.changes %}<tr><td data-label="Характеристика">{{ r.label or r.stat_name }}</td><td data-label="До">{{ r.before_fmt }}</td><td data-label="После">{{ r.current_fmt }}</td></tr>{% endfor %}</tbody></table></div></div>{% endfor %}
+</details>{% endif %}
+{% endif %}
+{% endif %}
+</div>
+<style>
+.mo-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:8px 16px}
+.mo-options label{min-width:0;overflow-wrap:anywhere}.mo-locks{margin:16px 0}.mo-lock-list{max-height:320px;overflow:auto;padding:8px}
+.mo-options label[hidden]{display:none}.mo-locks input[type=search]{max-width:100%;box-sizing:border-box}
+.panel form{max-width:none}.panel fieldset{min-width:0}.panel table{width:100%}.panel td{overflow-wrap:anywhere}
+.panel .checkbox input{flex:0 0 auto}.panel button{align-self:flex-start;max-width:100%;white-space:normal}
+</style>
+<script>
+document.querySelectorAll('[data-saved-at]').forEach(el => {
+    const date = new Date(Number(el.dataset.savedAt) * 1000);
+    el.dateTime = date.toISOString();
+    el.textContent = date.toLocaleString();
+});
+document.getElementById('mo-lock-search')?.addEventListener('input',e=>{
+ const q=e.target.value.toLocaleLowerCase();document.querySelectorAll('[data-lock-name]').forEach(el=>el.hidden=!el.dataset.lockName.includes(q));
+});
+document.querySelectorAll('input[name=locked],input[name=plates],select[name=relic_mode],input[name=dry_run],input[name^=threshold_]').forEach(el=>el.addEventListener('change',()=>{
+ const button=document.getElementById('mo-apply');if(button){button.disabled=true;document.getElementById('mo-changed').hidden=false;}
+ const summary=document.querySelector('.mo-locks summary');if(summary)summary.textContent='Заблокированные персонажи · '+document.querySelectorAll('input[name=locked]:checked').length;
+}));
+</script>
+<script src="/static/mod_optimizer.js?v=20261118search" defer></script>
+{% endblock %}

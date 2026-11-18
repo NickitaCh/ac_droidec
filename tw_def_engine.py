@@ -10,6 +10,7 @@
 # одного пака и в двух паках одного плана — это и есть ограничение, которое не даёт
 # HotUtils подбирать игроков автоматически, а здесь его решает перебор (match_squad).
 from dataclasses import dataclass, field
+import re
 
 import database
 import stat_engine
@@ -137,6 +138,13 @@ def normalize_slots(raw_slots, combat_type: str, known_units: dict, omicron_capa
             for key in OPTION_BOOL_FIELDS:
                 if raw.get(key):
                     opt[key] = True
+            exact_omicrons = raw.get('required_omicrons')
+            if exact_omicrons:
+                if (not isinstance(exact_omicrons, list) or len(exact_omicrons) > 10 or
+                        any(not isinstance(s, str) or not re.fullmatch(r'[A-Za-z0-9_]{1,120}', s) for s in exact_omicrons)):
+                    errors.append(f"Слот {slot_index}: некорректный список омикронов.")
+                else:
+                    opt['required_omicrons'] = list(dict.fromkeys(exact_omicrons))
             stats = []
             for st in option_stats(raw):
                 if not isinstance(st, dict) or st.get("stat") not in STAT_KEYS or st.get("min") in (None, ""):
@@ -163,7 +171,7 @@ def normalize_slots(raw_slots, combat_type: str, known_units: dict, omicron_capa
             if opt.get("omicron") and omicron_capable is not None and base_id not in omicron_capable:
                 opt.pop("omicron")
             if combat_type == "ship":
-                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "stats", "ignore_skills_placement"):
+                for key in ("min_relic", "min_gear", "zeta", "omicron", "ultimate", "stats", "ignore_skills_placement", "required_omicrons"):
                     opt.pop(key, None)
             options.append(opt)
         if options:
@@ -192,6 +200,8 @@ def option_requirement_label(opt: dict, combat_type: str) -> str:
         parts.append("зеты")
     if opt.get("omicron"):
         parts.append("омикрон")
+    if opt.get('required_omicrons'):
+        parts.append('указанный омикрон HotUtils')
     if opt.get("ignore_skills_placement") and (opt.get("zeta") or opt.get("omicron")):
         parts.append("зеты/омикрон не мешают расстановке")
     if opt.get("ultimate"):
@@ -341,6 +351,11 @@ def check_option(roster: Roster, ally_code: str, opt: dict, combat_type: str) ->
     reason = _skills_ok(unit, roster.skills, zeta=bool(opt.get("zeta")), omicron=bool(opt.get("omicron")))
     if reason:
         return reason
+    tiers = {s.get('id'): s.get('tier') or 0 for s in unit.get('skill') or []}
+    for skill_id in opt.get('required_omicrons') or []:
+        threshold = (roster.skills.get(skill_id) or (None, None, None))[1]
+        if threshold is None or tiers.get(skill_id, 0) < threshold:
+            return 'нет указанного омикрона HotUtils'
     if opt.get("ultimate") and not unit.get("purchasedAbilityId"):
         return "нет абсолютной способности"
     for st in option_stats(opt):

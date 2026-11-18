@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_tw.html" as twui %}
-{% block title %}{% if squad.id %}{{ squad.name }}{% else %}Новый пак{% endif %} — Деф-паки ВГ{% endblock %}
+{% import "_squads.html" as squadsui %}
+{% block title %}{% if squad.id %}{{ squad.name }}{% else %}Новый отряд{% endif %} — Отряды{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-    {{ twui.tw_hero(squad.name if squad.id else "Новый деф-пак", "squads") }}
-    <p><a href="/tw/def/squads">← Все паки</a></p>
+    {{ squadsui.hero(squad.name if squad.id else "Новый отряд") }}
+    <p><a href="/squads">← Все отряды</a></p>
 
     {% if errors %}
         <div class="config-warning">
@@ -12,7 +12,7 @@
         </div>
     {% endif %}
 
-    <form method="post" action="/tw/def/squads/save" class="twdef-editor" id="twdef-editor">
+    <form method="post" action="/squads/save" class="twdef-editor" id="twdef-editor">
         <input type="hidden" name="squad_id" value="{{ squad.id or '' }}">
         <input type="hidden" name="slots_json" id="twdef-slots-json">
 
@@ -63,7 +63,7 @@
 
         <div class="twdef-editor-actions">
             <button type="submit">Сохранить</button>
-            <a class="button button-secondary" href="/tw/def/squads">Отмена</a>
+            <a class="button button-secondary" href="/squads">Отмена</a>
         </div>
     </form>
 
@@ -105,5 +105,5 @@
     </template>
 
     <script type="application/json" id="twdef-squad-data">{{ squad | tojson }}</script>
-    <script src="/static/tw_def.js?v=20261105-dc-or" defer></script>
+    <script src="/static/tw_def.js?v=20261117squads" defer></script>
 {% endblock %}

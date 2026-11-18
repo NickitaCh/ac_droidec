@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Выставить защиту ВГ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<section class="page-hero"><h1>Выставить защиту ВГ</h1><a class="hero-link" href="/game-account/events/tw">ВГ сейчас</a></section>
+<p class="deploy-meta">{{ record.code }} · против {{ record.data.get('opponent', 'соперника текущей ВГ') }} · назначений: {{ record.data.assignments|length }}</p>
+<ol class="deploy-steps" aria-label="Этапы выставления"><li class="{{ 'current' if record.state in ('draft', 'stopped', 'partial') else '' }}">1. Составы и датакроны</li><li class="{{ 'current' if record.state == 'ready' else '' }}">2. Проверка и выставление</li></ol>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if record.state == 'complete' %}<p role="status">Все назначения выставлены и проверены в игре.</p>{% endif %}
+{% if record.state == 'partial' %}<p role="status">Доступные назначения выставлены. Паки с ошибками пропущены.</p>{% endif %}
+{% if record.state in ('applying', 'unknown') %}<p class="error">{% if record.data.in_flight %}Проверяется отряд «{{ record.data.in_flight }}». {% endif %}Повторное выставление заблокировано. Обновите «ВГ сейчас» и проверьте результат в игре.</p>{% endif %}
+{% for result in record.data.results %}<p>{{ result.name }} · {{ result.status }}</p>{% endfor %}
+<form method="post" style="max-width:none" id="tw-deploy-form">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+{% for row in record.data.assignments %}
+{% set availability_row = availability[loop.index0] if availability else none %}
+<section class="deploy-squad">
+<header class="deploy-squad-header"><h2>{{ row.name }}</h2><span class="deploy-zone">{{ zones[row.zone].label }}</span></header>
+{% if availability_row and availability_row.done %}<p>Уже выставлен в игре{% if availability_row.actual_datacron %} с датакроном{% endif %}. Повторно не отправляется.</p>{% endif %}
+{% if availability_row and availability_row.error %}<p class="error">{{ availability_row.error }} Этот пак будет пропущен.</p>{% endif %}
+{% if row.zone.endswith('f') %}
+<ol class="deploy-units">{% for base in row.units %}<li><img src="/unit-img/{{ base|urlencode }}" alt="" width="48" height="48" loading="lazy"><span>{{ names.get(base, base) }}<small>{{ 'Флагман' if loop.index0 == 0 else ('Основа' if loop.index0 < 4 else 'Подкрепление ' ~ (loop.index0 - 3)) }}</small></span></li>{% endfor %}</ol>
+{% else %}
+<ol class="deploy-units">{% for base in row.units %}<li><img src="/unit-img/{{ base|urlencode }}" alt="" width="48" height="48" loading="lazy"><span>{{ names.get(base, base) }}{% if loop.first %}<small>Лидер</small>{% endif %}</span></li>{% endfor %}</ol>
+{% if row.get('recommendation') %}<details class="deploy-recommendation"><summary>Рекомендация по датакрону</summary><p>{{ row.recommendation }}</p></details>{% endif %}
+{% if record.state in ('draft', 'stopped', 'partial') and not (availability_row and availability_row.done) %}
+<label for="dc-{{ loop.index0 }}">Датакрон</label>
+{% if row.get('datacron_source') == 'recommendation' %}<p class="deploy-hint">Подобран по рекомендации</p>{% endif %}
+{% if row.get('datacron_source') == 'history' %}<p class="deploy-hint">Из прошлой защиты этого состава</p>{% endif %}
+<select id="dc-{{ loop.index0 }}" name="dc_{{ loop.index0 }}" style="max-width:100%;width:100%">
+<option value="">Без датакрона</option>
+{% for dc in options %}<option value="{{ dc.id }}" data-title="{% if dc.title is defined %}№{{ loop.index }} · {{ dc.title }}{% else %}{{ dc.name }}{% endif %}" data-stats="{{ dc.stats|default('') }}" data-details="{{ dc.details|default('') }}"{% if row.get('datacron') == dc.id %} selected{% endif %}>{{ dc.name }}</option>{% endfor %}
+</select>
+{% else %}{% set selected_dc = availability_row.actual_datacron if availability_row and availability_row.done else row.get('datacron') %}<p>ДК: {% for dc in options if dc.id == selected_dc %}{{ dc.name }}{% else %}{{ 'выставлен в игре' if availability_row and availability_row.done and selected_dc else ('недоступен' if selected_dc else 'без датакрона') }}{% endfor %}</p>{% endif %}
+{% endif %}
+{% if record.data.get('preview') and record.data.preview[loop.index0].done and not (availability_row and availability_row.done) %}<p>Уже выставлен в этой зоне.</p>{% endif %}
+</section>
+{% endfor %}
+{% if record.state == 'ready' %}
+<input type="hidden" name="nonce" value="{{ record.data.nonce }}">
+<input type="hidden" name="confirm_deploy" value="true">
+<footer class="deploy-actions"><div><strong>Защита проверена</strong><p>Кнопка отправит доступные составы в игру. Уже выставленные и составы с ошибками будут пропущены.</p></div><div class="deploy-buttons"><button class="deploy-secondary" type="submit" name="action" value="edit" formnovalidate>Назад к датакронам</button><button type="submit" name="action" value="apply">Выставить в игре</button></div></footer>
+{% elif record.state not in ('applying', 'unknown', 'complete') %}
+<footer class="deploy-actions"><div><strong>{{ 'Нужен вход в игру' if login_required else 'Проверьте составы и датакроны' }}</strong><p>{{ 'Повторный вход может завершить сеанс на другом устройстве.' if login_required else 'Далее — проверка доступности. Выставление отдельным шагом.' }}</p></div><div class="deploy-buttons"><button class="deploy-secondary" type="submit" name="action" value="refresh" formnovalidate>Обновить из игры</button>{% if login_required %}<button type="submit" name="action" value="reconnect">Войти заново и проверить</button>{% else %}<button type="submit" name="action" value="prepare">Проверить защиту</button>{% endif %}</div></footer>
+{% endif %}
+</form>
+<script>
+(() => {
+const selects = [...document.querySelectorAll('#tw-deploy-form select')];
+const element = (tag, className, text) => {
+ const node = document.createElement(tag);
+ if (className) node.className = className;
+ if (text) node.textContent = text;
+ return node;
+};
+const pickers = selects.map(select => {
+ const picker = element('details', 'tw-dc-picker');
+ const summary = element('summary');
+ const list = element('div', 'tw-dc-options');
+ const cards = [...select.options].map(option => {
+  const button = element('button', 'tw-dc-option');
+  const header = element('span', 'tw-dc-card-header');
+  const title = element('strong', '', option.dataset.title || option.text);
+  const status = element('span', 'tw-dc-card-status');
+  button.type = 'button';
+  title.id = select.id + '-card-' + option.index;
+  button.setAttribute('aria-labelledby', title.id);
+  header.append(title, status);
+  button.append(header);
+  const descriptions = [];
+  for (const [kind, content] of [['stats', option.dataset.stats], ['effects', option.dataset.details]]) {
+   if (!content) continue;
+   const description = element('span', 'tw-dc-' + kind, content);
+   description.id = title.id + '-' + kind;
+   descriptions.push(description.id);
+   button.append(description);
+  }
+  if (descriptions.length) button.setAttribute('aria-describedby', descriptions.join(' '));
+  button.addEventListener('click', () => {
+   select.value = option.value;
+   picker.open = false;
+   update();
+   summary.focus();
+  });
+  list.append(button);
+  return {option, button, status};
+ });
+ picker.append(summary, list);
+ select.after(picker);
+ select.hidden = true;
+ const label = select.labels[0];
+ if (label) label.addEventListener('click', event => { event.preventDefault(); summary.focus(); });
+ picker.addEventListener('toggle', () => {
+  if (picker.open) for (const other of document.querySelectorAll('.tw-dc-picker[open]'))
+   if (other !== picker) other.open = false;
+ });
+ picker.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && picker.open) {
+   event.preventDefault();
+   picker.open = false;
+   summary.focus();
+  }
+ });
+ return {select, summary, cards};
+});
+function update() {
+ const chosen = new Set(selects.map(s => s.value).filter(Boolean));
+ for (const {select, summary, cards} of pickers) {
+  summary.textContent = select.selectedOptions[0].text;
+  for (const {option, button, status} of cards) {
+   button.disabled = option.disabled = Boolean(option.value && chosen.has(option.value) && !option.selected);
+   button.setAttribute('aria-pressed', option.selected);
+   status.textContent = option.selected ? 'Выбрано' : button.disabled ? 'В другом отряде' : '';
+  }
+ }
+}
+update();
+})();
+</script>
+<style>
+#tw-deploy-form .panel{min-width:0}
+.deploy-meta{color:var(--fg-secondary)}
+.deploy-steps{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;list-style:none;padding:0;margin:1.25rem 0;color:var(--fg-secondary);font-size:.9rem}
+.deploy-steps .current{color:var(--accent);font-weight:600}
+.deploy-squad{min-width:0;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.deploy-squad-header{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem 1rem;flex-wrap:wrap}
+.deploy-squad-header h2{margin:0;font-size:1.1rem}
+.deploy-zone{color:var(--fg-secondary);font-size:.85rem}
+.deploy-units{display:flex;flex-wrap:wrap;gap:1rem;list-style:none;padding:0;margin:1.25rem 0}
+.deploy-units li{display:flex;align-items:center;gap:.6rem;flex:0 1 11rem;min-width:0;font-size:.85rem;overflow-wrap:anywhere}
+.deploy-units img{flex-shrink:0;border-radius:50%;background:var(--surface-2);object-fit:cover}
+.deploy-units small{display:block;color:var(--fg-secondary);margin-top:.15rem}
+.deploy-hint,.deploy-recommendation{font-size:.85rem;color:var(--fg-secondary)}
+.deploy-recommendation summary{cursor:pointer}
+.deploy-actions{margin-top:.5rem;padding:1.25rem;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem}
+.deploy-actions>div:first-child{flex:1 1 18rem}
+.deploy-actions p{margin:.35rem 0 0;font-size:.85rem;color:var(--fg-secondary)}
+.deploy-buttons{display:flex;flex-wrap:wrap;gap:.6rem}
+#tw-deploy-form .deploy-secondary{background:var(--surface);color:var(--fg);border:1px solid var(--border-strong)}
+@media(max-width:40em){.deploy-squad,.deploy-actions{padding:1rem}.deploy-buttons{width:100%}.deploy-buttons button{flex:1 1 100%}.deploy-units{gap:.75rem}.deploy-units li{flex:1 1 9rem}}
+#tw-deploy-form p,#tw-deploy-form h2,#tw-deploy-form .tw-dc-picker{overflow-wrap:anywhere}
+#tw-deploy-form label{display:block;margin-block:1em}
+#tw-deploy-form [hidden]{display:none}
+.tw-dc-picker>summary{cursor:pointer;border:1px solid var(--border,#777);border-radius:.4rem;padding:.65rem}
+.tw-dc-options{display:grid;gap:.5rem;max-height:min(28rem,60vh);overflow:auto;overscroll-behavior:contain;margin-top:.35rem;padding:.45rem;background:var(--surface-2);border:1px solid var(--border);border-radius:.5rem}
+#tw-deploy-form .tw-dc-option{display:grid;gap:.3rem;min-width:0;margin:0;padding:.6rem .75rem;text-align:left;white-space:normal;overflow-wrap:anywhere;line-height:1.35;color:var(--fg);background:var(--surface);border:1px solid var(--border-strong);border-radius:.5rem}
+#tw-deploy-form .tw-dc-option:is(:enabled:hover,:focus-visible,[aria-pressed="true"]){border-color:var(--accent)}
+#tw-deploy-form .tw-dc-option:disabled{opacity:1;color:var(--fg-secondary);background:var(--surface-2)}
+.tw-dc-card-header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.15rem .75rem}
+.tw-dc-card-status{color:var(--fg-secondary);font-size:.8em}
+.tw-dc-card-status:empty{display:none}
+.tw-dc-option[aria-pressed="true"] .tw-dc-card-status{color:var(--accent)}
+.tw-dc-stats{color:var(--fg);font-size:.88em;font-weight:600}
+.tw-dc-effects{color:var(--fg-secondary);font-size:.85em;white-space:pre-line}
+</style>
+{% endblock %}

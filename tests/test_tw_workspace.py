@@ -33,6 +33,7 @@ class WorkspaceTests(unittest.TestCase):
         self.app = FastAPI()
         self.app.add_middleware(SessionMiddleware, secret_key="test")
         self.app.include_router(web.router, prefix="/tw/def")
+        self.app.include_router(web.squads_router, prefix="/squads")
         self.app.dependency_overrides[web._require] = lambda: self.user
         self.client = TestClient(self.app)
         self.load_patch = patch.object(web, "_load_roster", AsyncMock(return_value=(self.roster, None)))
@@ -65,6 +66,26 @@ class WorkspaceTests(unittest.TestCase):
         response = self.client.get(f"/tw/def/plans/{self.plan_id}")
         self.assertEqual(response.text.count('data-tw-zone="'), 10)
         self.assertEqual(response.text.count('data-tw-view-panel="'), 3)
+
+    def test_standalone_library_shares_squads_with_tw_and_preserves_guards(self):
+        for path in ('/squads', '/tw/def/squads', '/squads/new', '/squads/import',
+                     f'/squads/{self.squad_id}/edit'):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertIn('/squads', response.text)
+        page = self.client.get('/squads').text
+        self.assertIn('<h1>Отряды', page)
+        self.assertNotIn('hero-subtabs', page)
+        self.assertEqual(self.client.get('/squads/export').status_code, 200)
+        foreign = database.save_tw_def_squad(999, None, 'Foreign', 'character',
+                                            [{'options': [{'base_id': 'A'}]}], None, 'test')
+        self.assertEqual(self.client.get(f'/squads/{foreign}/edit').status_code, 404)
+        self.assertEqual(self.client.post(f'/squads/{self.squad_id}/copy',
+                         headers={'Origin': 'https://foreign.invalid'}).status_code, 403)
+        response = self.client.post(f'/squads/{self.squad_id}/copy', follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertTrue(response.headers['location'].startswith('/squads/'))
+        self.assertEqual(len(database.list_tw_def_squads(self.gid)), 3)
 
     def test_squad_editor_round_trips_alternative_datacrons_and_soft_skills(self):
         import json

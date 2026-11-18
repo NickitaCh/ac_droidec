@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import database
 from services import mod_analysis, mod_compare, tw_def_library, stat_forecast
 from services.steal_build import GuildLookupResult
-from tg_bot import command_access, core, handlers, more, checks, notifier, store
+from tg_bot import command_access, core, event_panels, handlers, more, checks, notifier, store
 from tg_bot.api import TelegramAPI, TelegramError
 
 command_access.install()
@@ -138,9 +138,23 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         command_access.toggle(1, -10, 42, "unit")
         self.assertEqual(command_access.blocked(-10, 42), set())
 
-    def test_all_feature_callbacks_have_command_gate(self):
+    async def test_all_feature_callbacks_have_command_gate(self):
         self.assertTrue(core.CALLBACKS)
         for cb in core.CALLBACKS.values():
+            if cb.handler is event_panels.open_panel:
+                ctx = SimpleNamespace(callback_query={"id": "q"}, access={"guild_id": 1, "tier": "officer"},
+                                      chat_id=1, app=SimpleNamespace(profile="test"),
+                                      api=SimpleNamespace(answer_callback=AsyncMock()))
+                for kind in event_panels.PANEL_COMMANDS:
+                    self.assertIn(kind, core.COMMANDS)
+                    with patch.object(store, "chat_guild", return_value=1), \
+                         patch.object(event_panels.event_panels, "allowed", return_value=True), \
+                         patch.object(command_access, "denied", return_value=True) as denied, \
+                         patch.object(event_panels.event_panels, "handoff") as handoff:
+                        await cb.handler(ctx, f"{kind}:token:open")
+                        denied.assert_called_once_with(ctx, kind)
+                        handoff.assert_not_called()
+                continue
             self.assertIn(cb.command_name, core.COMMANDS)
 
     def test_library_import_is_scoped_idempotent_and_preserves_requirements(self):

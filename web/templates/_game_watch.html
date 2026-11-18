@@ -1,0 +1,27 @@
+        {% if not game_connected %}
+        <p class="error" role="alert">Для получения данных из игры привяжите EA основного аккаунта.</p>
+        <a class="btn btn-primary" href="/me#ea-connection">Привязать EA в профиле</a>
+        {% else %}
+        <p class="muted">Новый вход может завершить игру на вашем устройстве.</p>
+        <form id="tb-live-refresh" class="filter-row" method="post" action="{{ refresh_url }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button type="submit">Обновить</button>
+        </form>
+        <div id="tb-watch-controls">
+            {% if watch %}<p role="status">{{ watch.message }}</p>{% endif %}
+            <form class="filter-row" method="post" action="{{ watch_url }}">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                {% if watch and watch.status != "ended" %}
+                    <input type="hidden" name="action" value="stop">
+                    <button type="submit">Остановить наблюдение</button>
+                {% else %}
+                    <input type="hidden" name="action" value="start">
+                    <label>Интервал
+                        <select name="interval">{% for value in watch_intervals %}<option value="{{ value }}"{% if value == 300 %} selected{% endif %}>{{ value // 60 }} мин.</option>{% endfor %}</select>
+                    </label>
+                    <label class="checkbox"><input name="confirm_login" type="checkbox" value="true" required> Разрешаю новый вход в игру</label>
+                    <button type="submit">Войти и запустить наблюдение</button>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}

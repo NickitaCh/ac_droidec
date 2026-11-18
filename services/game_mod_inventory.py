@@ -51,6 +51,11 @@ def _module(raw):
         "secondaryStat": secondary,
     })
     if mod:
+        # Keep exact wire integers for optimization; display/CSV floats are lossy.
+        for decoded, original in zip([mod['primary'], *mod['secondaries']],
+                                     [primary[0] if primary else {}, *secondary]):
+            if decoded and original:
+                decoded['unscaled'] = original['stat']['unscaledDecimalValue']
         mod["id"] = next((value.decode() for tag, wire, value in rows if (tag, wire) == (1, 2)), "")
         mod["locked"] = bool(values.get(11))
         mod["secondary_rolls"] = secondary_rolls

@@ -14,6 +14,7 @@
     </div>
     {% if classic %}
     <nav class="hero-tabs">
+        {% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}{% if active == "live" %}<strong>Сейчас</strong>{% else %}<a href="/tb/live">Сейчас</a>{% endif %}{% endif %}
         {% for href, key, label in [("/tb/plan", "plan", "План"), ("/tb/platoons", "platoons", "Взводы"), ("/tb/order", "order", "Ордер"), ("/tb", "results", "Итоги")] %}
             {% if key == active %}<strong>{{ label }}</strong>{% else %}<a href="{{ href }}">{{ label }}</a>{% endif %}
         {% endfor %}
@@ -21,6 +22,7 @@
     {% else %}
     {% set in_plan = active in ("plan", "platoons", "order", "goal") %}
     <nav class="hero-tabs">
+        {% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}{% if active == "live" %}<strong>Сейчас</strong>{% else %}<a href="/tb/live">Сейчас</a>{% endif %}{% endif %}
         {% if in_plan and active == "plan" %}<strong>План</strong>{% else %}<a href="/tb/plan{{ '?id=' ~ plan_id if plan_id else '' }}"{% if in_plan %} aria-current="page"{% endif %}>План</a>{% endif %}
         {% if active == "results" %}<strong>Итоги</strong>{% else %}<a href="/tb">Итоги</a>{% endif %}
     </nav>

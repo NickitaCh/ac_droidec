@@ -353,6 +353,10 @@
             let items = [];
             let active = -1;
             const choose = (item) => {
+                if (row.dataset.baseId !== item.base_id) {
+                    delete row.dataset.requiredOmicrons;
+                    row.querySelector('[data-imported-omicrons]')?.remove();
+                }
                 row.dataset.baseId = item.base_id;
                 row.dataset.hasOmicron = String(Boolean(item.has_omicron));
                 applyOmicron(row);
@@ -401,6 +405,12 @@
         const makeOption = (opt) => {
             const row = tpl.content.firstElementChild.cloneNode(true);
             row.dataset.baseId = opt.base_id || "";
+            if (opt.required_omicrons?.length) {
+                row.dataset.requiredOmicrons = JSON.stringify(opt.required_omicrons);
+                const info = el('small', 'muted', 'Проверяется указанный омикрон из HotUtils');
+                info.dataset.importedOmicrons = '';
+                row.appendChild(info);
+            }
             if (opt.base_id) {
                 row.querySelector(".unit-search-input").value = opt.name || opt.base_id;
                 row.querySelector(".twdef-option-portrait img").src = `/unit-img/${encodeURIComponent(opt.base_id)}`;
@@ -506,6 +516,7 @@
                         return;
                     }
                     const opt = { base_id: row.dataset.baseId };
+                    if (row.dataset.requiredOmicrons) opt.required_omicrons = JSON.parse(row.dataset.requiredOmicrons);
                     FIELDS.forEach((f) => {
                         const v = row.querySelector(`[data-field=${f}]`).value;
                         if (v !== "") opt[f] = parseInt(v, 10);

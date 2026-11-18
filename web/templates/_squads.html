@@ -1,0 +1,12 @@
+{% import "_ui.html" as ui %}
+{% macro hero(title, lead="") -%}
+<section class="page-hero page-hero-dark">
+    <div class="page-hero-top">
+        <div>
+            <p class="page-hero-eyebrow">Библиотека гильдии</p>
+            <h1>{{ title }}{% if lead %}{{ ui.help(lead, side="left") }}{% endif %}</h1>
+        </div>
+    </div>
+    {% if caller %}{{ caller() }}{% endif %}
+</section>
+{%- endmacro %}

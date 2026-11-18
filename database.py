@@ -1681,6 +1681,33 @@ def get_equipment_icon(base_id: str) -> str | None:
     return row[0] if row else None
 
 
+def save_equipment_icon_styles(items):
+    rows = [(item["id"], item["tier"], item.get("mark") or "")
+            for item in items if item.get("id") and item.get("tier")]
+    if not rows:
+        return
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_equipment_icon_styles (
+                base_id TEXT PRIMARY KEY, tier INTEGER NOT NULL, mark TEXT NOT NULL
+            )
+        """)
+        conn.executemany("""
+            INSERT OR REPLACE INTO game_equipment_icon_styles (base_id, tier, mark)
+            VALUES (?, ?, ?)
+        """, rows)
+
+
+def get_equipment_icon_style(base_id):
+    with sqlite3.connect(DB_NAME) as conn:
+        try:
+            return conn.execute(
+                "SELECT tier, mark FROM game_equipment_icon_styles WHERE base_id = ?", (base_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+
+
 def get_game_equipment_names(base_ids: list[str]) -> dict[str, str]:
     """{base_id: name_ru} — обратная к find_game_equipment_by_name_en, нужна для деталей,
     которых не было в исходном распознанном с картинки списке (см. /фарм: выбранный

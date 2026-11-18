@@ -17,7 +17,7 @@ class GameAccountCog(commands.Cog):
         access = guild_resolver.resolve_access(inter.author)
         args = (str(inter.author.id), access.get("guild_id"), bot_profiles.worker_profile() or bot_profiles.runtime_profile(), access.get("tier"))
         try:
-            game_account.require_pilot(*args)
+            game_account.require_account_read(*args)
             url = "https://swgoh-sng.ru/game-account/link?alt=" + ("1" if альт else "0")
             view = disnake.ui.View()
             view.add_item(disnake.ui.Button(style=disnake.ButtonStyle.link, label="Привязать альт" if альт else "Привязать аккаунт", url=url))

@@ -97,9 +97,31 @@ def _allocate(requirements, stock, recipes):
 
 
 def calculate(unit, kind, target, stock):
-    needed = _requirements(*unit, kind, target)
-    raw_recipes = database.get_bot_state("inventory_gear_crafting", guild_id=0) if needed and kind == "gear" else None
-    rows = _allocate(needed, stock, json.loads(raw_recipes) if raw_recipes else {})
+    rows, has_recipes = calculate_by_id(unit, kind, target, stock)
+    return [row[1:] for row in rows], has_recipes
+
+
+def calculate_by_id(unit, kind, target, stock):
+    return calculate_goals([(unit, kind, target)], stock)
+
+
+def calculate_goals(goals, stock):
+    rows, has_recipes, _ = calculate_report(goals, stock)
+    return rows, has_recipes
+
+
+def calculate_report(goals, stock):
+    """Pool all requirements before allocating stock or crafted ingredients."""
+    gear_needed, relic_needed = Counter(), Counter()
+    for unit, kind, target in goals:
+        if kind == "relic":
+            base_id, gear, relic, equipped = unit
+            gear_needed.update(_requirements(*unit, "gear", 13))
+            relic_needed.update(_requirements(base_id, max(13, gear), relic, equipped, kind, target))
+        else:
+            gear_needed.update(_requirements(*unit, kind, target))
+    raw_recipes = database.get_bot_state("inventory_gear_crafting", guild_id=0) if gear_needed else None
+    rows = _allocate(gear_needed + relic_needed, stock, json.loads(raw_recipes) if raw_recipes else {})
     names = database.get_game_equipment_names([row[0] for row in rows])
-    return [(names.get(item) or CURRENCY_NAMES.get(item) or ITEM_NAMES.get(item, item),
-             count, available, missing, craft) for item, count, available, missing, craft in rows], bool(raw_recipes)
+    return [(item, names.get(item) or CURRENCY_NAMES.get(item) or ITEM_NAMES.get(item, item),
+             count, available, missing, craft) for item, count, available, missing, craft in rows], bool(raw_recipes), set(relic_needed)

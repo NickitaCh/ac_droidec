@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import database
 from services import account_linking, ea_browser, ea_connect as ea, game_account as ga, game_lab as lab
 from web.routes import game_account as route
-from web.deps import require_officer_access
+from web.deps import require_officer_access, require_member_access
 
 
 def read_request(player):
@@ -44,6 +44,7 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
         self.app.add_middleware(SessionMiddleware, secret_key="test")
         self.app.include_router(route.router, prefix="/game-account")
         self.app.dependency_overrides[require_officer_access] = lambda: self.user
+        self.app.dependency_overrides[require_member_access] = lambda: self.user
 
     def tearDown(self):
         for p in reversed(self.patches):
@@ -73,6 +74,28 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r["id"] for r in lab.accounts()], ["notest"])
         with lab._db() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM user_mapping WHERE ally_code='987654321'").fetchone()[0], 0)
+
+    async def test_member_of_another_test_guild_links_alt_only_in_own_guild(self):
+        database.set_user_registration("member", "234567891", "Main", guild_id=2)
+        state = {"stage": "code", "cookies": [], "fields": {}, "url": "https://signin.ea.com/"}
+
+        async def restore(cfg, tokens, expected, validate_preview=None):
+            await validate_preview("new-alt")
+            return self.credentials, self.summary
+
+        with patch.object(ga.guild_resolver, "resolve_access", return_value={"guild_id": 2, "tier": "member"}), \
+                patch.object(ea_browser, "start", AsyncMock(return_value=state)), \
+                patch.object(ea_browser, "finish", AsyncMock(return_value={"stage": "complete", "longlive": "access"})), \
+                patch.object(ea, "_exchange", AsyncMock(return_value={})), patch.object(ea, "_import", side_effect=restore):
+            flow = await ea.start_registration("member", True, "test@example.com", True, guild_id=2)
+            self.assertIsNone(ea.pending("member", ea.registration_target("member", True, 1)))
+            result = await ea.finish_registration("member", True, flow, "123456", self.comlink, guild_id=2)
+
+        self.assertIn(("987654321", "New alt", 0), database.get_user_registrations("member", 2))
+        self.assertEqual(ea.target_for_registration("member", 2, "987654321"), result["target"])
+        self.assertIsNone(ea.target_for_registration("member", 1, "987654321"))
+        with ga._db() as conn:
+            self.assertEqual(conn.execute("SELECT guild_id FROM game_account_sessions WHERE owner='member'").fetchone()[0], 2)
 
     async def test_wrong_mode_cannot_demote_main_or_replace_it(self):
         with self.assertRaises(ga.AccountError):
@@ -126,7 +149,7 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
         with TestClient(self.app) as client, patch.object(ea, "available", return_value=True):
             result = client.get("/game-account/link?alt=1")
             self.assertEqual(result.status_code, 200)
-            self.assertIn("Привязать альт", result.text)
+            self.assertIn("Привязать EA альта", result.text)
             self.assertIn('name="ea_email"', result.text)
             self.assertNotIn("name=\"ally_code\"", result.text)
             self.assertNotIn('name="session_secret"', result.text)
@@ -135,6 +158,7 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
                 result = client.post("/game-account/link/ea-start", data={"csrf": csrf, "alt": "1", "ea_email": "test@example.com", "consent": "yes"})
                 self.assertEqual(start.await_args.args, ("admin", True, "test@example.com", True))
                 self.assertIn('name="one_time_code"', result.text)
+                self.assertIn("Привязать альт", result.text)
             with patch.object(ea, "finish_registration", AsyncMock(return_value={"target": "owned-target"})) as finish, patch("web.routes.registration._get_comlink", return_value=self.comlink):
                 result = client.post("/game-account/link/ea-finish", data={"csrf": csrf, "alt": "1", "flow_id": "flow", "one_time_code": "123456"}, follow_redirects=False)
                 self.assertEqual(result.status_code, 303)
