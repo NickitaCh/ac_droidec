@@ -12,7 +12,13 @@ from services import game_mod_inventory, mod_optimizer, mod_optimizer_plans as p
 
 async def snapshot(user, code, *, read_only=False):
     scope = (str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'], code)
-    connection, credentials, is_current = accounts._load(*scope, optimizer_read=read_only)
+    if not read_only:
+        ga.require_mod_actions(*scope[:4])
+    connection, credentials, connection_current = accounts._load(*scope, optimizer_read=True)
+    def is_current():
+        if not read_only:
+            ga.require_mod_actions(*scope[:4])
+        return connection_current()
     expected = connection[1]
     try:
         raw = base64.b64decode(credentials['read_request'], validate=True)

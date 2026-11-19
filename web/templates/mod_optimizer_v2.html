@@ -99,7 +99,7 @@
         </div>
         {% endmacro %}
         <fieldset><legend>Плейты</legend>
-        <div class="mo-options">{% for p in plates %}<label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>{{ p }}</label>{% else %}<p>Сначала создайте плейты в <a href="/plates">разделе требований</a>.</p>{% endfor %}</div>
+        <div class="mo-options">{% for p in plates %}<label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>{{ p|plate_label }}</label>{% else %}<p>Сначала создайте плейты в <a href="/plates">разделе требований</a>.</p>{% endfor %}</div>
         </fieldset>
         {% if characters %}
         <details {% if turn_order %}open{% endif %}><summary>Порядок ходов</summary>
@@ -262,7 +262,7 @@
         <label for="mo-character-select">Персонаж · {{ results|length }}</label>
         <input id="mo-character-search" type="search" aria-label="Найти персонажа" placeholder="Найти персонажа" autocomplete="off">
         <div class="mo-picker-row"><button type="button" data-mo-prev aria-label="Предыдущий персонаж">‹</button>
-        <select id="mo-character-select">{% for r in results %}<option value="{{ loop.index0 }}" data-name="{{ r.char_name }}">{{ '❌' if r.failed|selectattr('priority', 'equalto', 'required')|list or not r.owned else '✅' }} {{ r.char_name }} · {{ r.plate }}</option>{% endfor %}</select>
+        <select id="mo-character-select">{% for r in results %}<option value="{{ loop.index0 }}" data-name="{{ r.char_name }}">{{ '❌' if r.failed|selectattr('priority', 'equalto', 'required')|list or not r.owned else '✅' }} {{ r.char_name }} · {{ r.plate|plate_label }}</option>{% endfor %}</select>
         <button type="button" data-mo-next aria-label="Следующий персонаж">›</button></div>
     </div>{% if not loadouts_page %}<p data-mo-goals-changed hidden role="status">Цели изменены — нужен пересчёт.</p>
     <button form="mo-run" name="source" value="game" {% if not game_connected %}disabled{% endif %}>Пересчитать из игры</button>
@@ -273,21 +273,21 @@
 {% set required_passed = r.passed|selectattr('priority', 'equalto', 'required')|list|length %}
 {% set required_failed = r.failed|selectattr('priority', 'equalto', 'required')|list|length %}
 <div class="panel mo-character" data-mo-character="{{ loop.index0 }}">
-    <div class="mo-character-heading"><img src="/unit-img/{{ r.base_id }}" alt="" width="48" height="48" loading="lazy"><div><h3>{{ r.char_name }}{% if r.locked %} · 🔒{% endif %}</h3><span class="muted">{{ r.plate }}</span></div><span class="badge {{ 'badge-ok' if not required_failed and r.owned else 'badge-warn' }}">Обязательные: {{ required_passed }} из {{ required_passed + required_failed }}</span></div>
+    <div class="mo-character-heading"><img src="/unit-img/{{ r.base_id }}" alt="" width="48" height="48" loading="lazy"><div><h3>{{ r.char_name }}{% if r.locked %} · 🔒{% endif %}</h3><span class="muted">{{ r.plate|plate_label }}</span></div><span class="badge {{ 'badge-ok' if not required_failed and r.owned else 'badge-warn' }}">Обязательные: {{ required_passed }} из {{ required_passed + required_failed }}</span></div>
     {% if r.reason %}<p>{{ r.reason }}</p>{% endif %}
     {% if r.owned %}
     <p>Текущая реликвия: R{{ r.current_relic }}.{% if r.projected %} Подбор на R{{ r.target_relic }}.{% endif %} Необязательные цели: {{ r.passed|length - required_passed }} из {{ r.passed|length + r.failed|length - required_passed - required_failed }}.</p>
     <div class="table-scroll"><table class="data cards-on-phone"><thead><tr><th>Требование</th><th>До</th><th>{{ 'После апа' if r.projected else 'После' }}</th><th>Минимум / цель</th></tr></thead><tbody>
     {% for req in r.failed + r.passed %}
     {% set goal = 'Цель' if req.priority != 'required' else 'Минимум' if req.editable_id and req.operator == '>=' else 'Лимит' if req.editable_id and req.operator == '<=' else 'Норма' %}
-    <tr><td data-label="Требование">{{ '✅' if req.ok else '❌' if req.priority == 'required' else '○' }} {{ req.label or req.stat_name }}<small class="muted"> · {{ req.plate }}{% if req.priority != 'required' %} · необязательно{% endif %}</small></td><td data-label="До">{{ req.before_fmt }}</td><td data-label="{{ 'После апа' if r.projected else 'После' }}"><span>{{ req.current_fmt }}{% if r.projected %}<br><small class="muted">На R{{ r.current_relic }}: {{ req.now_fmt }}</small>{% endif %}</span></td>
+    <tr><td data-label="Требование">{{ '✅' if req.ok else '❌' if req.priority == 'required' else '○' }} {{ req.label or req.stat_name }}<small class="muted"> · {{ req.plate|plate_label }}{% if req.priority != 'required' %} · необязательно{% endif %}</small></td><td data-label="До">{{ req.before_fmt }}</td><td data-label="{{ 'После апа' if r.projected else 'После' }}"><span>{{ req.current_fmt }}{% if r.projected %}<br><small class="muted">На R{{ r.current_relic }}: {{ req.now_fmt }}</small>{% endif %}</span></td>
     <td data-label="{{ goal }}">{{ goal }}: {{ req.threshold_fmt }}
         {% if not loadouts_page and req.editable_id and req.editable_id not in edited.ids %}
         {% set edited.ids = edited.ids + [req.editable_id] %}
         <div class="mo-stat-control" data-mo-stat data-default="{{ req.threshold }}" data-before="{{ req.before if req.before is number else req.threshold }}" data-current="{{ req.current if req.current is number else req.threshold }}" data-stat="{{ req.stat_name }}">
             <input type="range" data-mo-range aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · ползунок">
             <div class="mo-stat-value"><input form="mo-run" type="number" step="any" name="threshold_{{ req.editable_id }}"
-                   aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · {{ req.plate }}"
+                   aria-label="{{ goal }} · {{ r.char_name }} · {{ req.label }} · {{ req.plate|plate_label }}"
                    placeholder="{{ req.threshold }}" value="{{ (thresholds|default({})).get(req.editable_id|string, '') }}">
             <button type="button" class="button-secondary" data-mo-reset aria-label="Вернуть норму плейта · {{ r.char_name }} · {{ req.label }}">↺</button></div>
         </div>

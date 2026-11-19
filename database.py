@@ -5273,6 +5273,9 @@ def get_stat_requirement(req_id: int, guild_id: int = 1):
 
 @refresh_before("plate")
 def get_stat_requirements(plate_name: str, character_key: str, guild_id: int = 1):
+    from services import personal_plates
+    if plate_name.startswith(personal_plates.PREFIX):
+        return personal_plates.rows(personal_plates.resolve(plate_name, guild_id), character_key)
     """Для модульного плейта прозрачно разворачивает композицию и возвращает требования из
     ВСЕХ плейтов-источников, где встретился этот персонаж (см. _resolve_modular_plate_leaf_pairs) —
     возвращаемые строки хранят plate_name исходного (leaf) плейта, а не имя модульного плейта,
@@ -5347,6 +5350,9 @@ def set_stat_plate_bot_visibility(plate_name: str, visible: bool, guild_id: int 
 
 @refresh_before("plate")
 def get_stat_requirement_characters(plate_name: str, guild_id: int = 1):
+    from services import personal_plates
+    if plate_name.startswith(personal_plates.PREFIX):
+        return list(dict.fromkeys(row[2] for row in personal_plates.rows(personal_plates.resolve(plate_name, guild_id))))
     """Персонажи плейта в пользовательском порядке (см. set_stat_plate_character_order,
     драг-н-дроп на /plates/<name>); персонажи без сохранённого порядка (новые, ещё не
     перетаскивались) идут следом, по алфавиту.

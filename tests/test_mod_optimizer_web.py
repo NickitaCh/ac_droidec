@@ -91,7 +91,7 @@ class OptimizerWebTests(unittest.TestCase):
         self.user.update(guild_id=2, tier='member', is_super_admin=False)
         with TestClient(self.app) as client:
             csrf = self.csrf(client)
-            self.assertEqual(client.post('/mod-optimizer/apply', data={'csrf': csrf, 'plan': 'anything'}).status_code, 403)
+            self.assertEqual(client.post('/mod-optimizer/apply', data={'csrf': csrf, 'plan': 'anything'}).status_code, 400)
 
     def test_expired_plan_offers_warned_retry_with_preserved_settings(self):
         token = plans.create('owner', 1, '123456789', {})
@@ -252,26 +252,31 @@ class OptimizerWebTests(unittest.TestCase):
             preview = client.post('/mod-loadouts/restore', data={**form, 'characters': 'B'})
             self.assertEqual(preview.url.path, '/mod-loadouts')
             self.assertIn('B — снять 1', preview.text)
-            self.assertNotIn('action="/mod-loadouts/apply"', preview.text)
+            self.assertIn('action="/mod-loadouts/apply"', preview.text)
             draft = str(preview.url).split('plan=')[1]
             data = plans.get(draft, 'owner', 1)['data']
             self.assertEqual(data['results'], [{'owned': True, 'base_id': 'B', 'used_mods': []}])
-            self.assertTrue(data['dry_run'])
+            self.assertFalse(data['dry_run'])
 
-    def test_member_dry_run_is_forced_and_direct_apply_is_forbidden(self):
+    def test_member_can_opt_out_of_dry_run_and_apply_with_confirmation(self):
         self.user.update(tier='member', is_super_admin=False)
         with TestClient(self.app) as client:
             csrf = self.csrf(client)
             checkbox = re.search(r'<input[^>]+name="dry_run"[^>]*>', client.get('/mod-optimizer').text).group(0)
             self.assertIn('checked', checkbox)
-            self.assertIn('disabled', checkbox)
+            self.assertNotIn('disabled', checkbox)
             with patch.object(route, '_spawn', side_effect=lambda c: c.close()):
                 posted = client.post('/mod-optimizer', data={'csrf': csrf, 'source': 'game', 'plates': 'P',
                     'ally_code': '123456789', 'dry_run': '0'}, follow_redirects=False)
                 self.assertEqual(posted.status_code, 303)
             token = posted.headers['location'].split('plan=')[1]
-            self.assertTrue(plans.get(token, 'owner', 1)['data']['dry_run'])
-            self.assertEqual(client.post('/mod-optimizer/apply', data={'csrf': csrf, 'plan': token, 'confirm': '1'}).status_code, 403)
+            data = plans.get(token, 'owner', 1)['data']
+            self.assertFalse(data['dry_run'])
+            data['game_source'] = True
+            plans.finish(token, 'ready', data)
+            with patch.object(route, '_spawn', side_effect=lambda c: c.close()) as spawn:
+                self.assertEqual(client.post('/mod-optimizer/apply', data={'csrf': csrf, 'plan': token, 'confirm': '1'}, follow_redirects=False).status_code, 303)
+                spawn.assert_called_once()
 
     def test_populated_result_formats_and_partial_status(self):
         result = {'base_id': 'A', 'char_name': 'Персонаж', 'owned': True, 'plate': 'P', 'locked': True,
@@ -357,7 +362,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         raw = ga.pack([(4, 2, b'PlayerRpc'), (5, 2, b'GetInitialData'), (6, 2, b''), (7, 2, b'player'), (8, 2, b'token')])
         import base64
         user = {'discord_id': 'owner', 'guild_id': 1, 'bot_profile': 'test', 'tier': 'officer'}
-        with patch.object(actions.accounts, '_load', return_value=(('target', 'player', b'secret'),
+        with patch.object(ga, 'require_mod_actions'), patch.object(actions.accounts, '_load', return_value=(('target', 'player', b'secret'),
                 {'read_request': base64.b64encode(raw).decode()}, lambda: True)), \
                 patch.object(ga, '_read_payload', AsyncMock(return_value=payload)), \
                 patch.object(actions.game_mod_inventory.database, 'get_game_unit_names', return_value={}):

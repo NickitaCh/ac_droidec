@@ -180,6 +180,7 @@
             {% if user and user.guild_id and user.bot_profile == 'test' %}
                 {{ nav_link("/game-account/modules", "📦", "Мои модули") }}
                 {{ nav_link("/mod-loadouts", "💾", "Подборки модулей") }}
+                {% if user.bot_profile == 'test' %}{{ nav_link("/personal-plates", "🎛️", "Личные плейты") }}{% endif %}
                 {{ nav_link("/mod-optimizer", "⚡", "Оптимизатор модулей") }}
             {% endif %}
             {% endcall %}{% endif %}

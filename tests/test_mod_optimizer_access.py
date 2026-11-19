@@ -82,7 +82,7 @@ class MemberAccountAccessTests(unittest.IsolatedAsyncioTestCase):
                 accounts._load('owner', 1, 'test', 'member', '123')
             with patch.object(ga, '_read_payload', AsyncMock()) as transport:
                 with self.assertRaises(ga.AccountError):
-                    await actions.snapshot(self.user, '123')
+                    await actions.snapshot(self.user, 'someone-else')
                 transport.assert_not_awaited()
 
 

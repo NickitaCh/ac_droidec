@@ -69,7 +69,7 @@ def require_pilot(owner, guild_id, profile, tier=None):
 
 
 def require_account_read(owner, guild_id, profile, tier=None):
-    """Allow personal reads for members of guilds served by TEST."""
+    """Allow personal reads in the guild assigned to the current profile."""
     if guild_id == 1 and profile == "test":
         try:
             require_pilot(owner, guild_id, profile, tier)
@@ -78,10 +78,25 @@ def require_account_read(owner, guild_id, profile, tier=None):
             pass
     access = guild_resolver.resolve_access(str(owner))
     from services import bot_profiles
-    if (profile != 'test' or guild_id is None or access.get('guild_id') != guild_id
+    if (profile not in bot_profiles.PROFILES or guild_id is None or access.get('guild_id') != guild_id
             or access.get('tier') not in ('member', 'officer')
-            or tier not in (None, 'member', 'officer') or bot_profiles.guild_profile(guild_id) != 'test'):
-        raise AccountError('Подключение доступно участникам гильдий тестового бота.')
+            or tier not in (None, 'member', 'officer') or bot_profiles.guild_profile(guild_id) != profile):
+        raise AccountError('Подключение доступно участникам гильдий в её версии бота.')
+
+
+def require_game_officer(owner, guild_id, profile, tier=None):
+    if profile != "prod":
+        return require_pilot(owner, guild_id, profile, tier)
+    require_account_read(owner, guild_id, profile, tier)
+    if tier not in (None, "officer") or guild_resolver.resolve_access(str(owner)).get("tier") != "officer":
+        raise AccountError("Доступно только офицерам.")
+
+
+def require_mod_actions(owner, guild_id, profile, tier=None):
+    """Personal module movement is available to connected members in TEST."""
+    if profile == 'test':
+        return require_account_read(owner, guild_id, profile, tier)
+    return require_game_officer(owner, guild_id, profile, tier)
 
 
 @contextmanager

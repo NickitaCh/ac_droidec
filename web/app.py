@@ -167,6 +167,8 @@ app.include_router(tb_map.router, prefix="/tb/map", tags=["tb-map"])
 app.include_router(registration.router, prefix="/registration", tags=["registration"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(stat_plates.router, prefix="/plates", tags=["stat-plates"])
+from web.routes import personal_plates
+app.include_router(personal_plates.router, prefix="/personal-plates", tags=["personal-plates"])
 app.include_router(birthdays.router, prefix="/birthdays", tags=["birthdays"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(datacrons.router, prefix="/datacrons", tags=["datacrons"])

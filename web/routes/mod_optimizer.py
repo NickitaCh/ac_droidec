@@ -21,16 +21,18 @@ import stat_engine
 import services.stat_forecast as stat_forecast
 import services.mod_optimizer as mod_optimizer
 from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_actions
+from services import personal_plates
 from web.deps import require_member_access
 
 router = APIRouter()
 loadouts_router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+templates.env.filters['plate_label'] = personal_plates.display_reference
 _jobs = set()
 _log = logging.getLogger(__name__)
 
 
-def require_optimizer_access(user: dict = Depends(require_member_access)):
+def require_loadouts_access(user: dict = Depends(require_member_access)):
     try:
         game_account.require_account_read(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'])
     except game_account.AccountError:
@@ -38,8 +40,20 @@ def require_optimizer_access(user: dict = Depends(require_member_access)):
     return user
 
 
+def require_optimizer_access(user: dict = Depends(require_loadouts_access)):
+    if user.get('bot_profile') != 'test':
+        raise HTTPException(404)
+    return user
+
+
 def can_apply(user):
-    return user.get('guild_id') == 1 and user.get('tier') == 'officer' and bool(user.get('is_super_admin'))
+    return user.get('bot_profile') == 'test' and user.get('guild_id') is not None and user.get('tier') in ('member', 'officer')
+
+
+def can_apply_loadout(user):
+    return can_apply(user) or (
+        user.get('bot_profile') == 'prod' and user.get('tier') == 'officer'
+        and bool(user.get('is_super_admin')))
 
 
 def _fmt_stat(value, name: str) -> str:
@@ -106,7 +120,7 @@ def _preview_moves(results, all_mods):
 
 
 def _render(request, context):
-    context['can_apply'] = can_apply(context['user'])
+    context['can_apply'] = (can_apply_loadout if context.get('loadouts_page') else can_apply)(context['user'])
     if not context['can_apply']:
         context['dry_run'] = True
     request.session.setdefault("mod_optimizer_csrf", secrets.token_urlsafe(32))
@@ -122,6 +136,7 @@ def _get_comlink():
 
 def _base_context(user: dict, guild_id: int) -> dict:
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
+    plates = list(plates) + [personal_plates.reference(p) for p in personal_plates.list_plates(user)]
     self_reg = database.get_user_registration(user["discord_id"], guild_id=guild_id)
     code = str(self_reg[0]) if self_reg else None
     registrations = database.get_user_registrations(user['discord_id'], guild_id=guild_id)
@@ -163,6 +178,7 @@ def _spawn(coro):
     task.add_done_callback(_jobs.discard)
 
 
+@personal_plates.scoped_job
 async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=()):
     dry_run = bool(dry_run) or not can_apply(user)
     data = {'selected_plates': plates, 'locked': locked, 'game_source': source == 'game', 'ally_code': code,
@@ -215,9 +231,10 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
         plans.finish(token, 'error', data, message)
 
 
+@personal_plates.scoped_job
 async def _apply(token, user, code, data):
     try:
-        if not can_apply(user) or data.get('dry_run', True):
+        if not (can_apply_loadout if data.get('preset_restore') else can_apply)(user) or data.get('dry_run', True):
             raise ValueError('Для этого пользователя или плана доступен только Dry run.')
         requirements_changed = (not data.get('preset_restore')
                                 and data.get('requirements_fingerprint') != plans.requirements_fingerprint(
@@ -249,7 +266,7 @@ async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', 
 
 
 @loadouts_router.get("", response_class=HTMLResponse)
-async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_optimizer_access)):
+async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_loadouts_access)):
     context = _optimizer_context(user, plan, ally_code)
     if plan and not _is_loadout(context['plan']):
         return RedirectResponse('/mod-optimizer?plan=' + context['plan']['id'], status_code=303)
@@ -271,7 +288,7 @@ def _optimizer_context(user, plan='', ally_code=''):
             raise HTTPException(404, 'План не найден.') from None
         context.update(job['data'])
         context['can_apply'] = can_apply(user)
-        context['dry_run'] = bool(job['data'].get('dry_run', True)) or not can_apply(user)
+        context['dry_run'] = bool(job['data'].get('dry_run', True)) or not (can_apply_loadout if job['data'].get('preset_restore') else can_apply)(user)
         context['plan'] = job
         if 'baseline' in job['data']:
             ids = plans.baseline_units(job['data'])
@@ -332,7 +349,7 @@ async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: st
                              name: str = Form(default='', max_length=80), characters: list[str] = Form(default=[]),
                              scope: str = Form(default=''), action: str = Form(default='save'),
                              reconnect: bool = Form(default=False),
-                             user: dict = Depends(require_optimizer_access)):
+                             user: dict = Depends(require_loadouts_access)):
     _csrf(request, csrf)
     owner, guild_id = user['discord_id'], user['guild_id']
     code = ally_code
@@ -398,7 +415,7 @@ def _baseline_context(user, code, name, selected, scope, action):
 async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Form(),
                             scope: str = Form(default='all'), characters: list[str] = Form(default=[]),
                             reconnect: bool = Form(default=False),
-                            user: dict = Depends(require_optimizer_access)):
+                            user: dict = Depends(require_loadouts_access)):
     _csrf(request, csrf)
     owner, guild_id = user['discord_id'], user['guild_id']
     try:
@@ -411,10 +428,10 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
             raise ValueError('Выберите хотя бы одного персонажа для переодевания.')
         if scope == 'selected' and 'baseline' not in data:
             raise ValueError('Частичное переодевание доступно для раскладки из игры.')
-        mutable = can_apply(user)
+        mutable = can_apply_loadout(user)
         if mutable:
             try:
-                game_account.require_pilot(str(owner), guild_id, user['bot_profile'], user['tier'])
+                game_account.require_mod_actions(str(owner), guild_id, user['bot_profile'], user['tier'])
             except game_account.AccountError:
                 mutable = False
         if reconnect:
@@ -548,15 +565,18 @@ async def optimizer_run(
 @router.post('/apply')
 @loadouts_router.post('/apply')
 async def optimizer_apply(request: Request, plan: str = Form(), csrf: str = Form(),
-                          confirm: bool = Form(default=False), user: dict = Depends(require_optimizer_access)):
+                          confirm: bool = Form(default=False), user: dict = Depends(require_loadouts_access)):
     _csrf(request, csrf)
-    if not can_apply(user):
+    loadout_route = request.url.path == '/mod-loadouts/apply'
+    if not (can_apply_loadout if loadout_route else can_apply)(user):
         raise HTTPException(403, 'Игрокам доступен только Dry run. Применение в игре запрещено.')
     if not confirm:
         raise HTTPException(400, 'Подтвердите применение показанных перестановок.')
     try:
         job = plans.get(plan, user['discord_id'], user['guild_id'])
-        game_account.require_pilot(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'])
+        if user['bot_profile'] == 'prod' and not job['data'].get('preset_restore'):
+            raise HTTPException(404)
+        game_account.require_mod_actions(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'])
         game_account.select_account(str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
         data = plans.claim(plan, user['discord_id'], user['guild_id'])
     except ValueError as error:
