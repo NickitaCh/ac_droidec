@@ -407,7 +407,7 @@
             row.dataset.baseId = opt.base_id || "";
             if (opt.required_omicrons?.length) {
                 row.dataset.requiredOmicrons = JSON.stringify(opt.required_omicrons);
-                const info = el('small', 'muted', 'Проверяется указанный омикрон из HotUtils');
+                const info = el('small', 'muted', 'Проверяется омикрон, указанный при импорте');
                 info.dataset.importedOmicrons = '';
                 row.appendChild(info);
             }

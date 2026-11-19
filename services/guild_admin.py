@@ -77,7 +77,7 @@ async def add_guild(comlink, ally_code: str, discord_guild_id: str, is_active: b
     try:
         guild = await asyncio.to_thread(comlink.get_guild, swgoh_guild_id)
     except Exception as e:
-        return GuildAddResult(ok=False, error=f"Не удалось получить данные гильдии из Comlink: {e}")
+        return GuildAddResult(ok=False, error=f"Не удалось получить данные гильдии из игры: {e}")
     guild = guild.get("guild", guild)
     profile = guild.get("profile", {})
     name = profile.get("name") or f"Гильдия {swgoh_guild_id}"

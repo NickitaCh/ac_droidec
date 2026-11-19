@@ -132,7 +132,7 @@
                 <input id="lab-code" name="ally_code" placeholder="123-456-789" required maxlength="11" inputmode="numeric" autocomplete="off">
                 <label class="lab-check"><input class="checkbox" type="checkbox" name="consent" value="yes" required><span>Это мой аккаунт. Разрешаю добавить его к испытаниям и читать приватные данные после подключения сессии.</span></label>
                 <button class="btn" type="submit">Проверить игрока и добавить</button>
-                <p class="lab-muted">Имя, уровень и гильдия проверяются через Comlink. Регистрация в ботах и реальные гильдейские настройки сохраняются.</p>
+                <p class="lab-muted">Имя, уровень и гильдия проверяются по данным игры. Регистрация в ботах и реальные гильдейские настройки сохраняются.</p>
             </form>
             <div>
                 <h3>2. Войти через EA — {{ account.name }}</h3>
@@ -186,7 +186,7 @@
     </details>
     <div class="lab-catalog-head">
         <h2>Возможности после входа</h2>
-        <p>Каталог по нашим проверкам клиента и прежним обзорам HotUtils / HotBot и swgoh.ru. Наличие раздела у другого сервиса не подтверждает, что мы уже умеем получать его данные.</p>
+        <p>Возможности и текущий статус их проверки.</p>
         <p>У notest 2-й уровень и нет гильдии. Для ТБ, ВГ, рейдов и поздних режимов добавьте подходящий тестовый аккаунт выше. Действия, меняющие игру, пока представлены только описанием.</p>
         <label for="lab-search">Поиск возможности</label><input id="lab-search" type="search" placeholder="Модули, фарм, ВГ…" autocomplete="off">
         <div class="lab-filters" aria-label="Фильтр возможностей">
@@ -203,7 +203,6 @@
             <span class="badge {{ item.badge_class }}">{{ item.badge }}</span>
             <h3>{{ item.title }}</h3><p>{{ item.description }}</p>
             <p class="lab-limit">{{ item.limit }}</p>
-            <details><summary>Основание</summary><p>{{ item.source }}</p></details>
         </article>
         {% endfor %}
     </div></section>

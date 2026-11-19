@@ -21,9 +21,9 @@
     {% endif %}
 
     {% if not catalog_loaded %}
-        <p class="empty-state">⏳ Справочник датакронов ещё загружается (или Comlink недоступен) — попробуйте обновить страницу через минуту.</p>
+        <p class="empty-state">Справочник датакронов пока недоступен. Попробуйте обновить страницу через минуту.</p>
     {% elif not seasons %}
-        <p class="empty-state">Нет активных (незавершённых) сезонов датакронов по данным Comlink.</p>
+        <p class="empty-state">Нет активных сезонов датакронов.</p>
     {% else %}
         <div class="panel">
             <div class="table-scroll">

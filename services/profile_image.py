@@ -317,7 +317,7 @@ def _relic_cells(rel: dict) -> list:
 
 
 def _mod_cells(mods: dict, modku: float | None = None) -> list:
-    return [("МодКу (Hotbot)", _modku(modku)), ("6 точек", _int(mods["six_dot"])), ("Скорость 25+", _int(mods["s25"])),
+    return [("МодКу", _modku(modku)), ("6 точек", _int(mods["six_dot"])), ("Скорость 25+", _int(mods["s25"])),
             ("Скорость 20+", _int(mods["s20"])), ("Скорость 20–24", _int(mods["s20_24"])), ("Скорость 15–19", _int(mods["s15_19"])),
             ("Скорость 10–14", _int(mods["s10_14"])), ("Атака 6%+", _int(mods["off6"])),
             ("Атака 4%+", _int(mods["off4"]))]

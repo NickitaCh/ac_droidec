@@ -61,7 +61,7 @@
                         <tr>
                             <th class="num" data-sort="num">ID</th>
                             <th data-sort="text">Название</th>
-                            <th data-sort="text">Comlink guild ID</th>
+                            <th data-sort="text">Игровой ID гильдии</th>
                             <th data-sort="text">Discord-сервер</th>
                             <th data-sort="text">Боты {{ ui.help("Discord: состоит ли бот на сервере гильдии и есть ли каналы из настроек, куда он не может писать. Telegram: чаты, привязанные командой /bind, и сколько игроков гильдии зарегистрированы только через Telegram.") }}</th>
                             <th data-sort="text">Статус</th>
@@ -142,7 +142,7 @@
 
     <div class="panel" style="max-width: 28em;">
         <div class="panel-title"><span>Добавить гильдию</span></div>
-        <p class="muted" style="margin: 0 0 0.75em;">Имя и игровой ID гильдии подтягиваются из Comlink автоматически — достаточно кода союзника любого участника.</p>
+        <p class="muted" style="margin: 0 0 0.75em;">Имя и игровой ID гильдии загружаются из игры автоматически — достаточно кода союзника любого участника.</p>
         <form method="post" action="/admin/guilds/add">
             <label>
                 Код союзника (9 цифр)

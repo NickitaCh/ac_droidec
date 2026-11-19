@@ -72,7 +72,7 @@
                     </table>
                 {% endfor %}
             {% else %}
-                <p class="muted">Детализация по планетам недоступна в comlink для этой фазы.</p>
+                <p class="muted">Детализация по планетам для этого этапа недоступна.</p>
             {% endif %}
         </div>
     {% endfor %}
@@ -82,14 +82,14 @@
     {% endif %}
 
     {% if not report.no_data %}
-        <p class="muted">Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт зональной детализации для этого показателя, только итог по фазе.</p>
+        <p class="muted">Примечание: «ОЗ: попытки» не привязано к планетам — для этого показателя доступен только итог по этапу.</p>
     {% endif %}
 
     {% if report.hidden_entries %}
         <div class="panel">
             <div class="panel-title">
                 <span>Скрытые параметры</span>
-                <span class="panel-hint">недостоверные данные comlink за эту ТБ</span>
+                <span class="panel-hint">недостоверные данные за эту ТБ</span>
             </div>
             <table class="data">
                 <tbody>

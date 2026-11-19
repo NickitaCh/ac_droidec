@@ -73,7 +73,7 @@ async def resolve_target(comlink, input_value: str) -> TargetLookupResult:
     try:
         guild = await asyncio.to_thread(comlink.get_guild, swgoh_guild_id, include_recent_guild_activity_info=True)
     except Exception as e:
-        return TargetLookupResult(False, error=f"Не удалось получить данные гильдии из Comlink: {e}")
+        return TargetLookupResult(False, error=f"Не удалось получить данные гильдии из игры: {e}")
     guild = guild.get("guild", guild)
     profile = guild.get("profile", {})
     if not profile and not guild.get("member"):

@@ -162,7 +162,7 @@ class UnitForecastCog(commands.Cog):
             return
         await inter.edit_original_response(file=disnake.File(io.BytesIO(png), filename=f"unit_{base_id}.png"))
 
-    @commands.slash_command(name="юнит" if LEGACY_UNIT_COMMANDS else "юнит_старый", description="Персонажи игроков бок о бок: статы, модули, зеты и омикроны (как HotBot /toon)")
+    @commands.slash_command(name="юнит" if LEGACY_UNIT_COMMANDS else "юнит_старый", description="Персонажи игроков бок о бок: статы, модули, зеты и омикроны")
     async def unit_card_cmd(
         self,
         inter: disnake.ApplicationCommandInteraction,

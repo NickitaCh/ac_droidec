@@ -900,19 +900,19 @@ class GuildEvents(commands.Cog):
                         action_label = TB_ACTION_LABELS.get(action, action)
                         lines.append(_fmt_line(action_label, total, indent=6))
             elif rt:
-                lines.append("  (детализация по планетам недоступна в comlink для этой фазы)")
+                lines.append("  (детализация по планетам для этого этапа недоступна)")
 
         lines.append("")
         lines.append(rule)
         lines.append(
-            "Примечание: «ОЗ: попытки» не привязано к планетам — comlink не даёт "
-            "зональной детализации для этого показателя, только итог по фазе/игроку."
+            "Примечание: «ОЗ: попытки» не привязано к планетам — для этого показателя недоступна "
+            "детализация по планетам, есть только итог по этапу/игроку."
         )
 
         if hidden_entries:
             lines.append("")
             lines.append(rule)
-            lines.append("Скрытые параметры (недостоверные данные comlink за эту ТБ):")
+            lines.append("Скрытые параметры (недостоверные данные за эту ТБ):")
             for raw_key, value in hidden_entries:
                 lines.append(f"  {raw_key} = {_fmt_num(value)}")
 
@@ -1002,7 +1002,7 @@ class GuildEvents(commands.Cog):
         if hidden_entries:
             lines.append("")
             lines.append(rule)
-            lines.append("Скрытые параметры по ТБ (недостоверные данные comlink):")
+            lines.append("Скрытые параметры по ТБ (недостоверные данные):")
             for tb_label, raw_key, value in hidden_entries:
                 lines.append(f"  {tb_label}: {raw_key} = {_fmt_num(value)}")
 

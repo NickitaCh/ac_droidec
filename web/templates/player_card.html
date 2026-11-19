@@ -24,7 +24,6 @@
                 </h1>
                 <p class="page-hero-links">
                     Код союзника: <strong>{{ card.ally_code }}</strong>
-                    · <a href="{{ card.swgoh_gg_url }}" target="_blank" rel="noopener">↗ swgoh.gg</a>
                     {% if card.discord_id %}
                         · Discord: {{ card.discord_username or card.discord_id }}
                     {% else %}
@@ -710,7 +709,7 @@
             </form>
 
             {% if not datacron_seasons %}
-                <p class="widget-empty">Справочник сезонов датакронов ещё не загрузился либо недоступен Comlink.</p>
+                <p class="widget-empty">Справочник сезонов датакронов пока недоступен.</p>
             {% elif selected_season and not datacron_result %}
                 <p class="empty-state">У сезона «{{ selected_season }}» нет сохранённых требований либо не удалось получить данные игрока.</p>
             {% elif datacron_result %}

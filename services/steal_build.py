@@ -80,7 +80,7 @@ async def resolve_guild(comlink, ally_code_or_guild_id: str) -> GuildLookupResul
             comlink.get_guild, swgoh_guild_id, include_recent_guild_activity_info=True
         )
     except Exception as e:
-        return GuildLookupResult(ok=False, error=f"Не удалось получить данные гильдии из Comlink: {e}")
+        return GuildLookupResult(ok=False, error=f"Не удалось получить данные гильдии из игры: {e}")
     guild = guild.get("guild", guild)
     profile = guild.get("profile", {})
     name = profile.get("name") or f"Гильдия {swgoh_guild_id}"

@@ -61,7 +61,7 @@ class GuildUnitsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="юнит_гильдия", description="У кого в гильдии есть юнит и на какой прокачке (как C3PO g unit)")
+    @commands.slash_command(name="юнит_гильдия", description="У кого в гильдии есть юнит и на какой прокачке")
     async def guild_unit(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -135,7 +135,7 @@ class GuildUnitsCog(commands.Cog):
         for chunk in messages[1:]:
             await inter.followup.send(embeds=chunk)
 
-    @commands.slash_command(name="готовность", description="Готовность к цели «Руководства» картинкой: игрока (как C3PO panic) или гильдии")
+    @commands.slash_command(name="готовность", description="Готовность игрока или гильдии к цели «Руководства» картинкой")
     async def readiness(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -260,7 +260,7 @@ class GuildUnitsCog(commands.Cog):
                 else "данные из игры на момент запроса")
         return player, roster, note
 
-    @commands.slash_command(name="фракция", description="Все персонажи фракции у игрока картинкой (как HotBot /faction)")
+    @commands.slash_command(name="фракция", description="Все персонажи фракции у игрока картинкой")
     async def faction(
         self,
         inter: disnake.ApplicationCommandInteraction,

@@ -639,7 +639,7 @@ async def _build_player_report(catalog, set_id, ally_code, player_name, requirem
     try:
         player = await asyncio.wait_for(asyncio.to_thread(comlink.get_player, allycode=ally_code), timeout=15.0)
     except asyncio.TimeoutError:
-        return {"error": "Запрос к Comlink занял слишком много времени."}
+        return {"error": "Не удалось загрузить данные из игры вовремя. Повторите позже."}
     except Exception as e:
         return {"error": f"Ошибка получения данных игрока: {e}"}
 
