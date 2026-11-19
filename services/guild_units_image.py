@@ -158,12 +158,13 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None,
     """Плитки требуемых юнитов: портрет, текущие звёзды и реликвия/гир, в углу — сколько нужно;
     рамка — зелёная (выполнено), жёлтая (не хватает реликвии/гира), красная (нет / мало звёзд)."""
     units = r["units"]
+    tile_h = TILE_H + (48 if any("shards" in u for u in units) else 0)
     cols = min(TILES_PER_ROW, max(1, len(units)))
     rows = (len(units) + cols - 1) // cols
     width = PAD * 2 + cols * TILE_W + (cols - 1) * TILE_GAP
     width = max(width, 520)
     head_h = 70
-    height = PAD + head_h + rows * (TILE_H + TILE_GAP) + 120
+    height = PAD + head_h + rows * (tile_h + TILE_GAP) + 120
     img = Image.new("RGB", (width, height), BG)
     draw = ImageDraw.Draw(img)
 
@@ -182,10 +183,10 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None,
     for i, u in enumerate(units):
         cx, cy = divmod(i, cols)[1], divmod(i, cols)[0]
         x = PAD + cx * (TILE_W + TILE_GAP)
-        y = y0 + cy * (TILE_H + TILE_GAP)
+        y = y0 + cy * (tile_h + TILE_GAP)
         color = STATUS_COLORS[u["status"]]
-        draw.rounded_rectangle((x, y, x + TILE_W, y + TILE_H), radius=8, fill=(8, 8, 10), outline=color, width=4)
-        draw.rectangle((x + 6, y + TILE_H - 9, x + TILE_W - 6, y + TILE_H - 5), fill=unit_alignment.color(u["base_id"]))
+        draw.rounded_rectangle((x, y, x + TILE_W, y + tile_h), radius=8, fill=(8, 8, 10), outline=color, width=4)
+        draw.rectangle((x + 6, y + tile_h - 9, x + TILE_W - 6, y + tile_h - 5), fill=unit_alignment.color(u["base_id"]))
         # Угол с требованием.
         draw.polygon([(x + TILE_W - 62, y + 2), (x + TILE_W - 2, y + 2), (x + TILE_W - 2, y + 62)], fill=color)
         for k, part in enumerate(u["label"].split(" ")[:2]):
@@ -227,8 +228,25 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None,
         lines.append(cur)
         for k, line in enumerate(lines[:2]):
             draw.text((x + TILE_W // 2, sy + 18 + k * 17), line, font=nf, fill=TEXT, anchor="mm")
+        if "shards" in u:
+            shard = u["shards"]
+            if shard.get("max"):
+                extra = ["7★ — максимум"]
+            elif shard["needed"] is None:
+                extra = [f"Осколки: {shard['available']}", "Нет рецепта звезды"]
+            else:
+                extra = [f"Осколки: {shard['available']} из {shard['needed']}",
+                         f"{'Открытие' if shard['unlock'] else 'До'} {shard['target']}★ · ещё {shard['remaining']}"]
+            for k, line in enumerate(extra):
+                size = 13
+                sf = _font(size, condensed=True)
+                while size > 9 and draw.textlength(line, font=sf) > TILE_W - 12:
+                    size -= 1
+                    sf = _font(size, condensed=True)
+                draw.text((x + TILE_W // 2, y + TILE_H + 6 + k * 18), line,
+                          font=sf, fill=GOLD if shard.get("remaining") == 0 else MUTED, anchor="mm")
 
-    y = y0 + rows * (TILE_H + TILE_GAP) + 6
+    y = y0 + rows * (tile_h + TILE_GAP) + 6
     # Легенду цветов убрали (Рикардо 2026-10-27: «и так очевидно»), осталась только свежесть данных.
     notes = [updated_note] if updated_note else []
     for line in notes:

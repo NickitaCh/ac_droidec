@@ -7,6 +7,9 @@
 from services.discord_options import yes_no_param
 import asyncio
 import io
+import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import disnake
 from disnake.ext import commands
@@ -18,6 +21,9 @@ from cogs.unit_forecast import _parse_bracket_id, autocomplete_character_unit
 from services import faction as faction_svc
 from services import faction_image, guild_units, guild_units_image, journey_guide, unit_aliases
 from services import public_checks
+from services import bot_profiles, game_account, game_account_readonly, unit_shards
+
+log = logging.getLogger(__name__)
 
 FIELD_LIMIT = 1024  # лимит Discord на значение поля эмбеда
 MESSAGE_EMBED_LIMIT = 5800  # лимит Discord — 6000 символов на все эмбеды одного сообщения
@@ -138,9 +144,35 @@ class GuildUnitsCog(commands.Cog):
         аликод: str = commands.Param(default=None, description=guild_resolver.TARGET_CODE_DESCRIPTION),
         альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
         гильдия: bool = yes_no_param(default=False, description="Только подключённая гильдия: вся гильдия одной таблицей"),
+        осколки: bool = yes_no_param(default=False, description="Показать осколки до следующей звезды — только свой аккаунт, требуется EA"),
     ):
-        await inter.response.defer()
+        with_shards = осколки is True
+        await inter.response.defer(ephemeral=with_shards)
         guild_id = guild_resolver.resolve_guild_id(inter.author)
+        context = None
+        if with_shards:
+            if гильдия or (участник and участник.id != inter.author.id):
+                await inter.edit_original_response("❌ Осколки доступны только для своего аккаунта, без режима «гильдия».")
+                return
+            try:
+                owner = str(inter.author.id)
+                profile = bot_profiles.worker_profile() or bot_profiles.runtime_profile()
+                game_account.require_account_read(owner, guild_id, profile)
+                code, _, error = guild_resolver.target_player(участник, аликод, guild_id)
+                if error:
+                    raise game_account.AccountError(error)
+                if альт and (участник or аликод):
+                    raise game_account.AccountError("❌ «альт» нельзя указывать вместе с другим игроком.")
+                if code is None:
+                    account = public_checks.account(inter.author, alt=альт)
+                    if not account:
+                        raise game_account.AccountError("Зарегистрируйте свой аккаунт через /регистрация.")
+                    code = account["ally_code"]
+                code = game_account.select_account(owner, guild_id, ally_code=code)
+                context = (owner, guild_id, profile, code)
+            except game_account.AccountError as exc:
+                await inter.edit_original_response(str(exc))
+                return
         if гильдия and guild_id is None:
             await inter.edit_original_response("❌ Отчёт по гильдии доступен участникам подключённых гильдий. Личная проверка — без параметра «гильдия».")
             return
@@ -154,14 +186,50 @@ class GuildUnitsCog(commands.Cog):
         if got is None:
             return
         player, roster, note = got
+        await self._send_readiness(inter, guild_id, цель, player, roster, note, context)
+
+    async def _send_readiness(self, inter, guild_id, goal, player, roster, note, context=None):
+        if context:
+            owner, guild_id, profile, code = context
+            try:
+                snapshot = await game_account_readonly.read(owner, guild_id, profile, None, code, member_read=True)
+                recipes = await unit_shards.catalog(self.bot.comlink)
+                roster = unit_shards.private_roster(snapshot)
+                stamp = datetime.fromtimestamp(snapshot["read_at"], ZoneInfo("Europe/Moscow"))
+                note = f"Данные игрового аккаунта: {stamp:%d.%m.%Y %H:%M} МСК"
+            except game_account.SessionExpired:
+                await inter.edit_original_response(content=game_account.LOGIN_WARNING,
+                    view=ReadinessSessionView(self, context, goal, player))
+                return
+            except game_account.ConnectionRequired:
+                await self._offer_connection(inter, context)
+                return
+            except game_account.AccountError as exc:
+                await inter.edit_original_response(content=str(exc), view=None)
+                return
+            except Exception as exc:
+                log.warning("Readiness shard read failed (%s)", type(exc).__name__)
+                await inter.edit_original_response(content="Не удалось прочитать осколки. Попробуйте позже.", view=None)
+                return
         ally_code = player.get("allyCode")
-        r = await asyncio.to_thread(guild_units.player_readiness, guild_id, цель, roster)
+        r = await asyncio.to_thread(guild_units.player_readiness, guild_id, goal, roster)
+        if context:
+            unit_shards.add_progress(r, snapshot, recipes)
         png = await asyncio.to_thread(guild_units_image.render_player, r, player.get("name") or str(ally_code), note)
         met = sum(1 for u in r["units"] if u["status"] == "met")
         await inter.edit_original_response(
             content=f"**{player.get('name')}** — {r['guide']['name']}: выполнено {met} из {len(r['units'])}",
-            file=disnake.File(io.BytesIO(png), filename=f"ready_{цель}_{ally_code}.png"),
+            file=disnake.File(io.BytesIO(png), filename=f"ready_{goal}_{ally_code}.png"),
+            view=None,
         )
+
+    async def _offer_connection(self, inter, context):
+        owner, guild_id, _profile, code = context
+        path = game_account.link_path(owner, guild_id, code)
+        view = disnake.ui.View()
+        view.add_item(disnake.ui.Button(style=disnake.ButtonStyle.link, label="Подключить через EA",
+                                       url=f"https://swgoh-sng.ru{path}"))
+        await inter.edit_original_response(content="Подключите свой игровой аккаунт через EA для чтения осколков.", view=view)
 
     async def _player_roster(self, inter, guild_id: int, участник, аликод, альт):
         """(player, {base_id: rosterUnit}, подпись о свежести) выбранного игрока или None —
@@ -231,6 +299,45 @@ class GuildUnitsCog(commands.Cog):
             content=f"**{r['guide']['name']}** — готовы {ready} из {len(r['players'])}",
             file=disnake.File(io.BytesIO(png), filename=f"ready_{guide}.png"),
         )
+
+
+class ReadinessSessionView(disnake.ui.View):
+    def __init__(self, cog, context, goal, player):
+        super().__init__(timeout=600)
+        self.cog, self.context, self.goal, self.player = cog, context, goal, player
+
+    async def interaction_check(self, inter):
+        if str(inter.author.id) == self.context[0]:
+            return True
+        await inter.response.send_message("Это подтверждение для автора команды.", ephemeral=True)
+        return False
+
+    @disnake.ui.button(label="Войти и показать осколки", style=disnake.ButtonStyle.success)
+    async def confirm(self, button, inter):
+        await inter.response.defer(with_message=False)
+        if self.is_finished():
+            return
+        self.stop()
+        owner, guild_id, profile, code = self.context
+        try:
+            await inter.edit_original_response(content="Вхожу и читаю осколки…", view=None)
+            await game_account.reconnect(owner, guild_id, profile, None, code, optimizer_read=True)
+            await self.cog._send_readiness(inter, guild_id, self.goal, self.player, {}, "", self.context)
+        except game_account.ConnectionRequired:
+            await self.cog._offer_connection(inter, self.context)
+        except game_account.AccountError as exc:
+            await inter.edit_original_response(content=str(exc), view=None)
+        except Exception as exc:
+            log.warning("Readiness session recovery failed (%s)", type(exc).__name__)
+            await inter.edit_original_response(content="Не удалось войти в игровой аккаунт. Попробуйте позже.", view=None)
+
+    @disnake.ui.button(label="Отмена", style=disnake.ButtonStyle.secondary)
+    async def cancel(self, button, inter):
+        await inter.response.defer(with_message=False)
+        if self.is_finished():
+            return
+        self.stop()
+        await inter.edit_original_response(content="Чтение осколков отменено.", view=None)
 
 
 def setup(bot):
