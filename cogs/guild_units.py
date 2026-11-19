@@ -1,4 +1,4 @@
-"""Гильдия по одному юниту и готовность к «Руководству» — по кэшу ежечасного синка:
+"""Гильдия по одному юниту и готовность к «Руководству» — по кэшу автообновления:
 /юнит_гильдия (как C3PO `g unit`) и /готовность (как WookieeBot `guild ready journey`);
 /фракция — персонажи фракции у игрока (как HotBot `/faction`, services/faction.py).
 Логика — services/guild_units.py, картинка готовности — services/guild_units_image.py.
@@ -79,7 +79,7 @@ class GuildUnitsCog(commands.Cog):
             await inter.edit_original_response(str(exc))
             return
         if not r["members"]:
-            await inter.edit_original_response("❌ Нет данных по составу гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Нет данных по составу гильдии — дождитесь автообновления.")
             return
 
         cfg = database.get_guild_config(guild_id) if guild_id else {}
@@ -116,7 +116,7 @@ class GuildUnitsCog(commands.Cog):
             embed.add_field(name=name, value=value, inline=False)
         if not embeds:
             embeds = [disnake.Embed(title=cfg.get("name") or "Гильдия", description=f"**{r['name']}** — ни у кого нет.")]
-        embeds[-1].set_footer(text=r.get("note") or "Данные ежечасного обновления составов")
+        embeds[-1].set_footer(text=r.get("note") or "Данные автообновления составов")
         # В одном сообщении — не больше 10 эмбедов и 6000 символов на все; остальное — следующими сообщениями.
         messages, current = [], []
         for e in embeds:
@@ -188,7 +188,7 @@ class GuildUnitsCog(commands.Cog):
             return None
         player.setdefault("allyCode", str(ally_code))
         roster = {guild_units.unit_base_id(u): u for u in player["rosterUnit"]}
-        note = (f"данные ежечасного обновления, {max(1, int(ages[0]) // 60)} мин назад" if ages[0] is not None
+        note = (f"данные автообновления, {max(1, int(ages[0]) // 60)} мин назад" if ages[0] is not None
                 else "данные из игры на момент запроса")
         return player, roster, note
 
@@ -222,10 +222,10 @@ class GuildUnitsCog(commands.Cog):
     async def _guild_readiness(self, inter, guild_id: int, guide: str):
         r = await asyncio.to_thread(guild_units.readiness, guild_id, guide)
         if not r["players"]:
-            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь автообновления.")
             return
         cfg = database.get_guild_config(guild_id) or {}
-        png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления")
+        png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные автообновления")
         ready = sum(1 for p in r["players"] if p["ready"])
         await inter.edit_original_response(
             content=f"**{r['guide']['name']}** — готовы {ready} из {len(r['players'])}",

@@ -1,7 +1,7 @@
 """/вг_соперник — своя гильдия против соперника картинкой (как HotBot `/compare guild` /
 C3PO `tw enemy quality`). Без аргументов используется соперник из свежего снимка ВГ.
 Можно явно выбрать прошлую ВГ или код союзника; ростеры берутся из игры (запрос на каждого
-участника), своя гильдия — из кэшей ежечасного синка. Расчёт — services/guild_compare.py
+участника), своя гильдия — из кэшей автообновления. Расчёт — services/guild_compare.py
 и services/player_profile.py, картинка — services/guild_compare_image.py."""
 
 import asyncio
@@ -123,7 +123,7 @@ class GuildCompareCog(commands.Cog):
         opp_players = [r for r in results if r]
         own_players = await asyncio.to_thread(pp.guild_players_from_cache, guild_id, stat_calc, ctx)
         if not own_players:
-            await inter.edit_original_response("❌ Нет данных по ростерам своей гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Нет данных по ростерам своей гильдии — дождитесь автообновления.")
             return
         own_gp = None
         if cfg.get("swgoh_guild_id"):

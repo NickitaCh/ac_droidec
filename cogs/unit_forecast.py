@@ -6,7 +6,7 @@ services/unit_forecast_image.py. Игрок — свежий get_player: сво�
 /юнит — персонажи игроков бок о бок (как HotBot `/toon`): services/toon.py + toon_image.py.
 Набор параметров — как у HotBot (5 юнитов, 4 участника Discord, 4 кода союзника, с_собой,
 обновить, альт) плюс includerokamora (просьба пользователя 2026-10-20). Ростер — из кэша
-ежечасного синка, если игрок в нём есть; «обновить» или игрок не из гильдии — из игры.
+автообновления, если игрок в нём есть; «обновить» или игрок не из гильдии — из игры.
 
 С 2026-10-21 в Discord обе команды заменены объединённой /юнит (cogs/unit_test.py, бывшая
 /юнит_тест — решение по треду). Код оставлен для отката: LEGACY_UNIT_COMMANDS = True вернёт
@@ -181,7 +181,7 @@ class UnitForecastCog(commands.Cog):
         аликод4: str = commands.Param(default=None, description="Ещё код союзника или игрок гильдии", autocomplete=autocomplete_ally_codes),
         с_собой: bool = yes_no_param(default=False, description="Добавить и вас (без других игроков вы и так в карточке)"),
         альт: bool = yes_no_param(default=False, description="Вместо вашего основного аккаунта — второй (альт)"),
-        обновить: bool = yes_no_param(default=False, description="Свежие данные из игры вместо ежечасного обновления"),
+        обновить: bool = yes_no_param(default=False, description="Свежие данные из игры вместо автообновления"),
         includerokamora: bool = yes_no_param(default=False, description="Добавить Rokamora"),
     ):
         await inter.response.defer()

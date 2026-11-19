@@ -1,7 +1,7 @@
 """/тб оз_готовность — кто в гильдии проходит спецмиссии (ОЗ) «Восхода Империи» по
 требованиям игры: таблица «игрок × спецмиссия» картинкой, как /рейд готовность, или разбор
 одного игрока по всем спецмиссиям. Логика — services/tb_covert.py, данные — кэш
-ежечасного синка ростеров."""
+автообновления ростеров."""
 
 import asyncio
 import io
@@ -70,7 +70,7 @@ class TBReadinessCog(commands.Cog):
 
         r = await asyncio.to_thread(tb_covert.guild_grid, guild_id, этап, planet)
         if not r["players"]:
-            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь автообновления.")
             return
         cfg = database.get_guild_config(guild_id) or {}
         title = "Спецмиссии ВИ" + (f", {tb_covert.planet_ru(planet)}" if planet else "") + (f", этап {этап}" if этап else "")
@@ -87,7 +87,7 @@ class TBReadinessCog(commands.Cog):
             lines.append(f"{m['phase']} · {tb_covert.planet_ru(m['planet'])}{who} — {n} из {total}{unlock}"
                          + (f" ({reward})" if reward else ""))
         png = await asyncio.to_thread(
-            guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные ежечасного обновления", title,
+            guild_units_image.render, r, cfg.get("name") or "Гильдия", "данные автообновления", title,
             ["✓ — проходит · R5 — уровень обязательного персонажа ниже порога · — — его нет",
              "Над колонкой — порог реликвии, портрет — обязательный персонаж; ×5 и 3/5 — только у миссий без обязательных",
              "% — доля пройденных спецмиссий"],
@@ -116,7 +116,7 @@ class TBReadinessCog(commands.Cog):
             await guild_resolver.send_denied(inter, error)
             return
         roster = await asyncio.to_thread(database.get_player_units, ally_code)
-        note = "данные ежечасного обновления"
+        note = "данные автообновления"
         if not roster:  # не из гильдии — берём из игры
             try:
                 roster = await activity_diff.fetch_player_units(self.bot.comlink, ally_code)

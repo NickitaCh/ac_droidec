@@ -76,6 +76,11 @@ def _format_delta(delta: timedelta) -> str:
 def _hours_label(hours: int) -> str:
     """Склонение "час"/"часа"/"часов" под PLAYER_STATS_SYNC_HOURS — значение конфигурируемое
     (сейчас 1), поэтому текст на /activity не может просто хардкодить "часов"."""
+    if hours < 1:
+        minutes = round(hours * 60)
+        n = abs(minutes) % 100
+        word = "минут" if 11 <= n <= 14 else ("минута" if n % 10 == 1 else "минуты" if n % 10 in (2, 3, 4) else "минут")
+        return f"{minutes} {word}"
     n = abs(hours) % 100
     if 11 <= n <= 14:
         word = "часов"
@@ -95,6 +100,8 @@ def _sync_status_text(sync_status: dict) -> dict:
         last_sync_text = sync_status["last_sync"].strftime("%d.%m.%Y %H:%M (МСК)")
 
     next_auto_text = None
+    if sync_status.get("paced"):
+        next_auto_text = f"постоянно, примерно раз в {_hours_label(sync_status['sync_hours'])} на игрока"
     next_auto = sync_status["next_auto"]
     if next_auto:
         now = datetime.now(MSK)

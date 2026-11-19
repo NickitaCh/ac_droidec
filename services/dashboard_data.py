@@ -1155,7 +1155,7 @@ def get_activity_sync_status(guild_id: int) -> dict:
         except ValueError:
             pass
 
-    return {"last_sync": last_sync, "next_auto": next_auto, "sync_hours": PLAYER_STATS_SYNC_HOURS}
+    return {"last_sync": last_sync, "next_auto": None, "sync_hours": PLAYER_STATS_SYNC_HOURS, "paced": True}
 
 
 def get_top_violators(guild_id: int, limit: int = 10) -> list[ViolationRow]:

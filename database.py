@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import closing
 
 from services import unit_aliases
+from services import player_json
 from services.alliance_access import guard_edit, refresh_before
 
 DB_NAME = os.getenv("DATABASE_PATH", "guild_management.db")
@@ -17,7 +18,7 @@ DB_NAME = os.getenv("DATABASE_PATH", "guild_management.db")
 # dashboard_data.py, оценка "автообновление через X" на /activity) тоже читает это
 # значение и не поднимает bot/main.py вообще. main.py импортирует его же, чтобы не
 # держать два независимых числа, которые могут разойтись при правке одного и не другого.
-PLAYER_STATS_SYNC_HOURS = 1
+PLAYER_STATS_SYNC_HOURS = 1 / 6  # target freshness: 10 minutes, paced per player
 
 # Через сколько дней после завершения (COMPLETED/FAILED) задача на прокачку (/задачи)
 # уходит из "текущего" списка в архив — и в вебе (/tasks), и в отчётах бота. Живёт
@@ -5967,11 +5968,13 @@ def upsert_player_units(ally_code: str, units: dict):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     _ensure_player_unit_cache_table(cursor)
-    rows = [(ally_code, base_id, json.dumps(unit_dict)) for base_id, unit_dict in units.items()]
+    _ensure_player_unit_sync_state_table(cursor)
+    rows = [(ally_code, base_id, player_json.dumps(unit_dict)) for base_id, unit_dict in units.items()]
     cursor.executemany("""
         INSERT OR REPLACE INTO player_unit_cache (ally_code, base_id, unit_json, updated_at)
         VALUES (?, ?, ?, datetime('now'))
     """, rows)
+    cursor.execute("INSERT OR REPLACE INTO player_unit_sync_state (ally_code, updated_at) VALUES (?, datetime('now'))", (str(ally_code),))
     conn.commit()
     conn.close()
 
@@ -5990,6 +5993,37 @@ def get_player_units_age_seconds(ally_code: str):
     return row[0] if row else None
 
 
+def _ensure_player_unit_sync_state_table(cursor):
+    cursor.execute("CREATE TABLE IF NOT EXISTS player_unit_sync_state (ally_code TEXT PRIMARY KEY, updated_at TEXT NOT NULL)")
+
+
+def get_player_units_sync_times(ally_codes):
+    """Persisted successful checks, UTC epoch seconds, for the paced scheduler."""
+    if not ally_codes:
+        return {}
+    with closing(sqlite3.connect(DB_NAME)) as conn:
+        _ensure_player_unit_cache_table(conn.cursor())
+        _ensure_player_unit_sync_state_table(conn.cursor())
+        result = {}
+        codes = list(ally_codes)
+        for start in range(0, len(codes), 500):
+            batch = codes[start:start + 500]
+            marks = ",".join("?" for _ in batch)
+            rows = conn.execute(f"SELECT ally_code, updated_at FROM player_unit_sync_state WHERE ally_code IN ({marks})", batch).fetchall()
+            found = {str(code) for code, _ in rows}
+            missing = [code for code in batch if code not in found]
+            if missing:
+                missing_marks = ",".join("?" for _ in missing)
+                legacy = conn.execute(
+                    f"SELECT ally_code, MAX(updated_at) FROM player_unit_cache WHERE ally_code IN ({missing_marks}) GROUP BY ally_code", missing).fetchall()
+                conn.executemany("INSERT OR IGNORE INTO player_unit_sync_state VALUES (?, ?)", legacy)
+                rows.extend(legacy)
+            result.update((str(code), datetime.datetime.fromisoformat(stamp).replace(tzinfo=datetime.timezone.utc).timestamp())
+                          for code, stamp in rows if stamp is not None)
+        conn.commit()
+        return result
+
+
 def get_player_unit(ally_code: str, base_id: str):
     """Возвращает (unit_dict, updated_at) либо None, если юнита нет в кэше."""
     conn = sqlite3.connect(DB_NAME)
@@ -6003,7 +6037,7 @@ def get_player_unit(ally_code: str, base_id: str):
     conn.close()
     if not row:
         return None
-    return json.loads(row[0]), row[1]
+    return player_json.loads(row[0]), row[1]
 
 
 def get_player_units(ally_code: str) -> dict:
@@ -6015,7 +6049,7 @@ def get_player_units(ally_code: str) -> dict:
     cursor.execute("SELECT base_id, unit_json FROM player_unit_cache WHERE ally_code = ?", (ally_code,))
     rows = cursor.fetchall()
     conn.close()
-    return {base_id: json.loads(unit_json) for base_id, unit_json in rows}
+    return {base_id: player_json.loads(unit_json) for base_id, unit_json in rows}
 
 
 def get_player_units_bulk(ally_codes: list) -> dict:
@@ -6037,7 +6071,7 @@ def get_player_units_bulk(ally_codes: list) -> dict:
     conn.close()
     result = {}
     for ally_code, base_id, unit_json in rows:
-        result.setdefault(ally_code, {})[base_id] = json.loads(unit_json)
+        result.setdefault(ally_code, {})[base_id] = player_json.loads(unit_json)
     return result
 
 
@@ -7933,7 +7967,7 @@ def upsert_player_datacrons(ally_code: str, datacrons: list) -> None:
     cursor.execute("""
         INSERT OR REPLACE INTO player_datacron_cache (ally_code, datacron_json, updated_at)
         VALUES (?, ?, datetime('now'))
-    """, (str(ally_code), json.dumps(datacrons or [])))
+    """, (str(ally_code), player_json.dumps(datacrons or [])))
     conn.commit()
     conn.close()
 
@@ -7957,7 +7991,7 @@ def upsert_player_profile(ally_code: str, profile: dict) -> None:
     _ensure_player_profile_cache_table(cursor)
     cursor.execute(
         "INSERT OR REPLACE INTO player_profile_cache (ally_code, profile_json, updated_at) VALUES (?, ?, datetime('now'))",
-        (str(ally_code), json.dumps(profile, ensure_ascii=False)),
+        (str(ally_code), player_json.dumps(profile)),
     )
     conn.commit()
     conn.close()
@@ -7979,7 +8013,7 @@ def get_player_profiles_bulk(ally_codes: list) -> dict:
     result = {}
     for ally_code, raw in rows:
         try:
-            result[ally_code] = json.loads(raw)
+            result[ally_code] = player_json.loads(raw)
         except ValueError:
             continue
     return result
@@ -8001,7 +8035,7 @@ def get_player_datacrons_bulk(ally_codes: list) -> dict:
     result = {}
     for ally_code, raw in rows:
         try:
-            result[ally_code] = json.loads(raw)
+            result[ally_code] = player_json.loads(raw)
         except ValueError:
             continue
     return result

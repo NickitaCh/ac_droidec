@@ -4,6 +4,8 @@ from services.sync_queue import serialized_sync
 import asyncio
 import contextvars
 import math
+import time
+from services.player_sync_schedule import PlayerSyncSchedule
 import io
 import re
 from datetime import datetime
@@ -1601,12 +1603,17 @@ class StatRequirementsCog(commands.Cog):
         bot.stat_calc_initial_attempt = asyncio.Event()
         from services import bot_profiles
         bot_profiles.start_shared_loop(self.stat_calc_loop)
-        self.player_units_sync_loop.change_interval(hours=bot.PLAYER_STATS_SYNC_HOURS)
+        self.player_sync_schedule = PlayerSyncSchedule(database.PLAYER_STATS_SYNC_HOURS * 3600)
+        self._player_sync_reconcile_at = 0
+        self._player_sync_retry_announcements_at = 0
+        self._player_sync_skill_tiers = {}
+        bot_profiles.start_shared_loop(self.player_units_maintenance_loop)
         bot_profiles.start_shared_loop(self.player_units_sync_loop)
 
     def cog_unload(self):
         self.stat_calc_loop.cancel()
         self.player_units_sync_loop.cancel()
+        self.player_units_maintenance_loop.cancel()
 
     @tasks.loop(hours=12)
     async def stat_calc_loop(self):
@@ -1622,68 +1629,69 @@ class StatRequirementsCog(commands.Cog):
     async def _before_stat_calc_loop(self):
         await self.bot.wait_until_ready()
 
-    @tasks.loop(hours=1)
-    @serialized_sync("ростеры игроков")
+    @tasks.loop(seconds=0.25)
     async def player_units_sync_loop(self):
-        # player_unit_cache — не per-guild (ключ ally_code глобально уникален), поэтому
-        # синхронизируем объединённый ростер по всем зарегистрированным гильдиям сразу.
-        # Заодно, до перезаписи кэша, диффим новый снимок против старого и пишем события
-        # гильдийской активности (guild_activity_events) — замена сдохшему из-за Cloudflare
-        # скрапингу swgoh.gg, см. services/activity_diff.py.
-        # Подбираем "зависшие" omicron-события — записанные в БД (уже не всплывут повторным
-        # диффом), но так и не объявленные: либо рестарт бота случился между записью и
-        # объявлением с прошлого цикла (было живым инцидентом 2026-09-02), либо отправка тогда
-        # упала на временной ошибке Discord. Не завязано на guild_roster_caches (в отличие от
-        # остального цикла) — независимая проверка, чтобы отставание с ростером не откладывало
-        # и без того просроченное объявление.
-        stale_hits = [(event_id, ally_code, base_id, skill_id, guild_id)
-                      for event_id, guild_id, ally_code, base_id, skill_id in database.get_unannounced_omicron_events()]
-        if stale_hits:
-            print(f"🔁 [Омикрон] Хвост необъявленных событий с прошлых циклов: {len(stale_hits)}")
-            await self._announce_omicrons(stale_hits)
-        if not self.bot.guild_roster_caches:
+        try:
+            await self._player_units_sync_tick()
+        except Exception as exc:
+            self.player_sync_schedule.next_start = time.time() + 5
+            print(f"⚠️ [Статы] Повтор фоновой проверки через 5 с: {exc}")
+
+    async def _player_units_sync_tick(self):
+        now = time.time()
+        if now < self.player_sync_schedule.next_start:
             return
         ally_to_guilds = {}
         for guild_id, cache in self.bot.guild_roster_caches.items():
-            for ally_code in cache.values():
-                ally_to_guilds.setdefault(ally_code, set()).add(guild_id)
-        ally_codes = list(ally_to_guilds)
-        if not ally_codes:
+            for code in cache.values():
+                code = str(code)
+                if database.ALLY_CODE_RE.fullmatch(code):
+                    ally_to_guilds.setdefault(code, set()).add(guild_id)
+        if not ally_to_guilds:
             return
-        # Метка "последний автоцикл стартовал в X" — веб-дашборд (/activity) оценивает время
-        # до следующего автообновления как last_auto_run + PLAYER_STATS_SYNC_HOURS. Пишем
-        # только тут (не из ручного веб-синка), иначе кнопка "Обновить сейчас" на веб-странице
-        # сбивала бы эту оценку, не переставляя реальный внутренний таймер disnake tasks.loop.
-        database.set_bot_state("player_units_sync_loop_last_auto_run", datetime.now(MSK).isoformat())
-        print(f"🔄 [Статы] Синхронизация ростеров игроков ({len(ally_codes)})...")
-        # Грузим один раз на весь цикл (не на каждого из ~50 игроков) — таблица общая,
-        # см. database.get_all_skill_tier_thresholds.
-        skill_tier_map = database.get_all_skill_tier_thresholds()
-        synced = 0
-        total_events = 0
-        today = datetime.now(MSK).date().isoformat()
-        for ally_code in ally_codes:
-            try:
-                fetched, added, omicron_hits = await activity_diff.sync_player(
-                    self.bot.comlink, ally_code, ally_to_guilds[ally_code], today, skill_tier_map
-                )
-                if fetched:
-                    synced += 1
-                total_events += added
-                if omicron_hits:
-                    # Объявляем сразу за игрока, а не копим на весь ~50-игроков цикл до конца —
-                    # раньше рестарт бота посреди цикла терял объявления для ВСЕХ уже
-                    # обработанных игроков (их omicron уже в БД, диффом больше не всплывёт),
-                    # хотя объявить успевали единицы. Теперь окно потери — один игрок, а не весь
-                    # цикл, и его подберёт stale_hits на следующем запуске в любом случае.
-                    await self._announce_omicrons(
-                        (event_id, ally_code, base_id, skill_id, guild_id)
-                        for event_id, base_id, skill_id, guild_id in omicron_hits
-                    )
-            except Exception as e:
-                print(f"⚠️ [Статы] Не удалось обновить ростер {ally_code}: {e}")
-            await asyncio.sleep(0.1)
-        print(f"✅ [Статы] Синхронизировано ростеров: {synced}/{len(ally_codes)}, событий активности: {total_events}")
+        if now >= self._player_sync_reconcile_at or set(ally_to_guilds) != set(self.player_sync_schedule.due):
+            marks = await asyncio.to_thread(database.get_player_units_sync_times, list(ally_to_guilds))
+            self.player_sync_schedule.reconcile(ally_to_guilds, marks)
+            self._player_sync_skill_tiers = await asyncio.to_thread(database.get_all_skill_tier_thresholds)
+            self._player_sync_reconcile_at = now + 60
+            await asyncio.to_thread(database.set_bot_state, "player_units_sync_loop_last_auto_run", datetime.now(MSK).isoformat())
+            print(f"🔄 [Статы] Равномерное обновление: {len(ally_to_guilds)} игроков, цель 10 минут")
+        if now >= self._player_sync_retry_announcements_at:
+            self._player_sync_retry_announcements_at = now + 60
+            stale = await asyncio.to_thread(database.get_unannounced_omicron_events)
+            if stale:
+                await self._announce_omicrons(
+                    (event_id, code, base_id, skill_id, gid)
+                    for event_id, gid, code, base_id, skill_id in stale)
+        code = self.player_sync_schedule.take(time.time())
+        if code is None:
+            return
+        try:
+            fetched, added, hits, checked_at = await self._player_units_sync_one(code, ally_to_guilds[code])
+            self.player_sync_schedule.complete(code, checked_at or time.time(), fetched or checked_at is not None)
+            if hits:
+                await self._announce_omicrons(
+                    (event_id, code, base_id, skill_id, gid)
+                    for event_id, base_id, skill_id, gid in hits)
+        except Exception as exc:
+            self.player_sync_schedule.complete(code, time.time(), False)
+            print(f"⚠️ [Статы] Не удалось обновить ростер {code}: {exc}")
+
+    @serialized_sync("ростер игрока", quiet=True)
+    async def _player_units_sync_one(self, code, guild_ids):
+        # Recheck after waiting for the shared slot and an in-process manual refresh.
+        lock = activity_diff._refresh_locks.setdefault(code, asyncio.Lock())
+        async with lock:
+            age = await asyncio.to_thread(database.get_player_units_age_seconds, code)
+            if age is not None and age < self.player_sync_schedule.period:
+                return False, 0, [], time.time() - max(0, age)
+            fetched, added, hits = await activity_diff.sync_player(
+                self.bot.comlink, code, guild_ids, datetime.now(MSK).date().isoformat(), self._player_sync_skill_tiers)
+            return fetched, added, hits, time.time() if fetched else None
+
+    @tasks.loop(hours=1)
+    @serialized_sync("сводки ростеров")
+    async def player_units_maintenance_loop(self):
         # Срез гильдии за сегодня для виджета на главной (services/guild_snapshot.py) — из
         # только что обновлённых кэшей, без запросов в игру.
         from services import guild_snapshot
@@ -1708,6 +1716,11 @@ class StatRequirementsCog(commands.Cog):
         initial = getattr(self.bot, "guild_roster_initial_attempt", None)
         if initial is not None:
             await initial.wait()
+
+    @player_units_maintenance_loop.before_loop
+    async def _before_player_units_maintenance_loop(self):
+        await self._before_player_units_sync_loop()
+        await asyncio.sleep(self.player_sync_schedule.period)
 
     # Если в канал за один вызов набралось столько отдельных объявлений (обычно это
     # database.get_unannounced_omicron_events после очень долгого простоя бота — см.

@@ -12,13 +12,16 @@ class StatStartupTests(unittest.IsolatedAsyncioTestCase):
         bot = SimpleNamespace(wait_until_ready=AsyncMock(),
                               guild_roster_initial_attempt=asyncio.Event(),
                               guild_roster_caches={}, comlink=object())
-        cog = SimpleNamespace(bot=bot)
+        with patch('services.bot_profiles.start_shared_loop'):
+            cog = StatRequirementsCog(bot)
 
         async def startup():
             await StatRequirementsCog._before_player_units_sync_loop(cog)
             await StatRequirementsCog.player_units_sync_loop.coro(cog)
 
         with (patch('database.get_unannounced_omicron_events', return_value=[]),
+              patch('database.get_player_units_sync_times', return_value={}),
+              patch('database.get_player_units_age_seconds', return_value=None),
               patch('database.set_bot_state'),
               patch('database.get_all_skill_tier_thresholds', return_value={}),
               patch('services.activity_diff.sync_player', new=AsyncMock(return_value=(True, 0, []))) as sync,
@@ -37,6 +40,7 @@ class StatStartupTests(unittest.IsolatedAsyncioTestCase):
                 if not task.done():
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
+                cog.cog_unload()
 
     async def test_roster_attempt_releases_player_sync_on_success_and_failure(self):
         for error in (None, RuntimeError('offline')):

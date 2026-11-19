@@ -46,7 +46,7 @@ def _unlock(handle):
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def serialized_sync(label):
+def serialized_sync(label, *, quiet=False):
     """FIFO within an event loop; mutually exclusive across application processes.
 
 Cancellation waits for the running coroutine (and its to_thread calls) to finish
@@ -61,7 +61,8 @@ Nested calls in the same task reuse the slot; unrelated child tasks do not.
             loop = asyncio.get_running_loop()
             lock = _locks.setdefault(loop, asyncio.Lock())
             queued = time.monotonic()
-            print(f"⏳ [Синхронизация] В очереди: {label}", flush=True)
+            if not quiet:
+                print(f"⏳ [Синхронизация] В очереди: {label}", flush=True)
             async with lock:
                 LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
                 with LOCK_PATH.open("a+b") as handle:
@@ -71,7 +72,8 @@ Nested calls in the same task reuse the slot; unrelated child tasks do not.
                     while not _try_lock(handle):
                         await asyncio.sleep(0.2)
                     started = time.monotonic()
-                    print(f"▶ [Синхронизация] Начало: {label}; ожидание {started - queued:.1f} с", flush=True)
+                    if not quiet:
+                        print(f"▶ [Синхронизация] Начало: {label}; ожидание {started - queued:.1f} с", flush=True)
 
                     async def run():
                         task = asyncio.current_task()
@@ -100,6 +102,7 @@ Nested calls in the same task reuse the slot; unrelated child tasks do not.
                             raise
                     finally:
                         _unlock(handle)
-                        print(f"■ [Синхронизация] Завершено: {label}; {time.monotonic() - started:.1f} с", flush=True)
+                        if not quiet:
+                            print(f"■ [Синхронизация] Завершено: {label}; {time.monotonic() - started:.1f} с", flush=True)
         return wrapped
     return decorate

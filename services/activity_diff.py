@@ -16,7 +16,7 @@ import asyncio
 
 import database
 import stat_engine
-from services import player_profile
+from services import player_profile, player_json
 
 
 def _store_player_meta(ally_code: str, player_data: dict) -> None:
@@ -30,7 +30,7 @@ def _store_player_meta(ally_code: str, player_data: dict) -> None:
 
 async def fetch_player_units(comlink, ally_code: str) -> dict:
     """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
-    player_data = await asyncio.to_thread(comlink.get_player, allycode=str(ally_code))
+    player_data = await asyncio.to_thread(player_json.get_player, comlink, str(ally_code))
     # Запись в БД — тоже в потоке: на занятой базе commit ждёт блокировку секундами и
     # держал event loop (watchdog 2026-10-21, падали автодополнения во время синка).
     await asyncio.to_thread(_store_player_meta, str(ally_code), player_data)

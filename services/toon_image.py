@@ -249,7 +249,7 @@ def freshness_note(age_seconds) -> str:
     """Подпись к картинке в сообщении: насколько свежи данные (возраст кэша, None — из игры)."""
     if age_seconds is None:
         return "-# Данные из игры — свежие"
-    return f"-# Данные из ежечасного обновления, {max(1, int(age_seconds) // 60)} мин назад («обновить» — свежие)"
+    return f"-# Данные из автообновления, {max(1, int(age_seconds) // 60)} мин назад («обновить» — свежие)"
 
 
 def render(rows: list[dict]) -> bytes:

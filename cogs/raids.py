@@ -251,14 +251,14 @@ class RaidsCog(commands.Cog):
         for u in r["units"]:  # ещё не вышедшие юниты анонса — имени в game_units нет
             u["name"] = names.get(u["base_id"], u["name"])
         if not r["players"]:
-            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь ежечасного обновления.")
+            await inter.edit_original_response("❌ Нет данных по ростерам гильдии — дождитесь автообновления.")
             return
         cfg = database.get_guild_config(guild_id) or {}
         level = f"R{реликвия}" if реликвия > 0 else "G13"
         title = f"Готовность к рейду «{rs.raid_name(рейд)}»" + (f", {отряд}" if отряд else "") + f" ({level})"
         png = await asyncio.to_thread(guild_units_image.render, r, cfg.get("name") or "Гильдия",
                                       f"в рейд пускают с {entry['min_stars']}★ · "
-                                      + (f"предварительно: {entry['preview']}" if entry.get("preview") else "данные ежечасного обновления"),
+                                      + (f"предварительно: {entry['preview']}" if entry.get("preview") else "данные автообновления"),
                                       title, portrait_overrides=rs.readiness_portraits(guild_id))
         ready = sum(1 for p in r["players"] if p["ready"])
         content = (f"**{rs.raid_name(рейд)}**" + (f", {отряд}" if отряд else "") + f" — {len(grouped)} персонажей, порог {level}: "
