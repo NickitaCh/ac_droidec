@@ -72,7 +72,7 @@ class ShardCommandTests(unittest.IsolatedAsyncioTestCase):
             await self.call(member=SimpleNamespace(id=999))
         gate.assert_not_called()
         read.assert_not_awaited()
-        self.inter.response.defer.assert_awaited_with(ephemeral=True)
+        self.inter.response.defer.assert_awaited_with(ephemeral=False)
 
     async def test_foreign_ally_code_rejected_before_roster_or_private_read(self):
         with patch("guild_resolver.resolve_guild_id", return_value=1), \
@@ -110,6 +110,7 @@ class ShardCommandTests(unittest.IsolatedAsyncioTestCase):
         account.assert_called_once_with(self.inter.author, alt=True)
         select.assert_called_once_with("123", 1, ally_code="222333444")
         self.assertEqual(send.call_args.args[-1][-1], "222333444")
+        self.inter.response.defer.assert_awaited_with(ephemeral=False)
 
     async def test_connected_owner_reads_and_renders_private_progress(self):
         snapshot = {"read_at": 1795070000, "farm": {"stars": {"UNIT": 6},

@@ -147,7 +147,7 @@ class GuildUnitsCog(commands.Cog):
         осколки: bool = yes_no_param(default=False, description="Показать осколки до следующей звезды — только свой аккаунт, требуется EA"),
     ):
         with_shards = осколки is True
-        await inter.response.defer(ephemeral=with_shards)
+        await inter.response.defer(ephemeral=False)
         guild_id = guild_resolver.resolve_guild_id(inter.author)
         context = None
         if with_shards:

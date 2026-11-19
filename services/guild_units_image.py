@@ -158,7 +158,7 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None,
     """Плитки требуемых юнитов: портрет, текущие звёзды и реликвия/гир, в углу — сколько нужно;
     рамка — зелёная (выполнено), жёлтая (не хватает реликвии/гира), красная (нет / мало звёзд)."""
     units = r["units"]
-    tile_h = TILE_H + (48 if any("shards" in u for u in units) else 0)
+    tile_h = TILE_H + (52 if any("shards" in u for u in units) else 0)
     cols = min(TILES_PER_ROW, max(1, len(units)))
     rows = (len(units) + cols - 1) // cols
     width = PAD * 2 + cols * TILE_W + (cols - 1) * TILE_GAP
@@ -231,20 +231,33 @@ def render_player(r: dict, player_name: str, updated_note: str | None = None,
         if "shards" in u:
             shard = u["shards"]
             if shard.get("max"):
-                extra = ["7★ — максимум"]
+                amount, caption, fraction = "7★", "Максимум", 1.0
             elif shard["needed"] is None:
-                extra = [f"Осколки: {shard['available']}", "Нет рецепта звезды"]
+                amount, caption, fraction = str(shard["available"]), "Нет рецепта звезды", 0.0
             else:
-                extra = [f"Осколки: {shard['available']} из {shard['needed']}",
-                         f"{'Открытие' if shard['unlock'] else 'До'} {shard['target']}★ · ещё {shard['remaining']}"]
-            for k, line in enumerate(extra):
-                size = 13
+                amount = f"{shard['available']}/{shard['needed']}"
+                fraction = min(1.0, max(0.0, shard["available"] / shard["needed"]))
+                target = f"{'Открытие' if shard['unlock'] else 'До'} {shard['target']}★"
+                caption = f"{target} · " + (f"ещё {shard['remaining']}" if shard["remaining"] else "хватает")
+            bar_x, bar_y = x + 10, y + TILE_H - 2
+            bar_w, bar_h = TILE_W - 20, 22
+            complete = fraction >= 1.0
+            fill = (42, 137, 88) if complete else (166, 125, 39)
+            draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), radius=5,
+                                   fill=(28, 32, 40), outline=(77, 82, 93))
+            filled = round((bar_w - 2) * fraction)
+            if filled:
+                draw.rounded_rectangle((bar_x + 1, bar_y + 1, bar_x + 1 + filled, bar_y + bar_h - 1),
+                                       radius=4, fill=fill)
+            draw.text((x + TILE_W // 2, bar_y + bar_h // 2), amount, font=_font(14, True, condensed=True),
+                      fill=TEXT, stroke_width=1, stroke_fill=(17, 20, 25), anchor="mm")
+            size = 12
+            sf = _font(size, condensed=True)
+            while size > 9 and draw.textlength(caption, font=sf) > TILE_W - 12:
+                size -= 1
                 sf = _font(size, condensed=True)
-                while size > 9 and draw.textlength(line, font=sf) > TILE_W - 12:
-                    size -= 1
-                    sf = _font(size, condensed=True)
-                draw.text((x + TILE_W // 2, y + TILE_H + 6 + k * 18), line,
-                          font=sf, fill=GOLD if shard.get("remaining") == 0 else MUTED, anchor="mm")
+            draw.text((x + TILE_W // 2, bar_y + bar_h + 13), caption, font=sf,
+                      fill=GOLD if complete else MUTED, anchor="mm")
 
     y = y0 + rows * (tile_h + TILE_GAP) + 6
     # Легенду цветов убрали (Рикардо 2026-10-27: «и так очевидно»), осталась только свежесть данных.
