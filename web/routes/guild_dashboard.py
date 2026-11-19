@@ -1803,6 +1803,7 @@ def _omicron_priority_context(guild_id: int, rules_text: str = None) -> dict:
     parsed, errors = guild_omicron_rules.parse_rules(rules_text, guild_id)
     return {
         "rows": omicron_priority.priority_list_display(guild_id),
+        "tiers": parsed.tiers,
         # limit с большим запасом — это весь ВГ-каталог для выпадающего списка (modes по
         # умолчанию = только "ВГ", см. database.search_omicron_catalog_for_priority), не
         # постраничный поиск.

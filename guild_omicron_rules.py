@@ -27,21 +27,27 @@
 # Зета (суффикс "zeta" у require) — на будущее, в v1 не реализуем (пользователь подтвердил,
 # что это не k v1) — грамматика (regex ниже) НЕ ловит его сейчас, добавится позже без слома
 # уже сохранённых конфигов.
+import json
 import re
 from dataclasses import dataclass, field
 
 import database
 
 _RULE_RE = re.compile(
-    r"^omicron\s+\[([^\]]+)\]\s+require\s+(unit|omicron)\s+\[([^\]]+)\](?:\s+relic\s+(\d+))?$",
+    r"^omicron\s+\[([^\]]+)\]\s+require\s+(unit|omicron|faction)\s+\[([^\]]+)\]"
+    r"(?:\s+relic\s+(\d+))?(?:\s+side\s+(light|dark|neutral))?"
+    r"(?:\s+alternative\s+([1-9][0-9]*))?$",
     re.IGNORECASE,
 )
+_TIER_RE = re.compile(r"^omicron\s+\[([^\]]+)\]\s+tier\s+([1-9][0-9]*)$", re.IGNORECASE)
+_SIDE_NAMES = {1: "нейтральная", 2: "светлая", 3: "тёмная"}
 
 
 @dataclass
 class ParsedRules:
-    # skill_id -> [{"base_id", "unit_name", "relic": int|None}, ...] — все требования по AND.
     requirements: dict = field(default_factory=dict)
+    alternatives: dict = field(default_factory=dict)
+    tiers: dict = field(default_factory=dict)
     omicron_display_names: dict = field(default_factory=dict)  # skill_id -> "Юнит — Способность"
     unit_display_names: dict = field(default_factory=dict)  # base_id -> имя, как введено в тексте
 
@@ -93,31 +99,53 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
 
     errors = []
     parsed_lines = []
+    tier_lines = []
     all_unit_names = set()
 
     for line_num, raw_line in enumerate(rules_text.splitlines(), start=1):
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        tier_match = _TIER_RE.fullmatch(stripped)
+        if tier_match:
+            target, tier = tier_match.groups()
+            all_unit_names.add(target.split(":", 1)[0].strip())
+            tier_lines.append((line_num, target, int(tier)))
+            continue
         m = _RULE_RE.match(stripped)
         if not m:
             errors.append((line_num, f"не распознана строка правила: {stripped!r}"))
             continue
-        omicron_raw, kind, target_raw, relic_raw = m.group(1).strip(), m.group(2).lower(), m.group(3).strip(), m.group(4)
+        omicron_raw, kind, target_raw = m.group(1).strip(), m.group(2).lower(), m.group(3).strip()
+        relic_raw, side, alternative = m.group(4, 5, 6)
+        if side and kind != "faction":
+            errors.append((line_num, "side применяется только к require faction"))
+            continue
         if kind == "omicron" and relic_raw is not None:
             errors.append((line_num, "relic N не применим к 'require omicron' — омикрон уже подразумевает релик 7+"))
             continue
         all_unit_names.add(omicron_raw.split(":", 1)[0].strip())
-        all_unit_names.add(target_raw.split(":", 1)[0].strip())
+        if kind != "faction":
+            all_unit_names.add(target_raw.split(":", 1)[0].strip())
         relic = int(relic_raw) if relic_raw is not None else None
-        parsed_lines.append((line_num, omicron_raw, kind, target_raw, relic))
+        parsed_lines.append((line_num, omicron_raw, kind, target_raw, relic, side, alternative))
 
     # Один batch-запрос на все имена юнитов сразу, а не один на строку — тот же приём, что и
     # в tb_platoon_filters.parse_rules.
     name_to_base_id = database.resolve_unit_display_names(list(all_unit_names)) if all_unit_names else {}
 
     result = ParsedRules()
-    for line_num, omicron_raw, kind, target_raw, relic in parsed_lines:
+    for line_num, target, tier in tier_lines:
+        skill_id, _, error = _resolve_omicron_target(target, name_to_base_id, base_id_to_skills, skill_names)
+        if error or skill_id in result.tiers:
+            errors.append((line_num, error or "тир омикрона уже указан"))
+        else:
+            result.tiers[skill_id] = tier
+    factions = alignments = {}
+    if any(line[2] == "faction" for line in parsed_lines):
+        factions = json.loads(database.get_bot_state("unit_factions", guild_id=0) or "{}")
+        alignments = json.loads(database.get_bot_state("unit_alignments", guild_id=0) or "{}")
+    for line_num, omicron_raw, kind, target_raw, relic, side, alternative in parsed_lines:
         skill_id, omicron_unit_name, error = _resolve_omicron_target(
             omicron_raw, name_to_base_id, base_id_to_skills, skill_names,
         )
@@ -134,12 +162,26 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
                 errors.append((line_num, f"юнит не найден: {target_raw!r}"))
                 continue
             result.unit_display_names[req_base_id] = target_raw
-            result.requirements.setdefault(skill_id, []).append({
+            requirement = {
                 "type": "unit",
                 "base_id": req_base_id,
                 "unit_name": target_raw,
                 "relic": relic,
-            })
+            }
+        elif kind == "faction":
+            faction = factions.get(target_raw)
+            if not faction:
+                errors.append((line_num, f"фракция не найдена: {target_raw!r}"))
+                continue
+            alignment = {"neutral": 1, "light": 2, "dark": 3}.get((side or "").lower())
+            members = [bid for bid in faction["units"] if alignment is None or alignments.get(bid) == alignment]
+            if not members:
+                errors.append((line_num, f"нет персонажей для указанной фракции и стороны: {target_raw!r}"))
+                continue
+            label = faction["name"]
+            if alignment:
+                label += f" ({_SIDE_NAMES[alignment]} сторона)"
+            requirement = {"type": "faction", "base_ids": members, "unit_name": label, "relic": relic}
         else:  # kind == "omicron" — парный омикрон, см. комментарий в шапке файла
             req_skill_id, req_unit_name, req_error = _resolve_omicron_target(
                 target_raw, name_to_base_id, base_id_to_skills, skill_names,
@@ -154,12 +196,17 @@ def parse_rules(rules_text: str, guild_id: int) -> tuple:
             result.omicron_display_names[req_skill_id] = (
                 f"{req_unit_name} — {req_skill_name}" if req_skill_name else req_unit_name
             )
-            result.requirements.setdefault(skill_id, []).append({
+            requirement = {
                 "type": "omicron",
                 "skill_id": req_skill_id,
                 "unit_name": req_unit_name,
                 "skill_name": req_skill_name,
-            })
+            }
+
+        if alternative:
+            result.alternatives.setdefault(skill_id, {}).setdefault(int(alternative), []).append(requirement)
+        else:
+            result.requirements.setdefault(skill_id, []).append(requirement)
 
     return result, errors
 
@@ -168,8 +215,7 @@ def describe_rules(parsed: ParsedRules) -> list:
     """Список строк на русском для отображения на /omicrons/priority/rules — что реально
     применится, без сырых skill_id/base_id."""
     lines = []
-    for skill_id, reqs in parsed.requirements.items():
-        omicron_name = parsed.omicron_display_names.get(skill_id, skill_id)
+    def describe_group(reqs):
         parts = []
         for r in reqs:
             if r["type"] == "omicron":
@@ -179,5 +225,14 @@ def describe_rules(parsed: ParsedRules) -> list:
                 parts.append(f"{r['unit_name']} (релик ≥{r['relic']})")
             else:
                 parts.append(r["unit_name"])
-        lines.append(f"Омикрон «{omicron_name}» требует: {', '.join(parts)}")
+        return " и ".join(parts)
+
+    for skill_id in dict.fromkeys([*parsed.requirements, *parsed.alternatives]):
+        omicron_name = parsed.omicron_display_names.get(skill_id, skill_id)
+        common = describe_group(parsed.requirements_for(skill_id))
+        choices = parsed.alternatives.get(skill_id, {})
+        if choices:
+            choices_text = " или ".join(f"({describe_group(group)})" for _, group in sorted(choices.items()))
+            common = f"{common} и ({choices_text})" if common else choices_text
+        lines.append(f"Омикрон «{omicron_name}» требует: {common}")
     return lines

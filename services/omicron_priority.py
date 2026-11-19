@@ -63,6 +63,7 @@ def _skill_tier(unit: dict, skill_id: str):
 
 
 def _requirements_met(reqs: list, units: dict, catalog: dict) -> bool:
+    named_units = {r["base_id"] for r in reqs if r["type"] == "unit"}
     for r in reqs:
         if r["type"] == "omicron":
             req_base_id = catalog["skill_owner"].get(r["skill_id"])
@@ -74,10 +75,12 @@ def _requirements_met(reqs: list, units: dict, catalog: dict) -> bool:
             if req_omicron_tier is None or current_tier is None or current_tier < req_omicron_tier:
                 return False
             continue
-        unit = units.get(r["base_id"])
-        if unit is None:
-            return False
-        if r["relic"] is not None and stat_engine.get_current_relic_level(unit) < r["relic"]:
+        base_ids = set(r["base_ids"]) - named_units if r["type"] == "faction" else [r["base_id"]]
+        if not any(
+            bid in units and units[bid] is not None
+            and (r["relic"] is None or stat_engine.get_current_relic_level(units[bid]) >= r["relic"])
+            for bid in base_ids
+        ):
             return False
     return True
 
@@ -100,7 +103,9 @@ def _missing_for_units(units: dict, catalog: dict, parsed_rules: guild_omicron_r
             continue  # омикрон уже поставлен
 
         reqs = parsed_rules.requirements_for(skill_id)
-        if reqs and not _requirements_met(reqs, units, catalog):
+        alternatives = parsed_rules.alternatives.get(skill_id, {})
+        groups = alternatives.values() if alternatives else ([],)
+        if not any(_requirements_met(reqs + group, units, catalog) for group in groups):
             continue
 
         name, _ability_id, _ability_type, omicron_mode = catalog["display"].get(skill_id, ("", "", "", ""))

@@ -40,6 +40,7 @@
                         <li class="omicron-priority-row" data-skill-id="{{ row.skill_id }}" data-unit-name="{{ row.unit_name }}" data-skill-name="{{ row.skill_name }}" data-omicron-mode="{{ row.omicron_mode }}" data-ability-type="{{ row.ability_type }}">
                             <span class="drag-handle">⠿</span>
                             <span class="omicron-priority-name">{{ row.unit_name }}{% if row.skill_name %} — {{ row.skill_name }}{% endif %}</span>
+                            {% if tiers.get(row.skill_id) %}<span class="badge badge-neutral">Тир {{ tiers[row.skill_id] }}</span>{% endif %}
                             {% if row.ability_type %}<span class="badge badge-neutral">{{ row.ability_type }}</span>{% endif %}
                             {% if row.omicron_mode %}<span class="badge badge-neutral">{{ row.omicron_mode }}</span>{% endif %}
                             <button type="button" class="omicron-priority-remove" title="Убрать из списка">✕</button>
@@ -76,6 +77,20 @@
                             <code>omicron [Итано] require unit [Итано] relic 7</code> +
                             <code>omicron [Итано] require unit [Кикс] relic 7</code> — омикрон
                             на Итано предлагается, только если и Итано, и Кикс на релике 7+.</div>
+                    </li>
+                    <li>
+                        <code>omicron [Юнит: Способность] tier 1</code> показывает тир рядом с
+                        омикроном. Порядок выдачи задаётся списком слева.
+                    </li>
+                    <li>
+                        Добавьте <code>alternative 1</code> в конце каждой строки первого состава,
+                        <code>alternative 2</code> для второго и так далее. Игроку достаточно одного
+                        полного состава. Строки без номера обязательны для всех вариантов.
+                    </li>
+                    <li>
+                        <code>require faction [unaligned_force_user] side light</code> требует
+                        нейтрального адепта Силы светлой стороны. Для тёмной стороны укажите
+                        <code>side dark</code>. Персонаж, уже указанный по имени в составе, занимает своё место.
                     </li>
                     <li>
                         <code>omicron [Юнит] require omicron [Юнит]</code> — парные омикроны:
