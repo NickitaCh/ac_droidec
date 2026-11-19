@@ -1641,6 +1641,13 @@ class StatRequirementsCog(commands.Cog):
         now = time.time()
         if now < self.player_sync_schedule.next_start:
             return
+        if now >= self._player_sync_retry_announcements_at:
+            self._player_sync_retry_announcements_at = now + 60
+            stale = await asyncio.to_thread(database.get_unannounced_omicron_events)
+            if stale:
+                await self._announce_omicrons(
+                    (event_id, code, base_id, skill_id, gid)
+                    for event_id, gid, code, base_id, skill_id in stale)
         ally_to_guilds = {}
         for guild_id, cache in self.bot.guild_roster_caches.items():
             for code in cache.values():
@@ -1656,13 +1663,6 @@ class StatRequirementsCog(commands.Cog):
             self._player_sync_reconcile_at = now + 60
             await asyncio.to_thread(database.set_bot_state, "player_units_sync_loop_last_auto_run", datetime.now(MSK).isoformat())
             print(f"🔄 [Статы] Равномерное обновление: {len(ally_to_guilds)} игроков, цель 10 минут")
-        if now >= self._player_sync_retry_announcements_at:
-            self._player_sync_retry_announcements_at = now + 60
-            stale = await asyncio.to_thread(database.get_unannounced_omicron_events)
-            if stale:
-                await self._announce_omicrons(
-                    (event_id, code, base_id, skill_id, gid)
-                    for event_id, gid, code, base_id, skill_id in stale)
         code = self.player_sync_schedule.take(time.time())
         if code is None:
             return

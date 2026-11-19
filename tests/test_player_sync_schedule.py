@@ -140,6 +140,16 @@ class CogScheduleTests(unittest.IsolatedAsyncioTestCase):
             sync.assert_not_awaited()
         cog.cog_unload()
 
+    async def test_pending_omicrons_retry_even_without_a_roster(self):
+        cog = self.make_cog()
+        cog.bot.guild_roster_caches = {}
+        with (patch('database.get_unannounced_omicron_events', return_value=[(42, 1, '123456789', 'UNIT', 'sk')]),
+              patch.object(cog, '_announce_omicrons', new=AsyncMock()) as announce):
+            await cog.player_units_sync_loop.coro(cog)
+            announce.assert_awaited_once()
+            self.assertEqual(list(announce.call_args.args[0]), [(42, '123456789', 'UNIT', 'sk', 1)])
+        cog.cog_unload()
+
     async def test_transient_database_error_does_not_stop_polling(self):
         cog = self.make_cog()
         with patch.object(cog, '_player_units_sync_tick', new=AsyncMock(side_effect=[RuntimeError('busy'), None])) as tick:
