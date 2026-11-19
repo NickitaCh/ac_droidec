@@ -80,9 +80,10 @@ def resolve(ref, guild_id):
     actor = _actor.get()
     if not actor or actor[1] != guild_id:
         raise ValueError('Личный плейт недоступен.')
-    plate_id = ref.rsplit('[', 1)[-1].removesuffix(']')
+    short = re.fullmatch(re.escape(PREFIX) + r'#([0-9a-f]{16})', ref)
+    plate_id = short.group(1) if short else ref.rsplit('[', 1)[-1].removesuffix(']')
     plate = get(plate_id, {'discord_id': actor[0], 'guild_id': guild_id})
-    if reference(plate) != ref:
+    if not short and reference(plate) != ref:
         raise ValueError('Плейт изменился. Выберите его заново.')
     return plate
 
@@ -228,7 +229,13 @@ def parse_source(messages, user):
             raise ValueError('Вставьте ссылку на ответ команды /статы из своей лички с Дроидцем.')
         with scope(user):
             if title.startswith(PREFIX):
-                resolve(title, user['guild_id'])
+                try:
+                    title = reference(resolve(title, user['guild_id']))
+                except ValueError:
+                    matches = [p for p in list_plates(user) if display_reference(reference(p)) == title]
+                    if len(matches) != 1:
+                        raise ValueError('Личный плейт недоступен или его имя неоднозначно. Откройте его на сайте.') from None
+                    title = reference(matches[0])
             elif title not in database.get_all_stat_requirement_plates(guild_id=user['guild_id']):
                 raise ValueError('Исходный плейт недоступен в вашей гильдии.')
             items = []

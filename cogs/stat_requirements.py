@@ -8,6 +8,8 @@ import time
 from services.player_sync_schedule import PlayerSyncSchedule
 import io
 import re
+import secrets
+import copy
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,7 +19,7 @@ from disnake.ext import commands, tasks
 import database
 import guild_resolver
 import stat_engine
-from services import activity_diff, feature_flags, mod_search, omicron_priority, unit_aliases
+from services import activity_diff, feature_flags, mod_search, omicron_priority, unit_aliases, personal_plates, bot_profiles
 from tg_bot import outbox
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -1349,6 +1351,19 @@ async def autocomplete_stat_plate(inter: disnake.ApplicationCommandInteraction, 
     if guild_id is None:
         return []
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id, bot_visible_only=True)
+    command = getattr(getattr(inter, 'application_command', None), 'name', None)
+    if command is None:
+        command = getattr(getattr(inter, 'data', None), 'name', None)
+    if command == 'статы' and bot_profiles.current_profile() == 'test' and bot_profiles.guild_profile(guild_id) == 'test':
+        user = {'discord_id': str(inter.author.id), 'guild_id': guild_id}
+        search = string.casefold().strip()
+        options = [disnake.OptionChoice(name=p[:100], value=p) for p in plates if len(p) <= 100 and (not search or search in p.casefold())]
+        personal_options = []
+        for plate in personal_plates.list_plates(user):
+            label = ('Личный · ' if plate['owner'] == str(inter.author.id) else 'Гильдия · ') + plate['name']
+            if not search or search in label.casefold():
+                personal_options.append(disnake.OptionChoice(name=label[:100], value=personal_plates.PREFIX + '#' + plate['id']))
+        return (personal_options + options)[:25]
     if not plates:
         return ["❌ Список плейтов пуст."]
     search = string.lower().strip()
@@ -1362,7 +1377,11 @@ async def autocomplete_stat_character(inter: disnake.ApplicationCommandInteracti
     plate = inter.filled_options.get("плейт")
     if not plate:
         return ["⚠️ СНАЧАЛА выберите плейт!"]
-    char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
+    try:
+        with personal_plates.scope({'discord_id': str(inter.author.id), 'guild_id': guild_id}):
+            char_keys = database.get_stat_requirement_characters(plate, guild_id=guild_id)
+    except ValueError:
+        return []
     if not char_keys:
         return ["❌ У этого плейта нет сохранённых требований."]
     search = string.lower().strip()
@@ -1504,11 +1523,19 @@ def _render_stats_page(state: dict, closed: bool = False) -> list:
                                         default=target == page.get("char"))
                    for label, emoji, target in part]
         components.append(ui.ActionRow(ui.StringSelect(custom_id=f"stp|{token}|pick{n}", placeholder=placeholder, options=options)))
+    buttons = []
     if "back" in page:
-        buttons = [ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back")]
+        buttons.append(ui.Button(label="К списку", emoji="📋", custom_id=f"stp|{token}|back"))
         if page.get("scheme_model"):
             buttons.append(ui.Button(label="Скрыть схему" if state.get("show_scheme") else "Схема модинга",
                                      custom_id=f"stp|{token}|scheme", style=disnake.ButtonStyle.secondary))
+    if state.get('private_personal'):
+        if state.get('published_url'):
+            buttons.append(ui.Button(label='Открыть публикацию', url=state['published_url']))
+        else:
+            buttons.append(ui.Button(label='Показать всем', emoji='🔓',
+                custom_id=f'stp|{token}|reveal', style=disnake.ButtonStyle.secondary))
+    if buttons:
         components.append(ui.ActionRow(*buttons))
     return components
 
@@ -1577,6 +1604,50 @@ async def _check_stats_pager_access(inter: disnake.MessageInteraction, token: st
     if not await guild_resolver.check_bot_profile(inter, state.get("guild_id")):
         return None
     return state
+
+
+async def _start_stats_pager(inter, pages, picks, color, footer, guild_id, allowed_ids, *, personal_ref=None):
+    token = str(inter.id)
+    state = {
+        'token': token, 'allowed_ids': allowed_ids, 'index': 0, 'color': color, 'footer': footer,
+        'guild_id': guild_id, 'pages': pages, 'picks': picks, 'message': None,
+        'lock': asyncio.Lock(), 'show_scheme': False, 'private_personal': bool(personal_ref),
+        'personal_ref': personal_ref, 'owner_id': inter.author.id, 'channel_id': inter.channel_id,
+    }
+    _stats_pagers[token] = state
+    await inter.edit_original_response(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
+    state['message'] = await inter.original_response()
+    asyncio.create_task(_expire_stats_pager(token))
+    return state
+
+
+async def _reveal_personal_stats(inter, state):
+    """Explicitly publish a copy of this result, leaving plate sharing unchanged."""
+    if not state.get('private_personal') or inter.author.id != state.get('owner_id'):
+        await inter.followup.send('Опубликовать результат может только вызвавший команду.', ephemeral=True)
+        return
+    if not inter.guild_id or inter.channel_id != state.get('channel_id'):
+        await inter.followup.send('Чтобы показать результат всем, вызовите /статы в канале сервера.', ephemeral=True)
+        return
+    if state.get('published_url'):
+        return
+    try:
+        with personal_plates.scope({'discord_id': str(inter.author.id), 'guild_id': state['guild_id']}):
+            personal_plates.resolve(state['personal_ref'], state['guild_id'])
+    except ValueError:
+        await inter.followup.send('Плейт больше недоступен. Вызовите /статы заново.', ephemeral=True)
+        return
+    token = secrets.token_hex(12)
+    public = {**state, 'token': token, 'index': 0, 'pages': copy.deepcopy(state['pages']),
+              'lock': asyncio.Lock(), 'show_scheme': False, 'private_personal': False, 'message': None}
+    message = await inter.followup.send(components=_render_stats_page(public),
+        flags=disnake.MessageFlags(is_components_v2=True), ephemeral=False, wait=True,
+        allowed_mentions=disnake.AllowedMentions.none())
+    public['message'] = message
+    _stats_pagers[token] = public
+    state['published_url'] = message.jump_url
+    asyncio.create_task(_expire_stats_pager(token))
+    await _edit_stats_pager(inter, state)
 
 
 async def _expire_stats_pager(token: str):
@@ -2017,7 +2088,8 @@ class StatRequirementsCog(commands.Cog):
         только_кресты: bool = yes_no_param(default=False, description="Показать только невыполненное (❌) — без строк в норме"),
         альт: bool = yes_no_param(default=False, description=guild_resolver.ALT_PARAM_DESCRIPTION),
     ):
-        await inter.response.defer()
+        is_personal = плейт.startswith(personal_plates.PREFIX)
+        await inter.response.defer(ephemeral=is_personal)
 
         if альт:
             alt = await guild_resolver.require_alt(inter, "stat_requirements", other_target=bool(участник or аликод or гильдия))
@@ -2029,207 +2101,215 @@ class StatRequirementsCog(commands.Cog):
             if guild_id is None:
                 return
 
-        if not await stat_engine.wait_stat_calc(self.bot, inter):
-            await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
-            return
-
-        forced_scheme = _parse_scheme_param(вариант)
-
-        char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
-        if not char_keys:
-            await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
-            return
-
-        if гильдия:
-            if not guild_resolver.is_officer_for_resolved_guild(inter.author):
-                await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
+        with personal_plates.scope({'discord_id': str(inter.author.id), 'guild_id': guild_id}):
+            if is_personal:
+                if bot_profiles.current_profile() != 'test' or bot_profiles.guild_profile(guild_id) != 'test':
+                    await inter.edit_original_response('Личные плейты доступны только в TEST.')
+                    return
+                try:
+                    плейт = personal_plates.reference(personal_plates.resolve(плейт, guild_id))
+                except ValueError:
+                    await inter.edit_original_response('Личный плейт недоступен. Выберите его заново.')
+                    return
+            if not await stat_engine.wait_stat_calc(self.bot, inter):
+                await inter.edit_original_response("⏳ Калькулятор статов не загрузился — попробуйте через пару минут.")
                 return
 
-            report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, squad_only=с_отрядом)
-            if report["error"]:
-                await inter.edit_original_response(f"❌ {report['error']}")
+            forced_scheme = _parse_scheme_param(вариант)
+
+            char_keys = [_parse_bracket_id(персонаж)] if персонаж is not None else database.get_stat_requirement_characters(плейт, guild_id=guild_id)
+            if not char_keys:
+                await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
                 return
 
-            lines = [f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
-            if сценарий == SCENARIO_RAW:
-                lines.append("_(как есть, без проекции на релик — как в ХБ)_")
-            elif сценарий == SCENARIO_UP:
-                lines.append("_(релик поднят только тем, кто ниже цели плейта)_")
-            else:
-                lines.append("_(полный подгон релика к цели плейта — вверх и вниз)_")
-            if report["no_data"]:
-                lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
-            if report["skipped"]:
-                lines.append(f"⚪ Не требуется — нет отряда: {len(report['skipped'])}")
-            lines.append("")
-            if report["compliant"]:
-                lines.append("✅ " + ", ".join(r["name"] for r in report["compliant"]))
-                lines.append("")
-            if report["problem"]:
-                lines.append("_(дробь ниже — только по ОБЯЗАТЕЛЬНЫМ требованиям, без опциональных/полезных)_")
-                for r in report["problem"]:
-                    lines.append(f"❌ {r['name']} — обязательных {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
-            else:
-                lines.append("Все закрыли все требования! 🎉")
-            if report["skipped"]:
-                lines.append("")
-                lines.append("⚪ Нет отряда: " + ", ".join(f"{r['name']} ({r['reason']})" for r in report["skipped"]))
+            if гильдия:
+                if not guild_resolver.is_officer_for_resolved_guild(inter.author):
+                    await guild_resolver.send_denied(inter, guild_resolver.GUILD_WIDE_OFFICER_ONLY)
+                    return
 
-            if not report["problem"]:
+                report = await _build_guild_report(self.bot, плейт, char_keys, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, squad_only=с_отрядом)
+                if report["error"]:
+                    await inter.edit_original_response(f"❌ {report['error']}")
+                    return
+
+                lines = [f"✅ Полностью соответствуют: {len(report['compliant'])}/{report['total_players']}"]
+                if сценарий == SCENARIO_RAW:
+                    lines.append("_(как есть, без проекции на релик — как в ХБ)_")
+                elif сценарий == SCENARIO_UP:
+                    lines.append("_(релик поднят только тем, кто ниже цели плейта)_")
+                else:
+                    lines.append("_(полный подгон релика к цели плейта — вверх и вниз)_")
+                if report["no_data"]:
+                    lines.append(f"⚠️ Нет данных: {len(report['no_data'])}")
+                if report["skipped"]:
+                    lines.append(f"⚪ Не требуется — нет отряда: {len(report['skipped'])}")
+                lines.append("")
+                if report["compliant"]:
+                    lines.append("✅ " + ", ".join(r["name"] for r in report["compliant"]))
+                    lines.append("")
+                if report["problem"]:
+                    lines.append("_(дробь ниже — только по ОБЯЗАТЕЛЬНЫМ требованиям, без опциональных/полезных)_")
+                    for r in report["problem"]:
+                        lines.append(f"❌ {r['name']} — обязательных {r['matched']}/{r['total']} (не выполнено: {r['total'] - r['matched']})")
+                else:
+                    lines.append("Все закрыли все требования! 🎉")
+                if report["skipped"]:
+                    lines.append("")
+                    lines.append("⚪ Нет отряда: " + ", ".join(f"{r['name']} ({r['reason']})" for r in report["skipped"]))
+
+                if not report["problem"]:
+                    color = DATACRON_CHECK_COLOR_FULL
+                elif not report["compliant"]:
+                    color = DATACRON_CHECK_COLOR_NONE
+                else:
+                    color = DATACRON_CHECK_COLOR_PARTIAL
+
+                title = f"📋 {personal_plates.display_reference(плейт)} — гильдия"
+                if is_personal:
+                    report_pages, report_picks = _build_stats_pages(title, lines, [], [])
+                    await _start_stats_pager(inter, report_pages, report_picks, color, '', guild_id,
+                                             {inter.author.id}, personal_ref=плейт)
+                    return
+                embeds = _lines_to_embeds(title, color, lines)
+                await inter.edit_original_response(embed=embeds[0])
+                for e in embeds[1:]:
+                    await inter.followup.send(embed=e)
+                return
+
+            ally_code, игрок, error = guild_resolver.target_player(участник, аликод, guild_id)
+            if error:
+                await inter.edit_original_response(error)
+                return
+            if ally_code is None:
+                registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
+                if not registration:
+                    await inter.edit_original_response(
+                        "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите участника "
+                        "или код союзника."
+                    )
+                    return
+                ally_code, игрок = registration
+            игрок = игрок or database.get_player_names(guild_id).get(ally_code) or ally_code
+
+            self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
+            if self_error:
+                await guild_resolver.send_denied(inter, self_error)
+                return
+
+            missing = {}
+            if с_отрядом:
+                if обновить:
+                    await activity_diff.refresh_player_units(self.bot.comlink, ally_code)
+                missing = _missing_plate_squads(ally_code, guild_id)
+                if плейт in missing:
+                    await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отряда плейта {плейт} ({missing[плейт]}) — плейт ему не требуется.")
+                    return
+
+            char_pages = []  # (char_name, block)
+            scheme_models = {}
+            summary_rows = []  # (char_name, matched, total, has_failed_required)
+            matched_total = 0
+            rows_total = 0
+            updated_ats = []
+            failed_required_by_char = []
+            skipped_chars = []
+            for base_id in char_keys:
+                skip_plates, skip_reason = _char_squad_skip(плейт, base_id, guild_id, missing)
+                if skip_reason:
+                    skipped_chars.append((_unit_display_name(base_id), skip_reason))
+                    continue
+                result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, skip_plates=skip_plates, only_failed=только_кресты)
+                if result is None:
+                    continue
+                char_name, block, matched, total, updated_at, failed_required, _required_total, _active_scheme, _scheme_label = result
+                summary_rows.append((char_name, matched, total, bool(failed_required)))
+                # «Только кресты»: персонаж без единого ❌ отдельной страницы не получает.
+                if not (только_кресты and matched == total and "❌" not in block):
+                    char_pages.append((char_name, block))
+                    scheme_models[char_name] = _stats_scheme_model(
+                        плейт, base_id, guild_id, _active_scheme, _scheme_label, skip_plates)
+                matched_total += matched
+                rows_total += total
+                if updated_at:
+                    updated_ats.append(updated_at)
+                if failed_required:
+                    failed_required_by_char.append((char_name, failed_required))
+
+            if not summary_rows:
+                if skipped_chars:
+                    await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отрядов этого плейта — проверять нечего.")
+                else:
+                    await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
+                return
+
+            # Первая страница — итог: персонажи плейта с дробью + обязательные статы, не прошедшие
+            # норму по выбранному сценарию (failed_required в _evaluate_character_player).
+            _scenario_titles = {
+                SCENARIO_RAW: "как есть, без проекции — как в ХБ",
+                SCENARIO_UP: "релик поднят только тем, кто ниже цели",
+                SCENARIO_FULL: "с полным подгоном релика на цель плейта",
+            }
+            # Порядок итога (NicolozZ 2026-10-16): сначала кресты, затем список персонажей —
+            # сперва с ❌, дальше в порядке плейта (сортировка стабильная). Страницы персонажей —
+            # в том же порядке, чтобы ▶ шла по списку.
+            summary_rows.sort(key=lambda row: not row[3])
+            order = {row[0]: pos for pos, row in enumerate(summary_rows)}
+            char_pages.sort(key=lambda page: order.get(page[0], len(order)))
+            failed_required_by_char.sort(key=lambda item: order.get(item[0], len(order)))
+
+            summary = [f"**Обязательные статы** ({_scenario_titles[сценарий]})"]
+            if failed_required_by_char:
+                for char_name, failed_items in failed_required_by_char:
+                    parts = "; ".join(f"{item['stat']}: {item['current']} (нужно {item['requirement']})" for item in failed_items)
+                    summary.append(f"❌ **{char_name}** — {parts}")
+            else:
+                summary.append("✅ Все обязательные статы в норме.")
+            summary.append("")
+            summary.append(f"**Персонажи** ({len(summary_rows)})")
+            picks = []
+            for char_name, matched, total, has_failed in summary_rows:
+                # Иконка — только по обязательным: недобор по опциональным не делает персонажа «⚠️».
+                icon = "❌" if has_failed else "✅"
+                summary.append(f"{icon} {char_name} — {matched}/{total}")
+                picks.append((f"{char_name} — {matched}/{total}", icon, char_name))
+            if skipped_chars:
+                summary.append("")
+                summary.append(f"**⚪ Не требуется — нет отряда** ({len(skipped_chars)})")
+                for char_name, reason in skipped_chars:
+                    summary.append(f"{char_name} — {reason}")
+            if только_кресты:
+                summary.append("")
+                summary.append("_Режим «только кресты»: на страницах персонажей — только невыполненное._")
+
+            # Цвет — по обязательным статам (как и текст итога), а не matched_total == rows_total.
+            if not failed_required_by_char:
                 color = DATACRON_CHECK_COLOR_FULL
-            elif not report["compliant"]:
+            elif matched_total == 0:
                 color = DATACRON_CHECK_COLOR_NONE
             else:
                 color = DATACRON_CHECK_COLOR_PARTIAL
 
-            title = f"📋 {плейт} — гильдия"
-            embeds = _lines_to_embeds(title, color, lines)
-            await inter.edit_original_response(embed=embeds[0])
-            for e in embeds[1:]:
-                await inter.followup.send(embed=e)
-            return
-
-        ally_code, игрок, error = guild_resolver.target_player(участник, аликод, guild_id)
-        if error:
-            await inter.edit_original_response(error)
-            return
-        if ally_code is None:
-            registration = database.get_user_registration(str(inter.author.id), guild_id=guild_id)
-            if not registration:
-                await inter.edit_original_response(
-                    "❌ Игрок не указан, а вы не зарегистрированы — используйте `/регистрация`, укажите участника "
-                    "или код союзника."
-                )
+            title = f"📋 {personal_plates.display_reference(плейт)} (игрок: {игрок})"
+            footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет сохранённых данных ни по одному из этих юнитов у игрока"
+            if not char_pages and not is_personal:
+                # Листать нечего (всё в норме при «только кресты») — обычный embed, как раньше.
+                pages = _lines_to_embeds(title + " — итог", color, summary)
+                for e in pages:
+                    e.set_footer(text=footer)
+                await inter.edit_original_response(embed=pages[0])
+                for e in pages[1:]:
+                    await inter.followup.send(embed=e)
                 return
-            ally_code, игрок = registration
-        игрок = игрок or database.get_player_names(guild_id).get(ally_code) or ally_code
-
-        self_error = guild_resolver.self_only_error(inter.author, guild_id, ally_code)
-        if self_error:
-            await guild_resolver.send_denied(inter, self_error)
-            return
-
-        missing = {}
-        if с_отрядом:
-            if обновить:
-                await activity_diff.refresh_player_units(self.bot.comlink, ally_code)
-            missing = _missing_plate_squads(ally_code, guild_id)
-            if плейт in missing:
-                await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отряда плейта {плейт} ({missing[плейт]}) — плейт ему не требуется.")
-                return
-
-        char_pages = []  # (char_name, block)
-        scheme_models = {}
-        summary_rows = []  # (char_name, matched, total, has_failed_required)
-        matched_total = 0
-        rows_total = 0
-        updated_ats = []
-        failed_required_by_char = []
-        skipped_chars = []
-        for base_id in char_keys:
-            skip_plates, skip_reason = _char_squad_skip(плейт, base_id, guild_id, missing)
-            if skip_reason:
-                skipped_chars.append((_unit_display_name(base_id), skip_reason))
-                continue
-            result = await _evaluate_character_player(self.bot, плейт, base_id, ally_code, обновить, игрок, guild_id=guild_id, scenario=сценарий, forced_scheme=forced_scheme, skip_plates=skip_plates, only_failed=только_кресты)
-            if result is None:
-                continue
-            char_name, block, matched, total, updated_at, failed_required, _required_total, _active_scheme, _scheme_label = result
-            summary_rows.append((char_name, matched, total, bool(failed_required)))
-            # «Только кресты»: персонаж без единого ❌ отдельной страницы не получает.
-            if not (только_кресты and matched == total and "❌" not in block):
-                char_pages.append((char_name, block))
-                scheme_models[char_name] = _stats_scheme_model(
-                    плейт, base_id, guild_id, _active_scheme, _scheme_label, skip_plates)
-            matched_total += matched
-            rows_total += total
-            if updated_at:
-                updated_ats.append(updated_at)
-            if failed_required:
-                failed_required_by_char.append((char_name, failed_required))
-
-        if not summary_rows:
-            if skipped_chars:
-                await inter.edit_original_response(f"⚪ У игрока «{игрок}» нет отрядов этого плейта — проверять нечего.")
-            else:
-                await inter.edit_original_response("❌ Нет сохранённых требований для этого плейта.")
-            return
-
-        # Первая страница — итог: персонажи плейта с дробью + обязательные статы, не прошедшие
-        # норму по выбранному сценарию (failed_required в _evaluate_character_player).
-        _scenario_titles = {
-            SCENARIO_RAW: "как есть, без проекции — как в ХБ",
-            SCENARIO_UP: "релик поднят только тем, кто ниже цели",
-            SCENARIO_FULL: "с полным подгоном релика на цель плейта",
-        }
-        # Порядок итога (NicolozZ 2026-10-16): сначала кресты, затем список персонажей —
-        # сперва с ❌, дальше в порядке плейта (сортировка стабильная). Страницы персонажей —
-        # в том же порядке, чтобы ▶ шла по списку.
-        summary_rows.sort(key=lambda row: not row[3])
-        order = {row[0]: pos for pos, row in enumerate(summary_rows)}
-        char_pages.sort(key=lambda page: order.get(page[0], len(order)))
-        failed_required_by_char.sort(key=lambda item: order.get(item[0], len(order)))
-
-        summary = [f"**Обязательные статы** ({_scenario_titles[сценарий]})"]
-        if failed_required_by_char:
-            for char_name, failed_items in failed_required_by_char:
-                parts = "; ".join(f"{item['stat']}: {item['current']} (нужно {item['requirement']})" for item in failed_items)
-                summary.append(f"❌ **{char_name}** — {parts}")
-        else:
-            summary.append("✅ Все обязательные статы в норме.")
-        summary.append("")
-        summary.append(f"**Персонажи** ({len(summary_rows)})")
-        picks = []
-        for char_name, matched, total, has_failed in summary_rows:
-            # Иконка — только по обязательным: недобор по опциональным не делает персонажа «⚠️».
-            icon = "❌" if has_failed else "✅"
-            summary.append(f"{icon} {char_name} — {matched}/{total}")
-            picks.append((f"{char_name} — {matched}/{total}", icon, char_name))
-        if skipped_chars:
-            summary.append("")
-            summary.append(f"**⚪ Не требуется — нет отряда** ({len(skipped_chars)})")
-            for char_name, reason in skipped_chars:
-                summary.append(f"{char_name} — {reason}")
-        if только_кресты:
-            summary.append("")
-            summary.append("_Режим «только кресты»: на страницах персонажей — только невыполненное._")
-
-        # Цвет — по обязательным статам (как и текст итога), а не matched_total == rows_total.
-        if not failed_required_by_char:
-            color = DATACRON_CHECK_COLOR_FULL
-        elif matched_total == 0:
-            color = DATACRON_CHECK_COLOR_NONE
-        else:
-            color = DATACRON_CHECK_COLOR_PARTIAL
-
-        title = f"📋 {плейт} (игрок: {игрок})"
-        footer = f"Данные игрока: {updated_ats[0]}" if updated_ats else "⚠️ Нет сохранённых данных ни по одному из этих юнитов у игрока"
-        if not char_pages:
-            # Листать нечего (всё в норме при «только кресты») — обычный embed, как раньше.
-            pages = _lines_to_embeds(title + " — итог", color, summary)
-            for e in pages:
-                e.set_footer(text=footer)
-            await inter.edit_original_response(embed=pages[0])
-            for e in pages[1:]:
-                await inter.followup.send(embed=e)
-            return
-        token = inter.id
-        allowed_ids = {inter.author.id}
-        target_discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
-        if target_discord_id and str(target_discord_id).isdigit():
-            allowed_ids.add(int(target_discord_id))
-        pages, picks = _build_stats_pages(title, summary, picks, char_pages)
-        for page in pages:
-            if "char" in page:
-                page["scheme_model"] = scheme_models.get(page["char_name"])
-        state = {
-            "token": token, "allowed_ids": allowed_ids, "index": 0, "color": color, "footer": footer, "guild_id": guild_id,
-            "pages": pages, "picks": picks, "message": None, "lock": asyncio.Lock(), "show_scheme": False,
-        }
-        _stats_pagers[str(token)] = state
-        await inter.edit_original_response(components=_render_stats_page(state), flags=disnake.MessageFlags(is_components_v2=True))
-        state["message"] = await inter.original_response()
-        asyncio.create_task(_expire_stats_pager(str(token)))
+            allowed_ids = {inter.author.id}
+            target_discord_id = database.get_discord_id_for_ally(ally_code, guild_id=guild_id)
+            if target_discord_id and str(target_discord_id).isdigit():
+                allowed_ids.add(int(target_discord_id))
+            pages, picks = _build_stats_pages(title, summary, picks, char_pages)
+            for page in pages:
+                if "char" in page:
+                    page["scheme_model"] = scheme_models.get(page["char_name"])
+            await _start_stats_pager(inter, pages, picks, color, footer, guild_id, allowed_ids,
+                                     personal_ref=плейт if is_personal else None)
 
     @commands.Cog.listener("on_button_click")
     async def on_stats_pager_click(self, inter: disnake.MessageInteraction):
@@ -2245,6 +2325,9 @@ class StatRequirementsCog(commands.Cog):
             if _stats_pagers.get(parts[1]) is not state:
                 return
             action, last = parts[2], len(state["pages"]) - 1
+            if action == 'reveal':
+                await _reveal_personal_stats(inter, state)
+                return
             if action == "close":
                 _stats_pagers.pop(parts[1], None)
                 await inter.edit_original_response(components=_render_stats_page(state, closed=True),
