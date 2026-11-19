@@ -131,28 +131,26 @@ class ViolationsCog(commands.Cog):
             gname = guild_cfg["name"]
             print(f"🔄 [{gname}] Запуск безопасного обновления состава...")
             try:
-                print(f"🔎 [{gname}] Шаг 1: Запрос профиля игрока для Ally Code: {guild_cfg['ally_code']}...")
-                player_data = await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(guild_cfg["ally_code"]))
-
-                swgoh_guild_id = player_data.get("guildId")
+                # Гильдия сохраняет свою идентичность, даже если игрок-зацепка
+                # вышел или перешёл в другую. Аликод нужен только при подключении.
+                swgoh_guild_id = guild_cfg.get("swgoh_guild_id")
                 if not swgoh_guild_id:
-                    print(f"⚠️ [{gname}] Шаг 2 ФЕЙЛ: У игрока-зацепки нет guildId (он не состоит в гильдии)")
-                    any_failure = True
-                    continue
-                print(f"✅ [{gname}] Шаг 2: Guild ID успешно получен: {swgoh_guild_id}")
-
-                # Самовосстановление swgoh_guild_id: раньше эта колонка нигде не
-                # заполнялась, из-за чего ТБ-подсистема (guild_events.py) молча не
-                # работала — мы и так уже получили актуальный ID выше, просто
-                # сохраняем его, если он расходится с тем, что в БД.
-                if str(guild_cfg.get("swgoh_guild_id") or "") != str(swgoh_guild_id):
-                    database.update_guild_config(gid, swgoh_guild_id=str(swgoh_guild_id))
+                    print(f"🔎 [{gname}] Определяем Guild ID по Ally Code: {guild_cfg['ally_code']}...")
+                    player_data = await asyncio.to_thread(self.bot.comlink.get_player, allycode=str(guild_cfg["ally_code"]))
+                    swgoh_guild_id = player_data.get("guildId")
+                    if not swgoh_guild_id:
+                        raise ValueError("Guild ID ещё не сохранён, а игрок-зацепка не состоит в гильдии")
 
                 print(f"🔎 [{gname}] Шаг 3: Запрос данных гильдии из comlink...")
                 guild = await asyncio.to_thread(
                     self.bot.comlink.get_guild, guild_id=swgoh_guild_id, include_recent_guild_activity_info=True
                 )
                 members = guild.get("guild", guild).get("member", [])
+                if not members:
+                    # Неполный ответ API не должен архивировать весь состав.
+                    raise ValueError("Comlink вернул пустой состав гильдии; сохранённые данные оставлены")
+                if not guild_cfg.get("swgoh_guild_id"):
+                    await asyncio.to_thread(database.update_guild_config, gid, swgoh_guild_id=str(swgoh_guild_id))
                 print(f"✅ [{gname}] Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
 
                 print(f"🌐 [{gname}] Сбор детальных профилей игроков из сети...")
