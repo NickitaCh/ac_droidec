@@ -159,33 +159,41 @@ class ViolationsCog(commands.Cog):
                     await asyncio.to_thread(database.update_guild_config, gid, swgoh_guild_id=str(swgoh_guild_id))
                 print(f"✅ [{gname}] Шаг 3: Состав гильдии получен, найдено {len(members)} аккаунтов")
 
-                print(f"🌐 [{gname}] Сбор детальных профилей игроков из сети...")
-                # Снимок предыдущего состава по playerId — если Comlink в этот раз не отдаст
-                # allyCode/имя для кого-то (известный глюк "зануления" участников ростера),
-                # подставляем последнее известное значение вместо мусора (сырого playerId).
+                # playerId постоянен: известным участникам не нужно скачивать полный
+                # профиль ради аликода. Имена, роли и активность берём из свежего состава.
                 previous_by_pid = database.get_roster_by_player_id(gid)
                 temp_roster_data = []
                 activity_rows = []
                 new_cache = {}
+                profile_lookups = 0
 
                 for member in members:
                     p_id = member.get("playerId")
                     p_name = member.get("playerName") or ""
                     a_code = str(member.get("allyCode") or "")
-
-                    for lookup_attempt in range(2):
-                        try:
-                            prof = await asyncio.to_thread(self.bot.comlink.get_player, player_id=p_id)
-                            p_name = prof.get("name") or p_name
-                            a_code = str(prof.get("allyCode") or a_code)
-                            break
-                        except Exception as e:
-                            print(f"⚠️ [{gname}] get_player({p_id}) попытка {lookup_attempt + 1} не удалась: {e!r}")
-                            if lookup_attempt == 0:
-                                await asyncio.sleep(1)
+                    prev_code, prev_name = previous_by_pid.get(p_id, (None, None))
+                    if not database.ALLY_CODE_RE.fullmatch(a_code):
+                        a_code = str(prev_code or "")
+                    if not database.ALLY_CODE_RE.fullmatch(a_code):
+                        a_code = ""  # сохранённый playerId/нулевой код — не аликод
 
                     if not a_code or not p_name:
-                        prev_code, prev_name = previous_by_pid.get(p_id, (None, None))
+                        for lookup_attempt in range(2):
+                            try:
+                                profile_lookups += 1
+                                prof = await asyncio.to_thread(self.bot.comlink.get_player, player_id=p_id)
+                                p_name = prof.get("name") or p_name
+                                resolved_code = str(prof.get("allyCode") or "")
+                                if database.ALLY_CODE_RE.fullmatch(resolved_code):
+                                    a_code = resolved_code
+                                break
+                            except Exception as e:
+                                print(f"⚠️ [{gname}] get_player({p_id}) попытка {lookup_attempt + 1} не удалась: {e!r}")
+                                if lookup_attempt == 0:
+                                    await asyncio.sleep(1)
+                        await asyncio.sleep(0.1)
+
+                    if not a_code or not p_name:
                         if not a_code and prev_code:
                             a_code = prev_code
                             print(f"↩️ [{gname}] {p_id}: allyCode не пришёл, использован предыдущий {prev_code}")
@@ -200,7 +208,6 @@ class ViolationsCog(commands.Cog):
                     temp_roster_data.append((a_code, a_code, p_name, member.get("memberLevel"), p_id))
                     activity_rows.append((a_code, int(member.get("lastActivityTime") or 0) or None,
                                           int(member.get("guildJoinTime") or 0) or None))
-                    await asyncio.sleep(0.1)
 
                 print(f"💾 [{gname}] Шаг 4: Мгновенное сохранение профилей в базу данных...")
                 # В потоке: архивация выбывших + запись в SQLite, которую параллельно пишет
@@ -213,7 +220,7 @@ class ViolationsCog(commands.Cog):
                 self.bot.guild_roster_caches[gid] = hybrid_cache
                 if gid == 1:
                     self.bot.guild_roster_cache = hybrid_cache  # легаси-зеркало, см. комментарий выше
-                print(f"✅ [{gname}] Синхронизировано {len(new_cache)} игроков.")
+                print(f"✅ [{gname}] Синхронизировано {len(new_cache)} игроков, запросов профиля: {profile_lookups}.")
                 any_success = True
 
             except Exception as e:
