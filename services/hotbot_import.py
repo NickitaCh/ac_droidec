@@ -86,21 +86,41 @@ def parse_link(link: str) -> tuple[str, str]:
     return m.group(2), m.group(3)
 
 
-async def fetch_messages(link: str, token: str | None = None) -> list[dict]:
+async def fetch_messages(link: str, token: str | None = None, *, owner: str | None = None, profile: str | None = None) -> list[dict]:
     """Первое сообщение HotBot по ссылке + его продолжения (ответы на него от того же
     автора) — эмбеды всех по порядку."""
     channel_id, message_id = parse_link(link)
     from services import bot_profiles
-    token = token or bot_profiles.token("discord")
+    token = token or bot_profiles.token("discord", profile)
     if not token:
         raise HotbotImportError("DISCORD_TOKEN не настроен на сервере.")
     headers = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://swgoh-sng.ru, 1.0)"}
+    dm_link = LINK_RE.search(link).group(1) == '@me'
+    if dm_link and owner is None:
+        raise HotbotImportError('Для импорта из лички войдите на сайт своим Discord-аккаунтом.')
+    own_bot_id = None
     async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as session:
+        if owner is not None:
+            async with session.get(f"{DISCORD_API}/channels/{channel_id}") as resp:
+                if resp.status in (403, 404):
+                    raise HotbotImportError('Бот не видит этот канал. Используйте сообщение из своей лички с Дроидцем или доступного ему канала.')
+                resp.raise_for_status()
+                channel = await resp.json()
+            if channel.get('type') in (1, 3):
+                if channel.get('type') != 1 or str(owner) not in {str(r.get('id')) for r in channel.get('recipients', [])}:
+                    raise HotbotImportError('Можно импортировать сообщения только из своей лички с Дроидцем.')
+                async with session.get(f"{DISCORD_API}/users/@me") as resp:
+                    resp.raise_for_status()
+                    own_bot_id = str((await resp.json())['id'])
+            elif dm_link:
+                raise HotbotImportError('Эта ссылка не ведёт в личку с Дроидцем.')
         async with session.get(f"{DISCORD_API}/channels/{channel_id}/messages/{message_id}") as resp:
             if resp.status in (403, 404):
                 raise HotbotImportError("Бот не видит это сообщение — нет доступа к каналу или сообщение удалено.")
             resp.raise_for_status()
             first = await resp.json()
+        if own_bot_id and str(first.get('author', {}).get('id')) == own_bot_id:
+            first['_droidec_dm'] = True
         async with session.get(f"{DISCORD_API}/channels/{channel_id}/messages",
                                params={"after": message_id, "limit": 30}) as resp:
             resp.raise_for_status()

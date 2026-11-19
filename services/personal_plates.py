@@ -121,6 +121,8 @@ def create(user, name, items=()):
 
 def item_data(item):
     from cogs.stat_requirements import STAT_MOD_PRIMARY, STAT_SET
+    if item['kind'] == 'stored':
+        return list(item['data'])
     kind = item['kind']
     stat, op, value = item.get('stat'), item.get('op', '>='), item.get('value', 1)
     skill, slot, compare = None, None, None
@@ -208,3 +210,32 @@ def parse_hotbot(parsed):
     items = hb._expand(items)
     hb._resolve_crit(items, [])
     return items, skipped
+
+
+def parse_source(messages, user):
+    """A verified own-bot DM identifies the source plate; copy its actual rows."""
+    from services import hotbot_import as hb
+    first = messages[0] if messages else {}
+    if first.get('_droidec_dm'):
+        def texts(components):
+            for component in components:
+                if component.get('type') == 10:
+                    yield component.get('content', '')
+                yield from texts(component.get('components') or [])
+        title = next((match.group(1) for text in texts(first.get('components') or [])
+                      if (match := re.match(r'^### 📋 (.+) \(игрок: .+\) — ', text))), None)
+        if not title:
+            raise ValueError('Вставьте ссылку на ответ команды /статы из своей лички с Дроидцем.')
+        with scope(user):
+            if title.startswith(PREFIX):
+                resolve(title, user['guild_id'])
+            elif title not in database.get_all_stat_requirement_plates(guild_id=user['guild_id']):
+                raise ValueError('Исходный плейт недоступен в вашей гильдии.')
+            items = []
+            for base in database.get_stat_requirement_characters(title, guild_id=user['guild_id']):
+                for row in database.get_stat_requirements(title, base, guild_id=user['guild_id']):
+                    items.append({'kind': 'stored', 'data': [*row[2:9], *row[11:15]], 'label': hb.describe_row(row)})
+        return display_reference(title).removeprefix(PREFIX), items, []
+    parsed = hb.parse_messages(messages)
+    items, skipped = parse_hotbot(parsed)
+    return parsed['title'], items, skipped

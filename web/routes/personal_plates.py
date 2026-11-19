@@ -5,6 +5,7 @@ import json
 import math
 import secrets
 from urllib.parse import urlencode
+import aiohttp
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -12,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 import database
 from services import feature_flags, hotbot_import as hb, personal_plates as plates
-from web.routes.stat_plates import STAT_OPTIONS, OPERATOR_OPTIONS, PRIORITY_OPTIONS, _stat_ru
+from web.routes.stat_plates import STAT_OPTIONS, OPERATOR_OPTIONS, PRIORITY_OPTIONS, _stat_ru, _fmt_value
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / 'templates'))
@@ -70,8 +71,8 @@ async def import_submit(request: Request, user=Depends(access)):
     check(request, form)
     link, name = str(form.get('link', '')), str(form.get('name', ''))
     try:
-        parsed = hb.parse_messages(await hb.fetch_messages(link))
-        items, skipped = plates.parse_hotbot(parsed)
+        messages = await hb.fetch_messages(link, owner=str(user['discord_id']), profile=user.get('bot_profile'))
+        title, items, skipped = plates.parse_source(messages, user)
         if not items:
             raise ValueError('В сообщении нет поддерживаемых требований.')
         digest = hashlib.sha256(json.dumps(items, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -84,10 +85,13 @@ async def import_submit(request: Request, user=Depends(access)):
                 raise ValueError('Отметьте хотя бы одно требование.')
             pid = plates.create(user, name, chosen)
             return redirect('/personal-plates/' + pid)
-        return render(request, user, importing=True, link=link, name=name or parsed['title'],
-                      preview=[hb.describe_item(item) for item in items], skipped=skipped, digest=digest)
-    except ValueError as error:
+        return render(request, user, importing=True, link=link, name=name or title,
+                      preview=[item['label'] if item.get('kind') == 'stored' else hb.describe_item(item) for item in items], skipped=skipped, digest=digest,
+                      source_note='Текущие требования исходного плейта.' if messages[0].get('_droidec_dm') else '')
+    except (ValueError, hb.HotbotImportError) as error:
         return render(request, user, importing=True, link=link, name=name, error=str(error))
+    except (aiohttp.ClientError, TimeoutError):
+        return render(request, user, importing=True, link=link, name=name, error='Не удалось прочитать сообщение Discord. Попробуйте ещё раз.')
 
 
 @router.get('/api/units')
@@ -106,6 +110,9 @@ async def detail(request: Request, plate_id: str, ally_code: str = '', check_sta
     entries = [{'id': row[0], 'character': names.get(row[2], row[2]),
                 'text': hb.describe_row(row).replace(' — ' + row[3], ' — ' + _stat_ru(row[3])),
                 'stat': _stat_ru(row[3]), 'value': row[5], 'operator': row[4], 'priority': row[6],
+                'condition': hb.describe_row(row).split(' — ', 1)[-1].rstrip('*'),
+                'norm': row[4] + ' ' + _fmt_value(row[5]),
+                'priority_label': dict((value, name) for name, value in PRIORITY_OPTIONS).get(row[6], row[6]),
                 'numeric': row[3] in {v for _, v in STAT_OPTIONS} and not row[13]} for row in rows]
     accounts = database.get_user_registrations(str(user['discord_id']), guild_id=user['guild_id'])
     results, error = None, None

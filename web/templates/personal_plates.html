@@ -1,36 +1,83 @@
 {% extends "base.html" %}
 {% block title %}Личные плейты — Дроидец{% endblock %}
+{% block main_class %}wide personal-plates-page{% endblock %}
+{% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
+{% macro priority_select(current='required') %}<select name="priority">{% for name,value in priority_options %}<option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>{% endmacro %}
+{% macro operator_select(current='>=') %}<select name="operator">{% for name,value in operator_options %}<option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>{% endmacro %}
 {% block content %}
-<section class="page-hero"><a class="page-hero-back" href="/personal-plates">Личные плейты</a>
-<h1>{{ plate.name if plate else ('Импорт из HotBot' if importing else 'Личные плейты') }}</h1>
-{% if not plate and not importing %}<p>Создавайте свои требования и открывайте их участникам своей гильдии.</p><a class="button" href="/personal-plates/import">Импорт по ссылке на сообщение</a>{% endif %}</section>
+<link rel="stylesheet" href="/static/personal_plates.css?v=20261119layout">
+<section class="page-hero pp-hero">
+    {% if plate or importing %}<a class="page-hero-back" href="/personal-plates">← Личные плейты</a>{% endif %}
+    <div class="page-hero-top">
+        <div><h1>{{ plate.name if plate else ('Импорт плейта' if importing else 'Личные плейты') }}</h1>
+        {% if plate %}<p class="page-hero-lead">{{ 'Доступен гильдии' if plate.shared else 'Только для вас' }} · Требований: {{ entries|length }}</p>{% endif %}</div>
+        {% if plate %}<div class="pp-actions"><a class="button button-secondary" href="#pp-check">Проверить себя</a><a class="button" href="/mod-optimizer">Подобрать модули</a></div>
+        {% elif not importing %}<a class="button" href="/personal-plates/import">Импорт по ссылке</a>{% endif %}
+    </div>
+</section>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if importing %}
-<div class="panel"><form method="post" action="/personal-plates/import">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Ссылка на сообщение HotBot<input type="url" name="link" value="{{ link|default('') }}" required></label>
-<label>Название личного плейта<input name="name" maxlength="80" value="{{ name|default('') }}" {% if preview %}required{% endif %}></label>
-{% if preview %}<input type="hidden" name="digest" value="{{ digest }}"><p>Будет создан новый личный плейт. Отметьте требования для переноса.</p>
-{% for text in preview %}<label class="checkbox"><input type="checkbox" name="selected" value="{{ loop.index0 }}" checked>{{ text }}</label>{% endfor %}
-<button name="action" value="save">Создать личный плейт</button>
-{% if skipped %}<details><summary>Не перенесутся: {{ skipped|length }}</summary>{% for s in skipped %}<p>{{ s.line }} — {{ s.reason }}</p>{% endfor %}</details>{% endif %}
-{% else %}<button name="action" value="preview">Предпросмотр</button>{% endif %}</form></div>
+<form method="post" action="/personal-plates/import" class="pp-import-layout">
+    {{ csrf_field() }}
+    <section class="panel pp-source"><h2>Источник</h2>
+        <label>Ссылка на сообщение<input type="url" name="link" value="{{ link|default('') }}" placeholder="https://discord.com/channels/…" required aria-describedby="pp-link-help"></label>
+        <p class="muted pp-help" id="pp-link-help">Ответ HotBot на сервере или сообщение /статы из вашей лички с Дроидцем. ПКМ по сообщению → «Копировать ссылку».</p>
+        <label>Название плейта<input name="name" maxlength="80" value="{{ name|default('') }}" {% if preview %}required{% endif %}></label>
+        {% if preview %}<input type="hidden" name="digest" value="{{ digest }}"><button name="action" value="save">Сохранить выбранное</button>{% else %}<button name="action" value="preview">Показать требования</button>{% endif %}
+    </section>
+    <section class="panel"><div class="pp-section-heading"><h2>Предпросмотр</h2>{% if preview %}<span class="muted">{{ preview|length }} требований</span>{% endif %}</div>
+        {% if preview %}{% if source_note %}<p class="muted pp-help">{{ source_note }}</p>{% endif %}<div class="pp-import-rows">{% for text in preview %}<label class="checkbox"><input type="checkbox" name="selected" value="{{ loop.index0 }}" checked><span>{{ text }}</span></label>{% endfor %}</div>
+        {% if skipped %}<details class="pp-details"><summary>Пропущено: {{ skipped|length }}</summary>{% for s in skipped %}<p>{{ s.line }} — {{ s.reason }}</p>{% endfor %}</details>{% endif %}
+        {% else %}<div class="pp-empty"><p>Вставьте ссылку, чтобы выбрать требования для личного плейта.</p></div>{% endif %}
+    </section>
+</form>
 {% elif plate %}
-<div class="panel"><p>{{ 'Доступен гильдии' if plate.shared else 'Виден только вам' }}{% if not own %} · плейт участника гильдии{% endif %}</p>
-{% if user.bot_profile == 'test' %}<a class="button" href="/mod-optimizer">Использовать в оптимизаторе</a><p class="muted">В списке плейтов: «Личный · {{ plate.name }}».</p>{% endif %}
-{% if own %}<form method="post" action="/personal-plates/{{ plate.id }}/share"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="shared" value="{{ 0 if plate.shared else 1 }}"><button>{{ 'Закрыть доступ гильдии' if plate.shared else 'Открыть гильдии' }}</button></form>
-<details><summary>Переименовать</summary><form method="post" action="/personal-plates/{{ plate.id }}/rename"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Название<input name="name" value="{{ plate.name }}" maxlength="80" required></label><button>Сохранить</button></form></details>
-{% if plate.shared %}<p>Участники гильдии могут открыть этот плейт по ссылке на страницу и выбрать его в оптимизаторе. Редактировать можете только вы.</p>{% endif %}{% endif %}</div>
-<div class="panel"><h2>Проверить себя</h2><form method="get" action="/personal-plates/{{ plate.id }}"><input type="hidden" name="check_stats" value="true"><label>Мой аккаунт<select name="ally_code">{% for code,name,main in accounts %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></label><button>Проверить текущие статы</button></form>
-{% if results is not none %}{% for r in results %}<h3>{{ r.name }} · {{ r.matched }} из {{ r.total }}</h3><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ r.block }}</pre>{% else %}<p>Нет требований для проверки.</p>{% endfor %}{% endif %}</div>
-<div class="panel"><h2>Требования</h2>{% for entry in entries %}<div style="display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:.7rem 0"><span style="flex:1 1 20rem;min-width:0;overflow-wrap:anywhere">{{ entry.text }}</span>{% if own %}{% if entry.numeric %}<details><summary>Изменить</summary><form method="post" action="/personal-plates/{{ plate.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="row_id" value="{{ entry.id }}"><label>Условие<select name="operator">{% for name,value in operator_options %}<option value="{{ value }}" {% if value == entry.operator %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label><label>Значение<input name="value" type="number" step="any" value="{{ entry.value }}" required></label><label>Приоритет<select name="priority">{% for name,value in priority_options %}<option value="{{ value }}" {% if value == entry.priority %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label><button>Сохранить</button></form></details>{% endif %}<form method="post" action="/personal-plates/{{ plate.id }}/remove"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="row_id" value="{{ entry.id }}"><button class="button-secondary">Удалить</button></form>{% endif %}</div>{% else %}<p>Требований пока нет.</p>{% endfor %}</div>
-{% if own %}<div class="panel"><h2>Добавить требование</h2><form method="post" action="/personal-plates/{{ plate.id }}/add"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Персонаж</label><div class="unit-search" data-live-search data-url="/personal-plates/api/units" data-value-field="base_id" data-label-field="name" data-required="true"><input class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off"><input type="hidden" name="base_id" class="unit-search-value"><div class="unit-search-results"></div></div>
-<label>Характеристика<select name="stat">{% for name,value in stat_options %}<option value="{{ value }}">{{ name }}</option>{% endfor %}</select></label>
-<label>Условие<select name="operator">{% for name,value in operator_options %}<option value="{{ value }}">{{ name }}</option>{% endfor %}</select></label><label>Значение<input name="value" type="number" step="any" required></label>
-<label>Приоритет<select name="priority">{% for name,value in priority_options %}<option value="{{ value }}">{{ name }}</option>{% endfor %}</select></label><button>Добавить</button></form>
-<details><summary>Основа, комплект или сравнение из строки HotBot</summary><form method="post" action="/personal-plates/{{ plate.id }}/add"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Строка с именем персонажа и требованием<textarea name="line" required placeholder="Darth Vader Speed: 200 (requires 300)"></textarea></label><button>Добавить строку</button></form></details></div>
-<form method="post" action="/personal-plates/{{ plate.id }}/delete" onsubmit="return confirm('Удалить личный плейт?');"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button-danger">Удалить плейт</button></form>{% endif %}
-{% else %}<div class="panel">{% for p in plates %}<p><a href="/personal-plates/{{ p.id }}">{{ p.name }}</a> · {{ 'мой' if p.owner == user.discord_id|string else 'участника гильдии' }}{% if p.shared %} · доступен гильдии{% endif %}</p>{% else %}<p>Личных плейтов пока нет.</p>{% endfor %}</div>
-<div class="panel"><h2>Новый личный плейт</h2><form method="post" action="/personal-plates/create"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Название<input name="name" maxlength="80" required></label><button>Создать</button></form></div>{% endif %}
+<div class="pp-layout">
+    <div class="pp-main">
+        <section class="panel" id="pp-requirements">
+            <div class="pp-section-heading"><h2>Требования</h2>{% if own %}<a href="#pp-add">+ Добавить</a>{% endif %}</div>
+            {% for group in entries|groupby('character') %}
+            <section class="pp-character"><h3>{{ group.grouper }}</h3>
+                {% for entry in group.list %}<div class="pp-requirement">
+                    <div class="pp-condition"><strong>{{ entry.stat if entry.numeric else entry.condition }}</strong>{% if entry.numeric %}<span>{{ entry.norm }}</span>{% endif %}</div>
+                    <span class="pp-priority pp-priority-{{ entry.priority }}">{{ entry.priority_label }}</span>
+                    {% if own %}<div class="pp-row-actions">
+                        {% if entry.numeric %}<details class="pp-edit"><summary class="link-btn">Изменить</summary><form method="post" action="/personal-plates/{{ plate.id }}/edit">{{ csrf_field() }}<input type="hidden" name="row_id" value="{{ entry.id }}"><label>Условие{{ operator_select(entry.operator) }}</label><label>Значение<input name="value" type="number" step="any" value="{{ entry.value }}" required></label><label>Приоритет{{ priority_select(entry.priority) }}</label><button>Сохранить</button></form></details>{% endif %}
+                        <form method="post" action="/personal-plates/{{ plate.id }}/remove">{{ csrf_field() }}<input type="hidden" name="row_id" value="{{ entry.id }}"><button class="link-btn pp-remove" title="Удалить требование">Удалить</button></form>
+                    </div>{% endif %}
+                </div>{% endfor %}
+            </section>
+            {% else %}<div class="pp-empty"><h3>{{ 'Добавьте первое требование' if own else 'Требований пока нет' }}</h3>{% if own %}<p>Выберите персонажа и нужную характеристику.</p><a class="button button-secondary" href="#pp-add">Добавить требование</a>{% endif %}</div>{% endfor %}
+        </section>
+        <section class="panel" id="pp-check"><h2>Проверить себя</h2>
+            <form method="get" action="/personal-plates/{{ plate.id }}" class="pp-check-form"><input type="hidden" name="check_stats" value="true"><label>Аккаунт<select name="ally_code">{% for code,name,main in accounts %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></label><button {% if not entries or not accounts %}disabled{% endif %}>Проверить статы</button></form>
+            {% if not entries %}<p class="muted pp-help">Проверка станет доступна после добавления требований.</p>{% endif %}
+            {% if results is not none %}<div class="pp-results">{% for r in results %}<article><h3>{{ r.name }} · {{ r.matched }} из {{ r.total }}</h3><pre>{{ r.block }}</pre></article>{% else %}<p>Нет требований для проверки.</p>{% endfor %}</div>{% endif %}
+        </section>
+    </div>
+    <aside class="pp-side">
+    {% if own %}
+        <section class="panel" id="pp-add"><h2>Добавить требование</h2>
+            <form method="post" action="/personal-plates/{{ plate.id }}/add" class="pp-add-form">{{ csrf_field() }}
+                <div class="pp-field pp-span"><label for="pp-unit">Персонаж</label><div class="unit-search" data-live-search data-url="/personal-plates/api/units" data-value-field="base_id" data-label-field="name" data-required="true"><input id="pp-unit" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off"><input type="hidden" name="base_id" class="unit-search-value"><div class="unit-search-results"></div></div></div>
+                <label class="pp-span">Характеристика<select name="stat">{% for name,value in stat_options %}<option value="{{ value }}" {% if value == 'Speed' %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+                <label>Условие{{ operator_select() }}</label><label>Значение<input name="value" type="number" step="any" placeholder="Например, 320" required></label>
+                <label class="pp-span">Приоритет{{ priority_select() }}</label><button class="pp-span">Добавить</button>
+            </form>
+            <details class="pp-details"><summary>Добавить строку из HotBot</summary><form method="post" action="/personal-plates/{{ plate.id }}/add">{{ csrf_field() }}<label>Строка требования<textarea name="line" required placeholder="Darth Vader Speed: 200 (requires 300)"></textarea></label><button>Добавить строку</button></form></details>
+        </section>
+        <section class="panel pp-settings"><h2>Настройки плейта</h2>
+            <div class="pp-share"><div><strong>Доступ гильдии</strong><p class="muted">{{ 'Участники могут использовать плейт. Правки — только у вас.' if plate.shared else 'Сейчас плейт виден только вам.' }}</p></div><form method="post" action="/personal-plates/{{ plate.id }}/share">{{ csrf_field() }}<input type="hidden" name="shared" value="{{ 0 if plate.shared else 1 }}"><button class="button-secondary">{{ 'Закрыть доступ' if plate.shared else 'Открыть гильдии' }}</button></form></div>
+            <details class="pp-details"><summary>Переименовать</summary><form method="post" action="/personal-plates/{{ plate.id }}/rename">{{ csrf_field() }}<label>Название<input name="name" value="{{ plate.name }}" maxlength="80" required></label><button>Сохранить</button></form></details>
+            <details class="pp-details"><summary>Удалить плейт</summary><form method="post" action="/personal-plates/{{ plate.id }}/delete" onsubmit="return confirm('Удалить личный плейт со всеми требованиями?');">{{ csrf_field() }}<button class="button-danger">Удалить безвозвратно</button></form></details>
+        </section>
+    {% else %}<section class="panel"><h2>Плейт участника гильдии</h2><p class="muted">Можно проверять свои статы и подбирать модули. Изменять требования может владелец.</p></section>{% endif %}
+    </aside>
+</div>
+{% else %}
+<div class="pp-layout">
+    <section class="panel"><div class="pp-section-heading"><h2>Мои и доступные гильдии</h2><span class="muted">{{ plates|length }}</span></div><div class="pp-library">{% for p in plates %}<a class="pp-library-card" href="/personal-plates/{{ p.id }}"><strong>{{ p.name }}</strong><span class="muted">{{ 'Мой плейт' if p.owner == user.discord_id|string else 'Плейт участника' }} · {{ 'Доступен гильдии' if p.shared else 'Личный' }}</span><span aria-hidden="true">→</span></a>{% else %}<div class="pp-empty"><h3>Пока нет личных плейтов</h3><p>Создайте свой или импортируйте требования из сообщения.</p></div>{% endfor %}</div></section>
+    <aside class="panel"><h2>Новый плейт</h2><form method="post" action="/personal-plates/create">{{ csrf_field() }}<label>Название<input name="name" maxlength="80" placeholder="Например, Мой рейд" required></label><button>Создать плейт</button></form></aside>
+</div>
+{% endif %}
 {% endblock %}

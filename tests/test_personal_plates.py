@@ -147,3 +147,20 @@ class PersonalPlateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(plates.rows(plate)), 1)
             self.user['guild_id'] = 2
             self.assertEqual(client.get(path).status_code, 404)
+
+    def test_droidec_dm_import_copies_source_requirements_and_rejects_foreign_plate(self):
+        database.create_stat_plate('AC_TEST', '', 'officer', guild_id=1)
+        database.add_stat_requirement('AC_TEST', 'VADER', 'Speed', '>=', 320, 'optional', '', None, 'officer', guild_id=1)
+        message = {'_droidec_dm': True, 'components': [{'type': 17, 'components': [
+            {'type': 10, 'content': '### 📋 AC_TEST (игрок: TEO Nod) — итог'},
+            {'type': 10, 'content': 'Только итог, без числовых требований.'}]}]}
+        title, items, skipped = plates.parse_source([message], self.user)
+        self.assertEqual((title, len(items), skipped), ('AC_TEST', 1, []))
+        pid = plates.create(self.user, title, items)
+        copied = plates.rows(plates.get(pid, self.user))
+        self.assertEqual(copied[0][2:7], ('VADER', 'Speed', '>=', 320, 'optional'))
+        with self.assertRaises(ValueError):
+            plates.parse_source([message], self.foreign)
+        message['components'][0]['components'][0]['content'] = '### Другое сообщение'
+        with self.assertRaises(ValueError):
+            plates.parse_source([message], self.user)
