@@ -84,6 +84,7 @@ class UnwarnSelect(disnake.ui.Select):
 class ViolationsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        bot.guild_roster_initial_attempt = asyncio.Event()
         # Твой оригинальный фоновый цикл обновлений
         self.update_roster_cache.start()
 
@@ -114,7 +115,12 @@ class ViolationsCog(commands.Cog):
                 caches[cfg["id"]] = HybridCache({name: code for _, code, name in rows})
             self.bot.guild_roster_caches = caches
             return
-        await self._sync_rosters()
+        try:
+            await self._sync_rosters()
+        finally:
+            # Release player sync even after a failed attempt; _sync_rosters
+            # restores saved rosters when Comlink is unavailable.
+            self.bot.guild_roster_initial_attempt.set()
 
     @serialized_sync("составы гильдий")
     async def _sync_rosters(self):

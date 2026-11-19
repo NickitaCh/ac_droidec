@@ -8,6 +8,49 @@ from cogs.violations import ViolationsCog
 
 
 class StatStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_player_sync_waits_for_roster_then_refreshes_without_hour_delay(self):
+        bot = SimpleNamespace(wait_until_ready=AsyncMock(),
+                              guild_roster_initial_attempt=asyncio.Event(),
+                              guild_roster_caches={}, comlink=object())
+        cog = SimpleNamespace(bot=bot)
+
+        async def startup():
+            await StatRequirementsCog._before_player_units_sync_loop(cog)
+            await StatRequirementsCog.player_units_sync_loop.coro(cog)
+
+        with (patch('database.get_unannounced_omicron_events', return_value=[]),
+              patch('database.set_bot_state'),
+              patch('database.get_all_skill_tier_thresholds', return_value={}),
+              patch('services.activity_diff.sync_player', new=AsyncMock(return_value=(True, 0, []))) as sync,
+              patch('services.guild_snapshot.take'),
+              patch('services.mod_grade.refresh_reference', return_value=False)):
+            task = asyncio.create_task(startup())
+            for _ in range(5):
+                await asyncio.sleep(0)
+            try:
+                self.assertFalse(task.done(), 'Player sync must wait outside the shared sync slot')
+                bot.guild_roster_caches[1] = {'Player': '123456789'}
+                bot.guild_roster_initial_attempt.set()
+                await asyncio.wait_for(task, 2)
+                sync.assert_awaited_once_with(bot.comlink, '123456789', {1}, unittest.mock.ANY, {})
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+    async def test_roster_attempt_releases_player_sync_on_success_and_failure(self):
+        for error in (None, RuntimeError('offline')):
+            with self.subTest(error=error):
+                bot = SimpleNamespace(guild_roster_initial_attempt=asyncio.Event())
+                cog = SimpleNamespace(bot=bot, _sync_rosters=AsyncMock(side_effect=error))
+                with patch('services.bot_profiles.worker_profile', return_value='test'):
+                    if error:
+                        with self.assertRaises(RuntimeError):
+                            await ViolationsCog.update_roster_cache.coro(cog)
+                    else:
+                        await ViolationsCog.update_roster_cache.coro(cog)
+                self.assertTrue(bot.guild_roster_initial_attempt.is_set())
+
     async def test_roster_waits_for_initial_calculator_attempt(self):
         bot = SimpleNamespace(wait_until_ready=AsyncMock(), stat_calc_initial_attempt=asyncio.Event())
         with patch('services.bot_profiles.worker_profile', return_value='test'):

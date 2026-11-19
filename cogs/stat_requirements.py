@@ -1703,6 +1703,11 @@ class StatRequirementsCog(commands.Cog):
     @player_units_sync_loop.before_loop
     async def _before_player_units_sync_loop(self):
         await self.bot.wait_until_ready()
+        # Wait outside serialized_sync: the initial roster load needs that same
+        # slot. Otherwise the first run sees an empty cache and skips an hour.
+        initial = getattr(self.bot, "guild_roster_initial_attempt", None)
+        if initial is not None:
+            await initial.wait()
 
     # Если в канал за один вызов набралось столько отдельных объявлений (обычно это
     # database.get_unannounced_omicron_events после очень долгого простоя бота — см.
