@@ -62,16 +62,20 @@ def policy(chat_id):
 
 def general_allowed(settings, thread_id, name):
     tid, rules = topics.topic_id(thread_id), settings["rules"]
-    if (tid,"all",name) in rules:
-        return rules[tid,"all",name]
-    if (tid,name) in settings["blocks"]:
-        return False
+    for candidate in (("ga", "arena") if name == "ga" else (name,)):
+        if (tid,"all",candidate) in rules:
+            return rules[tid,"all",candidate]
+        if (tid,candidate) in settings["blocks"]:
+            return False
     return rules.get((tid,"all","*"), settings["default"])
 
 
 def officer_extra(settings, thread_id, name):
     tid, rules = topics.topic_id(thread_id), settings["rules"]
-    return rules.get((tid,"officer",name), rules.get((tid,"officer","*"), False))
+    for candidate in (("ga", "arena") if name == "ga" else (name,)):
+        if (tid,"officer",candidate) in rules:
+            return rules[tid,"officer",candidate]
+    return rules.get((tid,"officer","*"), False)
 
 
 def set_rule(guild_id, chat_id, thread_id, audience, command_name, allowed):

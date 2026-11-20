@@ -410,8 +410,8 @@ async def cmd_ready(ctx: Ctx):
         await ctx.reply(f"Цель «{esc(what)}» не найдена в «Руководстве» — попробуйте подсказки:",
                         keyboard=find_button("🔎 Найти цель", f"готовность {what}"))
         return
-    if with_shards and (guild_mode or not ctx.is_private):
-        await ctx.reply("Осколки доступны только для своего аккаунта в личке: <code>/ready цель осколки [| код]</code>.")
+    if with_shards and guild_mode:
+        await ctx.reply("Осколки доступны только для своего аккаунта: <code>/ready цель осколки [| код]</code>.")
         return
     state = {"user_id": ctx.user["id"], "guild_id": guild_id, "who": who, "guild_mode": guild_mode,
              "with_shards": with_shards}

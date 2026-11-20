@@ -8,8 +8,59 @@ import database
 from services import (arena_map_image, farm_inventory, farm_report_image, game_account as ga,
                       game_account_readonly as reader, game_personal_modes, guild_units,
                       guild_units_image, unit_shards)
-from tg_bot import search
-from tg_bot.core import command, callback, esc, new_session, session_for_callback
+from tg_bot import command_access, search
+from tg_bot.api import TelegramError
+from tg_bot.core import Ctx, command, callback, esc, new_session, session_for_callback
+
+
+_COMMANDS = {"arena": "ga", "conquest": "conquest", "farm": "farm", "ready": "ready"}
+_PREFIXES = {"arena": "eag", "conquest": "eac", "farm": "eaf", "ready": "eas"}
+
+
+def _session(ctx, **data):
+    origin = None
+    if not ctx.is_private:
+        origin = {key: ctx.message[key] for key in ("chat", "message_id", "message_thread_id", "is_topic_message")
+                  if key in ctx.message}
+    return new_session({"user_id": ctx.user["id"], "origin": origin, **data})
+
+
+async def _callback_context(ctx, state):
+    origin = state.get("origin")
+    if origin:
+        origin_thread = origin.get("message_thread_id") if origin.get("is_topic_message") else None
+        if not ctx.is_private and (ctx.chat_id != origin["chat"]["id"] or
+                (ctx.thread_id or 0) != (origin_thread or 0)):
+            await ctx.api.answer_callback(ctx.callback_query["id"], "Откройте исходное сообщение отчёта.", alert=True)
+            return None
+        target = Ctx(ctx.app, origin, ctx.user) if ctx.is_private else ctx
+    elif ctx.is_private:
+        target = ctx
+    else:
+        await ctx.api.answer_callback(ctx.callback_query["id"], "Эта кнопка — из личного отчёта.", alert=True)
+        return None
+    if command_access.denied(target, _COMMANDS[state["spec"]["mode"]]):
+        await ctx.api.answer_callback(ctx.callback_query["id"], "Команда отключена в исходной теме.", alert=True)
+        return None
+    return target
+
+
+async def _account_error(ctx, error):
+    text = (esc(error) if ctx.is_private else
+            "Не удалось получить данные своего аккаунта. Проверьте регистрацию и подключение EA в личке бота.")
+    await ctx.reply(text)
+
+
+async def _private_prompt(ctx, text, keyboard):
+    if ctx.is_private:
+        await ctx.reply(text, keyboard)
+        return
+    try:
+        await ctx.api.send_message(ctx.user["id"], text, keyboard=keyboard)
+        notice = "Подключение или подтверждение входа отправлено в личку бота."
+    except TelegramError:
+        notice = "Откройте личку бота и нажмите Start, затем повторите команду или обновление отчёта."
+    await ctx.reply(notice, [[{"text": "Открыть личку бота", "url": f"https://t.me/{ctx.app.username}"}]])
 
 
 def _scope(ctx):
@@ -38,29 +89,29 @@ async def _link(ctx, code=None, *, alt=False):
     # A short-lived, one-use website login works for Telegram-only owners too.
     from services.telegram_web_login import create_url
     url = await asyncio.to_thread(create_url, ctx.user["id"], args[0], args[2], path, ctx.app.site_url)
-    await ctx.reply("Откройте сайт и подключите аккаунт через почту EA и код из письма.",
-                    [[{"text": "Подключить через EA", "url": url}]])
+    await _private_prompt(ctx, "Откройте сайт и подключите аккаунт через почту EA и код из письма. Затем повторите команду отчёта.",
+                          [[{"text": "Подключить через EA", "url": url}]])
 
 
-@command("ea", "Подключить игровой аккаунт через EA на сайте", aliases=("игровой_аккаунт",), where="private")
+@command("ea", "Подключить игровой аккаунт через EA на сайте", aliases=("игровой_аккаунт",))
 async def cmd_ea(ctx):
     try:
         await _link(ctx, alt=ctx.args.casefold() in ("альт", "alt"))
     except ga.AccountError as error:
-        await ctx.reply(esc(error))
+        await _account_error(ctx, error)
 
 
-@command("arena", "Великая арена: рейтинг, раунд, защита", aliases=("ва",), where="private")
+@command("ga", "Великая арена: рейтинг, раунд, защита", aliases=("arena", "ва"))
 async def cmd_arena(ctx):
     await start(ctx, {"mode": "arena"}, ctx.args)
 
 
-@command("conquest", "Завоевание: энергия, секторы, диски, выносливость", aliases=("завоевание",), where="private")
+@command("conquest", "Завоевание: энергия, секторы, диски, выносливость", aliases=("завоевание",))
 async def cmd_conquest(ctx):
     await start(ctx, {"mode": "conquest"}, ctx.args)
 
 
-@command("farm", "Фарм персонажа или цели Руководства по своим запасам", aliases=("фарм",), where="private")
+@command("farm", "Фарм персонажа или цели Руководства по своим запасам", aliases=("фарм",))
 async def cmd_farm(ctx):
     query, _, account = ctx.args.partition("|")
     words = query.split()
@@ -104,7 +155,7 @@ async def cmd_farm(ctx):
 
 
 async def _choose(ctx, spec, matches, account):
-    token = new_session({"user_id": ctx.user["id"], "spec": spec, "matches": matches, "account": account})
+    token = _session(ctx, spec=spec, matches=matches, account=account)
     await ctx.reply("Выберите цель:", [[{"text": name[:60], "callback_data": f"eat|{token}|{index}"}]
                                         for index, (_, name) in enumerate(matches[:25])])
 
@@ -113,17 +164,17 @@ async def _choose(ctx, spec, matches, account):
 async def choose_target(ctx, payload):
     token, _, index = payload.partition("|")
     state = await session_for_callback(ctx, token)
-    if state is None or not ctx.is_private:
+    if state is None:
+        return
+    target = await _callback_context(ctx, state)
+    if target is None:
         return
     if not index.isdigit() or int(index) >= len(state["matches"]):
         return
-    await start(ctx, {**state["spec"], "target": state["matches"][int(index)][0]}, state["account"])
+    await start(target, {**state["spec"], "target": state["matches"][int(index)][0]}, state["account"])
 
 
 async def ready(ctx, guide, account=None):
-    if not ctx.is_private:
-        await ctx.reply("Запас осколков доступен в личке бота: <code>/ready цель осколки [| код]</code>.")
-        return
     await start(ctx, {"mode": "ready", "target": guide}, account)
 
 
@@ -132,18 +183,19 @@ async def start(ctx, spec, raw=None):
         _, code = await _account(ctx, raw)
         await run(ctx, spec, code)
     except ga.AccountError as error:
-        await ctx.reply(esc(error))
+        await _account_error(ctx, error)
 
 
-def _buttons(token):
-    return [[{"text": "Обновить", "callback_data": f"ear|{token}|read"},
-             {"text": "Другой аккаунт", "callback_data": f"ear|{token}|accounts"}]]
+def _buttons(token, mode):
+    prefix = _PREFIXES[mode]
+    return [[{"text": "Обновить", "callback_data": f"{prefix}|{token}|read"},
+             {"text": "Другой аккаунт", "callback_data": f"{prefix}|{token}|accounts"}]]
 
 
 async def run(ctx, spec, code, *, reconnect=False):
     args = await asyncio.to_thread(_scope, ctx)
     code = await asyncio.to_thread(ga.select_account, args[0], args[1], ally_code=code)
-    token = new_session({"user_id": ctx.user["id"], "spec": spec, "code": code})
+    token = _session(ctx, spec=spec, code=code)
     await ctx.action()
     try:
         if reconnect:
@@ -167,7 +219,7 @@ async def run(ctx, spec, code, *, reconnect=False):
             images = await asyncio.to_thread(farm_report_image.render, report, name, target)
             for index, png in enumerate(images):
                 await ctx.reply_photo(png.getvalue() if hasattr(png, "getvalue") else png,
-                                      f"farm-{index + 1}.png", keyboard=_buttons(token) if index == len(images) - 1 else None)
+                                      f"farm-{index + 1}.png", keyboard=_buttons(token, mode) if index == len(images) - 1 else None)
         else:
             recipes = await unit_shards.catalog(ctx.app.comlink)
             roster = unit_shards.private_roster(state)
@@ -176,29 +228,41 @@ async def run(ctx, spec, code, *, reconnect=False):
             stamp = datetime.fromtimestamp(state["read_at"], ZoneInfo("Europe/Moscow"))
             png = await asyncio.to_thread(guild_units_image.render_player, report, code,
                                           f"Данные игрового аккаунта: {stamp:%d.%m %H:%M} МСК")
-            await ctx.reply_photo(png, "ready-shards.png", keyboard=_buttons(token))
+            await ctx.reply_photo(png, "ready-shards.png", keyboard=_buttons(token, mode))
     except ga.SessionExpired:
-        await ctx.reply(ga.LOGIN_WARNING, [[{"text": "Войти и обновить", "callback_data": f"ear|{token}|login"}]])
+        await _private_prompt(ctx, ga.LOGIN_WARNING,
+                              [[{"text": "Войти и обновить", "callback_data": f"{_PREFIXES[spec['mode']]}|{token}|login"}]])
     except ga.ConnectionRequired:
         await _link(ctx, code)
     except ga.AccountError as error:
-        await ctx.reply(esc(error))
+        await _account_error(ctx, error)
 
 
 @callback("ear", command_name="ea")
+@callback("eag", command_name="ga")
+@callback("eac", command_name="conquest")
+@callback("eaf", command_name="farm")
+@callback("eas", command_name="ready")
 async def refresh(ctx, payload):
     token, _, action = payload.partition("|")
     state = await session_for_callback(ctx, token)
-    if state is None or not ctx.is_private:
+    if state is None:
+        return
+    target = await _callback_context(ctx, state)
+    if target is None:
         return
     try:
         args = await asyncio.to_thread(_scope, ctx)
         if action == "accounts":
             accounts = await asyncio.to_thread(database.get_user_registrations, args[0], guild_id=args[1])
             await ctx.reply("Выберите свой аккаунт:", [[{"text": f"{name or code} · {code}"[:64],
-                         "callback_data": f"ear|{token}|a:{code}"}] for code, name, _ in accounts])
+                         "callback_data": f"{_PREFIXES[state['spec']['mode']]}|{token}|a:{code}"}] for code, name, _ in accounts])
             return
         if action == "login":
+            if not ctx.is_private:
+                await _private_prompt(ctx, ga.LOGIN_WARNING,
+                    [[{"text": "Войти и обновить", "callback_data": f"{_PREFIXES[state['spec']['mode']]}|{token}|login"}]])
+                return
             # Consume before awaiting the login: double taps never log in twice.
             if state.get("login_used"):
                 await ctx.reply("Этот вход уже запущен. Дождитесь результата или вызовите команду заново.")
@@ -206,9 +270,9 @@ async def refresh(ctx, payload):
             state["login_used"] = True
         elif action != "read" and not action.startswith("a:"):
             return
-        await run(ctx, state["spec"], action[2:] if action.startswith("a:") else state["code"], reconnect=action == "login")
+        await run(target, state["spec"], action[2:] if action.startswith("a:") else state["code"], reconnect=action == "login")
     except ga.AccountError as error:
-        await ctx.reply(esc(error))
+        await _account_error(ctx, error)
 
 
 async def _personal(ctx, mode, state, code, token):
@@ -231,7 +295,7 @@ async def _personal(ctx, mode, state, code, token):
             if match["defense"] is not None:
                 lines.append("Выставлено в защиту: %s из %s" % match["defense"])
             board = await asyncio.to_thread(arena_map_image.render, match)
-            # Keep full teams in the caller's session for private detail buttons.
+            # Keep full teams in the caller's session for owner-only controls.
             from tg_bot.core import get_session
             get_session(token)["match"] = match
     else:
@@ -246,7 +310,7 @@ async def _personal(ctx, mode, state, code, token):
             names = await asyncio.to_thread(database.get_game_unit_names, [r["unit"] for r in state["stamina"]])
             lines.append("<b>Выносливость</b>")
             lines += [f"{esc(names.get(r['unit'], r['unit']))}: {esc(r['value'])}" for r in state["stamina"]]
-    buttons = _buttons(token)
+    buttons = _buttons(token, mode)
     if mode == "arena" and state and any(m["current"] for m in state["matches"]):
         buttons.append([{"text": label, "callback_data": f"ead|{token}|{side}"}
                         for side, label in (("home", "Моя защита"), ("away", "Зоны атаки"))])
@@ -266,11 +330,14 @@ async def _send_lines(ctx, lines, buttons=None):
     await ctx.reply("\n".join(chunk) or "Игра не передала данные.", buttons)
 
 
-@callback("ead", command_name="arena")
+@callback("ead", command_name="ga")
 async def arena_details(ctx, payload):
     token, _, side = payload.partition("|")
     state = await session_for_callback(ctx, token)
-    if state is None or not ctx.is_private or side not in ("home", "away"):
+    if state is None or side not in ("home", "away"):
+        return
+    target = await _callback_context(ctx, state)
+    if target is None:
         return
     try:
         args = await asyncio.to_thread(_scope, ctx)
@@ -280,6 +347,6 @@ async def arena_details(ctx, payload):
             lines.append(f"<b>Зона {index}</b> · выставлено {zone['placed']}")
             for team in zone["teams"]:
                 lines.append(esc(" · ".join(team["names"]) or "Состав скрыт игрой") + f" · удержано атак: {team['defends']}")
-        await _send_lines(ctx, lines)
+        await _send_lines(target, lines)
     except ga.AccountError as error:
-        await ctx.reply(esc(error))
+        await _account_error(ctx, error)
