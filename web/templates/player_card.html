@@ -71,7 +71,7 @@
                     <span class="muted">{{ "основной" if is_main else "альт" }}</span>{% if not loop.last %} · {% endif %}
                 {% endfor %}
             </p>
-            {% if user.bot_profile == 'test' and user.guild_id %}
+            {% if user.guild_id %}
             <div id="ea-connection">
                 {% for code, name, is_main in own_accounts if code == card.ally_code %}
                 <a class="link-btn" href="/game-account/link?alt={{ 0 if is_main else 1 }}">Привязать EA</a>

@@ -16,7 +16,7 @@ import grpc
 import httpx
 
 import database
-from services import ea_browser, game_account as ga, game_lab as lab
+from services import bot_profiles, ea_browser, game_account as ga, game_lab as lab
 
 TTL = 600
 
@@ -98,7 +98,7 @@ def registration_target(owner, is_alt, guild_id=1):
 
 
 async def start_registration(owner, is_alt, email, consent, *, guild_id=1):
-    ga.require_account_read(owner, guild_id, "test")
+    ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
     return await _start_flow(owner, registration_target(owner, is_alt, guild_id), email, consent,
                              registration={"is_alt": bool(is_alt)})
 
@@ -304,7 +304,7 @@ def _save(target, credentials, summary, previous_secret=None, pending_id=None, *
     owner = lab.NOTEST_OWNER if target == "notest" else row["added_by"]
     own = database.get_user_registrations(owner, guild_id=guild_id)
     if target == "notest" or any(str(r[0]) == row["ally_code"] for r in own):
-        ga.require_account_read(owner, guild_id, "test")
+        ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
         if ga._identity(owner, guild_id, row["ally_code"]) != credentials["expected_id"]:
             raise ga.AccountError("Привязка игрока изменилась.")
         request = base64.b64decode(credentials["read_request"])
@@ -333,7 +333,7 @@ async def finish(owner, target, flow_id, code):
 
 
 async def finish_registration(owner, is_alt, flow_id, code, comlink, *, guild_id=1):
-    ga.require_account_read(owner, guild_id, "test")
+    ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
     return await _finish_flow(owner, registration_target(owner, is_alt, guild_id), flow_id, code,
                               is_alt=bool(is_alt), comlink=comlink, guild_id=guild_id)
 

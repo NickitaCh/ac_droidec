@@ -34,6 +34,10 @@ class TBReadinessCog(commands.Cog):
     async def tb_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
+    @tb_group.sub_command(name="старт", description="Опубликовать сводку ТБ в этом канале (АС, TEST)")
+    async def tb_start(self, inter: disnake.ApplicationCommandInteraction):
+        await self.bot.get_cog("EventPanelCog")._start(inter, "tb")
+
     @tb_group.sub_command(name="оз_готовность", description="Какие спецмиссии ВИ (ОЗ) вы проходите (вся гильдия и чужие — 🔒 офицеры)")
     async def covert_readiness(
         self,

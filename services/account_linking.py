@@ -4,11 +4,11 @@ import time
 import uuid
 
 import database
-from services import game_account as ga, game_lab as lab, test_accounts
+from services import bot_profiles, game_account as ga, game_lab as lab, test_accounts
 
 
 async def validate_player(owner, is_alt, preview_id, comlink, *, guild_id=1):
-    ga.require_account_read(owner, guild_id, "test")
+    ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
     try:
         player = await asyncio.to_thread(comlink.get_player, player_id=preview_id)
     except Exception:
@@ -24,6 +24,10 @@ async def validate_player(owner, is_alt, preview_id, comlink, *, guild_id=1):
         raise ga.AccountError("Это ваш основной аккаунт. Откройте форму без «альт: Да».")
     if not is_alt and code != str(main[0]):
         raise ga.AccountError("Эта почта относится к другому игроку. Для второго аккаунта откройте форму с «альт: Да».")
+    if is_alt and bot_profiles.current_profile() == "prod" and not any(
+            str(registered) == code and not is_main
+            for registered, _, is_main in database.get_user_registrations(str(owner), guild_id=guild_id)):
+        raise ga.AccountError("Сначала зарегистрируйте альт в боте.")
     if any(str(other) != str(owner) for _gid, other in database.get_ally_code_registrations(code)):
         raise ga.AccountError("Этот игрок уже зарегистрирован у другого пользователя. Привязка не изменена.")
     with test_accounts._db() as conn:
@@ -37,7 +41,7 @@ async def validate_player(owner, is_alt, preview_id, comlink, *, guild_id=1):
 
 
 def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None, guild_id=1):
-    ga.require_account_read(owner, guild_id, "test")
+    ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
     code = str(player["allyCode"])
     main = database.get_user_registration(str(owner), guild_id=guild_id)
     if not main or (is_alt and str(main[0]) == code) or (not is_alt and str(main[0]) != code):
@@ -56,6 +60,10 @@ def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None, guild
         if (conn.execute("SELECT 1 FROM user_registration WHERE ally_code=? AND discord_id!=?", (code, str(owner))).fetchone()
                 or conn.execute("SELECT 1 FROM test_account_links WHERE ally_code=? AND owner!=?", (code, str(owner))).fetchone()):
             raise ga.AccountError("Игрок уже привязан к другому пользователю.")
+        if is_alt and bot_profiles.current_profile() == "prod" and not conn.execute(
+                "SELECT 1 FROM user_registration WHERE guild_id=? AND discord_id=? AND ally_code=? AND is_main=0",
+                (guild_id, str(owner), code)).fetchone():
+            raise ga.AccountError("Альт больше не зарегистрирован в боте.")
         existing = conn.execute("SELECT id,player_id,added_by FROM game_lab_accounts WHERE ally_code=?", (code,)).fetchone()
         if existing and (existing["player_id"] != player["playerId"] or existing["added_by"] != str(owner)):
             raise ga.AccountError("Этот аккаунт уже используется в другом подключении.")
@@ -65,7 +73,7 @@ def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None, guild
                          "(id,ally_code,player_id,name,level,game_guild_id,game_guild_name,added_by,added_at,lab_visible) VALUES (?,?,?,?,?,?,?,?,?,0)",
                          (target, code, player["playerId"], player["name"], int(player.get("level") or 0),
                           str(player.get("guildId") or ""), str(player.get("guildName") or ""), str(owner), time.time()))
-        if is_alt:
+        if is_alt and bot_profiles.current_profile() == "test":
             conn.execute("INSERT OR REPLACE INTO test_account_links VALUES (?,?,?,?,?)", (guild_id, str(owner), code, player["playerId"], player["name"]))
         if pending_id is not None:
             conn.execute("UPDATE ea_browser_pending SET target=? WHERE id=?", (target, pending_id))

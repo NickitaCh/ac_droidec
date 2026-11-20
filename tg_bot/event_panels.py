@@ -9,8 +9,8 @@ from tg_bot.core import TIER_OFFICER, callback, command
 PANEL_COMMANDS = ("tb", "tw", "raid")
 
 async def _start(ctx, kind):
-    if ctx.args.lower() != "start":
-        await ctx.reply(f"Вызовите <code>/{kind} start</code> в нужной теме.")
+    if ctx.args.lower() not in ("старт", "start"):
+        await ctx.reply(f"Вызовите <code>/{kind} старт</code> в нужной теме.")
         return
     guild_id = ctx.access.get("guild_id")
     if store.chat_guild(ctx.chat_id) != guild_id or not event_panels.allowed(guild_id, ctx.access.get("tier"), ctx.app.profile):
@@ -28,17 +28,17 @@ async def _start(ctx, kind):
         await event_panels.edit(replaced, retire=True)
 
 
-@command("tb", "ТБ · /tb start публикует сводку", tier=TIER_OFFICER, where="group", menu=False)
+@command("tb", "ТБ · /tb старт публикует сводку", tier=TIER_OFFICER, aliases=("тб",), where="group", menu=False)
 async def start_tb(ctx):
     await _start(ctx, "tb")
 
 
-@command("tw", "ВГ · /tw start публикует сводку", tier=TIER_OFFICER, where="group", menu=False)
+@command("tw", "ВГ · /tw старт публикует сводку", tier=TIER_OFFICER, aliases=("вг",), where="group", menu=False)
 async def start_tw(ctx):
     await _start(ctx, "tw")
 
 
-@command("raid", "Рейд · /raid start публикует сводку", tier=TIER_OFFICER, where="group", menu=False)
+@command("raid", "Рейд · /raid старт публикует сводку", tier=TIER_OFFICER, aliases=("рейд",), where="group", menu=False)
 async def start_raid(ctx):
     await _start(ctx, "raid")
 

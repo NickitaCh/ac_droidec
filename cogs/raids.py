@@ -167,6 +167,10 @@ class RaidsCog(commands.Cog):
     async def raid_group(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
+    @raid_group.sub_command(name="старт", description="Опубликовать сводку рейда в этом канале (АС, TEST)")
+    async def raid_start(self, inter: disnake.ApplicationCommandInteraction):
+        await self.bot.get_cog("EventPanelCog")._start(inter, "raid")
+
     @raid_group.sub_command(name="итоги", description="Очки всех участников за рейд и кто ниже порога")
     async def raid_summary(
         self,

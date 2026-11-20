@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    {% set is_account_auth = request.url.path.startswith(('/game-account', '/admin/game-lab', '/mod-loadouts')) or request.url.path in ('/farm/inventory', '/farm/guide', '/mod-optimizer', '/tb/live') %}
+    {% set is_account_auth = request.url.path.startswith(('/game-account', '/admin/game-lab', '/mod-loadouts', '/login/telegram')) or request.url.path in ('/farm/inventory', '/farm/guide', '/mod-optimizer', '/tb/live') %}
     {% if request.url.hostname == 'swgoh-sng.ru' and not is_account_auth %}
     <!-- Yandex.Metrika counter -->
     <script>
@@ -181,6 +181,8 @@
                 {{ nav_link("/game-account/modules", "📦", "Мои модули") }}
                 {{ nav_link("/mod-loadouts", "💾", "Подборки модулей") }}
                 {% if user.bot_profile == 'test' %}{{ nav_link("/personal-plates", "🎛️", "Личные плейты") }}{% endif %}
+            {% endif %}
+            {% if user and user.guild_id and user.tier in ('member', 'officer') %}
                 {{ nav_link("/mod-optimizer", "⚡", "Оптимизатор модулей") }}
             {% endif %}
             {% endcall %}{% endif %}

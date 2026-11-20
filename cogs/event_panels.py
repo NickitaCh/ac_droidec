@@ -40,29 +40,13 @@ class EventPanelCog(commands.Cog):
         self._watch_owners = {}
         self._busy = set()
 
-    @commands.slash_command(name="tb", description="Оперативная сводка ТБ", guild_ids=[AC_DISCORD_SERVER])
-    async def tb(self, inter):
-        pass
-
-    @tb.sub_command(name="start", description="Опубликовать сводку ТБ в этом канале")
-    async def tb_start(self, inter: disnake.ApplicationCommandInteraction):
-        await self._start(inter, "tb")
-
-    @commands.slash_command(name="tw", description="Оперативная сводка ВГ", guild_ids=[AC_DISCORD_SERVER])
+    @commands.slash_command(name="вг", description="Оперативная сводка ВГ", guild_ids=[AC_DISCORD_SERVER])
     async def tw(self, inter):
         pass
 
-    @tw.sub_command(name="start", description="Опубликовать сводку ВГ в этом канале")
+    @tw.sub_command(name="старт", description="Опубликовать сводку ВГ в этом канале")
     async def tw_start(self, inter: disnake.ApplicationCommandInteraction):
         await self._start(inter, "tw")
-
-    @commands.slash_command(name="raid", description="Оперативная сводка рейда", guild_ids=[AC_DISCORD_SERVER])
-    async def raid(self, inter):
-        pass
-
-    @raid.sub_command(name="start", description="Опубликовать сводку рейда в этом канале")
-    async def raid_start(self, inter: disnake.ApplicationCommandInteraction):
-        await self._start(inter, "raid")
 
     async def _start(self, inter, kind):
         access = await asyncio.to_thread(guild_resolver.resolve_access, inter.author)

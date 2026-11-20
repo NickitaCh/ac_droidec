@@ -30,5 +30,4 @@ class GameAccountCog(commands.Cog):
 
 
 def setup(bot):
-    if (bot_profiles.worker_profile() or bot_profiles.runtime_profile()) == "test":
-        bot.add_cog(GameAccountCog(bot))
+    bot.add_cog(GameAccountCog(bot))

@@ -194,5 +194,4 @@ class PersonalReportView(disnake.ui.View):
 
 
 def setup(bot):
-    if _profile() == "test":
-        bot.add_cog(PersonalGameModesCog())
+    bot.add_cog(PersonalGameModesCog())

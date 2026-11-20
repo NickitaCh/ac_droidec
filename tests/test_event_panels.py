@@ -158,8 +158,13 @@ class EventPanelTests(unittest.IsolatedAsyncioTestCase):
 
     def test_commands_registered_and_callbacks_fit_telegram_limit(self):
         discord = {c.name: set(c.children) for c in EventPanelCog.__cog_app_commands__ if getattr(c, "children", None)}
-        self.assertEqual(discord, {"tb": {"start"}, "tw": {"start"}, "raid": {"start"}})
-        for name in discord:
+        self.assertEqual(discord, {"вг": {"старт"}})
+        from cogs.tb_readiness import TBReadinessCog
+        from cogs.raids import RaidsCog
+        for cog, name in ((TBReadinessCog, "тб"), (RaidsCog, "рейд")):
+            group = next(c for c in cog.__cog_app_commands__ if c.name == name)
+            self.assertIn("старт", group.children)
+        for name in ("tb", "tw", "raid"):
             self.assertEqual(COMMANDS[name].where, "group")
             self.assertTrue(all(len(b["callback_data"].encode()) <= 64
                                 for row in panels.telegram_keyboard(name, "test-token") for b in row))

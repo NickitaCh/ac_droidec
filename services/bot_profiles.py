@@ -20,15 +20,14 @@ _worker_profile = None
 
 PROD_DISABLED = frozenset({
     "fun", "omicron_phrases", "steal_build", "mod_analysis", "mod_compare",
-    "mod_scan", "tw_order", "antispam", "mod_optimizer", "mod_ku", "gear_farm",
+    "mod_scan", "tw_order", "antispam", "mod_ku", "gear_farm",
     "ai_models", "qa_checklist", "datacron_shorts", "unit_aliases", "mod_ku_plates", "raid_b1_portrait",
 })
 
 PROD_BLOCKED_PATHS = (
     "/admin/game-lab",
-    "/game-account",
-    "/tw", "/steal-build", "/mod-analysis", "/mod-scan", "/mod-optimizer",
-    "/mod-ku", "/farm", "/qa-checklist", "/omicron/phrases", "/admin/fun",
+    "/tw", "/steal-build", "/mod-analysis", "/mod-scan",
+    "/mod-ku", "/qa-checklist", "/omicron/phrases", "/admin/fun",
     "/admin/ai-models", "/admin/datacron-shorts", "/admin/unit-aliases",
 )
 
@@ -94,7 +93,6 @@ def start_shared_loop(loop):
 
 def extension_available(name):
     return (worker_profile() or runtime_profile()) != "prod" or name not in {
-        "game_account",
         "antispam", "mod_scan", "tw_counters", "guild_compare",
     }
 

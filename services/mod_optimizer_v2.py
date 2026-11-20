@@ -173,7 +173,7 @@ def _rank(c):
             c['optional_matched'], -c['moves'])
 
 
-def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicron_tiers=None, seconds=SEARCH_SECONDS, relic_mode='current', slow_candidate=False):
+def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicron_tiers=None, seconds=SEARCH_SECONDS, relic_mode='current', slow_candidate=False, deep_search=False):
     """Diverse seeds + exact coordinate descent, preserving resource alternatives.
 
     Mod contributions are ranked by one-mod StatCalc deltas, not by adding raw HP
@@ -231,7 +231,7 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
     modes = [dict(weights)] + [{n: 1 / max(abs(naked[n]), 1)} for n in names]
     if slow_candidate and 'Speed' in naked:
         modes.insert(0, {'Speed': -1})
-    modes += [{n: w * rng.uniform(.2, 2.5) for n, w in weights.items()} for _ in range(8)]
+    modes += [{n: w * rng.uniform(.2, 2.5) for n, w in weights.items()} for _ in range(16 if deep_search else 8)]
     seeds = [current] if len(current) == 6 else []
     preferred_primaries = defaultdict(set)
     for group in rows.values():
@@ -264,7 +264,7 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
     for mods in seeds:
         candidate(mods)
     # Exact, threshold-aware multi-stat search around several distinct seeds.
-    frontier = sorted(cache.values(), key=_rank, reverse=True)[:12]
+    frontier = sorted(cache.values(), key=_rank, reverse=True)[:24 if deep_search else 12]
     for seed in frontier:
         best = seed
         for _ in range(3):
@@ -445,7 +445,8 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
     return chosen, optimal
 
 
-async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force_refresh=False, *, units_override=None, relic_mode='current', thresholds=None, turn_order=()):
+async def prepare_inputs(comlink, plates, code, mods, guild_id, force_refresh=False, *,
+                         units_override=None, relic_mode='current', thresholds=None, turn_order=()):
     if relic_mode not in ('current', 'plate'):
         raise ValueError('Выберите расчёт по текущей реликвии или по реликвии плейта.')
     validate_inventory(mods)
@@ -503,97 +504,145 @@ async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force
         raise ValueError('Ростер неполный: обновите данные игрока перед расчётом.')
     tiers = database.get_skill_omicron_tiers(list({r[11] for group in rows.values() for rs in group.values() for r in rs if r[3] == 'Omicron'}))
 
+    return members, rows, units, tiers
+
+
+def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), relic_mode='current',
+              turn_order=(), deep_search=False):
+    equipped = defaultdict(list)
+    for mod in mods:
+        if mod.get('equipped_to'):
+            equipped[mod['equipped_to']].append(mod)
     slower_units = {slower for _, slower in turn_order}
 
-    def run():
-        before = {b: final_stats(calc, u, equipped[b]) for b, u in units.items()}
-        modeled_before = {**before, **{b: final_stats(calc, evaluation_unit(units[b], group, equipped[b], relic_mode), equipped[b])
-                                      for b, group in rows.items() if b in units}}
-        pool = [m for m in mods if m.get('equipped_to') not in locked]
-        candidates = {b: search(calc, b, units[b], group, pool, equipped[b], modeled_before, b in locked, tiers,
-                                relic_mode=relic_mode, slow_candidate=b in slower_units)
-                      for b, group in rows.items() if b in units}
-        chosen, optimal = solve(candidates, members, rows, units, before, tiers) if candidates else ({}, True)
-        first_choice = chosen
-        # Contention repair: search again with other selected builds reserved.
-        for b in candidates:
-            if b in locked or chosen[b]['full_pass']:
+    search_seconds = 18 if deep_search else SEARCH_SECONDS
+    repair_seconds = 6 if deep_search else 2
+    solve_seconds = 135 if deep_search else 45
+
+    before = {b: final_stats(calc, u, equipped[b]) for b, u in units.items()}
+    modeled_before = {**before, **{b: final_stats(calc, evaluation_unit(units[b], group, equipped[b], relic_mode), equipped[b])
+                                  for b, group in rows.items() if b in units}}
+    pool = [m for m in mods if m.get('equipped_to') not in locked]
+    candidates = {b: search(calc, b, units[b], group, pool, equipped[b], modeled_before, b in locked, tiers,
+                            seconds=search_seconds, relic_mode=relic_mode, slow_candidate=b in slower_units,
+                            deep_search=deep_search)
+                  for b, group in rows.items() if b in units}
+    chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds) if candidates else ({}, True)
+    first_choice = chosen
+    # Contention repair: search again with other selected builds reserved.
+    for b in candidates:
+        if b in locked or chosen[b]['full_pass']:
+            continue
+        reserved = {mid for key, c in chosen.items() if key != b for mid in c['mod_ids']}
+        extra = search(calc, b, units[b], rows[b], [m for m in pool if m['id'] not in reserved], equipped[b],
+                       {**modeled_before, **{key: c['final_stats'] for key, c in chosen.items()}},
+                       omicron_tiers=tiers, seconds=repair_seconds, relic_mode=relic_mode,
+                       slow_candidate=b in slower_units, deep_search=deep_search)
+        known = {c['mod_ids'] for c in candidates[b]}
+        candidates[b].extend(c for c in extra if c['mod_ids'] not in known)
+    if candidates:
+        chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds)
+    def assess(allocation):
+        allocated = {mid: b for b, c in allocation.items() for mid in c['mod_ids']}
+        after = {**before, **{b: c['final_stats'] for b, c in allocation.items()}}
+        for b, worn in equipped.items():
+            if b in allocation:
                 continue
-            reserved = {mid for key, c in chosen.items() if key != b for mid in c['mod_ids']}
-            extra = search(calc, b, units[b], rows[b], [m for m in pool if m['id'] not in reserved], equipped[b],
-                           {**modeled_before, **{key: c['final_stats'] for key, c in chosen.items()}},
-                           omicron_tiers=tiers, seconds=2, relic_mode=relic_mode, slow_candidate=b in slower_units)
-            known = {c['mod_ids'] for c in candidates[b]}
-            candidates[b].extend(c for c in extra if c['mod_ids'] not in known)
-        if candidates:
-            chosen, optimal = solve(candidates, members, rows, units, before, tiers)
-        def assess(allocation):
-            allocated = {mid: b for b, c in allocation.items() for mid in c['mod_ids']}
-            after = {**before, **{b: c['final_stats'] for b, c in allocation.items()}}
-            for b, worn in equipped.items():
-                if b in allocation:
-                    continue
-                remaining = [m for m in worn if allocated.get(m['id'], b) == b]
+            remaining = [m for m in worn if allocated.get(m['id'], b) == b]
+            if len(remaining) != len(worn):
+                after[b] = final_stats(calc, units[b], remaining)
+        checks = {b: evaluate(rows[b], c['evaluation_unit'], c['mods'], c['final_stats'], after, tiers) for b, c in allocation.items()}
+        completed = set(members)
+        for b, group in rows.items():
+            completed -= {p for p in group if b not in checks or not checks[b]['plate_ok'].get(p)}
+        score = (len(completed), sum(c['full_pass'] for c in checks.values()),
+                 sum(c['required_matched'] for c in checks.values()),
+                 sum(c['optional_matched'] for c in checks.values()),
+                 -sum(c['deficit'] for c in checks.values()), -sum(c['moves'] for c in allocation.values()))
+        return score, after
+    baseline = {b: next(c for c in cs if c['baseline']) for b, cs in candidates.items()}
+    options = [chosen, first_choice, baseline]
+    scores = [assess(option) for option in options]
+    best = max(range(len(options)), key=lambda i: scores[i][0])
+    chosen, after = options[best], scores[best][1]
+    if best:
+        optimal = False
+    results, passed, donors = render_allocation(calc, members, rows, units, tiers, mods, names,
+                                                chosen, locked=locked, before=before, after=after)
+    return results, passed, optimal, donors
+
+
+def render_allocation(calc, members, rows, units, tiers, mods, names, chosen, *, locked=(), before=None, after=None):
+    """Exact assessment of a concrete allocation; no search or solver calls."""
+    equipped = defaultdict(list)
+    for mod in mods:
+        if mod.get('equipped_to'):
+            equipped[mod['equipped_to']].append(mod)
+    if before is None:
+        before = {b: final_stats(calc, u, equipped[b]) for b, u in units.items()}
+    if after is None:
+        allocation = {mid: b for b, c in chosen.items() for mid in c['mod_ids']}
+        after = {**before, **{b: c['final_stats'] for b, c in chosen.items()}}
+        for b, worn in equipped.items():
+            if b not in chosen:
+                remaining = [m for m in worn if allocation.get(m['id'], b) == b]
                 if len(remaining) != len(worn):
                     after[b] = final_stats(calc, units[b], remaining)
-            checks = {b: evaluate(rows[b], c['evaluation_unit'], c['mods'], c['final_stats'], after, tiers) for b, c in allocation.items()}
-            completed = set(members)
-            for b, group in rows.items():
-                completed -= {p for p in group if b not in checks or not checks[b]['plate_ok'].get(p)}
-            score = (len(completed), sum(c['full_pass'] for c in checks.values()),
-                     sum(c['required_matched'] for c in checks.values()),
-                     sum(c['optional_matched'] for c in checks.values()),
-                     -sum(c['deficit'] for c in checks.values()), -sum(c['moves'] for c in allocation.values()))
-            return score, after
-        baseline = {b: next(c for c in cs if c['baseline']) for b, cs in candidates.items()}
-        options = [chosen, first_choice, baseline]
-        scores = [assess(option) for option in options]
-        best = max(range(len(options)), key=lambda i: scores[i][0])
-        chosen, after = options[best], scores[best][1]
-        if best:
-            optimal = False
-        actual_after = {**after, **{b: final_stats(calc, units[b], c['mods']) for b, c in chosen.items()}}
-        results, passed = [], set(members)
-        for b, group in rows.items():
-            if b not in chosen:
-                passed -= set(group)
-                results.append({'base_id': b, 'char_name': database.get_game_unit_name(b) or b, 'owned': False,
-                                'plate': ', '.join(group), 'plates': list(group), 'passed': [], 'failed': [], 'used_mods': [],
-                                'reason': 'Персонаж не открыт или отсутствует в актуальном ростере.'})
-                continue
-            c = chosen[b]
-            check = evaluate(group, c['evaluation_unit'], c['mods'], c['final_stats'], after, tiers)
-            actual_check = evaluate(group, units[b], c['mods'], actual_after[b], actual_after, tiers)
-            actual_rows = {(r['plate'], r['row_index']): r for r in actual_check['rows']}
-            old = evaluate(group, units[b], equipped[b], before[b], before, tiers)
-            old_rows = {(r['plate'], r['label'], r['target_text']): r for r in old['rows']}
-            for r in check['rows']:
-                r['before'] = old_rows.get((r['plate'], r['label'], r['target_text']), {}).get('current')
-                r['now'] = actual_rows[(r['plate'], r['row_index'])]['current']
-                r['now_ok'] = actual_rows[(r['plate'], r['row_index'])]['ok']
-            passed -= {p for p, ok in check['plate_ok'].items() if not ok}
-            results.append({'base_id': b, 'char_name': database.get_game_unit_name(b) or b, 'owned': True,
-                            'plate': ', '.join(group), 'plates': list(group), 'locked': b in locked, 'ok': check['full_pass'],
-                            'passed': [r for r in check['rows'] if r['ok']], 'failed': [r for r in check['rows'] if not r['ok']],
-                            'used_mods': c['mods'], 'reason': 'Персонаж заблокирован.' if b in locked else None,
-                            'current_relic': stat_engine.get_current_relic_level(units[b]),
-                            'target_relic': stat_engine.get_current_relic_level(c['evaluation_unit']),
-                            'projected': c['evaluation_unit'] is not units[b],
-                            'required_relic': None})
-        allocation = {m['id']: b for b, c in chosen.items() for m in c['mods']}
-        donors = []
-        for b, worn in equipped.items():
-            if b in chosen:
-                continue
-            remaining = [m for m in worn if allocation.get(m['id'], b) == b]
-            if len(remaining) == len(worn):
-                continue
-            stats = final_stats(calc, units[b], remaining)
-            changes = [{'stat_name': n, 'before': v, 'current': stats.get(n)} for n, v in before[b].items() if stats.get(n) != v]
-            old_sets, new_sets = Counter(m['set_id'] for m in worn), Counter(m['set_id'] for m in remaining)
-            lost = [stat_engine.MOD_SET_NAMES_RU[s] for s, n in old_sets.items()
-                    for _ in range(n // stat_engine.MOD_SET_PIECE_COUNT[s] - new_sets[s] // stat_engine.MOD_SET_PIECE_COUNT[s])]
-            donors.append({'base_id': b, 'name': database.get_game_unit_name(b) or b, 'changes': changes,
-                           'removed': len(worn) - len(remaining), 'lost_sets': lost})
-        return results, sorted(passed), optimal, donors
+    actual_after = {**after, **{b: final_stats(calc, units[b], c['mods']) for b, c in chosen.items()}}
+    results, passed = [], set(members)
+    for b, group in rows.items():
+        if b not in chosen:
+            passed -= set(group)
+            results.append({'base_id': b, 'char_name': names.get(b) or b, 'owned': False,
+                            'plate': ', '.join(group), 'plates': list(group), 'passed': [], 'failed': [], 'used_mods': [],
+                            'reason': 'Персонаж не открыт или отсутствует в актуальном ростере.'})
+            continue
+        c = chosen[b]
+        check = evaluate(group, c['evaluation_unit'], c['mods'], c['final_stats'], after, tiers)
+        actual_check = evaluate(group, units[b], c['mods'], actual_after[b], actual_after, tiers)
+        actual_rows = {(r['plate'], r['row_index']): r for r in actual_check['rows']}
+        old = evaluate(group, units[b], equipped[b], before[b], before, tiers)
+        old_rows = {(r['plate'], r['label'], r['target_text']): r for r in old['rows']}
+        for r in check['rows']:
+            r['before'] = old_rows.get((r['plate'], r['label'], r['target_text']), {}).get('current')
+            r['now'] = actual_rows[(r['plate'], r['row_index'])]['current']
+            r['now_ok'] = actual_rows[(r['plate'], r['row_index'])]['ok']
+        passed -= {p for p, ok in check['plate_ok'].items() if not ok}
+        results.append({'base_id': b, 'char_name': names.get(b) or b, 'owned': True,
+                        'plate': ', '.join(group), 'plates': list(group), 'locked': b in locked, 'ok': check['full_pass'],
+                        'passed': [r for r in check['rows'] if r['ok']], 'failed': [r for r in check['rows'] if not r['ok']],
+                        'used_mods': c['mods'], 'reason': 'Персонаж заблокирован.' if b in locked else None,
+                        'current_relic': stat_engine.get_current_relic_level(units[b]),
+                        'target_relic': stat_engine.get_current_relic_level(c['evaluation_unit']),
+                        'projected': c['evaluation_unit'] is not units[b],
+                        'required_relic': None})
+    allocation = {m['id']: b for b, c in chosen.items() for m in c['mods']}
+    donors = []
+    for b, worn in equipped.items():
+        if b in chosen:
+            continue
+        remaining = [m for m in worn if allocation.get(m['id'], b) == b]
+        if len(remaining) == len(worn):
+            continue
+        stats = final_stats(calc, units[b], remaining)
+        changes = [{'stat_name': n, 'before': v, 'current': stats.get(n)} for n, v in before[b].items() if stats.get(n) != v]
+        old_sets, new_sets = Counter(m['set_id'] for m in worn), Counter(m['set_id'] for m in remaining)
+        lost = [stat_engine.MOD_SET_NAMES_RU[s] for s, n in old_sets.items()
+                for _ in range(n // stat_engine.MOD_SET_PIECE_COUNT[s] - new_sets[s] // stat_engine.MOD_SET_PIECE_COUNT[s])]
+        donors.append({'base_id': b, 'name': names.get(b) or b, 'changes': changes,
+                       'removed': len(worn) - len(remaining), 'lost_sets': lost})
+    return results, sorted(passed), donors
+
+
+async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force_refresh=False, *,
+                   units_override=None, relic_mode='current', thresholds=None, turn_order=(), deep_search=False):
+    members, rows, units, tiers = await prepare_inputs(
+        comlink, plates, code, mods, guild_id, force_refresh, units_override=units_override,
+        relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order)
+
+    def run():
+        names = {base_id: database.get_game_unit_name(base_id) for base_id in rows.keys() | units.keys()}
+        return calculate(calc, members, rows, units, tiers, mods, names, locked=locked,
+                         relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search)
+
     return await asyncio.to_thread(run)

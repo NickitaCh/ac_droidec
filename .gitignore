@@ -21,3 +21,6 @@ cache/
 # База демо-режима сайта (services/demo_data.py собирает её на сервере)
 demo.db
 demo.db.tmp
+
+# Pinned WASM runtimes installed by scripts/prepare_optimizer_runtime.py
+web/static/vendor/optimizer/

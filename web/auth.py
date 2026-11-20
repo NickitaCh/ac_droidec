@@ -162,6 +162,43 @@ async def logout(request: Request):
     return RedirectResponse("/")
 
 
+@router.get("/login/telegram", response_class=HTMLResponse)
+async def login_telegram_form(request: Request, token: str = ""):
+    from services import telegram_web_login
+    from starlette.concurrency import run_in_threadpool
+    row = await run_in_threadpool(telegram_web_login.lookup, token)
+    nonce = secrets.token_urlsafe(32)
+    request.session["telegram_login_csrf"] = nonce
+    return templates.TemplateResponse(request, "login_telegram.html", {
+        "user": None, "token": token, "csrf": nonce, "name": row[3] if row else "",
+        "error": None if row else "Ссылка устарела. Вызовите /ea в личке Telegram-бота ещё раз.",
+    }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+@router.post("/login/telegram")
+async def login_telegram(request: Request, token: str = Form(), csrf: str = Form()):
+    from fastapi import HTTPException
+    from services import telegram_web_login, game_account
+    from starlette.concurrency import run_in_threadpool
+    expected = request.session.pop("telegram_login_csrf", "")
+    if not expected or not secrets.compare_digest(expected, csrf):
+        raise HTTPException(403, "Обновите страницу входа.")
+    row = await run_in_threadpool(telegram_web_login.lookup, token, consume=True)
+    if not row:
+        raise HTTPException(403, "Ссылка устарела. Вызовите /ea в личке бота ещё раз.")
+    owner, profile, destination, name = row
+    access = await run_in_threadpool(guild_resolver.resolve_access, owner)
+    try:
+        await run_in_threadpool(game_account.require_account_read, owner, access.get("guild_id"), profile, access.get("tier"))
+    except game_account.AccountError as error:
+        raise HTTPException(403, str(error)) from None
+    request.session.clear()
+    request.session["bot_profile"] = profile
+    request.session["login_bot_profile"] = profile
+    request.session["user"] = {"discord_id": owner, "username": name or "Telegram", "avatar": None, **access}
+    return RedirectResponse(destination, status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 # =====================================================================
 # ВХОД ПО ЛОГИНУ/ПАРОЛЮ — второй способ входа рядом с Discord OAuth выше,
 # для офицеров, у которых нет доступа к Discord (блокировки РФ). Учётки

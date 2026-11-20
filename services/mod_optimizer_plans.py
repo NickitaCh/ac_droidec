@@ -64,7 +64,7 @@ def create(owner, guild_id, ally_code, data):
     with _db() as db:
         db.execute('BEGIN IMMEDIATE')
         active = db.execute("SELECT 1 FROM mod_optimizer_plans WHERE owner=? AND ally_code=? "
-                            "AND state IN ('running','applying') AND updated>?", (str(owner), str(ally_code), now - TTL)).fetchone()
+                            "AND state IN ('running','browser','applying') AND updated>?", (str(owner), str(ally_code), now - TTL)).fetchone()
         if active:
             raise ValueError('Для этого аккаунта уже выполняется расчёт или применение.')
         db.execute('DELETE FROM mod_optimizer_plans WHERE created<?', (now - 7 * 86400,))
@@ -86,7 +86,7 @@ def get(token, owner, guild_id):
     result = dict(row)
     result['data'] = json.loads(result['data'])
     result['expired'] = time.time() - result['created'] > TTL
-    if time.time() - result['updated'] > TTL and result['state'] in ('running', 'applying'):
+    if time.time() - result['updated'] > TTL and result['state'] in ('running', 'browser', 'applying'):
         result['message'] = 'Задача прервана или превысила время ожидания. Сначала проверьте расстановку в игре.'
         result['state'] = 'error'
     return result

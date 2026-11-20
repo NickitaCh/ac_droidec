@@ -57,7 +57,15 @@
     {% endif %}
 </nav>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-{% if plan and plan.state in ('running', 'applying') %}
+{% if plan and plan.state == 'browser' %}
+<div class="panel" id="mo-browser" data-plan="{{ plan.id }}" data-csrf="{{ game_csrf }}" role="status">
+    <h2>Подбор модулей</h2>
+    <p data-browser-status>Подготавливаю расчёт…</p>
+    <p>Держите вкладку открытой до завершения подбора.</p>
+    <button type="button" data-browser-cancel>Отменить подбор</button>
+</div>
+<script src="/static/mod_optimizer_browser.js?v=20261120" defer></script>
+{% elif plan and plan.state in ('running', 'applying') %}
 <div class="panel" role="status">
     <h2>{% if plan.state == 'running' %}Идёт подбор{% else %}Применение расстановки{% endif %}</h2>
     <p>{% if plan.state == 'running' %}Расчёт может занять несколько минут. Вкладку можно закрыть и вернуться по этой ссылке.{% else %}Каждая операция проверяется по данным игры. Не меняйте модули до завершения.{% endif %}</p>
@@ -83,6 +91,8 @@
     </label><noscript><button>Выбрать</button></noscript></form>
     {% else %}<p>{{ self_player_name }} · {{ self_ally_code or 'Сначала зарегистрируйте аккаунт' }}</p>{% endif %}
     <form id="mo-run" method="post" action="/mod-optimizer" enctype="multipart/form-data">
+        {% if user.bot_profile == 'prod' %}<input type="hidden" name="engine" value="browser">
+        {% else %}<label>Вычислитель<select name="engine"><option value="server">Сервер</option><option value="browser">Браузер</option></select></label>{% endif %}
         <input type="hidden" name="csrf" value="{{ game_csrf }}">
         <input type="hidden" name="ally_code" value="{{ self_ally_code or '' }}">
         {% macro order_pair(first='', second='') %}
@@ -122,6 +132,7 @@
             <div class="mo-options mo-lock-list">{% for key, name in characters %}<label class="checkbox" data-lock-name="{{ name|lower }} {{ key|lower }}"><input type="checkbox" name="locked" value="{{ key }}" {% if key in locked %}checked{% endif %}>{{ name }}</label>{% endfor %}</div>
         </details>
         <p class="muted">Модули с незаблокированных доноров можно снимать. Все затронутые персонажи и ухудшения показаны в результате.</p>
+        <label class="checkbox"><input type="checkbox" name="deep_search" value="1" {% if deep_search %}checked{% endif %}>Углублённый подбор (дольше обычного)</label>
         <label class="checkbox"><input type="checkbox" name="dry_run" value="1" {% if dry_run|default(true) or not can_apply %}checked{% endif %} {% if not can_apply %}disabled{% endif %}>Dry run — без перестановки модулей в игре</label>
         {% if not can_apply %}<p class="muted">Игрокам доступен только просмотр результата. Применение в игре отключено.</p>{% endif %}
         {% if connection_action == 'login' and game_connected %}

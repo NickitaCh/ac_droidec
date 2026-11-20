@@ -395,6 +395,7 @@ def _html_chunks(blocks: list[str], limit: int = 3900) -> list[str]:
 async def cmd_ready(ctx: Ctx):
     guild_id = ctx.access["guild_id"]
     what, who = _split_player(ctx.args)
+    what, (with_shards,) = _split_flags(what, {"осколки", "shards"})
     what, (guild_mode,) = _split_flags(what, GUILD_WORDS)
     if guild_mode and guild_id is None:
         await ctx.reply("Отчёт по гильдии доступен участникам подключённых гильдий. Личная проверка — без слова «гильдия».")
@@ -409,7 +410,11 @@ async def cmd_ready(ctx: Ctx):
         await ctx.reply(f"Цель «{esc(what)}» не найдена в «Руководстве» — попробуйте подсказки:",
                         keyboard=find_button("🔎 Найти цель", f"готовность {what}"))
         return
-    state = {"user_id": ctx.user["id"], "guild_id": guild_id, "who": who, "guild_mode": guild_mode}
+    if with_shards and (guild_mode or not ctx.is_private):
+        await ctx.reply("Осколки доступны только для своего аккаунта в личке: <code>/ready цель осколки [| код]</code>.")
+        return
+    state = {"user_id": ctx.user["id"], "guild_id": guild_id, "who": who, "guild_mode": guild_mode,
+             "with_shards": with_shards}
     if len(matches) > 1:
         token = new_session(state)
         items = [(f"{g['name']} · {g['kind_label']}", g["base_id"]) for g in matches]
@@ -441,6 +446,10 @@ async def cb_ready_who(ctx: Ctx, payload: str):
 async def _ready_run(ctx: Ctx, state: dict, guide: str):
     state["guide"] = guide
     guild_id = state["guild_id"]
+    if state.get("with_shards"):
+        from tg_bot.game_account import ready
+        await ready(ctx, guide, state["who"])
+        return
     if state["guild_mode"]:
         if ctx.access["guild_id"] is None or ctx.access["guild_id"] != guild_id:
             await ctx.reply("Отчёт по гильдии доступен только участникам подключённой гильдии.")

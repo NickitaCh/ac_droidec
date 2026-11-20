@@ -10,9 +10,10 @@ import secrets
 import asyncio
 import logging
 import math
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 import database
@@ -20,7 +21,7 @@ from services import game_account, game_account_readonly
 import stat_engine
 import services.stat_forecast as stat_forecast
 import services.mod_optimizer as mod_optimizer
-from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_actions
+from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_actions, mod_optimizer_browser
 from services import personal_plates
 from web.deps import require_member_access
 
@@ -41,8 +42,6 @@ def require_loadouts_access(user: dict = Depends(require_member_access)):
 
 
 def require_optimizer_access(user: dict = Depends(require_loadouts_access)):
-    if user.get('bot_profile') != 'test':
-        raise HTTPException(404)
     return user
 
 
@@ -179,10 +178,10 @@ def _spawn(coro):
 
 
 @personal_plates.scoped_job
-async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=()):
+async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=(), deep_search=False):
     dry_run = bool(dry_run) or not can_apply(user)
     data = {'selected_plates': plates, 'locked': locked, 'game_source': source == 'game', 'ally_code': code,
-            'relic_mode': relic_mode, 'dry_run': dry_run, 'thresholds': thresholds or {}, 'turn_order': turn_order}
+            'relic_mode': relic_mode, 'dry_run': dry_run, 'deep_search': deep_search, 'thresholds': thresholds or {}, 'turn_order': turn_order}
     try:
         data['requirements_fingerprint'] = plans.requirements_fingerprint(plates, user['guild_id'])
         if source == 'game':
@@ -196,9 +195,23 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
             mods = mod_optimizer.parse_mods_csv(raw_csv)
         comlink = _get_comlink()
         calc = await stat_forecast.get_stat_calc(comlink)
+        if user.get('bot_profile') == 'prod' or user.get('optimizer_engine') == 'browser':
+            if not mod_optimizer_browser.runtime_ready():
+                raise ValueError('Вычислитель пока не установлен. Попробуйте позже.')
+            members, rows, units, tiers = await mod_optimizer_v2.prepare_inputs(
+                comlink, plates, code, mods, user['guild_id'], force_refresh,
+                units_override=snap['roster'] if source == 'game' else None,
+                relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order)
+            names = await asyncio.to_thread(database.get_game_unit_names, list(rows.keys() | units.keys()))
+            data['browser_inputs'] = dict(members=members, rows=rows, units=units, tiers=tiers, mods=mods,
+                names=names, locked=locked, relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search)
+            data['browser_engine'] = True
+            plans.finish(token, 'browser', data)
+            return
         results, passed, optimal, donors = await mod_optimizer_v2.optimize(
             comlink, calc, plates, code, mods, user['guild_id'], locked, force_refresh,
             units_override=snap['roster'] if source == 'game' else None, relic_mode=relic_mode,
+            **({'deep_search': True} if deep_search else {}),
             **({'thresholds': thresholds} if thresholds else {}),
             **({'turn_order': turn_order} if turn_order else {}))
         _enrich_results(results)
@@ -265,6 +278,77 @@ async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', 
     return _render(request, context)
 
 
+@router.get('/browser/inputs')
+async def browser_inputs(plan: str, user: dict = Depends(require_optimizer_access)):
+    try:
+        job = await asyncio.to_thread(plans.get, plan, user['discord_id'], user['guild_id'])
+        if job['expired'] or job['state'] != 'browser':
+            raise ValueError('Расчёт устарел или уже завершён.')
+        await asyncio.to_thread(game_account.select_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
+        with personal_plates.scope(user):
+            fingerprint = await asyncio.to_thread(plans.requirements_fingerprint, job['data']['selected_plates'], user['guild_id'])
+        if fingerprint != job['data']['requirements_fingerprint']:
+            raise ValueError('Требования изменились. Запустите новый подбор.')
+        calc = await stat_forecast.get_stat_calc(_get_comlink())
+        payload = {**job['data']['browser_inputs'], 'calculator': mod_optimizer_browser.calculator_data(calc)}
+        body = await asyncio.to_thread(json.dumps, {'payload': payload, 'source': mod_optimizer_browser.python_source()}, ensure_ascii=False)
+        return Response(body, media_type='application/json', headers={'Cache-Control': 'no-store'})
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+
+
+@router.post('/browser/result')
+async def browser_result(request: Request, user: dict = Depends(require_optimizer_access)):
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 256 * 1024:
+            raise HTTPException(413, 'Результат слишком большой.')
+    try:
+        message = json.loads(raw)
+        if not isinstance(message, dict) or not isinstance(message.get('plan'), str):
+            raise ValueError('Некорректный результат подбора.')
+        _csrf(request, message.get('csrf', ''))
+        token = message['plan']
+        job = await asyncio.to_thread(plans.get, token, user['discord_id'], user['guild_id'])
+        if job['expired'] or job['state'] != 'browser':
+            raise ValueError('Расчёт устарел или уже завершён.')
+        data = job['data']
+        if message.get('cancel'):
+            data.pop('browser_inputs', None)
+            await asyncio.to_thread(plans.finish, token, 'error', data, 'Подбор отменён.', expected='browser')
+            return JSONResponse({'url': '/mod-optimizer?plan=' + token})
+        await asyncio.to_thread(game_account.select_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
+        with personal_plates.scope(user):
+            fingerprint = await asyncio.to_thread(plans.requirements_fingerprint, data['selected_plates'], user['guild_id'])
+        if fingerprint != data['requirements_fingerprint']:
+            raise ValueError('Требования изменились. Запустите новый подбор.')
+        calc = await stat_forecast.get_stat_calc(_get_comlink())
+        prepared = data['browser_inputs']
+        results, passed, donors = await asyncio.to_thread(mod_optimizer_browser.assess, calc, prepared, message['allocation'])
+        _enrich_results(results)
+        _preview_moves(results, prepared['mods'])
+        for donor in donors:
+            from cogs.stat_requirements import STAT_LABEL_SHORT
+            for row in donor['changes']:
+                row.update(before_fmt=_fmt_stat(row['before'], row['stat_name']),
+                           current_fmt=_fmt_stat(row['current'], row['stat_name']),
+                           label=STAT_LABEL_SHORT.get(row['stat_name'], row['stat_name']))
+        if data.get('game_source'):
+            data['operation_count'] = len(game_mod_actions.operations(prepared['mods'], results, set(data['locked'])))
+        with personal_plates.scope(user):
+            current = await asyncio.to_thread(plans.requirements_fingerprint, data['selected_plates'], user['guild_id'])
+        if current != data['requirements_fingerprint']:
+            raise ValueError('Требования изменились во время проверки. Запустите новый подбор.')
+        data.update(results=results, plates_passed=passed, donors=donors, mods_total=len(prepared['mods']),
+                    plates_total=len(prepared['members']), solver_timed_out=True)
+        data.pop('browser_inputs')
+        await asyncio.to_thread(plans.finish, token, 'ready', data, expected='browser')
+        return JSONResponse({'url': '/mod-optimizer?plan=' + token})
+    except (ValueError, KeyError, TypeError) as error:
+        raise HTTPException(400, str(error) if isinstance(error, ValueError) else 'Некорректный результат подбора.') from None
+
+
 @loadouts_router.get("", response_class=HTMLResponse)
 async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_loadouts_access)):
     context = _optimizer_context(user, plan, ally_code)
@@ -288,6 +372,7 @@ def _optimizer_context(user, plan='', ally_code=''):
             raise HTTPException(404, 'План не найден.') from None
         context.update(job['data'])
         context['can_apply'] = can_apply(user)
+        context['deep_search'] = job['data'].get('deep_search', False)
         context['dry_run'] = bool(job['data'].get('dry_run', True)) or not (can_apply_loadout if job['data'].get('preset_restore') else can_apply)(user)
         context['plan'] = job
         if 'baseline' in job['data']:
@@ -478,17 +563,23 @@ async def optimizer_run(
     locked: list[str] = Form(default=[]),
     relic_mode: str = Form(default='current'),
     dry_run: bool = Form(default=False),
+    deep_search: bool = Form(default=False),
     faster: list[str] = Form(default=[]),
     slower: list[str] = Form(default=[]),
+    engine: str = Form(default='server'),
     user: dict = Depends(require_optimizer_access),
 ):
     guild_id = user["guild_id"]
     context = _base_context(user, guild_id)
     context["selected_plates"] = plates
     context['relic_mode'] = relic_mode
+    context['deep_search'] = deep_search
     dry_run = bool(dry_run) or not can_apply(user)
     context['dry_run'] = dry_run
     _csrf(request, csrf)
+    if engine not in ('server', 'browser'):
+        raise HTTPException(400, 'Неизвестный вычислитель.')
+    engine = 'browser' if user.get('bot_profile') == 'prod' else engine
 
     ally_code = ally_code or context["self_ally_code"]
     if not ally_code:
@@ -551,13 +642,13 @@ async def optimizer_run(
         else:
             raise ValueError('Выберите чтение из игры или загрузите CSV.')
         token = plans.create(user['discord_id'], guild_id, code, {'selected_plates': plates, 'locked': locked,
-                             'relic_mode': relic_mode, 'dry_run': dry_run, 'turn_order': turn_order})
+                             'relic_mode': relic_mode, 'dry_run': dry_run, 'deep_search': deep_search, 'turn_order': turn_order})
         plans.set_locks(user['discord_id'], guild_id, code, locked)
     except ValueError as error:
         context['error'] = str(error)
         return _render(request, context)
-    _spawn(_calculate(token, dict(user), plates, code, source, raw_csv, locked, force_refresh, relic_mode, dry_run,
-                      reconnect=reconnect, **({'thresholds': thresholds} if thresholds else {}),
+    _spawn(_calculate(token, {**user, 'optimizer_engine': engine}, plates, code, source, raw_csv, locked, force_refresh, relic_mode, dry_run,
+                      reconnect=reconnect, **({'deep_search': True} if deep_search else {}), **({'thresholds': thresholds} if thresholds else {}),
                       **({'turn_order': turn_order} if turn_order else {})))
     return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
 
