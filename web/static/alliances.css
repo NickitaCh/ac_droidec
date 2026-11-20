@@ -1,0 +1,36 @@
+.alliance-management { display: grid; gap: 1em; }
+.alliance-management > h2 { margin-bottom: 0; }
+.alliance-management > .alliance-form { margin-top: 0; }
+.alliance-panel.alliance-management > .alliance-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.alliance-management > .alliance-form button { align-self: end; }
+.alliance-management > details { border-top: 1px solid var(--border); padding-top: 1em; margin-top: 0; }
+.alliance-section-heading { display: flex; flex-wrap: wrap; gap: .75em 1.5em; justify-content: space-between; align-items: center; }
+.alliance-section-heading h2 { margin: 0; }
+.alliance-sharing-filters { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 1em; margin: 1.25em 0; }
+.alliance-sharing-filters label { display: grid; gap: .4em; min-width: 0; }
+.alliance-sharing-filters input, .alliance-sharing-filters select { width: 100%; min-width: 0; box-sizing: border-box; }
+.alliance-share-list { display: grid; gap: .75em; }
+.alliance-share-row { border: 1px solid var(--border); border-radius: .7em; padding: 1em; min-width: 0; }
+.alliance-share-overview { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr); gap: 1em; }
+.alliance-share-overview > div { min-width: 0; }
+.alliance-share-overview h3, .alliance-share-overview p { margin: .3em 0; overflow-wrap: anywhere; }
+.alliance-share-overview .muted { font-size: .85em; }
+.alliance-share-editor { margin-top: .75em; }
+.alliance-share-editor > summary { cursor: pointer; color: var(--accent); width: fit-content; }
+.alliance-share-editor[open] { border-top: 1px solid var(--border); padding-top: .75em; }
+.alliance-panel .alliance-share-editor > .alliance-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.alliance-share-editor .alliance-form > button { grid-column: 1 / -1; justify-self: start; }
+.alliance-share-dialog { box-sizing: border-box; padding: 0; }
+.alliance-share-dialog form.alliance-form { box-sizing: border-box; }
+.alliance-share-dialog .alliance-resource-list { min-height: 8em; max-height: 30vh; }
+.alliance-share-dialog [data-resource-row] { padding: .4em .5em; border-radius: .35em; }
+.alliance-share-dialog [data-resource-row]:has(input:checked) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.alliance-share-dialog [data-share-count] { margin: 0; font-weight: 600; }
+.alliance-panel [hidden], .alliance-share-dialog [hidden] { display: none !important; }
+@media (max-width: 700px) {
+    .alliance-panel.alliance-management > .alliance-form, .alliance-sharing-filters, .alliance-share-overview,
+    .alliance-panel .alliance-share-editor > .alliance-form { grid-template-columns: minmax(0, 1fr); }
+    .alliance-share-overview { gap: .65em; }
+    .alliance-share-dialog { width: calc(100vw - 1em); max-width: calc(100vw - 1em); max-height: 90dvh; }
+    .alliance-share-dialog form.alliance-form { padding: .8em; }
+}
