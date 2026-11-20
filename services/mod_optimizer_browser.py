@@ -6,6 +6,7 @@ from pathlib import Path
 
 import stat_engine
 from services import mod_optimizer as legacy, mod_optimizer_v2 as engine
+from services import mod_farm as mod_recommendations
 
 
 def python_source():
@@ -17,12 +18,12 @@ def python_source():
     lines = ["from __future__ import annotations", "import copy, itertools, math, random, time, json, logging, urllib.request",
              "from typing import Any", "from collections import Counter, defaultdict", "from types import SimpleNamespace",
              "import pulp", "_CANONICAL_STATS = " + repr(StatCalc.STATS_NAME_MAP), inspect.getsource(StatCalc)]
-    for name in ("PERCENT_STATS", "MOD_SET_PIECE_COUNT", "MOD_SET_NAMES_RU", "UNIT_STAT_RU"):
+    for name in ("PERCENT_STATS", "MOD_SET_PIECE_COUNT", "MOD_SET_NAMES_RU", "UNIT_STAT_RU", "MOD_PRIMARY_OPTIONS"):
         lines.append(name + " = " + repr(getattr(stat_engine, name)))
     for name in ("project_unit_relic", "get_current_relic_level", "calc_final_stats"):
         lines.append(inspect.getsource(getattr(stat_engine, name)))
     lines.append("stat_engine = SimpleNamespace(**{k: v for k, v in globals().copy().items() if k in "
-                 "('project_unit_relic', 'get_current_relic_level', 'calc_final_stats', 'MOD_SET_PIECE_COUNT', 'MOD_SET_NAMES_RU', 'UNIT_STAT_RU')})")
+                 "('project_unit_relic', 'get_current_relic_level', 'calc_final_stats', 'MOD_SET_PIECE_COUNT', 'MOD_SET_NAMES_RU', 'UNIT_STAT_RU', 'MOD_PRIMARY_OPTIONS')})")
     for name in ("TWO_PIECE_SETS", "FOUR_PIECE_SETS"):
         lines.append(name + " = " + repr(getattr(legacy, name)))
     for name in ("_to_equipped_stat_mod", "_target_multisets", "_compare"):
@@ -33,6 +34,12 @@ def python_source():
     for name in ("final_stats", "validate_inventory", "_ids", "_scheme", "evaluation_unit", "_mod_value",
                  "evaluate", "_rank", "search", "solve", "calculate", "render_allocation"):
         lines.append(inspect.getsource(getattr(engine, name)))
+    lines.append("optimizer = SimpleNamespace(SLOTS=SLOTS, SLOT_LABELS=SLOT_LABELS, _ids=_ids, "
+                 "final_stats=final_stats, evaluation_unit=evaluation_unit, evaluate=evaluate)")
+    farm_functions = ('farm_mod', 'farm_signature', 'farm_matches', 'farm_context', 'farm_trial', 'farm_recipes', 'recommend', 'verify')
+    for name in farm_functions:
+        lines.append(inspect.getsource(getattr(mod_recommendations, name)))
+    lines.append("mod_recommendations = SimpleNamespace(**{k: v for k, v in globals().copy().items() if k in " + repr(farm_functions) + "})")
     return "\n\n".join(lines)
 
 
@@ -42,7 +49,7 @@ def calculator_data(calc):
         ("crTables", "_cr_tables"), ("gpTables", "_gp_tables"), ("relicData", "_relic_data"))}
 
 
-def assess(calc, prepared, allocation):
+def assess(calc, prepared, allocation, proposals=None):
     """Accept IDs only, reconstruct and recompute every value from trusted inputs."""
     members, rows, units, tiers = (prepared[k] for k in ("members", "rows", "units", "tiers"))
     mods, locked = prepared["mods"], set(prepared["locked"])
@@ -76,7 +83,14 @@ def assess(calc, prepared, allocation):
         modeled = engine.evaluation_unit(units[base], rows[base], selected, prepared["relic_mode"])
         chosen[base] = {"mods": selected, "mod_ids": frozenset(ids), "evaluation_unit": modeled,
                         "final_stats": engine.final_stats(calc, modeled, selected)}
-    return engine.render_allocation(calc, members, rows, units, tiers, mods, prepared["names"], chosen, locked=locked)
+    results, passed, donors = engine.render_allocation(calc, members, rows, units, tiers, mods, prepared["names"],
+                                                      chosen, locked=locked)
+    if proposals is not None:
+        context = mod_recommendations.farm_context(calc, rows, units, tiers, mods, chosen, locked, prepared['relic_mode'])
+        checked = mod_recommendations.verify(context, proposals)
+        for result in results:
+            result['recommendations'] = checked.get(result['base_id'], [])
+    return results, passed, donors
 
 
 def runtime_ready():

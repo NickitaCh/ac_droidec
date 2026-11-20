@@ -16,6 +16,7 @@ import pulp
 import database
 import stat_engine
 from services import mod_optimizer as legacy
+from services import mod_farm as mod_recommendations
 
 SLOTS = ('square', 'arrow', 'diamond', 'triangle', 'circle', 'cross')
 SLOT_LABELS = ('Квадрат', 'Стрела', 'Ромб', 'Треугольник', 'Круг', 'Крест')
@@ -569,6 +570,10 @@ def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), reli
         optimal = False
     results, passed, donors = render_allocation(calc, members, rows, units, tiers, mods, names,
                                                 chosen, locked=locked, before=before, after=after)
+    farm = mod_recommendations.farm_context(calc, rows, units, tiers, mods, chosen, locked, relic_mode)
+    for result in results:
+        if result['owned']:
+            result['recommendations'] = mod_recommendations.recommend(farm, result['base_id'])
     return results, passed, optimal, donors
 
 

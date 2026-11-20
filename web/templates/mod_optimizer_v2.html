@@ -2,7 +2,7 @@
 {% block title %}{{ 'Подборки модулей' if loadouts_page else 'Оптимизатор модулей' }} — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/mod_optimizer.css?v=20261118loadouts">
+<link rel="stylesheet" href="/static/mod_optimizer.css?v=20261120farm">
 {% macro preset_picker(rows, counts=none, selected=(), scope='all', partial_label='Выбранные персонажи') %}
 <fieldset class="mo-preset-picker" data-preset-picker>
     <legend>Состав раскладки</legend>
@@ -64,7 +64,7 @@
     <p>Держите вкладку открытой до завершения подбора.</p>
     <button type="button" data-browser-cancel>Отменить подбор</button>
 </div>
-<script src="/static/mod_optimizer_browser.js?v=20261120" defer></script>
+<script src="/static/mod_optimizer_browser.js?v=20261120farm" defer></script>
 {% elif plan and plan.state in ('running', 'applying') %}
 <div class="panel" role="status">
     <h2>{% if plan.state == 'running' %}Идёт подбор{% else %}Применение расстановки{% endif %}</h2>
@@ -291,6 +291,15 @@
     <button form="mo-run" name="source" value="game" {% if not game_connected %}disabled{% endif %}>Пересчитать из игры</button>
     {% endif %}
 </div>
+{% if mod_shopping %}
+<details class="panel mo-farm-summary" open><summary>Что искать · {{ mod_shopping|length }} сочетаний</summary>
+    <p class="muted">По первому рекомендованному варианту каждого персонажа. Подробные допы и альтернативы — в карточке ниже.</p>
+    <div class="mo-farm-grid">{% for item in mod_shopping %}
+        <div class="mo-farm-item"><strong>{{ item.summary }} · {{ item.rarity }}★</strong>
+        <p>{{ item.characters|length }} шт. · {{ item.characters|join(', ') }}</p></div>
+    {% endfor %}</div>
+</details>
+{% endif %}
 {% set edited = namespace(ids=[]) %}
 {% for r in results %}
 {% set required_passed = r.passed|selectattr('priority', 'equalto', 'required')|list|length %}
@@ -320,6 +329,35 @@
     {% if r.moves %}<details><summary>Перестановки · {{ r.moves|length }}</summary>
         {% for move in r.moves %}<p><strong>{{ move.mod }}</strong><br>Откуда: {{ move.source }}{% if move.replaced %}<br>Снимается: {{ move.replaced }}{% endif %}</p>{% endfor %}
     </details>{% else %}<p class="muted">Сборка сохраняется.</p>{% endif %}
+    {% endif %}
+    {% if r.recommendations is defined %}
+    <details class="mo-farm" {% if r.recommendations %}open{% endif %}>
+        <summary>Что фармить и улучшать{% if r.recommendations %} · {{ r.recommendations|length }}{% endif %}</summary>
+        {% if r.recommendations %}
+        <p class="muted">Варианты замен на 1–2 модуля. Каждый проверен отдельно: остальные сборки сохраняются. Варианты не суммируются.</p>
+        {% for suggestion in r.recommendations %}
+        <div class="mo-farm-option">
+            <h4>{{ 'Закрыть нехватку' if suggestion.kind == 'shortage' else 'Улучшить готовую сборку' }} · {{ suggestion.needs|length }} {{ 'модуль' if suggestion.needs|length == 1 else 'модуля' }}</h4>
+            {% if suggestion.closed %}<ul>{% for req in suggestion.closed %}<li>{{ 'Обязательное' if req.priority == 'required' else 'Цель' }}: {{ req.label }} {{ req.threshold_fmt }} — выполнено</li>{% endfor %}</ul>{% endif %}
+            {% if suggestion.gains %}<p>{% for gain in suggestion.gains %}{{ gain.label }}: {{ gain.before_fmt }} → <strong>{{ gain.after_fmt }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+            {% if suggestion.kind == 'shortage' and not suggestion.completes %}<p class="muted">Часть требований ещё не выполнена.</p>{% endif %}
+            <div class="mo-farm-grid">{% for need in suggestion.needs %}
+                <div class="mo-farm-item"><strong>{{ need.summary }} · {{ need.mod.rarity }}★</strong>
+                    <p>Допы: {{ need.secondaries_fmt }}</p>
+                    <p>{% if need.status == 'available' %}С такими параметрами: {{ need.available }} — доступны для этой замены.
+                    {% elif need.status == 'occupied' %}С такими параметрами: {{ need.owned }} — заняты в других сборках или заблокированы. Нужен ещё один.
+                    {% else %}Такого сочетания параметров нет — искать или прокачивать.{% endif %}</p>
+                    {% if need.candidates %}<details><summary>Найти в моих модулях · {{ need.candidates|length }}</summary>
+                    <p class="muted">Та же фигура, сет и основа; допы могут отличаться. Расположение после подбора.</p>
+                    {% for candidate in need.candidates %}<p><strong>{{ candidate.location }}{% if candidate.locked %} · 🔒{% endif %}</strong> · {{ candidate.mod.rarity }}★ · ур. {{ candidate.mod.level }}<br>{{ candidate.secondaries_fmt }}</p>{% endfor %}
+                    </details>{% endif %}
+                </div>
+            {% endfor %}</div>
+        </div>
+        {% endfor %}
+        <p class="muted">Допы — пример проверенного сочетания, а не минимальные роллы. Проверяются основы из калькулятора и допы уровня ваших модулей; перебор ограничен.</p>
+        {% else %}<p class="muted">Полезных замен на 1–2 модуля в проверенных вариантах не найдено{% if r.locked %}: персонаж заблокирован{% endif %}.</p>{% endif %}
+    </details>
     {% endif %}
 </div>
 {% endfor %}

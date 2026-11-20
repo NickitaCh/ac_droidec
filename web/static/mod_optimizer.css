@@ -58,3 +58,10 @@
 .mo-preset-controls input[type="search"] {
     max-width: 100%;
 }
+
+.mo-farm,.mo-farm-summary{margin-top:14px}
+.mo-farm>summary,.mo-farm-summary>summary{font-weight:600;cursor:pointer}
+.mo-farm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:10px;margin-top:10px}
+.mo-farm-item{min-width:0;padding:12px;border:1px solid var(--border);border-radius:8px;overflow-wrap:anywhere}
+.mo-farm-option{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.mo-farm-option h4{margin:0 0 8px}.mo-farm-option ul{padding-left:22px}

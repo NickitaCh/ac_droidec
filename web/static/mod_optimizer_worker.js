@@ -54,12 +54,19 @@ def search(*args, **kwargs):
     total = len(set(payload['rows']) & set(payload['units']))
     optimizerProgress(('Уточняю сборку: ' if repeat else f'Подбираю {len(_searched)} из {total}: ') + name)
     return _worker_search(*args, **kwargs)
+_worker_recommend = mod_recommendations.recommend
+def _browser_recommend(context, base):
+    optimizerProgress('Проверяю, что фармить: ' + (payload['names'].get(base) or base))
+    return _worker_recommend(context, base)
+mod_recommendations.recommend = _browser_recommend
 calculated = calculate(StatCalc(payload['calculator']), payload['members'], payload['rows'], payload['units'],
                        payload['tiers'], payload['mods'], payload['names'], locked=payload['locked'],
                        relic_mode=payload['relic_mode'], turn_order=payload['turn_order'], deep_search=payload['deep_search'])
 browser_result_json = json.dumps({'allocation': {r['base_id']: [m['id'] for m in r['used_mods']]
                                                for r in calculated[0] if r['owned']},
                                  'optimal': calculated[2],
+                                 'recommendations': {r['base_id']: [t['recipes'] for t in r.get('recommendations', [])]
+                                                     for r in calculated[0] if r['owned']},
                                  **({'verification': calculated} if payload.get('_verification') else {})})
 `);
         self.postMessage({type: 'complete', result: JSON.parse(python.globals.get('browser_result_json'))});

@@ -37,7 +37,7 @@
             const data = await response.json();
             if (!response.ok) throw Error(data.detail || 'Не удалось подготовить расчёт.');
             if (cancelled) return;
-            worker = new Worker('/static/mod_optimizer_worker.js?v=20261120');
+            worker = new Worker('/static/mod_optimizer_worker.js?v=20261120farm');
             worker.onerror = () => fail('Вычислитель остановился. Закройте расчёт и попробуйте снова.');
             worker.onmessage = async ({data: message}) => {
                 if (cancelled) return;

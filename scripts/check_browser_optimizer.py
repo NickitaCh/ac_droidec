@@ -88,7 +88,8 @@ def main():
             chrome.close()
         if outcome['type'] != 'complete':
             raise AssertionError((outcome, errors))
-        checked, passed, donors = browser.assess(calc, prepared, outcome['result']['allocation'])
+        checked, passed, donors = browser.assess(calc, prepared, outcome['result']['allocation'],
+                                                 outcome['result']['recommendations'])
         # Equivalent optimum can choose different IDs. Compare passes, actual
         # required values and resource exclusivity rather than arbitrary ties.
         assert passed == native[1], (passed, native[1])
@@ -97,7 +98,10 @@ def main():
                     for r in outcome['result']['verification'][0] if r['owned']}
         actual = {base: values for base, values in actual.items() if base in expected}
         assert actual == expected, (actual, expected)
-        print('Real Chrome worker matches TEST: exact StatCalc values, plate checks and exclusive allocation.')
+        for result in checked:
+            browser_row = next(r for r in outcome['result']['verification'][0] if r['base_id'] == result['base_id'])
+            assert json.loads(json.dumps(result.get('recommendations', []))) == browser_row.get('recommendations', [])
+        print('Real Chrome worker matches TEST: exact stats, exclusive allocation and server-verified mod recommendations.')
     finally:
         server.shutdown()
 

@@ -80,6 +80,8 @@ def _enrich_results(results: list[dict]) -> None:
     тащить форматирование статов в Jinja."""
     from cogs.stat_requirements import STAT_LABEL_SHORT
     peer_keys = {req['compare'] for r in results for req in r['passed'] + r['failed'] if req.get('compare')}
+    peer_keys.update(c['owner'] for r in results for s in r.get('recommendations', [])
+                     for n in s['needs'] for c in n.get('candidates', []) if c['owner'])
     peer_names = database.get_game_unit_names(list(peer_keys)) if peer_keys else {}
     for r in results:
         for req in r["passed"] + r["failed"]:
@@ -96,6 +98,25 @@ def _enrich_results(results: list[dict]) -> None:
                 req['now_fmt'] = stat_engine.UNIT_STAT_RU.get(req.get('now'), 'Нет')
             req["threshold_fmt"] = req.get('target_text') or f"{req['operator']} {_fmt_stat(req['threshold'], req['stat_name'])}"
         r["mods_summary"] = [_mod_summary(m) for m in r.get("used_mods", [])]
+        for suggestion in r.get('recommendations', []):
+            def secondary_text(mod):
+                labels = {1: 'Здоровье', 28: 'Защита', 41: 'Атака', 42: 'Оборона', **stat_engine.UNIT_STAT_RU}
+                return ', '.join(f"{labels.get(s['unit_stat_id'], s.get('name', 'Доп. стат'))} "
+                                 f"+{s['value']:g}{'%' if s['is_percent'] else ''}"
+                                 for s in mod['secondaries']) or 'Без дополнительных требований'
+            for need in suggestion['needs']:
+                need['summary'] = _mod_summary(need['mod'])
+                need['secondaries_fmt'] = secondary_text(need['mod'])
+                for candidate in need.get('candidates', []):
+                    candidate['location'] = peer_names.get(candidate['owner'], candidate['owner']) if candidate['owner'] else 'Свободный склад'
+                    candidate['secondaries_fmt'] = secondary_text(candidate['mod'])
+            for gain in suggestion['gains']:
+                gain.update(label=STAT_LABEL_SHORT.get(gain['stat_name'], gain['stat_name']),
+                            before_fmt=_fmt_stat(gain['before'], gain['stat_name']),
+                            after_fmt=_fmt_stat(gain['after'], gain['stat_name']))
+            for req in suggestion['closed']:
+                req['label'] = STAT_LABEL_SHORT.get(req['stat_name'], req['label'])
+                req['threshold_fmt'] = req.get('target_text') or f"{req['operator']} {_fmt_stat(req['threshold'], req['stat_name'])}"
 
 
 def _preview_moves(results, all_mods):
@@ -121,6 +142,23 @@ def _preview_moves(results, all_mods):
 
 
 def _render(request, context):
+    shopping = {}
+    reserved = set()
+    for result in context.get('results') or []:
+        alternatives = result.get('recommendations', [])
+        if not alternatives:
+            continue
+        for need in alternatives[0]['needs']:
+            if need['status'] == 'available':
+                spare = next((mid for mid in need.get('available_ids', []) if mid not in reserved), None)
+                if spare:
+                    reserved.add(spare)
+                    continue
+            mod = need['mod']
+            key = (mod['set_id'], mod['slot_id'], mod['primary']['unit_stat_id'], mod['rarity'])
+            item = shopping.setdefault(key, dict(summary=need['summary'], rarity=mod['rarity'], characters=[]))
+            item['characters'].append(result['char_name'])
+    context['mod_shopping'] = sorted(shopping.values(), key=lambda x: -len(x['characters']))
     context['can_apply'] = (can_apply_loadout if context.get('loadouts_page') else can_apply)(context['user'])
     if not context['can_apply']:
         context['dry_run'] = True
@@ -327,7 +365,8 @@ async def browser_result(request: Request, user: dict = Depends(require_optimize
             raise ValueError('Требования изменились. Запустите новый подбор.')
         calc = await stat_forecast.get_stat_calc(_get_comlink())
         prepared = data['browser_inputs']
-        results, passed, donors = await asyncio.to_thread(mod_optimizer_browser.assess, calc, prepared, message['allocation'])
+        results, passed, donors = await asyncio.to_thread(mod_optimizer_browser.assess, calc, prepared, message['allocation'],
+                                                        message.get('recommendations'))
         _enrich_results(results)
         _preview_moves(results, prepared['mods'])
         for donor in donors:
