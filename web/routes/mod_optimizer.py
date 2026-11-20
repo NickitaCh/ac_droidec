@@ -11,6 +11,7 @@ import asyncio
 import logging
 import math
 import json
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
@@ -23,6 +24,7 @@ import services.stat_forecast as stat_forecast
 import services.mod_optimizer as mod_optimizer
 from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_actions, mod_optimizer_browser
 from services import personal_plates
+from services.registration import register_player
 from web.deps import require_member_access
 
 router = APIRouter()
@@ -355,7 +357,24 @@ async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', u
     if plan and not _is_loadout(context['plan']):
         return RedirectResponse('/mod-optimizer?plan=' + context['plan']['id'], status_code=303)
     context['loadouts_page'] = True
+    context['alt_error'] = request.query_params.get('alt_error')
+    context['alt_added'] = request.query_params.get('alt_added')
+    context['alt_outside_guild'] = request.query_params.get('outside_guild') == '1'
     return _render(request, context)
+
+
+@loadouts_router.post('/alt')
+async def loadouts_add_alt(request: Request, ally_code: str = Form(), csrf: str = Form(),
+                           user: dict = Depends(require_loadouts_access)):
+    _csrf(request, csrf)
+    result = await register_player(_get_comlink(), str(user['discord_id']), ally_code, is_alt=True)
+    if not result.ok:
+        query = {'alt_error': result.error}
+    elif result.guild_id == user['guild_id']:
+        query = {'ally_code': result.ally_code, 'alt_added': result.ingame_name}
+    else:
+        query = {'alt_added': result.ingame_name, 'outside_guild': 1}
+    return RedirectResponse('/mod-loadouts?' + urlencode(query), status_code=303)
 
 
 def _is_loadout(job):

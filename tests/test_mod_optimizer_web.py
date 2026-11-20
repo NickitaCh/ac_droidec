@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware.sessions import SessionMiddleware
 
 from services import game_account as ga, game_mod_actions as actions, mod_optimizer_plans as plans
+from services.registration import RegistrationResult
 from web.routes import mod_optimizer as route
 from web.deps import require_member_access
 
@@ -72,6 +73,25 @@ class OptimizerWebTests(unittest.TestCase):
             pending = client.get(response.headers['location'])
             self.assertIn('Идёт подбор', pending.text)
             self.assertNotIn('action="/mod-optimizer/apply"', pending.text)
+
+    def test_loadouts_register_alt_and_select_its_saved_items(self):
+        code = '987654321'
+        result = RegistrationResult(ok=True, ally_code=code, ingame_name='Alt', guild_id=1)
+        with TestClient(self.app) as client, patch.object(route, '_get_comlink'), patch.object(
+                route, 'register_player', new_callable=AsyncMock, return_value=result) as register:
+            page = client.get('/mod-loadouts')
+            csrf = re.search('name="csrf" value="([^"]+)"', page.text).group(1)
+            self.assertIn('action="/mod-loadouts/alt"', page.text)
+            denied = client.post('/mod-loadouts/alt', data={'ally_code': code, 'csrf': 'wrong'})
+            self.assertEqual(denied.status_code, 403)
+            register.assert_not_called()
+            self.context['accounts'].append((code, 'Alt'))
+            saved = client.post('/mod-loadouts/alt', data={'ally_code': code, 'csrf': csrf})
+            self.assertEqual(saved.status_code, 200)
+            self.assertIn(f'value="{code}" selected', saved.text)
+            self.assertIn('Альт «Alt» добавлен.', saved.text)
+            self.assertEqual(register.await_args.args[1:], ('owner', code))
+            self.assertEqual(register.await_args.kwargs, {'is_alt': True})
 
     def test_other_profile_and_foreign_guild_are_denied(self):
         for changes in ({'guild_id': 2}, {'bot_profile': 'prod'}):

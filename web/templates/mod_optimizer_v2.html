@@ -159,6 +159,18 @@
     </label><noscript><button>Выбрать</button></noscript></form>
     {% elif self_ally_code %}<p>{{ self_player_name }} · {{ self_ally_code }}</p>
     {% else %}<p>Сначала зарегистрируйте игровой аккаунт.</p>{% endif %}
+    {% if alt_added %}<p role="status">Альт «{{ alt_added }}» добавлен.{% if alt_outside_guild %} Он доступен в «Моём профиле». Для подборок доступны аккаунты текущей гильдии.{% endif %}</p>{% endif %}
+    <details{% if alt_error %} open{% endif %}>
+        <summary>Добавить альт-аккаунт</summary>
+        {% if alt_error %}<p class="error" role="alert">{{ alt_error }}</p>{% endif %}
+        <form method="post" action="/mod-loadouts/alt">
+            <input type="hidden" name="csrf" value="{{ game_csrf }}">
+            <label>Код союзника альта
+                <input name="ally_code" pattern="[0-9]{9}" maxlength="9" inputmode="numeric" required>
+            </label>
+            <button type="submit">Добавить</button>
+        </form>
+    </details>
 </div>
 {% if self_ally_code %}
 <div class="panel"><h2>Сохранённые подборки</h2>
