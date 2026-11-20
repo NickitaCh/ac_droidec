@@ -86,19 +86,53 @@ class PersonalRaidReadinessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 raids.readiness_requirements(**kwargs)
 
-    def test_latest_added_raid_is_default_without_guild_results(self):
+    def test_latest_released_raid_is_default_even_with_old_guild_results(self):
         database.set_bot_state(raids.RAID_UNITS_STATE, json.dumps({
             "droiddestruction": {"units": ["B"], "min_stars": 4},
             "order66": {"units": ["A"], "min_stars": 5},
             "future_raid": {"units": ["C"], "min_stars": 4},
         }), guild_id=0)
-        with patch.object(database, "get_raid_results", return_value=[{"raid_id": "order66"}]):
-            self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "order66")
+        with patch.object(database, "get_raid_results", return_value=[{"raid_id": "order66"}]) as history:
+            self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "droiddestruction")
+        history.assert_not_called()
         self.assertEqual(raids.readiness_requirements()["raid_id"], "droiddestruction")
         order = raids.raid_release_order({"future_raid": {}, "order66": {}}, ["order66", "droiddestruction"])
         database.set_bot_state(raids.RAID_UNITS_STATE + "_order", json.dumps(order), guild_id=0)
         self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "future_raid")
         self.assertEqual(raids.readiness_requirements("order66", guild_id=1)["raid_id"], "order66")
+
+    def test_unreleased_preview_does_not_replace_current_raid(self):
+        database.set_bot_state(raids.RAID_UNITS_STATE + "_order",
+                               json.dumps(["order66", "droiddestruction"]), guild_id=0)
+        self.assertEqual(raids.readiness_requirements(guild_id=1)["raid_id"], "order66")
+
+    async def test_discord_team_suggestions_follow_new_release_despite_guild_history(self):
+        database.set_bot_state(raids.RAID_UNITS_STATE, json.dumps({
+            "order66": {"units": ["A"], "min_stars": 5},
+            "new_raid": {"units": ["C"], "min_stars": 4},
+        }), guild_id=0)
+        database.set_bot_state(raids.RAID_UNITS_STATE + "_order",
+                               json.dumps(["order66", "new_raid"]), guild_id=0)
+        with patch.object(guild_resolver, "resolve_guild_id", return_value=1), \
+             patch.object(database, "get_raid_results", return_value=[{"raid_id": "order66"}]), \
+             patch.dict(raids.RAID_TEAMS, {"new_raid": [("Новый отряд", ["C"])]}):
+            options = await autocomplete_raid_teams(SimpleNamespace(author=self.author, filled_options={}), "")
+        self.assertEqual([o.value for o in options], ["Новый отряд"])
+
+    async def test_telegram_default_follows_latest_release_with_old_guild_history(self):
+        database.set_bot_state(raids.RAID_UNITS_STATE, json.dumps({
+            "order66": {"units": ["A"], "min_stars": 5},
+            "new_raid": {"units": ["B"], "min_stars": 4},
+        }), guild_id=0)
+        database.set_bot_state(raids.RAID_UNITS_STATE + "_order",
+                               json.dumps(["order66", "new_raid"]), guild_id=0)
+        ctx = SimpleNamespace(owner_id="123", access={"tier": None, "guild_id": 1},
+                              args="", action=AsyncMock(), reply=AsyncMock(), reply_photo=AsyncMock())
+        with patch.object(database, "get_raid_results", return_value=[{"raid_id": "order66"}]), \
+             patch.object(more, "_player_roster", AsyncMock(return_value=({"name": "Player"}, {}, "fresh"))), \
+             patch.object(guild_units_image, "render_player", return_value=b"png"):
+            await more.cmd_raidready(ctx)
+        self.assertIn("new_raid", ctx.reply_photo.call_args.kwargs["caption"])
 
     def test_preview_names_order_and_notice_are_kept(self):
         plan = raids.readiness_requirements("droiddestruction")

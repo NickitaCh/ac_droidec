@@ -76,9 +76,9 @@ class RaidsCog(commands.Cog):
         self.raids_loop.cancel()
 
     async def _sync_raid_units(self) -> None:
-        """Раз в сутки: кого пускают в каждый рейд (для /рейд готовность)."""
+        """Раз в три часа: новые рейды и допущенные персонажи (для /рейд готовность)."""
         last = database.get_bot_state(rs.RAID_UNITS_STATE + "_at", guild_id=0)
-        if last and time.time() - float(last) < 86400 and database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0):
+        if last and time.time() - float(last) < 3 * 3600 and database.get_bot_state(rs.RAID_UNITS_STATE, guild_id=0):
             return
         from services.units_sync import UNIT_DEFINITIONS_FLAG
         campaigns = (await asyncio.to_thread(self.bot.comlink.get_game_data, items=str(rs.CAMPAIGN_FLAG),
@@ -212,7 +212,7 @@ class RaidsCog(commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         реликвия: int = commands.Param(default=7, ge=0, le=10, description="Порог реликвии (0 — G13), по умолчанию R7"),
-        рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний рейд гильдии или последний добавленный)", autocomplete=autocomplete_raid_kinds),
+        рейд: str = commands.Param(default=None, description="Рейд из списка (пусто → последний вышедший в игре)", autocomplete=autocomplete_raid_kinds),
         отряд: str = commands.Param(default=None, description="Отряд рейда (пусто → все персонажи)", autocomplete=autocomplete_raid_teams),
         альт: bool = yes_no_param(default=False, description="Личная проверка второго привязанного аккаунта"),
         гильдия: bool = yes_no_param(default=False, description="Только офицеры подключённой гильдии: таблица всех игроков"),

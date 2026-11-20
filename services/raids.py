@@ -251,11 +251,9 @@ def raid_release_order(data: dict, previous: list[str] | None) -> list[str]:
 
 
 def default_readiness_raid(guild_id: int | None = None) -> str:
+    """Последний вышедший рейд из каталога игры, независимо от истории гильдии."""
     import json
     import database
-    last = database.get_raid_results(guild_id, limit=1) if guild_id is not None else []
-    if last:
-        return last[0]["raid_id"]
     data = _raid_units_data()
     released = {raid_id: entry for raid_id, entry in data.items() if entry.get("units") and not entry.get("preview")}
     raw_order = database.get_bot_state(RAID_UNITS_STATE + "_order", guild_id=0)
