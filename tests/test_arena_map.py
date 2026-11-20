@@ -15,6 +15,22 @@ def num(tag, value):
 
 
 class ArenaMapTests(unittest.TestCase):
+    def test_real_zone_ids_place_fleet_behind_upper_front_despite_response_order(self):
+        zones = [{'id':f'tt4v4_phase0{p}_conflict0{c}'} for p,c in ((2,2),(1,2),(2,1),(1,1))]
+        placed = image.positioned_zones(zones)
+        self.assertEqual([(p,z['id']) for p,_,z in placed], [
+            (0,'tt4v4_phase01_conflict01'), (1,'tt4v4_phase02_conflict01'),
+            (2,'tt4v4_phase01_conflict02'), (3,'tt4v4_phase02_conflict02')])
+        self.assertEqual(image.zone_label(zones[2],0,'tt4v4_5v5char_1ship'),'ФЛОТ · ТЫЛ')
+        self.assertEqual(image.zone_label(zones[2],0,'tt4v4_3v3char_0ship'),'ТЫЛ · ВЕРХ')
+
+    def test_hidden_rear_zones_keep_positions_and_do_not_reorder_squads(self):
+        front = {'id':'4zone_phase01_conflict02','teams':[{'units':['VADER']}]}
+        placed = image.positioned_zones([front])
+        self.assertEqual([p for p,_,_ in placed],[0,1,2,3])
+        self.assertIs(placed[2][2],front)
+        self.assertIsNone(placed[1][2]['remaining'])
+
     def test_combat_counter_keeps_defeated_teams_and_counts_survivors(self):
         def squad(state):
             return msg(3, num(6, state), num(8, 1), msg(4, msg(1, (2, 2, b'VADER:SEVEN_STAR'))))
@@ -62,7 +78,7 @@ class ArenaMapTests(unittest.TestCase):
         self.assertIsNotNone(ImageChops.difference(alive,dead).getbbox())
         self.assertIsNone(ImageChops.difference(pristine,portrait).getbbox())
         # Red crossed portrait at its exact location, independent of text rendering.
-        self.assertEqual(dead.getpixel((348,238)), (250,117,129))
+        self.assertEqual(dead.getpixel((384,238)), (250,117,129))
 
     def test_more_than_ten_squads_are_rendered_and_rows_grow(self):
         teams = [{'units':['VADER'],'state':3,'defends':1} for _ in range(13)]
@@ -70,7 +86,7 @@ class ArenaMapTests(unittest.TestCase):
         with patch.object(image,'_load_icon',return_value=None):
             canvas = Image.open(image.render({'home':[zone],'away':[]}))
         self.assertGreater(canvas.height,500)
-        self.assertEqual(canvas.getpixel((348,454)), (250,117,129))
+        self.assertEqual(canvas.getpixel((384,526)), (250,117,129))
 
     def test_no_board_returns_none(self):
         self.assertIsNone(image.render({'home':[],'away':[]}))

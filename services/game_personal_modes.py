@@ -109,6 +109,7 @@ def arena(payload):
         capacity = [zone["capacity"] for zone in home_zones]
         index = _number(match, 8)
         matches.append({
+            "map": _text(match, 1),
             "number": index, "round": _number(match, 5), "round_end": _time(_number(match, 6)),
             "start": _time(_number(match, 15)), "current": bool(match_id and index == match_id),
             "opponent": _text(opponent, 2) if opponent is not None else "",
