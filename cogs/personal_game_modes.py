@@ -56,9 +56,13 @@ def _arena(embed, state):
         for side, heading in (("home", "Моя защита"), ("away", "Зоны атаки")):
             zones = current[side]
             if zones:
-                counts = [f"Зона {index} · {zone['placed']}" +
-                          (f" из {zone['capacity']}" if zone["capacity"] is not None else "")
-                          for index, zone in enumerate(zones, 1)]
+                counts = []
+                for index, zone in enumerate(zones, 1):
+                    summary = game_personal_modes.arena_zone_summary(zone)
+                    remaining = summary["remaining"]
+                    amount = "—" if remaining is None else str(remaining)
+                    capacity = "—" if zone["capacity"] is None else str(zone["capacity"])
+                    counts.append(f"Зона {index} · осталось {amount} из {capacity}")
                 embed.add_field(name=heading, value="\n".join(counts), inline=True)
     _fields(embed, (("Конец текущего матча", state["match_end"]),))
 
@@ -167,14 +171,18 @@ class PersonalReportView(disnake.ui.View):
                     await inter.response.defer(ephemeral=True)
                     for index, zone in enumerate(zones, 1):
                         lines = [f"**{label} · зона {index}**"]
-                        if zone["capacity"] is not None:
+                        summary = game_personal_modes.arena_zone_summary(zone)
+                        if summary["remaining"] is not None:
+                            lines.append(f"Осталось {summary['remaining']} отрядов")
+                        if zone["capacity"] is not None and zone["placed"] is not None:
                             lines.append(f"Выставлено {zone['placed']} из {zone['capacity']}")
                         if zone["defeated"] is not None:
                             lines.append(f"Побеждено {zone['defeated']}")
                         for team in zone["teams"]:
                             line = " · ".join(team["names"]) or "Состав скрыт игрой"
-                            if team["defends"]:
-                                line += f" · удержано атак: {team['defends']}"
+                            status = game_personal_modes.arena_team_status(team)
+                            icon = {1: "🛡️", 2: "⚔️", 3: "❌"}.get(status["state"], "❔")
+                            line = f"{icon} {status['label']} · {line}"
                             lines.append(line)
                         if not zone["teams"]:
                             lines.append("Игра не передала составы." if zone["placed"] or side == "away" else "Пусто.")

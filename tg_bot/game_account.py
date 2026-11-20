@@ -344,9 +344,16 @@ async def arena_details(ctx, payload):
         await asyncio.to_thread(ga.select_account, args[0], args[1], ally_code=state["code"])
         lines = []
         for index, zone in enumerate(state["match"][side], 1):
-            lines.append(f"<b>Зона {index}</b> · выставлено {zone['placed']}")
+            summary = game_personal_modes.arena_zone_summary(zone)
+            amount = "—" if summary["remaining"] is None else summary["remaining"]
+            capacity = "—" if summary["capacity"] is None else summary["capacity"]
+            lines.append(f"<b>Зона {index}</b> · осталось {amount} из {capacity}")
             for team in zone["teams"]:
-                lines.append(esc(" · ".join(team["names"]) or "Состав скрыт игрой") + f" · удержано атак: {team['defends']}")
+                status = game_personal_modes.arena_team_status(team)
+                icon = {1: "🛡️", 2: "⚔️", 3: "❌"}.get(status["state"], "❔")
+                lines.append(f"{icon} {esc(status['label'])} · " + esc(" · ".join(team["names"]) or "Состав скрыт игрой"))
+            if not zone["teams"]:
+                lines.append("Игра не передала составы.")
         await _send_lines(target, lines)
     except ga.AccountError as error:
         await _account_error(ctx, error)

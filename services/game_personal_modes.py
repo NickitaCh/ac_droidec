@@ -26,7 +26,7 @@ def _time(value):
         return None
 
 
-def _arena_zones(participant):
+def _arena_zones(participant, *, battle=False):
     if participant is None:
         return []
     zones = []
@@ -43,9 +43,18 @@ def _arena_zones(participant):
                         units.append(base)
             teams.append({"units": units, "defends": _number(record, 8), "state": _number(record, 6)})
         count = _number(zone, 4)
-        zones.append({"id": _text(status, 1) if status else "", "status": _number(status, 2) if status else None,
+        row = {"id": _text(status, 1) if status else "", "status": _number(status, 2) if status else None,
                       "capacity": _number(zone, 2), "placed": max(count or 0, len(teams)),
-                      "defeated": _number(zone, 5), "teams": teams})
+                      "defeated": _number(zone, 5), "teams": teams}
+        if battle:
+            # The same WarConflict counters as TW: field 4 is survivors in combat.
+            row["remaining"] = count
+            states = [team["state"] for team in teams]
+            if (row["defeated"] is None and states and all(s in (1, 2, 3) for s in states)
+                    and sum(s in (1, 2) for s in states) == count):
+                row["defeated"] = states.count(3)
+            row["placed"] = count + row["defeated"] if count is not None and row["defeated"] is not None else None
+        zones.append(row)
     return zones
 
 
@@ -54,8 +63,34 @@ def name_arena_units(state):
     ids = {unit for zone in zones for team in zone["teams"] for unit in team["units"]}
     names = database.get_game_unit_names(sorted(ids)) if ids else {}
     for zone in zones:
+        zone["summary"] = arena_zone_summary(zone)
         for team in zone["teams"]:
             team["names"] = [names.get(unit) or unit for unit in team["units"]]
+            team["battle_status"] = arena_team_status(team)
+
+
+def arena_team_status(team):
+    """WarSquad status, including the attempt counted while locked or defeated."""
+    state = team.get("state")
+    holds = max(0, (team.get("defends") or 0) - (state in (2, 3)))
+    label = {1: "В защите", 2: "В бою", 3: "Побеждён"}.get(state, "Статус неизвестен")
+    if holds:
+        label += f" · удержаний: {holds}"
+    return {"state": state, "label": label, "holds": holds}
+
+
+def arena_zone_summary(zone):
+    """Do not infer individual defeats from the zone's aggregate counter."""
+    teams = zone.get("teams", [])
+    defeated = zone.get("defeated")
+    placed = zone.get("placed")
+    complete = bool(teams) and len(teams) == placed and all(t.get("state") in (1, 2, 3) for t in teams)
+    if defeated is None and complete:
+        defeated = sum(t["state"] == 3 for t in teams)
+    remaining = zone.get("remaining")
+    if "remaining" not in zone and placed is not None and defeated is not None:
+        remaining = max(0, placed - defeated)
+    return {"remaining": remaining, "defeated": defeated, "capacity": zone.get("capacity")}
 
 
 def arena(payload):
@@ -67,8 +102,10 @@ def arena(payload):
     for match in _messages(event, 2):
         opponent = _only(match, 16)
         home = _only(match, 2)
-        home_zones = _arena_zones(home)
-        away_zones = _arena_zones(_only(match, 3))
+        round_number = _number(match, 5)
+        battle = round_number is not None and round_number != 0
+        home_zones = _arena_zones(home, battle=battle)
+        away_zones = _arena_zones(_only(match, 3), battle=battle)
         capacity = [zone["capacity"] for zone in home_zones]
         index = _number(match, 8)
         matches.append({
@@ -76,7 +113,7 @@ def arena(payload):
             "start": _time(_number(match, 15)), "current": bool(match_id and index == match_id),
             "opponent": _text(opponent, 2) if opponent is not None else "",
             "defense": (sum(zone["placed"] for zone in home_zones), sum(capacity))
-            if home_zones and None not in capacity else None,
+            if home_zones and None not in capacity and all(z["placed"] is not None for z in home_zones) else None,
             "home": home_zones, "away": away_zones,
         })
     league = _text(event, 11)

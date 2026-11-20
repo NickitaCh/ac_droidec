@@ -44,17 +44,18 @@
             {% for zone in zones %}
             <section class="panel">
                 <h4>Зона {{ loop.index }}</h4>
-                <p>Выставлено {{ zone.placed }}{% if zone.capacity is not none %} из {{ zone.capacity }}{% endif %}
-                    {% if zone.defeated is not none %} · побеждено {{ zone.defeated }}{% endif %}</p>
+                <p>Осталось {{ zone.summary.remaining if zone.summary.remaining is not none else "—" }}{% if zone.capacity is not none %} из {{ zone.capacity }}{% endif %}
+                    {% if zone.summary.defeated is not none %} · побеждено {{ zone.summary.defeated }}{% endif %}</p>
                 {% if zone.teams %}
                 <ol>
                     {% for team in zone.teams %}
-                        <li>
+                        <li{% if team.state == 3 %} style="border-left:3px solid #fa7581;padding-left:.5rem"{% endif %}>
+                        <strong>{{ team.battle_status.label }}</strong> ·
                         {% for unit in team.units %}
                         <span title="{{ team.names[loop.index0] }}"><img src="/unit-img/{{ unit|urlencode }}" width="36" height="36" loading="lazy" alt="{{ team.names[loop.index0] }}"></span>
                         {% endfor %}
                         {{ team.names|join(" · ") if team.names else "Состав скрыт игрой" }}
-                        {% if team.defends %}<span class="muted"> · удержано атак: {{ team.defends }}</span>{% endif %}</li>
+                        </li>
                     {% endfor %}
                 </ol>
                 {% else %}
