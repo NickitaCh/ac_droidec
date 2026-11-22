@@ -86,10 +86,15 @@ def parse_link(link: str) -> tuple[str, str]:
     return m.group(2), m.group(3)
 
 
-async def fetch_messages(link: str, token: str | None = None, *, owner: str | None = None, profile: str | None = None) -> list[dict]:
+async def fetch_messages(link: str, token: str | None = None, *, owner: str | None = None, profile: str | None = None, end_link: str = "") -> list[dict]:
     """Первое сообщение HotBot по ссылке + его продолжения (ответы на него от того же
     автора) — эмбеды всех по порядку."""
     channel_id, message_id = parse_link(link)
+    end_id = None
+    if end_link:
+        end_channel, end_id = parse_link(end_link)
+        if end_channel != channel_id or int(end_id) < int(message_id):
+            raise HotbotImportError('Укажите первое и последнее сообщения по порядку из одной лички.')
     from services import bot_profiles
     token = token or bot_profiles.token("discord", profile)
     if not token:
@@ -121,6 +126,40 @@ async def fetch_messages(link: str, token: str | None = None, *, owner: str | No
             first = await resp.json()
         if own_bot_id and str(first.get('author', {}).get('id')) == own_bot_id:
             first['_droidec_dm'] = True
+        if end_id:
+            if not own_bot_id:
+                raise HotbotImportError('Диапазон сообщений доступен только в своей личке с Дроидцем.')
+            # Walk backwards from the explicit end: pagination cannot include newer forwards.
+            collected = {message_id: first}
+            cursor = str(int(end_id) + 1)
+            while int(cursor) > int(message_id):
+                async with session.get(f"{DISCORD_API}/channels/{channel_id}/messages",
+                                       params={"before": cursor, "limit": 100}) as resp:
+                    resp.raise_for_status()
+                    page = await resp.json()
+                page = [m for m in page if int(m['id']) < int(cursor)]
+                if not page:
+                    break
+                for message in page:
+                    if int(message_id) <= int(message['id']) <= int(end_id):
+                        collected[message['id']] = message
+                if len(collected) > 500:
+                    raise HotbotImportError('В диапазоне больше 500 сообщений. Разделите импорт на части.')
+                cursor = str(min(int(m['id']) for m in page))
+            if end_id not in collected:
+                raise HotbotImportError('Последнее сообщение не найдено. Проверьте ссылку.')
+            messages, seen = [], set()
+            for message in sorted(collected.values(), key=lambda m: int(m['id'])):
+                if str(message.get('author', {}).get('id')) != str(owner) or not message.get('message_snapshots'):
+                    raise HotbotImportError('В диапазоне должны быть только ваши пересылки шаблона HotBot. Уточните границы.')
+                reference = message.get('message_reference') or {}
+                key = (reference.get('channel_id'), reference.get('message_id'))
+                if all(key):
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                messages.append(message)
+            return messages
         async with session.get(f"{DISCORD_API}/channels/{channel_id}/messages",
                                params={"after": message_id, "limit": 30}) as resp:
             resp.raise_for_status()
@@ -151,7 +190,12 @@ def _split_names(text: str) -> list[str]:
 
 def parse_messages(messages: list[dict]) -> dict:
     """→ {"title", "player", "sections": [{"name", "lines": [str]}]} (строки без ```)."""
-    embeds = [e for m in messages for e in m.get("embeds") or []]
+    embeds = []
+    for message in messages:
+        snapshots = message.get('message_snapshots') or []
+        sources = [s.get('message') or {} for s in snapshots] if snapshots else [message]
+        for source in sources:
+            embeds.extend(source.get('embeds') or [])
     if not embeds or not any(e.get("fields") for e in embeds):
         raise HotbotImportError("В сообщении нет таблицы требований HotBot (нужен ответ на «templates test»).")
     title = (embeds[0].get("title") or "").strip()

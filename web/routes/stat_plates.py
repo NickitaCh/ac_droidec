@@ -200,17 +200,21 @@ def _import_mapping(form, plan_sections_count: int) -> dict:
             if form.get(f"section_{i}")}
 
 
-async def _import_plan(link: str, guild_id: int, mapping: dict | None = None):
-    parsed = hotbot_import.parse_messages(await hotbot_import.fetch_messages(link))
-    return parsed, hotbot_import.build_plan(parsed, guild_id, mapping)
+async def _import_plan(link: str, user: dict, mapping: dict | None = None, end_link: str = ""):
+    messages = await hotbot_import.fetch_messages(link, owner=str(user['discord_id']),
+                                                  profile=user.get('bot_profile'), end_link=end_link)
+    parsed = hotbot_import.parse_messages(messages)
+    plan = hotbot_import.build_plan(parsed, user['guild_id'], mapping)
+    plan['message_count'] = len(messages)
+    return parsed, plan
 
 
 @router.get("/import", response_class=HTMLResponse)
-async def plates_import_page(request: Request, link: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
-    ctx = {"user": user, "link": link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
+async def plates_import_page(request: Request, link: str = "", end_link: str = "", user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    ctx = {"user": user, "link": link, "end_link": end_link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
     if link:
         try:
-            _parsed, plan = await _import_plan(link, user["guild_id"])
+            _parsed, plan = await _import_plan(link, user, end_link=end_link)
             ctx.update(plan=plan, selected=hotbot_import.default_selection(plan), counts=hotbot_import.plan_counts(plan))
         except hotbot_import.HotbotImportError as e:
             ctx["error"] = str(e)
@@ -223,13 +227,14 @@ async def plates_import_page(request: Request, link: str = "", user: dict = Depe
 async def plates_import_submit(request: Request, user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
     """action=preview — пересчитать с новым сопоставлением разделов; action=apply — записать
     отмеченное. План всегда строится заново из сообщения, форма шлёт только выбор."""
-    form = await request.form()
+    form = await request.form(max_fields=20000)
     link = (form.get("link") or "").strip()
-    ctx = {"user": user, "link": link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
+    end_link = (form.get("end_link") or "").strip()
+    ctx = {"user": user, "link": link, "end_link": end_link, "plan": None, "error": None, "result": None, "selected": set(), "counts": None}
     try:
         sections_count = int(form.get("sections_count") or 0)
         mapping = _import_mapping(form, sections_count)
-        _parsed, plan = await _import_plan(link, user["guild_id"], mapping)
+        _parsed, plan = await _import_plan(link, user, mapping, end_link)
     except hotbot_import.HotbotImportError as e:
         ctx["error"] = str(e)
         return templates.TemplateResponse(request, "plates_import.html", ctx)
@@ -244,7 +249,7 @@ async def plates_import_submit(request: Request, user: dict = Depends(feature_fl
         selected = set(form.getlist("sel"))
         result = hotbot_import.apply_plan(plan, selected, user["guild_id"], str(user["discord_id"]),
                                           build_parent=form.get("build_parent") == "1")
-        _parsed, plan = await _import_plan(link, user["guild_id"], mapping)
+        _parsed, plan = await _import_plan(link, user, mapping, end_link)
         ctx["result"] = result
     ctx.update(plan=plan, selected=hotbot_import.default_selection(plan), counts=hotbot_import.plan_counts(plan))
     return templates.TemplateResponse(request, "plates_import.html", ctx)

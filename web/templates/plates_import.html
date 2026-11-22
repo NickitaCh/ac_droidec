@@ -22,18 +22,22 @@
         </p>
     {% endif %}
 
-    <form method="get" action="/plates/import" class="panel inline-form">
-        <input type="url" name="link" value="{{ link }}" placeholder="https://discord.com/channels/…/…/…" required style="flex:1; min-width: 18em;">
+    <form method="get" action="/plates/import" class="panel">
+        <p class="muted">Перешлите все сообщения шаблона HotBot подряд в личку Дроидецу. Для большого шаблона укажите начало и конец пересылок.</p>
+        <label>Ссылка на первое сообщение<input type="url" name="link" value="{{ link }}" placeholder="https://discord.com/channels/…/…/…" required></label>
+        <label>Ссылка на последнее сообщение (если их несколько)<input type="url" name="end_link" value="{{ end_link|default('') }}" placeholder="https://discord.com/channels/@me/…/…"></label>
         <button type="submit">Прочитать</button>
     </form>
 
     {% if plan %}
         <form method="post" action="/plates/import" id="import-form">
             <input type="hidden" name="link" value="{{ link }}">
+            <input type="hidden" name="end_link" value="{{ end_link|default('') }}">
             <input type="hidden" name="sections_count" value="{{ plan.sections|length }}">
 
             <div class="panel">
                 <h2>{{ plan.title }}{% if plan.player %} <span class="muted">· проверка {{ plan.player }}</span>{% endif %}</h2>
+                <p class="muted">Сообщений: {{ plan.message_count }} · Разделов: {{ plan.sections|length }}</p>
                 <p class="muted">
                     Новых {{ counts.add }} · изменённых {{ counts.change }} · совпадает {{ counts.same }}
                     · только у нас {{ counts.only_ours }}{% if counts.skipped %} · не переносится {{ counts.skipped }}{% endif %}

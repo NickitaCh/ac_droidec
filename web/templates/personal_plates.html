@@ -20,13 +20,14 @@
 <form method="post" action="/personal-plates/import" class="pp-import-layout">
     {{ csrf_field() }}
     <section class="panel pp-source"><h2>Источник</h2>
-        <label>Ссылка на сообщение<input type="url" name="link" value="{{ link|default('') }}" placeholder="https://discord.com/channels/…" required aria-describedby="pp-link-help"></label>
-        <p class="muted pp-help" id="pp-link-help">Ответ HotBot на сервере или сообщение /статы из вашей лички с Дроидцем. ПКМ по сообщению → «Копировать ссылку».</p>
+        <label>Ссылка на первое сообщение<input type="url" name="link" value="{{ link|default('') }}" placeholder="https://discord.com/channels/…" required aria-describedby="pp-link-help"></label>
+        <label>Ссылка на последнее сообщение (если их несколько)<input type="url" name="end_link" value="{{ end_link|default('') }}" placeholder="https://discord.com/channels/@me/…/…"></label>
+        <p class="muted pp-help" id="pp-link-help">Перешлите сообщения шаблона HotBot подряд в личку Дроидецу и укажите начало и конец. Все требования сохранятся в один личный плейт. Также подходит ссылка на ответ /статы из своей лички.</p>
         <label>Название плейта<input name="name" maxlength="80" value="{{ name|default('') }}" {% if preview %}required{% endif %}></label>
         {% if preview %}<input type="hidden" name="digest" value="{{ digest }}"><button name="action" value="save">Сохранить выбранное</button>{% else %}<button name="action" value="preview">Показать требования</button>{% endif %}
     </section>
     <section class="panel"><div class="pp-section-heading"><h2>Предпросмотр</h2>{% if preview %}<span class="muted">{{ preview|length }} требований</span>{% endif %}</div>
-        {% if preview %}{% if source_note %}<p class="muted pp-help">{{ source_note }}</p>{% endif %}<div class="pp-import-rows">{% for text in preview %}<label class="checkbox"><input type="checkbox" name="selected" value="{{ loop.index0 }}" checked><span>{{ text }}</span></label>{% endfor %}</div>
+        {% if preview %}<p class="muted pp-help">Сообщений: {{ message_count }}</p>{% if source_note %}<p class="muted pp-help">{{ source_note }}</p>{% endif %}<div class="pp-import-rows">{% for text in preview %}<label class="checkbox"><input type="checkbox" name="selected" value="{{ loop.index0 }}" checked><span>{{ text }}</span></label>{% endfor %}</div>
         {% if skipped %}<details class="pp-details"><summary>Пропущено: {{ skipped|length }}</summary>{% for s in skipped %}<p>{{ s.line }} — {{ s.reason }}</p>{% endfor %}</details>{% endif %}
         {% else %}<div class="pp-empty"><p>Вставьте ссылку, чтобы выбрать требования для личного плейта.</p></div>{% endif %}
     </section>

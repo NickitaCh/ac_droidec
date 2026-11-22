@@ -14,6 +14,7 @@ import re
 import database
 
 PREFIX = 'Личный · '
+MAX_REQUIREMENTS = 10000
 _actor = ContextVar('personal_plate_actor', default=None)
 
 
@@ -106,8 +107,8 @@ def create(user, name, items=()):
     if not name or len(name) > 80 or any(c in name for c in '\r\n[]'):
         raise ValueError('Название: от 1 до 80 символов, без квадратных скобок.')
     records = [item_data(it) for it in items]
-    if len(records) > 1000:
-        raise ValueError('В одном плейте допускается до 1000 требований.')
+    if len(records) > MAX_REQUIREMENTS:
+        raise ValueError(f'В одном плейте допускается до {MAX_REQUIREMENTS} требований.')
     plate_id = secrets.token_hex(8)
     with _db() as db:
         if db.execute('SELECT count(*) FROM personal_stat_plates WHERE owner=? AND guild_id=?',
@@ -145,8 +146,8 @@ def add(user, plate_id, item):
     get(plate_id, user, edit=True)
     data = item_data(item)
     with _db() as db:
-        if db.execute('SELECT count(*) FROM personal_stat_rows WHERE plate_id=?', (plate_id,)).fetchone()[0] >= 1000:
-            raise ValueError('В одном плейте допускается до 1000 требований.')
+        if db.execute('SELECT count(*) FROM personal_stat_rows WHERE plate_id=?', (plate_id,)).fetchone()[0] >= MAX_REQUIREMENTS:
+            raise ValueError(f'В одном плейте допускается до {MAX_REQUIREMENTS} требований.')
         db.execute('INSERT INTO personal_stat_rows(plate_id,data) VALUES (?,?)',
                    (plate_id, json.dumps(data, ensure_ascii=False)))
 

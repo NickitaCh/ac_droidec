@@ -110,6 +110,50 @@ class PersonalPlateTests(unittest.IsolatedAsyncioTestCase):
             self.user['bot_profile'] = 'prod'
             self.assertEqual(client.get('/personal-plates').status_code, 404)
 
+    def test_forwarded_range_preview_and_save_as_one_personal_plate(self):
+        fixture = json.loads((Path(__file__).parent / 'fixtures/hotbot_compact.json').read_text(encoding='utf-8'))
+        messages = [{'message_snapshots': [{'message': message}]} for message in fixture]
+        names = ['Cassian Andor (Undercover)', 'Luthen Rael', 'Kleya Marki', 'Cinta Kaz', 'Vel Sartha']
+        fetch = AsyncMock(return_value=messages)
+        with TestClient(self.app()) as client, patch.object(route.hb, 'fetch_messages', fetch), \
+                patch.object(database, 'get_game_unit_en_names', return_value={name: name for name in names}):
+            page = client.get('/personal-plates/import')
+            csrf = re.search('name="csrf" value="([^"]+)"', page.text).group(1)
+            payload = {'csrf': csrf, 'link': 'https://discord.com/channels/@me/22/33',
+                       'end_link': 'https://discord.com/channels/@me/22/55', 'name': 'Большой шаблон'}
+            preview = client.post('/personal-plates/import', data=payload)
+            self.assertIn('name="end_link" value="' + payload['end_link'] + '"', preview.text)
+            digest = re.search('name="digest" value="([^"]+)"', preview.text).group(1)
+            selected = re.findall('name="selected" value="([^"]+)"', preview.text)
+            self.assertGreater(len(selected), 40)
+            self.assertEqual(plates.list_plates(self.user), [])
+            saved = client.post('/personal-plates/import', data={**payload, 'action': 'save',
+                                'digest': digest, 'selected': selected}, follow_redirects=False)
+            self.assertEqual(saved.status_code, 303)
+            fetch.assert_awaited_with(payload['link'], owner='one', profile='test', end_link=payload['end_link'])
+            mine = plates.list_plates(self.user)
+            self.assertEqual(len(mine), 1)
+            self.assertEqual(len(plates.rows(mine[0])), len(selected))
+            self.assertEqual(database.get_all_stat_requirement_plates(1), [])
+
+    def test_import_saves_more_than_one_thousand_requirements(self):
+        items = [{**self.item, 'char': f'UNIT{i}'} for i in range(1100)]
+        with TestClient(self.app()) as client, patch.object(route.hb, 'fetch_messages', AsyncMock(return_value=[{}])), \
+                patch.object(plates, 'parse_source', return_value=('Большой', items, [])):
+            csrf = re.search('name="csrf" value="([^"]+)"', client.get('/personal-plates/import').text).group(1)
+            payload = {'csrf': csrf, 'link': 'https://discord.com/channels/@me/22/33', 'name': 'Большой'}
+            preview = client.post('/personal-plates/import', data=payload)
+            digest = re.search('name="digest" value="([^"]+)"', preview.text).group(1)
+            # Exercise multipart's field limit, not only URL-encoded forms.
+            fields = {**payload, 'action': 'save', 'digest': digest}
+            files = [(key, (None, value)) for key, value in fields.items()]
+            files.extend(('selected', (None, str(i))) for i in range(len(items)))
+            saved = client.post('/personal-plates/import', files=files, follow_redirects=False)
+            self.assertEqual(saved.status_code, 303, saved.text)
+            mine = plates.list_plates(self.user)
+            self.assertEqual(len(mine), 1)
+            self.assertEqual(len(plates.rows(mine[0])), len(items))
+
     def test_test_members_mod_write_gate_preserves_other_game_and_prod_gates(self):
         with patch.object(ga.guild_resolver, 'resolve_access', return_value={'guild_id': 2, 'tier': 'member'}), \
                 patch('services.bot_profiles.guild_profile', return_value='test'):

@@ -67,11 +67,12 @@ async def import_page(request: Request, user=Depends(access)):
 
 @router.post('/import')
 async def import_submit(request: Request, user=Depends(access)):
-    form = await request.form()
+    form = await request.form(max_fields=plates.MAX_REQUIREMENTS + 20)
     check(request, form)
     link, name = str(form.get('link', '')), str(form.get('name', ''))
+    end_link = str(form.get('end_link', '')).strip()
     try:
-        messages = await hb.fetch_messages(link, owner=str(user['discord_id']), profile=user.get('bot_profile'))
+        messages = await hb.fetch_messages(link, owner=str(user['discord_id']), profile=user.get('bot_profile'), end_link=end_link)
         title, items, skipped = plates.parse_source(messages, user)
         if not items:
             raise ValueError('В сообщении нет поддерживаемых требований.')
@@ -85,13 +86,13 @@ async def import_submit(request: Request, user=Depends(access)):
                 raise ValueError('Отметьте хотя бы одно требование.')
             pid = plates.create(user, name, chosen)
             return redirect('/personal-plates/' + pid)
-        return render(request, user, importing=True, link=link, name=name or title,
+        return render(request, user, importing=True, link=link, end_link=end_link, message_count=len(messages), name=name or title,
                       preview=[item['label'] if item.get('kind') == 'stored' else hb.describe_item(item) for item in items], skipped=skipped, digest=digest,
                       source_note='Текущие требования исходного плейта.' if messages[0].get('_droidec_dm') else '')
     except (ValueError, hb.HotbotImportError) as error:
-        return render(request, user, importing=True, link=link, name=name, error=str(error))
+        return render(request, user, importing=True, link=link, end_link=end_link, name=name, error=str(error))
     except (aiohttp.ClientError, TimeoutError):
-        return render(request, user, importing=True, link=link, name=name, error='Не удалось прочитать сообщение Discord. Попробуйте ещё раз.')
+        return render(request, user, importing=True, link=link, end_link=end_link, name=name, error='Не удалось прочитать сообщение Discord. Попробуйте ещё раз.')
 
 
 @router.get('/api/units')
