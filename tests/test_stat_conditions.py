@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from tests import test_mod_recommendations as fixtures
 from cogs import stat_requirements as stats
-from services import stat_conditions, mod_progress, mod_optimizer_v2, mod_optimizer_plans
+from services import stat_conditions, mod_progress
 
 
 class ConditionTests(unittest.TestCase):
@@ -24,6 +24,7 @@ class ConditionTests(unittest.TestCase):
         fixtures.RecommendationTests.tearDown(self)
 
     def test_condition_roundtrip_and_guild_boundary(self):
+        from services import mod_optimizer_plans
         db = stats.database
         before = mod_optimizer_plans.requirements_fingerprint(['Plate'], 1)
         self.assertEqual(self.client.post(self.url, data={'base_id': 'IG90', 'skill_id': 'unique-ig'}).status_code, 303)
@@ -83,6 +84,7 @@ class ConditionTests(unittest.TestCase):
         self.assertEqual(db.get_stat_requirement_conditions([self.rid], 1), {})
 
     def test_optimizer_loads_condition_unit_outside_selected_plate(self):
+        from services import mod_optimizer_v2
         stats.database.set_stat_requirement_condition(self.rid, 'IG90', 'unique-ig', 1)
         for tier, priority in [(6, 'required'), (7, 'optional')]:
             units = {'HUX': {'skill': []}, 'IG90': {'skill': [{'id': 'unique-ig', 'tier': tier}]}}
