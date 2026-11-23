@@ -355,7 +355,10 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
     characters = []
     for base_id in char_keys:
         reqs = []
-        for r in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
+        rows = database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
+        conditions = database.get_stat_requirement_conditions([r[0] for r in rows], guild_id)
+        for r in rows:
+            condition_unit, condition_skill = conditions.get(r[0], (None, None))
             is_omicron = r[3] == STAT_OMICRON
             is_mod_primary = r[3] == STAT_MOD_PRIMARY
             is_mod_set = r[3] == STAT_SET
@@ -375,6 +378,10 @@ async def plate_detail(request: Request, plate_name: str, user: dict = Depends(f
                 value_display = f"{_stat_ru(r[3])} {r[4]} {_fmt_value(r[5])}"
             reqs.append({
                 "id": r[0], "stat_name": r[3], "operator": r[4], "threshold": r[5],
+                "condition_unit": condition_unit, "condition_skill": condition_skill,
+                "condition_name": _unit_name(condition_unit) if condition_unit else "",
+                "condition_options": _omicron_options(condition_unit) if condition_unit else [],
+                "condition_text": f"Обязательно без омикрона: {_unit_name(condition_unit)} — {_omicron_ability_name(condition_skill)}" if condition_skill else "",
                 "threshold_fmt": _fmt_value(r[5]), "priority": r[6], "comment": r[8],
                 "priority_label": PRIORITY_LABELS.get(r[6], r[6]), "priority_emoji": PRIORITY_EMOJI.get(r[6], ""),
                 "is_omicron": is_omicron,
@@ -968,6 +975,24 @@ async def requirements_bulk_edit(request: Request, plate_name: str, user: dict =
             errors.append(error)
     query = f"?{urlencode({'error': ' '.join(errors)})}" if errors else ""
     return RedirectResponse(f"/plates/{plate_name}{query}{anchor}", status_code=303)
+
+
+@router.post("/{plate_name}/requirements/{req_id}/condition")
+async def requirement_condition(request: Request, plate_name: str, req_id: int,
+                                user: dict = Depends(feature_flags.require_feature("stat_requirements"))):
+    row = database.get_stat_requirement(req_id, guild_id=user['guild_id'])
+    if not row or row[1] != plate_name:
+        return JSONResponse({'error': 'Требование не найдено.'}, status_code=404)
+    form = await request.form()
+    error = None
+    try:
+        clear = form.get('clear') == '1'
+        database.set_stat_requirement_condition(req_id, None if clear else form.get('base_id') or None,
+                                                None if clear else form.get('skill_id') or None, user['guild_id'])
+    except ValueError as exc:
+        error = str(exc)
+    query = '?' + urlencode({'error': error}) if error else ''
+    return RedirectResponse(f"/plates/{plate_name}{query}#char-{row[2]}", status_code=303)
 
 
 @router.post("/{plate_name}/requirements/{req_id}/delete", response_class=HTMLResponse)

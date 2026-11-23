@@ -3,6 +3,13 @@
 {% block title %}{{ plate_name }} — Плейты — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
+    <style>
+        [data-condition-form] select, [data-condition-form] input { max-width: 100%; }
+        @media (max-width: 60em) {
+            table.cards-on-phone td.requirement-condition { display: block; text-align: left; }
+            table.cards-on-phone td.requirement-condition::before { display: block; margin-bottom: .4em; }
+        }
+    </style>
     <section class="page-hero">
         <a class="page-hero-back" href="/plates">← Все плейты</a>
         <div class="page-hero-top">
@@ -431,8 +438,8 @@
                 </form>
             </dialog>
         {% endif %}
-        <div class="table-scroll">
-            <table class="data">
+        <div>
+            <table class="data cards-on-phone">
                 <thead>
                     <tr>
                         <th>Стат</th>
@@ -444,13 +451,38 @@
                 <tbody>
                     {% for r in reqs %}
                         <tr>
-                            <td>{{ r.value_display }}</td>
-                            <td>{{ r.priority_emoji }} {{ r.priority_label }}</td>
-                            <td>{{ r.comment or "—" }}</td>
+                            <td data-label="Стат">{{ r.value_display }}</td>
+                            <td data-label="Приоритет">{{ r.priority_emoji }} {{ r.priority_label }}</td>
+                            <td data-label="Комментарий" class="requirement-condition">{{ r.comment or "—" }}
+                                {% if r.condition_text %}<p>{{ r.condition_text }}</p>{% endif %}
+                                {% if not is_modular %}
+                                <details>
+                                    <summary class="link-btn">Условие обязательности</summary>
+                                    <p class="muted">Без выбранного омикрона требование обязательно. С омикроном действует обычный приоритет строки. Выберите «Опционально», если с омикроном оно не обязательно.</p>
+                                    <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/condition" data-condition-form style="max-width:none">
+                                        <label>Персонаж
+                                            <div class="unit-search" data-live-search data-url="/plates/api/units" data-value-field="base_id" data-label-field="name" data-required="false">
+                                                <input class="unit-search-input" type="text" autocomplete="off" value="{{ r.condition_name }}" placeholder="Выберите персонажа…">
+                                                <input class="unit-search-value" type="hidden" name="base_id" value="{{ r.condition_unit or '' }}">
+                                                <div class="unit-search-results"></div>
+                                            </div>
+                                        </label>
+                                        <label>Омикрон
+                                            <select name="skill_id" class="omicron-skill-select">
+                                                <option value="">Без условия</option>
+                                                {% for opt in r.condition_options %}<option value="{{ opt.skill_id }}" {% if opt.skill_id == r.condition_skill %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
+                                            </select>
+                                        </label>
+                                        <button>Сохранить условие</button>
+                                        <button type="submit" name="clear" value="1">Убрать условие</button>
+                                    </form>
+                                </details>
+                                {% endif %}
+                            </td>
                             {% if is_modular %}
-                                <td><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
+                                <td data-label="Источник"><a href="/plates/{{ r.source_plate }}">{{ r.source_plate }}</a></td>
                             {% else %}
-                            <td class="row-actions">
+                            <td class="row-actions" data-label="Действия">
                                 <form method="post" action="/plates/{{ plate_name }}/requirements/{{ r.id }}/delete"
                                       onsubmit="return confirm('Удалить требование «{{ r.value_display }}» для {{ char.name }}?');">
                                     <button type="submit" class="button-danger">Удалить</button>
@@ -637,8 +669,7 @@
         // /plates/api/omicron-skills. Та же связка unit-search + select, что на /tasks
         // (см. tasks.html, data-omicron-picker), но проще: тут это единственная цель формы,
         // без переключателя target_type.
-        const form = document.querySelector("[data-omicron-add-form]");
-        if (!form) return;
+        document.querySelectorAll("[data-omicron-add-form], [data-condition-form]").forEach(form => {
         const unitHidden = form.querySelector(".unit-search-value");
         const select = form.querySelector(".omicron-skill-select");
 
@@ -672,6 +703,7 @@
         };
 
         unitHidden.addEventListener("change", refresh);
+        });
     });
     </script>
 

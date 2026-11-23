@@ -489,7 +489,10 @@ async def prepare_inputs(comlink, plates, code, mods, guild_id, force_refresh=Fa
         if m.get('equipped_to'):
             equipped[m['equipped_to']].append(m)
     other_keys = {r[13] for group in rows.values() for rs in group.values() for r in rs if len(r) > 13 and r[13]}
-    unit_keys = set(rows) | set(equipped) | other_keys
+    from services.stat_conditions import apply_priorities
+    conditions = database.get_stat_requirement_conditions(
+        [r[0] for group in rows.values() for rs in group.values() for r in rs], guild_id)
+    unit_keys = set(rows) | set(equipped) | other_keys | {b for b, _ in conditions.values()}
     types.update(database.get_unit_types(list(unit_keys - types.keys())))
     units = {}
     for b in unit_keys:
@@ -503,6 +506,9 @@ async def prepare_inputs(comlink, plates, code, mods, guild_id, force_refresh=Fa
     missing_donors = set(equipped) - set(units)
     if missing_donors:
         raise ValueError('Ростер неполный: обновите данные игрока перед расчётом.')
+    for group in rows.values():
+        for plate, requirements in group.items():
+            group[plate] = apply_priorities(requirements, conditions, units)
     tiers = database.get_skill_omicron_tiers(list({r[11] for group in rows.values() for rs in group.values() for r in rs if r[3] == 'Omicron'}))
 
     return members, rows, units, tiers

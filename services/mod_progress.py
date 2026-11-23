@@ -148,14 +148,21 @@ def plate_requirements(plate_name: str, guild_id: int) -> list[dict]:
     seen = set()
     for base_id in database.get_stat_requirement_characters(plate_name, guild_id=guild_id):
         char_name = _unit_display_name(base_id)
-        for row in database.get_stat_requirements(plate_name, base_id, guild_id=guild_id):
+        rows = database.get_stat_requirements(plate_name, base_id, guild_id=guild_id)
+        conditions = database.get_stat_requirement_conditions([r[0] for r in rows], guild_id)
+        for row in rows:
             key = progress_row_key(row)
             if key in seen:
                 continue
             seen.add(key)
             label, req = progress_row_text(row)
+            condition = conditions.get(row[0])
+            if condition:
+                unit, skill = condition
+                info = database.get_skill_display_info([skill]).get(skill)
+                req += f" (обязательно без омикрона: {_unit_display_name(unit)} — {info[0] if info else skill})"
             reqs.append({"key": key, "base_id": base_id, "char": char_name, "label": label,
-                         "req": req, "priority": row[6], "source": row[1]})
+                         "req": req, "priority": 'required' if condition else row[6], "source": row[1]})
     return reqs
 
 

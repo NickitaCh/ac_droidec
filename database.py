@@ -4501,9 +4501,38 @@ def _ensure_stat_requirements_table(cursor):
         cursor.execute("ALTER TABLE stat_requirements ADD COLUMN scheme_num INTEGER")
     except sqlite3.OperationalError:
         pass  # колонка уже добавлена ранее
+    for column in ("required_unless_unit", "required_unless_skill"):
+        try:
+            cursor.execute(f"ALTER TABLE stat_requirements ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            pass
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_stat_req_guild_plate_char ON stat_requirements(guild_id, plate_name, character_key)"
     )
+
+
+def get_stat_requirement_conditions(req_ids, guild_id=1):
+    """Extra metadata; keep the public 15-field requirement tuple compatible."""
+    if not req_ids:
+        return {}
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _ensure_stat_requirements_table(conn.cursor())
+        return {rid: (unit, skill) for rid, unit, skill in conn.execute(
+            "SELECT id,required_unless_unit,required_unless_skill FROM stat_requirements "
+            "WHERE guild_id=? AND required_unless_skill IS NOT NULL AND id IN (" +
+            ",".join("?" for _ in req_ids) + ")", (guild_id, *req_ids))}
+
+
+@guard_edit("plate", lookup=("stat_requirements", "plate_name"))
+def set_stat_requirement_condition(req_id, base_id=None, skill_id=None, guild_id=1):
+    if bool(base_id) != bool(skill_id):
+        raise ValueError("Выберите персонажа и его омикрон.")
+    if skill_id and skill_id not in get_all_unit_omicron_skills().get(base_id, []):
+        raise ValueError("Омикрон не принадлежит выбранному персонажу.")
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _ensure_stat_requirements_table(conn.cursor())
+        conn.execute("UPDATE stat_requirements SET required_unless_unit=?,required_unless_skill=? "
+                     "WHERE id=? AND guild_id=?", (base_id or None, skill_id or None, req_id, guild_id))
 
 
 def _ensure_mod_secondary_recommendations_table(cursor):

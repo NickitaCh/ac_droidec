@@ -43,7 +43,10 @@ def fingerprint(mods, units=None):
 def requirements_fingerprint(plates, guild_id):
     rows = {p: {b: database.get_stat_requirements(p, b, guild_id=guild_id)
                 for b in database.get_stat_requirement_characters(p, guild_id=guild_id)} for p in sorted(plates)}
-    return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    conditions = database.get_stat_requirement_conditions(
+        sorted({r[0] for chars in rows.values() for requirements in chars.values() for r in requirements}), guild_id)
+    payload = {'rows': rows, 'conditions': conditions} if conditions else rows
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def get_locks(owner, guild_id, code):

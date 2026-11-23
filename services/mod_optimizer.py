@@ -490,6 +490,14 @@ async def optimize_plates(comlink, stat_calc, plate_names: list[str], ally_code:
 
     char_info = {}
     for base_id, rows_by_plate in rows_by_char.items():
+        from services.stat_conditions import apply_priorities
+        conditions = database.get_stat_requirement_conditions(
+            [r[0] for rows in rows_by_plate.values() for r in rows], guild_id)
+        condition_units = {}
+        for condition_base, _ in set(conditions.values()):
+            condition_units[condition_base], _ = await _get_unit_for_player(comlink, ally_code, condition_base, False)
+        for plate, rows in rows_by_plate.items():
+            rows_by_plate[plate] = apply_priorities(rows, conditions, condition_units)
         thresholds = _merge_thresholds(rows_by_plate)
         relic_vals = [int(r[5]) for rows in rows_by_plate.values() for r in rows if r[3] == "Relic"]
         unit, updated_at = await _get_unit_for_player(comlink, ally_code, base_id, force_refresh)

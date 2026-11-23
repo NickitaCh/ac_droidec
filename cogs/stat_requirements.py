@@ -747,6 +747,23 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
         block = f"⚠️ нет юнита у игрока «{player_label}» (не открыт либо ещё не синхронизирован)"
         return char_name, block, 0, 0, None, [], 0, None, None
 
+    from services.stat_conditions import apply_priorities
+    conditions = database.get_stat_requirement_conditions([r[0] for r in rows], guild_id)
+    condition_units = {base_id: unit}
+    for condition_base, _ in set(conditions.values()):
+        if condition_base not in condition_units:
+            condition_units[condition_base], _ = await _get_unit_for_player(
+                bot, ally_code, condition_base, False)
+    effective_rows = apply_priorities(rows, conditions, condition_units)
+    # Keep stable progress keys based on the configured priority, not the player's omicron.
+    effective_priorities = {r[0]: r[6] for r in effective_rows}
+    inactive_progress_keys = {progress_row_key(r) for r in rows
+                              if r[0] in conditions and effective_priorities[r[0]] != PRIORITY_REQUIRED}
+    if conditions:
+        comments = list(comments) + [
+            f"Обязательно без омикрона: {_unit_display_name(b)} — {_omicron_label(s, '')}"
+            for b, s in sorted(set(conditions.values()))]
+
     current_relic = stat_engine.get_current_relic_level(unit)
     current_values = _with_total_life(dict(stat_engine.calc_final_stats(bot.stat_calc, unit)))
     current_values["Relic"] = current_relic
@@ -853,6 +870,7 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     compare_lines = []
     for row in rows:
         req_id, _, _, stat_name, operator, threshold, priority, raw_text, comment, _, _, skill_id, mod_slot, compare_character_key, row_scheme = row
+        priority = effective_priorities[req_id]
         if active_scheme is not None and row_scheme and row_scheme != active_scheme:
             # Строка другой (неактивной) схемы — полностью пропускается: не в таблице,
             # не в matched/total, не в "Итог" (см. _resolve_scheme выше).
@@ -1111,6 +1129,10 @@ async def _evaluate_character_player(bot, plate_name: str, base_id: str, ally_co
     if comments:
         block += "\n" + "\n".join(f"💠 _{c}_" for c in comments)
 
+    if rows_out is not None and inactive_progress_keys:
+        for item in rows_out:
+            if item['key'] in inactive_progress_keys:
+                item['ok'] = None
     return char_name, block, matched, total, updated_at, failed_required, required_total, active_scheme, scheme_label
 
 
