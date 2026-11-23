@@ -11,7 +11,7 @@
 {% if not plan %}
 <section class="panel tw-empty"><h2>Подготовим следующую войну</h2><p>Создайте план защиты, выберите соперника и задайте стратегию.</p><a class="button" href="/tw/def/plans">Создать первый план</a><a href="/squads">Библиотека паков →</a></section>
 {% else %}
-<form method="get" action="/tw" class="tw-work-form tw-plan-pick"><label>План войны<select name="plan" onchange="this.form.submit()">{% for p in plans %}<option value="{{ p.id }}"{% if p.id == plan.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><button type="submit" class="button-secondary">Открыть</button><a href="/tw/def/plans">Все планы →</a></form>
+<form method="get" action="/tw" class="tw-work-form tw-plan-pick"><label>План войны<select name="plan" onchange="this.form.requestSubmit()">{% for p in plans %}<option value="{{ p.id }}"{% if p.id == plan.id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label><button type="submit" class="button-secondary">Открыть</button><a href="/tw/def/plans">Все планы →</a></form>
 {{ tw.plan_nav(plan, "overview", workspace) }}
 <section class="tw-matchup">
     <div><span class="tw-eyebrow">Наша гильдия</span><h2>{{ guild_name }}</h2><span>{{ plan.name }}</span></div>
@@ -44,10 +44,10 @@
 <form method="post" action="/tw/def/plans/{{ plan.id }}/campaign" class="tw-work-form">{{ tw.revision_input(revision) }}
     <div class="tw-form-grid"><label>Соперник<select name="opponent"><option value="">Не выбран</option>{% if workspace.opponent %}<option value="{{ workspace.opponent }}" selected>{{ workspace.opponent_name }}</option>{% endif %}{% if current_opponent and current_opponent.id != workspace.opponent %}<option value="{{ current_opponent.id }}">Текущая ВГ · {{ current_opponent.name }}</option>{% endif %}{% for o in recent if o.id != workspace.opponent and (not current_opponent or o.id != current_opponent.id) %}<option value="{{ o.id }}">{{ opponent_label(o) }}</option>{% endfor %}</select></label>
     <label>Или код союзника / ID гильдии<input name="opponent_code" maxlength="80" placeholder="123-456-789"></label>
-    <label>Этап<select name="phase">{% for key, label in phases.items() %}<option value="{{ key }}"{% if key == workspace.phase %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <fieldset class="tw-phase-field"><legend>Статус плана</legend><div class="tw-phase-options">{% for key, label in phases.items() %}<label class="tw-phase-option"><input type="radio" name="phase" value="{{ key }}"{% if key == workspace.phase %} checked{% endif %}><span><strong>{{ label }}</strong><small>{{ phase_hints[key] }}</small></span></label>{% endfor %}</div><small class="muted">Отметка офицера для команды. Не переключает этап в игре и не ограничивает редактирование плана.</small></fieldset>
     <label>Связать с результатом<select name="result_start"><option value="">Пока нет результата</option>{% for r in results if r.opponent == workspace.opponent %}<option value="{{ r.start }}"{% if r.start|string == workspace.result_start|string %} selected{% endif %}>{{ r.label }}</option>{% endfor %}</select></label></div>
-    <p class="muted">Этап задаёт офицер. После сохранения этот план станет текущей ВГ для гильдии.</p><button type="submit">Сохранить</button>
+    <p class="muted">После сохранения этот план станет текущей ВГ для гильдии.</p><button type="submit">Сохранить</button>
 </form></details>
 {% endif %}
-<script src="/static/tw_def.js?v=20261105" defer></script><script src="/static/tw_workspace.js?v=20261105" defer></script>
+<script src="/static/tw_def.js?v=20261123" defer></script>
 {% endblock %}

@@ -1,6 +1,63 @@
 /* TW command center: local view switches, map inspector and clipboard. */
 (() => {
     "use strict";
+    if (window.twWorkspaceReady) return;
+    window.twWorkspaceReady = true;
+
+    // Navigation and ordinary forms share a visible, accessible progress state.
+    // Keep named buttons enabled so their values still reach the server.
+    const progress = document.createElement("div");
+    progress.className = "tw-loading-notice";
+    progress.hidden = true;
+    progress.setAttribute("role", "status");
+    progress.setAttribute("aria-live", "polite");
+    const spinner = document.createElement("span");
+    spinner.className = "tw-loading-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const progressText = document.createElement("span");
+    progress.append(spinner, progressText);
+    document.body.append(progress);
+    const resetProgress = () => {
+        progress.hidden = true;
+        document.querySelectorAll("[data-tw-submitting]").forEach(form => {
+            delete form.dataset.twSubmitting;
+            form.removeAttribute("aria-busy");
+            form.querySelectorAll("[data-tw-busy-label]").forEach(button => {
+                button.textContent = button.dataset.twBusyLabel;
+                delete button.dataset.twBusyLabel;
+            });
+        });
+    };
+    document.addEventListener("submit", event => {
+        const form = event.target;
+        if (!form.closest("main, dialog") || form.method === "dialog" || form.target === "_blank") return;
+        if (event.defaultPrevented) return;
+        if (form.dataset.twSubmitting) { event.preventDefault(); return; }
+        form.dataset.twSubmitting = "true";
+        // Run after validation/confirm and other submit handlers have accepted it.
+        queueMicrotask(() => {
+            if (event.defaultPrevented) { delete form.dataset.twSubmitting; return; }
+            form.setAttribute("aria-busy", "true");
+            progressText.textContent = form.dataset.twLoading || (form.method === "get" ? "Загружаем…" : "Сохраняем изменения…");
+            progress.hidden = false;
+            if (event.submitter) {
+                event.submitter.dataset.twBusyLabel = event.submitter.textContent;
+                event.submitter.textContent = "Подождите…";
+            }
+        });
+    });
+    document.addEventListener("click", event => {
+        const link = event.target.closest("a[href]");
+        if (!link || !link.closest("main") || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target || link.hasAttribute("download") || link.dataset.ajaxSwap) return;
+        const url = new URL(link.href, location.href);
+        if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
+        queueMicrotask(() => {
+            if (event.defaultPrevented) return;
+            progressText.textContent = "Загружаем страницу…";
+            progress.hidden = false;
+        });
+    });
+    window.addEventListener("pageshow", resetProgress);
     const viewPanels = [...document.querySelectorAll("[data-tw-view-panel]")];
     const zonePanels = [...document.querySelectorAll("[data-tw-zone-panel]")];
     const setView = (key, updateUrl = true) => {
@@ -81,8 +138,20 @@
                 const first = [...target.options].find(o => !o.disabled);
                 target.value = first?.value || "";
             }
+            target.dispatchEvent(new Event("change"));
         };
         source.addEventListener("change", filter);
         filter();
+    });
+    document.querySelectorAll("[data-tw-squad-select]").forEach(select => {
+        const host = select.form.querySelector("[data-tw-squad-preview]");
+        if (!host) return;
+        const render = () => {
+            const template = document.getElementById(`tw-squad-${select.value}`);
+            if (template) host.replaceChildren(template.content.cloneNode(true));
+            else host.textContent = "Нет подходящих паков — добавьте состав в библиотеку.";
+        };
+        select.addEventListener("change", render);
+        render();
     });
 })();

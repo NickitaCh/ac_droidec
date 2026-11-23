@@ -188,9 +188,10 @@ def _dc_value(dc: dict | None) -> str:
     return f"{dc['kind']}:{dc['req_id']}" if dc and "kind" in dc else ""
 
 
-def _squad_view(squad: dict, roster: engine.Roster | None = None) -> dict:
+def _squad_view(squad: dict, roster: engine.Roster | None = None, names=None) -> dict:
     """Пак для шаблона: слоты с именами юнитов и подписями требований."""
-    names = roster.unit_names if roster else database.get_game_unit_names(list(engine.squad_base_ids(squad)))
+    if names is None:
+        names = roster.unit_names if roster else database.get_game_unit_names(list(engine.squad_base_ids(squad)))
     slots = []
     for slot in squad["slots"]:
         slots.append([
@@ -474,14 +475,13 @@ def _int_in(value: str, default: int, lo: int = 1, hi: int = 100) -> int:
 async def plan_create(
     name: str = Form(""),
     squads_per_zone: str = Form("40"),
-    fleets_per_zone: str = Form("40"),
     user: dict = Depends(_require),
 ):
     name = name.strip()
     if not name:
         return _redirect("/tw/def/plans", error="Укажите название плана.")
-    plan_id = database.create_tw_def_plan(user["guild_id"], name, _int_in(squads_per_zone, 40),
-                                          _int_in(fleets_per_zone, 40), _who(user))
+    capacity = _int_in(squads_per_zone, 40)
+    plan_id = database.create_tw_def_plan(user["guild_id"], name, capacity, capacity, _who(user))
     return RedirectResponse(f"/tw/def/plans/{plan_id}", status_code=303)
 
 
@@ -580,6 +580,7 @@ async def plan_page(plan_id: int, request: Request, user: dict = Depends(_requir
         "columns": columns,
         "zone_options": engine.ZONES,
         "squad_stats": squad_stats,
+        "squad_previews": [_squad_view(s, roster) for s in squads],
         "players": player_rows,
         "roster_players": [{"ally_code": c, "name": names.get(c) or c} for c in roster.ally_codes],
         "assigned_total": len(assignments),
@@ -601,7 +602,6 @@ async def plan_settings(
     request: Request,
     name: str = Form(""),
     squads_per_zone: str = Form("40"),
-    fleets_per_zone: str = Form("40"),
     note: str = Form(""),
     user: dict = Depends(_require),
 ):
@@ -611,7 +611,7 @@ async def plan_settings(
     database.update_tw_def_plan(
         user["guild_id"], plan_id, name=name.strip() or plan["name"],
         squads_per_zone=_int_in(squads_per_zone, plan["squads_per_zone"]),
-        fleets_per_zone=_int_in(fleets_per_zone, plan["fleets_per_zone"]),
+        fleets_per_zone=_int_in(squads_per_zone, plan["squads_per_zone"]),
         excluded=excluded, note=note.strip() or None,
     )
     return _redirect(f"/tw/def/plans/{plan_id}", message="Настройки сохранены")
@@ -895,7 +895,7 @@ async def command_page(request: Request, user: dict = Depends(_require)):
     selected = request.query_params.get("plan") or database.get_bot_state("tw_active_plan", guild_id=guild_id)
     plan = next((p for p in plans if str(p["id"]) == str(selected)), plans[0] if plans else None)
     ctx = {"user": user, "guild_name": (database.get_guild_config(guild_id) or {}).get("name") or "Мы",
-           "plans": plans, "plan": plan, "phases": work.PHASES,
+           "plans": plans, "plan": plan, "phases": work.PHASES, "phase_hints": work.PHASE_HINTS,
            "error": request.query_params.get("error"), "message": request.query_params.get("message"),
            "recent": guild_compare.load_recent_opponents(guild_id), "opponent_label": guild_compare.opponent_label,
            "current_opponent": guild_compare.current_opponent(guild_id) if user.get("bot_profile") == "test" else None}
@@ -932,9 +932,11 @@ async def strategy_page(plan_id: int, request: Request, user: dict = Depends(_re
     plan = _get_plan_or_404(user["guild_id"], plan_id)
     squads = database.list_tw_def_squads(user["guild_id"])
     names = database.get_player_names(user["guild_id"])
+    unit_names = database.get_game_unit_names(list({b for s in squads for b in engine.squad_base_ids(s)}))
     return templates.TemplateResponse(request, "tw_strategy.html", {
         "user": user, "plan": plan, "workspace": work.workspace(user["guild_id"], plan_id),
-        "revision": work.revision(user["guild_id"], plan_id), "squads": squads,
+        "revision": work.revision(user["guild_id"], plan_id),
+        "squads": [_squad_view(s, names=unit_names) for s in squads],
         "squad_names": {s["id"]: s["name"] for s in squads}, "zones": engine.ZONES,
         "zone_names": {z["key"]: z["label"] for z in engine.ZONES}, "names": names,
         "players": [{"ally_code": c, "name": names.get(c, c)} for c, _ in database.get_roster_by_player_id(user["guild_id"]).values()],
@@ -1038,7 +1040,7 @@ async def plan_preview(plan_id: int, request: Request, user: dict = Depends(_req
     token = work.save_proposal(guild_id, plan_id, rev, roster, proposal)
     return templates.TemplateResponse(request, "tw_proposal.html", {"user": user, "plan": plan, "proposal": proposal,
         "token": token, "revision": rev, "zones": {z["key"]: z["label"] for z in engine.ZONES},
-        "unit_names": roster.unit_names})
+        "unit_names": roster.unit_names, "proposal_zones": work.group_proposal(proposal)})
 
 
 @router.post("/plans/{plan_id}/apply")
@@ -1076,7 +1078,7 @@ async def template_apply(plan_id: int, template_id: int = Form(...), user: dict 
     ws = work.workspace(guild_id, plan_id)
     ws["targets"] = template["targets"]
     database.update_tw_def_plan(guild_id, plan_id, name=plan["name"], squads_per_zone=template["squads_per_zone"],
-        fleets_per_zone=template["fleets_per_zone"], excluded=plan["excluded"], note=plan["note"])
+        fleets_per_zone=template["squads_per_zone"], excluded=plan["excluded"], note=plan["note"])
     work.save_workspace(guild_id, plan_id, ws)
     return _redirect(f"/tw/def/plans/{plan_id}/strategy", message="Цели стратегии заменены. Назначения игроков сохранены.")
 
@@ -1098,18 +1100,10 @@ async def attack_page(plan_id: int, request: Request, user: dict = Depends(_requ
     selected = request.query_params.get("pack", packs[0] if packs else "")
     counters = database.get_tw_counters_for_pack(guild_id, selected) if selected in packs else []
     ws = work.workspace(guild_id, plan_id)
-    lines = [f"ВГ — {plan['name']}"]
-    for o in ws["orders"]:
-        lines.append(f"\n{o['zone']} — {o['enemy']} → {o['counter']}\n{o['composition']}\n{o['note']}")
-        if o.get("datacron"):
-            lines.append("Датакрон: " + o["datacron"])
-        if o.get("guide"):
-            lines.append(o["guide"])
-        if o.get("team_code"):
-            lines.append("Команда: " + o["team_code"])
     return templates.TemplateResponse(request, "tw_attack.html", {"user": user, "plan": plan, "workspace": ws,
         "revision": work.revision(guild_id, plan_id), "packs": packs, "selected_pack": selected, "counters": counters,
-        "zones": engine.ZONES, "order_text": "\n".join(lines), "error": request.query_params.get("error")})
+        "zones": engine.ZONES, "order_text": work.format_attack_orders(plan["name"], ws["orders"]),
+        "error": request.query_params.get("error")})
 
 
 @router.post("/plans/{plan_id}/order")

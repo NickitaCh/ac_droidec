@@ -102,7 +102,7 @@
             delForm.elements.assignment_id.value = del.dataset.twdefDel;
             delForm.elements.back.value = del.dataset.back || "";
             del.disabled = true;
-            delForm.submit();
+            delForm.requestSubmit();
             return;
         }
         const move = e.target.closest("[data-twdef-move]");
@@ -121,7 +121,7 @@
                 moveForm.elements.assignment_id.value = move.dataset.twdefMove;
                 moveForm.elements.zone.value = select.value;
                 select.disabled = true;
-                moveForm.submit();
+                moveForm.requestSubmit();
             });
             select.addEventListener("blur", () => { if (!select.disabled) select.replaceWith(move); });
         }

@@ -1,6 +1,8 @@
 {% import "_ui.html" as ui %}
+{% import "_game.html" as game %}
 {# Шапка раздела ВГ: баннер + вкладки разделов. KPI/доп. содержимое — через {% call %}. #}
 {% macro tw_hero(title, active, lead="") -%}
+<script src="/static/tw_workspace.js?v=20261123" defer></script>
 <section class="page-hero page-hero-dark">
     <div class="page-hero-top">
         <div>
@@ -30,3 +32,20 @@
 {%- endmacro %}
 
 {% macro revision_input(revision) -%}<input type="hidden" name="revision" value="{{ revision }}">{%- endmacro %}
+
+{% macro squad_preview(squad) -%}
+<div class="tw-squad-preview">
+    <header><strong>{{ squad.name }}</strong><a href="/squads/{{ squad.id }}/edit">Требования ↗</a></header>
+    <div class="tw-squad-slots">
+    {% for slot in squad.slot_views %}
+        <div class="tw-squad-slot"><small>{{ ('Флагман' if loop.index == 1 else 'Основа' if loop.index <= 4 else 'Подкрепление') if squad.combat_type == 'ship' else ('Лидер' if loop.first else 'Слот ' ~ loop.index) }}</small>
+        {% for opt in slot %}<div class="tw-squad-option">{{ game.portrait(opt.base_id, 'xs') }}<span>{{ opt.name }}{% if opt.req %}<small>{{ opt.req }}</small>{% endif %}</span></div>{% if not loop.last %}<span class="tw-squad-or">или</span>{% endif %}{% endfor %}</div>
+    {% endfor %}
+    </div>
+    {% if squad.datacron %}<small class="muted">Датакрон: {{ 'обязателен' if squad.datacron.required else 'рекомендован' }} · подробнее в требованиях</small>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro squad_templates(squads) -%}
+{% for s in squads %}<template id="tw-squad-{{ s.id }}">{{ squad_preview(s) }}</template>{% endfor %}
+{%- endmacro %}

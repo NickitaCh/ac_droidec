@@ -1,9 +1,28 @@
 {% extends "base.html" %}
-{% import "_tw.html" as tw %}{% import "_game.html" as game %}
-{% block title %}Предложение защиты — {{ plan.name }}{% endblock %}{% block main_class %}wide{% endblock %}
-{% block content %}{{ tw.tw_hero(plan.name, "plans") }}{{ tw.plan_nav(plan, "strategy") }}
-<section class="panel"><div class="panel-title">Предложение защиты</div><p>Новых назначений: <strong>{{ proposal.rows|length }}</strong>. Целей с нехваткой: <strong>{{ proposal.shortages|length }}</strong>.</p><p class="muted">Существующие назначения закреплены. Подбор учитывает приоритеты целей, дефицит паков, резерв атаки и обязательные ДК. Это последовательный подбор, он не гарантирует единственное лучшее решение.</p>
-{% for s in proposal.shortages %}<p class="config-warning"><strong>{{ zones.get(s.zone, s.zone) }} · {{ s.squad }}</strong> — не хватает {{ s.missing }} отрядов.<br>{{ s.reason }}</p>{% endfor %}
-<div class="tw-proposal-list">{% for a in proposal.rows %}<article class="tw-proposal-row"><div><strong>{{ a.name }}</strong><small>{{ zones[a.zone] }} · {{ a.squad_name }}</small></div><div class="twdef-units">{% for b in a.units %}<span title="{{ unit_names.get(b, b) }}">{{ game.portrait(b, 'xs') }}</span>{% endfor %}</div><small>{{ a.reason }}{% if a.datacron_id %} · ДК назначен{% endif %}</small></article>{% endfor %}</div>
-<form method="post" action="/tw/def/plans/{{ plan.id }}/apply" class="tw-work-form tw-inline-form">{{ tw.revision_input(revision) }}<input type="hidden" name="token" value="{{ token }}"><button{% if not proposal.rows %} disabled{% endif %}>Применить {{ proposal.rows|length }} назначений</button><a class="button button-secondary" href="/tw/def/plans/{{ plan.id }}/strategy">Вернуться к стратегии</a></form></section>
+{% import "_tw.html" as tw %}{% import "_game.html" as game %}{% import "_ui.html" as ui %}
+{% block title %}Предложение защиты — {{ plan.name }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{{ tw.tw_hero(plan.name, "plans") }}{{ tw.plan_nav(plan, "strategy") }}
+<section class="panel tw-proposal-head">
+    <span class="tw-eyebrow">Результат подбора · ещё не сохранён</span>
+    <h2>Предложение защиты</h2>
+    <div class="tw-proposal-totals"><span><strong>{{ proposal.rows|length }}</strong> новых назначений</span><span><strong>{{ proposal_zones|length }}</strong> локаций</span><span class="{{ 'tw-shortage-count' if proposal.shortages else '' }}"><strong>{{ proposal.shortages|length }}</strong> целей с нехваткой</span></div>
+    <p class="muted">Уже назначенные отряды сохранены. Проверьте составы и игроков, затем примените предложение.</p>
+    <details class="tw-proposal-method"><summary>Как выбраны игроки</summary><p>Сначала — цели высокого приоритета и дефицитные паки. Среди подходящих игроков выбираются те, чьи юниты нужны меньшему числу других паков, затем — игроки с меньшим числом назначений. Учитываются резерв атаки и обязательные датакроны.</p><p>Это последовательный подбор: другой порядок целей может дать иной результат.</p></details>
+</section>
+{% if proposal.shortages %}<section class="panel"><h2>Не удалось заполнить</h2><div class="tw-shortage-grid">{% for s in proposal.shortages %}<article class="tw-shortage"><strong>{{ zones.get(s.zone, s.zone) }} · {{ s.squad }}</strong><span>Не хватает: {{ s.missing }}</span><details><summary>Почему</summary><p>{{ s.reason }}</p></details></article>{% endfor %}</div></section>{% endif %}
+<div class="tw-proposal-zones">
+{% for z in proposal_zones %}
+<section class="panel tw-proposal-zone">
+    <header class="tw-proposal-zone-head"><div><span class="tw-eyebrow">{{ 'Флот' if z.kind == 'ship' else 'Наземная защита' }}</span><h2>{{ z.label }}</h2></div><span class="badge badge-neutral">+{{ z.count }} отрядов</span></header>
+    <div class="tw-proposal-packs">{% for pack in z.packs %}<article class="tw-proposal-pack"><header><h3>{{ pack.name }}</h3><strong>×{{ pack.count }}</strong></header>
+    {% for composition in pack.compositions %}<div class="tw-proposal-composition"><div class="tw-proposal-units">{% for b in composition.units %}<span title="{{ unit_names.get(b, b) }}">{{ game.portrait(b, 'xs') }}<small>{{ unit_names.get(b, b) }}</small></span>{% endfor %}</div>
+    <div class="tw-proposal-players">{% for a in composition.players %}<span>{{ a.name }}{% if a.datacron_id %}<small title="Подобран обязательный датакрон"> · ДК</small>{% endif %}</span>{% endfor %}</div>
+    <details class="tw-proposal-reasons"><summary>Почему эти игроки</summary><p class="muted">«Другие паки» — сколько составов библиотеки затронет это назначение. «В защите» — сколько отрядов было у игрока перед этим назначением.</p><table class="data"><thead><tr><th>Игрок</th><th>Другие паки</th><th>В защите</th></tr></thead><tbody>{% for a in composition.players %}<tr><td>{{ a.name }}</td><td>{{ a.conflict }}</td><td>{{ a.assigned }}</td></tr>{% endfor %}</tbody></table></details></div>{% endfor %}
+    </article>{% endfor %}</div>
+</section>
+{% else %}{% if not proposal.shortages %}<p class="empty-state">Все цели уже заполнены — новых назначений нет.</p>{% endif %}{% endfor %}
+</div>
+<div class="tw-proposal-apply"><form method="post" action="/tw/def/plans/{{ plan.id }}/apply" class="tw-work-form tw-inline-form" data-tw-loading="Сохраняем назначения…">{{ tw.revision_input(revision) }}<input type="hidden" name="token" value="{{ token }}"><span>{{ proposal.rows|length }} новых назначений</span><button{% if not proposal.rows %} disabled{% endif %}>Применить предложение</button><a class="button button-secondary" href="/tw/def/plans/{{ plan.id }}/strategy">Изменить стратегию</a></form></div>
 {% endblock %}

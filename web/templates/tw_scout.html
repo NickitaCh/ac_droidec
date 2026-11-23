@@ -23,7 +23,7 @@
         {% if plan %}<input type="hidden" name="plan" value="{{ plan.id }}">{% endif %}
         {% if current or recent %}
         <label>Соперник
-            <select name="opp" onchange="this.form.querySelector('[name=opp_code]').value=''; this.form.submit()">
+            <select name="opp" onchange="this.form.querySelector('[name=opp_code]').value=''; this.form.requestSubmit()">
                 <option value="">— выберите —</option>
                 {% if current %}<option value="{{ current.id }}"{% if opp == current.id %} selected{% endif %}>Текущая ВГ · {{ current.name }}</option>{% endif %}
                 {% for o in recent if not current or o.id != current.id %}<option value="{{ o.id }}" {% if lookup and lookup.swgoh_guild_id == o.id %}selected{% endif %}>{{ label(o) }}</option>{% endfor %}

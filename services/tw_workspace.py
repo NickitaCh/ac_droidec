@@ -15,6 +15,12 @@ import database
 import tw_def_engine as engine
 
 PHASES = {"preparation": "Подготовка", "defense": "Расстановка защиты", "attack": "Атака", "finished": "Завершена"}
+PHASE_HINTS = {
+    "preparation": "Выберите составы защиты и сохраните нужные паки для атаки.",
+    "defense": "Проверьте назначения и разошлите игрокам задания на защиту.",
+    "attack": "Соберите приказы по зонам из гайдов гильдии.",
+    "finished": "Свяжите план с результатом и сохраните его для следующей войны.",
+}
 
 
 @contextmanager
@@ -131,7 +137,7 @@ def restore(guild_id, plan_id, version_id):
         p = snapshot["plan"]
         conn.execute("UPDATE tw_def_plans SET name=?, squads_per_zone=?, fleets_per_zone=?, excluded_json=?, note=?, "
                      "updated_at=datetime('now') WHERE guild_id=? AND id=?",
-                     (p["name"], p["squads_per_zone"], p["fleets_per_zone"], json.dumps(p["excluded"]), p["note"], guild_id, plan_id))
+                     (p["name"], p["squads_per_zone"], p["squads_per_zone"], json.dumps(p["excluded"]), p["note"], guild_id, plan_id))
         conn.execute("DELETE FROM tw_def_assignments WHERE guild_id=? AND plan_id=?", (guild_id, plan_id))
         for a in snapshot["assignments"]:
             conn.execute("INSERT INTO tw_def_assignments (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json, "
@@ -258,6 +264,7 @@ def propose(plan, assignments, ws, roster, squads):
                 engine.used_datacrons_by_player(working).get(c["ally_code"], set()))
             row = {"zone": zone["key"], "squad_id": squad["id"], "squad_name": squad["name"],
                    "ally_code": c["ally_code"], "name": c["name"], "units": c["units"], "datacron_id": dc_id,
+                   "conflict": c["conflict"], "assigned": c["assigned"],
                    "reason": f"Других паков блокирует: {c['conflict']}; уже назначено игроку: {c['assigned']}"}
             working.append(row)
             added.append(row)
@@ -267,6 +274,43 @@ def propose(plan, assignments, ws, roster, squads):
                               "reason": "; ".join(f"{reason} ({n})" for reason, n in failures.most_common(3)) or "Нет доступных игроков",
                               "wanted": original_need})
     return {"rows": added, "shortages": shortages}
+
+
+def group_proposal(proposal):
+    """Group only the display; preserve every player's concrete unit snapshot."""
+    zones = []
+    for zone in engine.ZONES:
+        rows = [a for a in proposal["rows"] if a["zone"] == zone["key"]]
+        if not rows:
+            continue
+        packs = {}
+        for row in rows:
+            pack = packs.setdefault(row["squad_id"], {"name": row["squad_name"], "count": 0, "compositions": {}})
+            pack["count"] += 1
+            composition = pack["compositions"].setdefault(tuple(row["units"]), {"units": row["units"], "players": []})
+            composition["players"].append(row)
+        for pack in packs.values():
+            pack["compositions"] = list(pack["compositions"].values())
+        zones.append({**zone, "count": len(rows), "packs": list(packs.values())})
+    return zones
+
+
+def format_attack_orders(name, orders):
+    """Readable Discord text, including the saved guide without repeating its heading."""
+    blocks = [f"ВГ — {name}"]
+    for order in orders:
+        heading = f"## {order['zone']} · {order['enemy']}"
+        composition = order.get("composition", "").strip()
+        counter = order.get("counter", "").strip()
+        lines = [heading, f"**{counter}**"]
+        if composition and composition.casefold() != counter.casefold():
+            lines.append("Состав: " + composition)
+        for key, prefix in (("datacron", "Датакрон: "), ("note", ""), ("guide", ""), ("team_code", "Команда: ")):
+            value = order.get(key, "").strip()
+            if value:
+                lines.append(prefix + value)
+        blocks.append("\n\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def save_proposal(guild_id, plan_id, rev, roster, proposal):
@@ -291,7 +335,7 @@ def templates(guild_id):
 
 
 def save_template(guild_id, name, plan, ws):
-    data = {"targets": ws["targets"], "squads_per_zone": plan["squads_per_zone"], "fleets_per_zone": plan["fleets_per_zone"]}
+    data = {"targets": ws["targets"], "squads_per_zone": plan["squads_per_zone"], "fleets_per_zone": plan["squads_per_zone"]}
     with connect() as conn:
         conn.execute("INSERT INTO tw_strategy_templates (guild_id, name, data) VALUES (?, ?, ?)",
                      (guild_id, name, json.dumps(data, ensure_ascii=False)))

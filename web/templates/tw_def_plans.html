@@ -16,48 +16,26 @@
             <label>Название
                 <input type="text" name="name" required maxlength="80" placeholder="vs Mighty Chlorians">
             </label>
-            <label title="Сколько паков вмещает наземная зона">Паков на зону
+            <label title="Одинаково для наземных и флотских локаций этой ВГ">Паков на локацию
                 <input type="number" name="squads_per_zone" value="40" min="1" max="100">
-            </label>
-            <label title="Сколько флотов вмещает флотская зона">Флотов на зону
-                <input type="number" name="fleets_per_zone" value="40" min="1" max="100">
             </label>
             <button type="submit">Создать</button>
         </form>
+        <p class="muted">Число из игры на начало ВГ — одинаковое для всех локаций, включая флот.</p>
     </div>
 
     {% if plans %}
-        <div class="panel">
-            <div class="table-scroll">
-                <table class="data">
-                    <thead>
-                        <tr>
-                            <th>План</th>
-                            <th class="num">Паков</th>
-                            <th class="num">Игроков</th>
-                            <th>Изменён (UTC)</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for p in plans %}
-                            <tr>
-                                <td><a href="/tw/def/plans/{{ p.id }}"><strong>{{ p.name }}</strong></a>{% if p.note %}<div class="cell-sub">{{ p.note }}</div>{% endif %}</td>
-                                <td class="num">{{ p.assigned_count }}</td>
-                                <td class="num">{{ p.player_count }}</td>
-                                <td>{{ p.updated_at }}</td>
-                                <td class="twdef-row-actions">
-                                    <form method="post" action="/tw/def/plans/{{ p.id }}/copy" class="twdef-inline">{{ twui.revision_input(p.revision) }}<button type="submit" class="button-secondary">Копия</button></form>
-                                    <form method="post" action="/tw/def/plans/{{ p.id }}/delete" class="twdef-inline"
-                                          onsubmit="return confirm('Удалить план «{{ p.name }}» со всеми назначениями?');">
-                                        {{ twui.revision_input(p.revision) }}<button type="submit" class="button-danger">Удалить</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        <div class="tw-plan-list">
+        {% for p in plans %}
+            <article class="panel tw-plan-list-card">
+                <div><a href="/tw/def/plans/{{ p.id }}"><strong>{{ p.name }}</strong></a>{% if p.note %}<p class="muted">{{ p.note }}</p>{% endif %}<p class="muted">{{ p.assigned_count }} отрядов · {{ p.player_count }} игроков · {{ p.squads_per_zone }} паков на локацию</p><small class="muted">Изменён {{ p.updated_at }} UTC</small></div>
+                <div class="tw-inline-form">
+                    <a class="button" href="/tw/def/plans/{{ p.id }}">Открыть</a>
+                    <form method="post" action="/tw/def/plans/{{ p.id }}/copy" class="twdef-inline">{{ twui.revision_input(p.revision) }}<button type="submit" class="button-secondary">Копия</button></form>
+                    <form method="post" action="/tw/def/plans/{{ p.id }}/delete" class="twdef-inline" onsubmit="return confirm('Удалить план со всеми назначениями?');">{{ twui.revision_input(p.revision) }}<button type="submit" class="button-danger">Удалить</button></form>
+                </div>
+            </article>
+        {% endfor %}
         </div>
     {% else %}
         <p class="empty-state">Планов пока нет.</p>

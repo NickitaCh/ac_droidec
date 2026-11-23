@@ -90,8 +90,9 @@ def option_stats(opt: dict) -> list[dict]:
 
 
 def zone_capacity(plan: dict, zone_key: str) -> int:
-    zone = ZONES_BY_KEY[zone_key]
-    return plan["fleets_per_zone"] if zone["kind"] == "ship" else plan["squads_per_zone"]
+    # The game sets one capacity for all locations in a particular war.
+    ZONES_BY_KEY[zone_key]  # Keep rejecting invalid zone keys.
+    return plan["squads_per_zone"]
 
 
 # ---------------------------------------------------------------------------

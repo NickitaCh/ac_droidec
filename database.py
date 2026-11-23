@@ -7766,6 +7766,8 @@ _TW_DEF_PLAN_KEYS = ["id", "guild_id", "name", "squads_per_zone", "fleets_per_zo
 
 def _tw_def_plan_row(row) -> dict:
     d = dict(zip(_TW_DEF_PLAN_KEYS, row))
+    # Compatibility column: the game uses the same limit for troops and fleets.
+    d["fleets_per_zone"] = d["squads_per_zone"]
     try:
         d["excluded"] = json.loads(d.pop("excluded_json") or "[]")
     except ValueError:
@@ -7806,7 +7808,7 @@ def create_tw_def_plan(guild_id: int, name: str, squads_per_zone: int, fleets_pe
     cursor.execute("""
         INSERT INTO tw_def_plans (guild_id, name, squads_per_zone, fleets_per_zone, created_by, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    """, (guild_id, name, squads_per_zone, fleets_per_zone, user))
+    """, (guild_id, name, squads_per_zone, squads_per_zone, user))
     plan_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -7820,7 +7822,7 @@ def update_tw_def_plan(guild_id: int, plan_id: int, *, name: str, squads_per_zon
         UPDATE tw_def_plans SET name = ?, squads_per_zone = ?, fleets_per_zone = ?, excluded_json = ?, note = ?,
                updated_at = datetime('now')
         WHERE guild_id = ? AND id = ?
-    """, (name, squads_per_zone, fleets_per_zone, json.dumps(excluded), note, guild_id, plan_id))
+    """, (name, squads_per_zone, squads_per_zone, json.dumps(excluded), note, guild_id, plan_id))
     conn.commit()
     conn.close()
 

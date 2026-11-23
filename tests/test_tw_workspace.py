@@ -56,6 +56,47 @@ class WorkspaceTests(unittest.TestCase):
         return self.client.post(f"/tw/def/plans/{pid}/{action}",
             data={"revision": work.revision(self.gid, pid), **(data or {})}, follow_redirects=False)
 
+    def test_all_locations_share_capacity_in_create_settings_templates_and_legacy_plans(self):
+        response = self.client.post('/tw/def/plans/create', data={
+            'name': 'Общий лимит', 'squads_per_zone': '35', 'fleets_per_zone': '1'}, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        pid = int(response.headers['location'].rsplit('/', 1)[1])
+        plan = database.get_tw_def_plan(self.gid, pid)
+        self.assertEqual({engine.zone_capacity(plan, z['key']) for z in engine.ZONES}, {35})
+        self.assertEqual(plan['fleets_per_zone'], 35)
+        response = self.post('settings', {'name': 'Общий лимит', 'squads_per_zone': '30', 'fleets_per_zone': '5'}, pid)
+        self.assertEqual(response.status_code, 303)
+        plan = database.get_tw_def_plan(self.gid, pid)
+        self.assertEqual(plan['fleets_per_zone'], 30)
+        # Historical rows/templates may still contain unequal values.
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(database.DB_NAME)) as conn, conn:
+            conn.execute('UPDATE tw_def_plans SET fleets_per_zone=1 WHERE id=?', (pid,))
+        self.assertEqual(database.get_tw_def_plan(self.gid, pid)['fleets_per_zone'], 30)
+        self.assertEqual(engine.zone_capacity({'squads_per_zone': 30, 'fleets_per_zone': 1}, '3f'), 30)
+        work.save_template(self.gid, 'Лимит', {**plan, 'fleets_per_zone': 1}, work.workspace(self.gid, pid))
+        template = work.load_template(self.gid, work.templates(self.gid)[0]['id'])
+        self.assertEqual(template['squads_per_zone'], template['fleets_per_zone'])
+
+    def test_grouped_proposal_preserves_alternative_units_and_every_player(self):
+        rows = [dict(zone='1t', squad_id=1, squad_name='Пак', units=units, name=name)
+                for units, name in [(['A', 'B'], 'Первый'), (['A', 'B'], 'Второй'), (['A', 'C'], 'Третий')]]
+        zones = work.group_proposal({'rows': rows, 'shortages': []})
+        self.assertEqual(len(zones), 1)
+        self.assertEqual(zones[0]['count'], 3)
+        compositions = zones[0]['packs'][0]['compositions']
+        self.assertEqual([c['units'] for c in compositions], [['A', 'B'], ['A', 'C']])
+        self.assertEqual([p['name'] for c in compositions for p in c['players']], ['Первый', 'Второй', 'Третий'])
+
+    def test_attack_text_keeps_tactics_datacron_and_one_composition(self):
+        text = work.format_attack_orders('Awakened Order', [dict(zone='1 верх', enemy='Альфа (жуки)',
+            counter='Палпатин, Мара, Вейдер', composition='Палпатин, Мара, Вейдер',
+            note='Не ниже Р3', guide='Вторую особую используйте с осторожностью.', datacron='Нужен ДК', team_code='123')])
+        self.assertEqual(text.count('Палпатин, Мара, Вейдер'), 1)
+        for value in ('## 1 верх · Альфа (жуки)', 'Не ниже Р3', 'Вторую особую', 'Датакрон: Нужен ДК', 'Команда: 123'):
+            self.assertIn(value, text)
+
     def test_render_all_views_and_workflow_without_network(self):
         for url in [f"/tw/def/plans/{self.plan_id}", f"/tw/def/plans/{self.plan_id}?view=players",
                     f"/tw/def/plans/{self.plan_id}?view=problems", f"/tw/def/plans/{self.plan_id}/strategy",
