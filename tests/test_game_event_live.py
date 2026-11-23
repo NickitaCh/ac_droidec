@@ -1,9 +1,11 @@
 import base64
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from services import game_account as ga, game_account_readonly, game_event_live, game_personal_modes, guild_compare
+from services import game_account as ga, game_account_readonly, game_event_live, game_personal_modes, guild_compare, tw_battle_log
 
 
 def text(tag, value):
@@ -47,9 +49,24 @@ class EventReadTests(unittest.TestCase):
         result = game_event_live.parse_tw(ga.pack([tw]))
         self.assertEqual(result["round"], 1)
         self.assertEqual(result["own"], [
-            {"id": "zone", "status": None, "points": 0, "capacity": 25, "deployed": 0, "defeated": None},
+            {"id": "zone", "status": None, "points": 0, "capacity": 25,
+             "remaining": 0, "deployed": None, "defeated": None},
         ])
         self.assertIsNone(game_event_live.parse_tw(b""))
+
+    def test_tw_combat_counts_remaining_and_defeated_separately(self):
+        def team(status):
+            return message(3, number(6, status), message(4, message(1, text(2, "VADER"))))
+
+        def zone(key, remaining, *teams):
+            return message(2, message(1, text(1, key)), number(2, 41), number(4, remaining), *teams)
+
+        tw = message(3, number(3, 1), number(4, 2_000_000_000),
+                     message(7, zone("open", 2, team(1), team(2), team(3)), zone("hidden", 41)))
+        known, hidden = game_event_live.parse_tw(ga.pack([tw]))["opponent"]
+        self.assertEqual((known["remaining"], known["deployed"], known["defeated"]), (2, 3, 1))
+        self.assertEqual([row["status"] for row in known["teams"]], [1, 2, 3])
+        self.assertEqual((hidden["remaining"], hidden["deployed"], hidden["defeated"]), (41, None, None))
 
     def test_tw_reads_revealed_teams_and_keeps_unrevealed_counts(self):
         squad = message(3, text(1, "player-id"), text(2, "Ник"), message(4, message(1, text(2, "GLREY:SEVEN_STAR")),
@@ -145,6 +162,73 @@ class SuppliesDecodeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SavedSessionTests(unittest.IsolatedAsyncioTestCase):
+    def test_tw_pairs_a_retry_without_using_a_different_players_start(self):
+        target = {"guild_id": "home", "zone": "north", "squad_id": "squad", "defender": "Defender"}
+        events = [
+            {**target, "id": "1", "at": 1, "attacker": "First", "outcome": "start"},
+            {**target, "id": "2", "at": 2, "attacker": "Second", "outcome": "start"},
+            {**target, "id": "3", "at": 3, "attacker": "Second", "outcome": "hold"},
+            {**target, "id": "4", "at": 4, "attacker": "Second", "outcome": "start"},
+            {**target, "id": "5", "at": 5, "attacker": "Second", "outcome": "win", "banners": 20},
+        ]
+        rows = tw_battle_log._attempts(events)
+        self.assertEqual([(row["id"], row["outcome"], row.get("banners")) for row in rows],
+                         [("4", "win", 20), ("2", "hold", None), ("1", "start", None)])
+
+    async def test_tw_reads_the_activity_channel_and_deduplicates_observations(self):
+        zone_id = "tw_jakku01_phase01_conflict01"
+        war = ga.pack([message(3, text(1, "war"), number(3, 1), number(4, 2_000_000_000),
+                               text(5, "channel"), message(6, message(1, text(1, "home"))),
+                               message(7, message(1, text(1, "away")),
+                                       message(2, message(1, text(1, zone_id), text(4, "channel")))))])
+
+        def event(identifier, status, *, owner="defender", channel="channel"):
+            key = "TERRITORY_CHANNEL_ACTIVITY_CONFLICT_FLEET_WIN" if status == 3 else "EMPTY"
+            params = [message(2, text(3, "22"), number(4, 2))] if status == 3 else []
+            zone = message(1, text(1, zone_id), message(4, text(1, key), *params),
+                           text(7, "war"), text(12, "home"))
+            squad = message(2, text(1, owner), text(2, "Defender"), number(6, status),
+                            message(4, message(1, text(2, "VADER:SEVEN_STAR"))),
+                            text(5, "different-squad" if identifier == "hold" else "squad"),
+                            number(8, 1) if identifier == "hold" else number(8, 0))
+            return message(1, text(1, identifier), text(3, channel), number(6, 1_800_000_000_000),
+                           text(7, "attacker"), text(8, "Attacker"),
+                           message(10, text(5, "TERRITORY_WAR_CONFLICT_ACTIVITY"),
+                                   message(6, zone, squad)))
+
+        log = ga.pack([event("win", 3), event("start", 2), event("hold", 1), event("deploy", 1, owner="attacker"),
+                       event("foreign", 3, channel="other"), event("win", 3)])
+        request = ga.pack([text(4, "PlayerRpc"), text(5, "GetInitialData"), text(6, ""),
+                           text(7, "player"), text(8, "session")])
+        session = ga.pack([text(1, "channel-player"), text(2, "channel-token")])
+        with patch.object(ga, "_read_payload", AsyncMock(side_effect=[war, session, log])) as read:
+            result = await game_account_readonly._read_event(request, "player", "tw", lambda: True)
+        args = read.call_args.args
+        self.assertEqual(args[1:], ("ChannelRpc", "GetEvents"))
+        self.assertEqual(read.await_args.kwargs["endpoint"], tw_battle_log.ENDPOINT)
+        self.assertEqual(ga._one(ga.fields(args[0]), 8, 2), b"channel-token")
+        payload = ga.fields(ga._one(ga.fields(args[0]), 6, 2))
+        channel = ga.fields(ga._one(payload, 4, 2))
+        self.assertEqual(channel, [text(1, "channel"), number(5, 100)])
+        self.assertEqual([(row["id"], row["outcome"]) for row in result["battles"]],
+                         [("win", "win"), ("start", "start"), ("hold", "hold")])
+        self.assertEqual((result["battles"][0]["attacker"], result["battles"][0]["defender"],
+                          result["battles"][0]["leader"]), ("Attacker", "Defender", "VADER"))
+        with TemporaryDirectory() as temp, patch.object(tw_battle_log.database, "DB_NAME", str(Path(temp) / "db.sqlite")):
+            tw_battle_log.record(1, result, 100)
+            tw_battle_log.record(1, {**result, "battles": [result["battles"][0]]}, 101)
+            self.assertEqual(len(tw_battle_log.latest(1)["rows"]), 3)
+            self.assertFalse(tw_battle_log.latest(2))
+            with patch.object(tw_battle_log.database, "get_game_unit_names", return_value={"VADER": "Vader"}):
+                log = tw_battle_log.latest(1)
+                zone = next(key for key in tw_battle_log.zone_options(log)
+                            if tw_battle_log.display_rows(log, zone=key))
+                battles = tw_battle_log.display_rows(log, zone=zone)
+                self.assertEqual(len(battles), 2)
+                self.assertEqual({row["result"] for row in battles}, {"Победа · +22 стяг.", "Защита устояла"})
+                victory = next(row for row in battles if row["outcome"] == "win")
+                self.assertEqual((victory["id"], victory["banners"]), ("start", 22))
+
     async def test_expired_session_uses_only_one_allowlisted_read(self):
         request = ga.pack([text(4, "PlayerRpc"), text(5, "GetInitialData"), text(6, ""),
                            text(7, "player"), text(8, "session")])

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import tempfile
 import unittest
@@ -51,10 +52,34 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
             p.stop()
         self.tmp.cleanup()
 
+    async def test_prod_can_link_its_registered_external_alt(self):
+        with patch("services.bot_profiles.current_profile", return_value="prod"), patch.object(ga, "require_account_read"):
+            with self.assertRaises(ga.AccountError):
+                await account_linking.validate_player("admin", True, "new-alt", self.comlink)
+            database.set_user_registration("admin", "987654321", "New alt", guild_id=0)
+            player = await account_linking.validate_player("admin", True, "new-alt", self.comlink)
+            target = account_linking.enroll("admin", True, player)
+            ea._save(target, self.credentials, self.summary)
+            self.assertEqual(ea.target_for_registration("admin", 1, "987654321", personal=True), target)
+            self.assertIsNone(ea.target_for_registration("admin", 1, "987654321"))
+            self.assertEqual(database.get_user_registration("admin", guild_id=1), ("123456789", "Main"))
+
     async def start(self):
         state = {"stage": "code", "cookies": [], "fields": {}, "url": "https://signin.ea.com/"}
         with patch.object(ea_browser, "start", AsyncMock(return_value=state)):
             return await ea.start_registration("admin", True, "test@example.com", True)
+
+    async def test_link_page_shows_email_only_for_the_pending_account(self):
+        flow = await self.start()
+        with patch.object(ea_browser, "finish", AsyncMock(return_value={"stage": "code"})):
+            with self.assertRaises(ga.AccountError):
+                await ea.finish_registration("admin", True, flow, "123456", self.comlink)
+        with TestClient(self.app) as client:
+            page = client.get("/game-account/link?alt=1")
+            self.assertIn("test@example.com", page.text)
+            self.assertNotIn("test@example.com", client.get("/game-account/link").text)
+            self.user["discord_id"] = "other"
+            self.assertNotIn("test@example.com", client.get("/game-account/link?alt=1").text)
 
     async def test_new_alt_requires_no_previous_alt_and_preserves_main(self):
         flow = await self.start()
@@ -74,6 +99,44 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r["id"] for r in lab.accounts()], ["notest"])
         with lab._db() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM user_mapping WHERE ally_code='987654321'").fetchone()[0], 0)
+
+    async def test_resubmission_survives_cancelled_request_and_reuses_success(self):
+        flow = await self.start()
+        checking = asyncio.Event()
+        resume = asyncio.Event()
+
+        async def check_code(state, code):
+            checking.set()
+            await resume.wait()
+            return {"stage": "complete", "longlive": "access"}
+
+        async def restore(cfg, tokens, expected, validate_preview=None):
+            await validate_preview("new-alt")
+            return self.credentials, self.summary
+
+        def submit():
+            return ea.finish_registration("admin", True, flow, "123456", self.comlink)
+
+        with (patch.object(ea_browser, "finish", side_effect=check_code) as finish,
+              patch.object(ea, "_exchange", AsyncMock(return_value={})),
+              patch.object(ea, "_import", side_effect=restore) as import_player):
+            first = asyncio.create_task(submit())
+            await asyncio.wait_for(checking.wait(), timeout=2)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            with TestClient(self.app) as client:
+                page = client.get("/game-account/link/ea-finish?alt=1")
+                self.assertIn("Проверяем код EA.", page.text)
+                self.assertNotIn('name="ea_email"', page.text)
+            with self.assertRaisesRegex(ga.AccountError, "Код уже проверяется"):
+                await self.start()
+            duplicate = asyncio.create_task(submit())
+            resume.set()
+            result = await duplicate
+            self.assertEqual(await submit(), result)
+            finish.assert_awaited_once()
+            import_player.assert_awaited_once()
 
     async def test_member_of_another_test_guild_links_alt_only_in_own_guild(self):
         database.set_user_registration("member", "234567891", "Main", guild_id=2)
@@ -157,6 +220,7 @@ class LinkingTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(ea, "start_registration", AsyncMock()) as start, patch.object(ea, "pending", return_value={"id": "flow"}):
                 result = client.post("/game-account/link/ea-start", data={"csrf": csrf, "alt": "1", "ea_email": "test@example.com", "consent": "yes"})
                 self.assertEqual(start.await_args.args, ("admin", True, "test@example.com", True))
+                self.assertEqual(result.history[0].status_code, 303)
                 self.assertIn('name="one_time_code"', result.text)
                 self.assertIn("Привязать альт", result.text)
             with patch.object(ea, "finish_registration", AsyncMock(return_value={"target": "owned-target"})) as finish, patch("web.routes.registration._get_comlink", return_value=self.comlink):

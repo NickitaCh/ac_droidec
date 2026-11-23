@@ -2,7 +2,7 @@
 {% block title %}Выставить защиту ВГ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<section class="page-hero"><h1>Выставить защиту ВГ</h1><a class="hero-link" href="/game-account/events/tw">ВГ сейчас</a></section>
+<section class="page-hero"><h1>Выставить защиту ВГ</h1><a class="hero-link" href="/game-account/events/tw">Анализ ВГ</a></section>
 <p class="deploy-meta">{{ record.code }} · против {{ record.data.get('opponent', 'соперника текущей ВГ') }} · назначений: {{ record.data.assignments|length }}</p>
 <ol class="deploy-steps" aria-label="Этапы выставления"><li class="{{ 'current' if record.state in ('draft', 'stopped', 'partial') else '' }}">1. Составы и датакроны</li><li class="{{ 'current' if record.state == 'ready' else '' }}">2. Проверка и выставление</li></ol>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}

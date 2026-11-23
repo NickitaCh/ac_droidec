@@ -32,6 +32,10 @@ def allowed(guild_id, tier, profile):
     return guild_id == 1 and tier == "officer" and profile == PROFILE and bot_profiles.accepts(guild_id, profile)
 
 
+def personal_allowed(guild_id, tier, profile):
+    return tier in ("officer", "member") and allowed(guild_id, "officer", profile)
+
+
 def _connect():
     db = sqlite3.connect(database.DB_NAME)
     db.row_factory = sqlite3.Row
@@ -168,25 +172,41 @@ def summary(kind, data, captured):
             if operations:
                 lines.append(f"Взводы {complete} из {len(operations)} · не хватает {missing} юнитов")
     elif kind == "tw":
+        from services.game_event_live import tw_remaining
+
         phase = "расстановка защиты" if data["round"] == 0 else f"раунд {data['round']}"
         lines.append(f"**ВГ · {phase} · до {_clock(data['end'])} МСК**")
         for label, side in (("Мы", "own"), ("Соперник", "opponent")):
             zones = data[side]
             if zones:
                 capacities = [zone["capacity"] for zone in zones]
-                filled = [zone["deployed"] for zone in zones]
+                filled = [tw_remaining(zone) if data["round"] else zone["deployed"] for zone in zones]
                 beaten = [zone["defeated"] for zone in zones]
                 slots = _score(sum(capacities)) if None not in capacities else "—"
                 deployed = _score(sum(filled)) if None not in filled else "—"
-                line = f"{label} · слоты защиты: {deployed} из {slots}"
+                metric = "осталось в защите" if data["round"] else "слоты защиты"
+                line = f"{label} · {metric}: {deployed} из {slots}"
                 if data["round"] != 0 and None not in beaten:
                     line += f" · разгромлено в защите: {_score(sum(beaten))}"
                 lines.append(line)
     else:
+        from services import raid_live_image, raids
+
         raid = data["active"][0]
         expires = f" · до {_clock(raid['end'])} МСК" if raid.get("end") else ""
-        lines.append(f"**Рейд{expires}**")
-        lines.append(f"Очки гильдии {_score(raid.get('points'))} · игроков в снимке {len(raid['players'])}")
+        name = raids.raid_name(raid["id"]) if raid.get("id") else "Рейд"
+        lines.append(f"**{name}{expires}**")
+        points = raid.get("points")
+        lines.append(f"Очки гильдии: {_score(points)}")
+        reward = raid_live_image.progress(raid)
+        if reward:
+            reached, goal = reward
+            if reached:
+                lines.append(f"Достигнут сундук №{reached}")
+            if goal:
+                lines.append(f"Цель — сундук №{reached + 1}: {_score(goal)} · осталось {_score(goal - points)}")
+            else:
+                lines.append("Максимальная награда достигнута")
     lines.append(f"Снимок {_clock(captured)} МСК")
     return "\n".join(lines)[:1900]
 
@@ -214,7 +234,7 @@ def personal_tw_lines(guild_id, ally_code, rows, snapshot):
     captured = snapshot.get("at")
     valid = bool(zones and player_ids and captured and state.get("end")
                  and game_event_live.epoch(state["end"]) > time.time())
-    complete = valid and all(zone.get("deployed") is not None and
+    complete = valid and all((not state.get("round") or "remaining" in zone) and zone.get("deployed") is not None and
                             len(zone.get("teams", [])) >= zone["deployed"] for zone in zones)
     teams = [(zone, team) for zone in zones for team in zone.get("teams", [])
              if team.get("player_id") in player_ids]
@@ -262,13 +282,12 @@ def discord_details(guild_id, owner, ally_code, kind, action):
             return ["Активного плана защиты ВГ нет."]
         rows = [row for row in database.get_tw_def_assignments(guild_id, int(plan_id))
                 if str(row["ally_code"]) == ally_code]
-        return personal_tw_lines(guild_id, ally_code, rows, game_event_live.snapshot(guild_id, owner, "tw")) if rows else ["В активном плане ВГ у вас нет назначений."]
+        return personal_tw_lines(guild_id, ally_code, rows, game_event_live.latest_tw_snapshot(guild_id)) if rows else ["В активном плане ВГ у вас нет назначений."]
     if kind == "tb":
-        recent = tb_live.history(guild_id, owner, 1)
-        state = recent[0][1] if recent else None
-        if not state:
-            return ["Снимка ТБ нет. Нажмите «Обновить» на сводке."]
         if action == "mine":
+            state = tb_live.latest_guild_state(guild_id)
+            if not state or game_event_live.epoch(state["end_ms"]) <= time.time():
+                return ["Актуального снимка ТБ нет. Попросите офицера обновить сводку."]
             owned = database.get_player_units(ally_code)
             rows = tb_live_order.personal_preview(state, ally_code, set(owned) if owned else None)
             names = database.get_game_unit_names(sorted({row["unit"] for row in rows}))
@@ -276,6 +295,10 @@ def discord_details(guild_id, owner, ally_code, kind, action):
                 f"{tb_plan_reader.PLANET_NAME_TO_RU.get(row['planet'], row['planet']).capitalize()}"
                 f" · взвод {row['operation']} · {names.get(row['unit']) or row['unit']}" for row in rows
             ] or ["В текущем этапе ТБ для вас нет назначений во взводы."]
+        recent = tb_live.history(guild_id, owner, 1)
+        state = recent[0][1] if recent else None
+        if not state:
+            return ["Снимка ТБ нет. Нажмите «Обновить» на сводке."]
         lines = []
         for key, zone in state["zones"].items():
             if zone["status"] != tb_live.OPEN_ZONE:
@@ -293,41 +316,44 @@ def discord_details(guild_id, owner, ally_code, kind, action):
         return ["Снимка нет. Нажмите «Обновить» на сводке."]
     if kind == "tw":
         from services import tw_live_image
-        from tw_def_engine import ZONES, ZONES_BY_KEY
         from disnake.utils import escape_markdown
 
+        pages = tw_live_image.zone_pages(state)
+        names = database.get_game_unit_names(sorted({unit for _, _, groups in pages
+                                                     for units, _ in groups for unit in units}))
         lines = []
-        order = {entry["key"]: index for index, entry in enumerate(ZONES)}
-        zones = sorted((zone for zone in state.get("opponent", ()) if zone.get("status") == tb_live.OPEN_ZONE),
-                       key=lambda zone: order.get(tw_live_image.zone_key(zone["id"]), 99))
-        names = database.get_game_unit_names(sorted({unit for zone in zones
-                    for team in zone.get("teams", ()) for unit in team.get("units", ())}))
-        for zone in zones:
-            key = tw_live_image.zone_key(zone["id"])
-            name = ZONES_BY_KEY[key]["label"] if key else zone["id"]
-            lines.append(f"\n**{escape_markdown(name)}**")
-            groups = {}
-            for team in zone.get("teams", ()):
-                units = team.get("units", ())
-                if not units:
-                    continue
-                # Leader matters; the order of the remaining members does not.
-                composition = (units[0], *sorted(units[1:]))
-                groups.setdefault(composition, []).append(team)
-            for units, teams in groups.items():
-                players = ", ".join(escape_markdown(team.get("player_name") or "Имя не раскрыто") for team in teams)
-                squad = " · ".join(escape_markdown(names.get(unit) or unit) for unit in units)
-                lines.append(f"{players} — {squad}")
-            if not groups:
-                lines.append("Составы пока не раскрыты." if zone.get("deployed") else "Нет отрядов.")
+        for title, note, groups in pages:
+            lines.append(f"\n**{escape_markdown(title)}**")
+            for units, teams in groups:
+                leader, *members = [escape_markdown(names.get(unit) or unit) for unit in units]
+                holds = sum(team.get("holds", 0) for team in teams)
+                title = f"**{leader} ×{len(teams)}**"
+                if holds:
+                    title += f" · удержаний: {holds}"
+                detail = [title]
+                if members:
+                    detail.append(" · ".join(members))
+                players = [escape_markdown(team["player_name"]) for team in teams if team.get("player_name")]
+                if players:
+                    detail.append("-# Защита: " + ", ".join(players))
+                lines.append("\n".join(detail))
+            if note:
+                lines.append(note)
         return lines or ["Открытых зон соперника пока нет."]
     if not state["active"]:
         return ["Активного рейда нет."]
-    roster = database.get_roster_by_player_id(guild_id)
-    return [f"{roster.get(player['id'], ('', 'Игрок вне ростера'))[1]} · {_score(player['points'])}"
-            f" очков · попыток: {_score(player['attempts'])}"
-            for player in sorted(state["active"][0]["players"], key=lambda row: row["points"] or 0, reverse=True)
+    return [f"{name} · {_score(points)} очков" for name, points in raid_players(guild_id, state)
             ] or ["В снимке рейда пока нет результатов по игрокам."]
+
+
+def raid_players(guild_id, state):
+    if not state or not state["active"]:
+        return []
+    roster = database.get_roster_by_player_id(guild_id)
+    players = sorted(state["active"][0]["players"],
+                     key=lambda row: (row["points"] is not None, row["points"] or 0), reverse=True)
+    return [(roster.get(player["id"], ("", ""))[1] or "Игрок вне ростера", player["points"])
+            for player in players]
 
 
 async def set_refreshing(panel, active):
@@ -355,7 +381,7 @@ async def set_refreshing(panel, active):
         _LOG.warning("Event panel progress update failed (%s)", type(error).__name__)
 
 
-async def edit(panel, text=None, *, retire=False, tw_board=None, replace_board=False):
+async def edit(panel, text=None, *, retire=False, tw_board=None, replace_board=False, raid_board=None):
     """Update a message already published by its bot."""
     if not panel:
         return
@@ -374,15 +400,20 @@ async def edit(panel, text=None, *, retire=False, tw_board=None, replace_board=F
             async with httpx.AsyncClient(timeout=8) as client:
                 url = f"{discord_rest.DISCORD_API}/channels/{channel}/messages/{message}"
                 headers = discord_rest._headers(PROFILE)
-                if tw_board:
-                    payload["attachments"] = [{"id": 0, "filename": "tw-map.png"}]
+                board_name = "raid-guild.png" if panel.get("kind") == "raid" else "tw-map.png"
+                board = raid_board if board_name == "raid-guild.png" else tw_board
+                if board or replace_board:
+                    old = await client.get(url, headers=headers)
+                    old.raise_for_status()
+                    payload["attachments"] = [{"id": item["id"]} for item in old.json().get("attachments", [])
+                                              if item["filename"] != board_name]
+                if board:
+                    payload["attachments"].append({"id": 0, "filename": board_name})
                     response = await client.patch(
                         url, headers=headers, data={"payload_json": json.dumps(payload)},
-                        files={"files[0]": ("tw-map.png", tw_board, "image/png")},
+                        files={"files[0]": (board_name, board, "image/png")},
                     )
                 else:
-                    if replace_board:
-                        payload["attachments"] = []
                     response = await client.patch(url, headers=headers, json=payload)
                 if response.status_code >= 400:
                     _LOG.warning("Event panel Discord edit returned %s", response.status_code)
@@ -420,6 +451,11 @@ async def publish(guild_id, kind, data, captured):
         if kind == "tw" and panel["platform"] == "discord":
             board = await asyncio.to_thread(tw_board, data)
             updates.append(edit(panel, text, tw_board=board, replace_board=True))
+        elif kind == "raid" and panel["platform"] == "discord":
+            from services.raid_live_image import guild_card
+
+            board = await asyncio.to_thread(guild_card, data["active"][0]) if data and data["active"] else None
+            updates.append(edit(panel, text, raid_board=board, replace_board=True))
         else:
             updates.append(edit(panel, text))
     await asyncio.gather(*updates)

@@ -20,7 +20,7 @@ _worker_profile = None
 
 PROD_DISABLED = frozenset({
     "fun", "omicron_phrases", "steal_build", "mod_analysis", "mod_compare",
-    "mod_scan", "tw_order", "antispam", "mod_ku", "gear_farm",
+    "mod_scan", "antispam", "mod_ku", "gear_farm",
     "ai_models", "qa_checklist", "datacron_shorts", "unit_aliases", "mod_ku_plates", "raid_b1_portrait",
 })
 
@@ -162,6 +162,8 @@ def feature_for_guild(key, guild_id):
 
 
 def path_available(path, profile):
+    if path == "/tw/def" or path.startswith("/tw/def/"):
+        return True
     return profile != "prod" or not any(
         path == prefix or path.startswith(prefix + "/") for prefix in PROD_BLOCKED_PATHS
     )

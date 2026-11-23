@@ -3,6 +3,7 @@
 Only game_lab's explicitly enrolled accounts. Credentials and browser cookies
 are encrypted with the existing vault key; browser state never enters cookies.
 """
+import asyncio
 import base64
 import json
 import logging
@@ -14,11 +15,13 @@ from pathlib import Path
 
 import grpc
 import httpx
+from cryptography.fernet import InvalidToken
 
 import database
 from services import bot_profiles, ea_browser, game_account as ga, game_lab as lab
 
 TTL = 600
+_registration_checks = {}
 
 
 class ReconnectRequired(ga.ConnectionRequired):
@@ -64,8 +67,13 @@ def linked(target):
         return bool(conn.execute("SELECT 1 FROM ea_account_links WHERE target=?", (target,)).fetchone())
 
 
-def target_for_registration(owner, guild_id, ally_code):
-    if not any(str(code) == str(ally_code) for code, _, _ in database.get_user_registrations(owner, guild_id=guild_id)):
+def target_for_registration(owner, guild_id, ally_code, *, personal=False):
+    try:
+        if personal:
+            ga.select_personal_account(owner, guild_id, ally_code)
+        else:
+            ga.select_account(owner, guild_id, ally_code=ally_code)
+    except ga.AccountError:
         return None
     conn = sqlite3.connect(database.DB_NAME, timeout=15)
     try:
@@ -80,11 +88,22 @@ def target_for_registration(owner, guild_id, ally_code):
         conn.close()
 
 
-def pending(owner, target):
+def pending(owner, target, *, include_email=False, include_checking=False):
     with _db() as conn:
-        row = conn.execute("SELECT id,status FROM ea_browser_pending WHERE owner=? AND target=? AND expires>? "
-                           "AND status='code' ORDER BY created_at DESC LIMIT 1", (str(owner), target, time.time())).fetchone()
-    return {"id": row["id"], "status": row["status"]} if row else None
+        row = conn.execute("SELECT id,status,secret FROM ea_browser_pending WHERE owner=? AND target=? AND expires>? "
+                           "AND (status='code' OR (? AND status='checking')) "
+                           "ORDER BY created_at DESC LIMIT 1", (str(owner), target, time.time(), include_checking)).fetchone()
+    if not row:
+        return None
+    flow = {"id": row["id"], "status": row["status"]}
+    if include_email and row["secret"]:
+        try:
+            state = json.loads(ga._cipher().decrypt(row["secret"]))
+        except (ga.AccountError, InvalidToken, ValueError):
+            return flow
+        if isinstance(state.get("email"), str):
+            flow["email"] = state["email"]
+    return flow
 
 
 async def start(owner, target, email, consent):
@@ -112,16 +131,20 @@ async def _start_flow(owner, target, email, consent, registration=None):
     with _db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("DELETE FROM ea_browser_pending WHERE expires<=?", (now,))
+        if conn.execute("SELECT 1 FROM ea_browser_pending WHERE owner=? AND target=? AND status='checking'",
+                        (str(owner), target)).fetchone():
+            raise ga.AccountError("Код уже проверяется.")
         if conn.execute("SELECT 1 FROM ea_browser_pending WHERE owner=? AND created_at>?", (str(owner), now - 60)).fetchone():
             raise ga.AccountError("Повторная отправка кода доступна через минуту.")
         conn.execute("DELETE FROM ea_browser_pending WHERE owner=? AND target=?", (str(owner), target))
         conn.execute("INSERT INTO ea_browser_pending (id,owner,target,expires,created_at) VALUES (?,?,?,?,?)",
                      (flow_id, str(owner), target, now + TTL, now))
     try:
-        state = await ea_browser.start(cfg, email.strip())
+        email = email.strip()
+        state = await ea_browser.start(cfg, email)
         if state["stage"] != "code":
             raise ga.AccountError("EA не запросила код подтверждения. Начните вход заново.")
-        stored = {"browser": state, "registration": registration} if registration is not None else state
+        stored = {"browser": state, "registration": registration, "email": email} if registration is not None else state
         encrypted = ga._cipher().encrypt(json.dumps(stored).encode())
         with _db() as conn:
             conn.execute("UPDATE ea_browser_pending SET secret=?,status='code' WHERE id=?", (encrypted, flow_id))
@@ -215,6 +238,7 @@ def _envelope(template, service, method, payload, credentials=None, device=None)
 async def _game(service, method, request):
     if (service, method) not in {("AuthRpc", "DoAuthGuest"), ("PlayerRpc", "GetNucleusPlayerPreview"), ("PlayerRpc", "LinkNucleusAccount")}:
         raise ga.AccountError("Недопустимая операция подключения.")
+    request = ga.current_client_version(request)
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
             async with client.stream("POST", "https://sw-live.cgswprod.com/rpc", content=request,
@@ -334,8 +358,24 @@ async def finish(owner, target, flow_id, code):
 
 async def finish_registration(owner, is_alt, flow_id, code, comlink, *, guild_id=1):
     ga.require_account_read(owner, guild_id, bot_profiles.current_profile())
-    return await _finish_flow(owner, registration_target(owner, is_alt, guild_id), flow_id, code,
-                              is_alt=bool(is_alt), comlink=comlink, guild_id=guild_id)
+    target = registration_target(owner, is_alt, guild_id)
+    key = (target, flow_id)
+    task = _registration_checks.get(key)
+    if task is None:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_finish_flow(owner, target, flow_id, code,
+                                             is_alt=bool(is_alt), comlink=comlink, guild_id=guild_id))
+        _registration_checks[key] = task
+
+        def release(completed):
+            if completed.cancelled() or completed.exception() is not None:
+                _registration_checks.pop(key, None)
+            else:
+                loop.call_later(TTL, _registration_checks.pop, key, None)
+
+        task.add_done_callback(release)
+    # Closing the browser request must not interrupt the shared EA verification.
+    return await asyncio.shield(task)
 
 
 async def _finish_flow(owner, target, flow_id, code, row=None, is_alt=None, comlink=None, *, guild_id=1):
@@ -344,6 +384,8 @@ async def _finish_flow(owner, target, flow_id, code, row=None, is_alt=None, coml
     now = time.time()
     with _db() as conn:
         flow = conn.execute("SELECT * FROM ea_browser_pending WHERE id=? AND owner=? AND target=?", (flow_id, str(owner), target)).fetchone()
+        if flow and flow["status"] == "checking" and flow["expires"] > now:
+            raise ga.AccountError("Код уже проверяется.")
         if not flow or flow["expires"] <= now or flow["attempts"] >= 5 or flow["status"] != "code":
             raise ga.AccountError("Подтверждение истекло или уже используется. Запросите новый код.")
         changed = conn.execute("UPDATE ea_browser_pending SET status='checking',attempts=attempts+1 WHERE id=? AND status='code'", (flow_id,))
@@ -356,9 +398,10 @@ async def _finish_flow(owner, target, flow_id, code, row=None, is_alt=None, coml
             raise ga.AccountError("Тип привязки изменился. Начните вход заново.")
         result = await ea_browser.finish(state.get("browser", state), code)
         if result["stage"] == "code":
+            pending_state = {**state, "browser": result} if registration is not None else result
             with _db() as conn:
                 conn.execute("UPDATE ea_browser_pending SET status='code',secret=? WHERE id=?",
-                             (ga._cipher().encrypt(json.dumps({"browser": result, "registration": registration} if registration is not None else result).encode()), flow_id))
+                             (ga._cipher().encrypt(json.dumps(pending_state).encode()), flow_id))
             raise ga.AccountError("EA не приняла код. Проверьте последнее письмо и повторите ввод.")
         if result["stage"] != "complete":
             raise ga.AccountError("EA не завершила вход. Начните подключение заново.")

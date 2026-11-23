@@ -58,46 +58,7 @@
         <p class="config-warning">📦 Архив: игрок выбыл из гильдии {{ card.departed_at }}. Данные больше не обновляются.</p>
     {% endif %}
 
-    {% if own_accounts is not none %}
-        <div class="panel my-accounts">
-            <div class="panel-title"><span>👤 Мой профиль — мои аккаунты</span></div>
-            <p class="my-accounts-list">
-                {% for code, name, is_main in own_accounts %}
-                    {% if code == card.ally_code %}
-                        <strong>{{ name }}</strong>
-                    {% else %}
-                        <a href="/player/{{ code }}">{{ name }}</a>
-                    {% endif %}
-                    <span class="muted">{{ "основной" if is_main else "альт" }}</span>{% if not loop.last %} · {% endif %}
-                {% endfor %}
-            </p>
-            {% if user.guild_id %}
-            <div id="ea-connection">
-                {% for code, name, is_main in own_accounts if code == card.ally_code %}
-                <a class="link-btn" href="/game-account/link?alt={{ 0 if is_main else 1 }}">Привязать EA</a>
-                {% endfor %}
-                <span class="muted">— для функций, которым нужен вход в игру</span>
-            </div>
-            {% endif %}
-            {% if alt_added %}<p class="badge badge-ok">✅ Альт «{{ alt_added }}» привязан.</p>{% endif %}
-            {% if alt_error %}<p class="error">{{ alt_error }}</p>{% endif %}
-            <details>
-                <summary class="link-btn">➕ Добавить альт-аккаунт</summary>
-                <form method="post" action="/me/alt" class="inline-form">
-                    <input type="text" name="ally_code" placeholder="Код союзника альта, 9 цифр" pattern="[1-9]{9}" maxlength="9" inputmode="numeric" required>
-                    <button type="submit">Привязать</button>
-                </form>
-                <p class="muted">Альт должен состоять в гильдии, которую обслуживает бот. Отвязать — <code>/регистрация_отмена</code> в Discord.</p>
-            </details>
-            {% if card_tg %}
-            <p>📱 Telegram привязан: {{ card_tg|join(", ") }}
-                <span class="muted">— <a href="/me/telegram" target="_blank" rel="noopener">привязать другой</a></span></p>
-            {% elif telegram_bot_username() %}
-            <p><a class="link-btn" href="/me/telegram" target="_blank" rel="noopener">📱 Привязать Telegram</a>
-                <span class="muted">— бот в Telegram будет знать вас как этого же игрока</span></p>
-            {% endif %}
-        </div>
-    {% endif %}
+    {% include "_my_accounts.html" %}
 
     <div class="dashboard-grid">
         <div class="widget" id="my-tasks" data-tab="overview">

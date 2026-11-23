@@ -1,0 +1,45 @@
+{% import "_ui.html" as ui %}
+{% macro number(value) -%}{{ ui.num(value) if value is not none else "—" }}{%- endmacro %}
+<section id="attack-analysis" aria-label="Сводка атак">
+    {% if attack_analysis %}
+        <div class="tw-score-matchup">
+            {% for side in attack_analysis %}
+                <section class="tw-score-side {{ 'tw-score-home' if loop.first else 'tw-score-away' }}">
+                    <h2>{{ side.name }}</h2>
+                    <dl>
+                        <div><dt>Текущий счёт</dt><dd>{{ number(side.current) }}</dd></div>
+                        <div><dt>Потенциал</dt><dd>{% if side.potential is not none %}+{% endif %}{{ number(side.potential) }}</dd></div>
+                        <div><dt>Максимум</dt><dd>{{ number(side.maximum) }}</dd></div>
+                    </dl>
+                </section>
+            {% endfor %}
+        </div>
+        <p class="muted tw-score-note">Максимум при зачистке всех зон. Скрытые отряды считаются нетронутыми.</p>
+        <div class="tw-score-matchup">
+            {% for side in attack_analysis %}
+                <section class="panel tw-score-breakdown">
+                    <h3>Атака · {{ side.name }}</h3>
+                    <table class="data tw-score-table">
+                        <thead><tr><th scope="col">Зона</th><th scope="col">Снято</th><th scope="col" title="Неудачные атаки">Удерж.</th><th scope="col" title="Победы с первой попытки">1-я</th><th scope="col" title="Потерянные стяги">−Стяги</th></tr></thead>
+                        <tbody>{% for zone in side.zones %}
+                            <tr{% if zone.captured %} class="tw-score-captured"{% endif %}>
+                                <th scope="row">{{ zone.name }}{% if zone.captured %} <span title="Захвачена" aria-label="Захвачена">✓</span>{% endif %}</th>
+                                <td>{{ number(zone.defeated) }}/{{ number(zone.capacity) }}</td>
+                                <td>{{ number(zone.holds) }}</td>
+                                <td>{{ (zone.first ~ "%") if zone.first is not none else "—" }}</td>
+                                <td>{{ number(zone.lost) }}</td>
+                            </tr>
+                        {% endfor %}</tbody>
+                    </table>
+                    {% if side.defenders %}
+                        <h4>Больше всего удержаний в защите</h4>
+                        <ul class="tw-score-defenders">
+                            {% for row in side.defenders %}<li>{{ row.name }} <b>{{ row.holds }}</b></li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </section>
+            {% endfor %}
+        </div>
+        <p class="muted tw-score-note">1-я — доля побед с первой попытки. −Стяги — потери от идеального прохода.</p>
+    {% else %}<p>Анализ появится после начала боёв и обновления данных.</p>{% endif %}
+</section>

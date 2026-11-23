@@ -1,5 +1,7 @@
 """FastAPI-зависимости для роутов, требующих залогиненного пользователя."""
 
+import secrets
+
 from fastapi import Request, HTTPException
 
 import guild_resolver
@@ -108,6 +110,18 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=307, headers={"Location": "/admin/guilds"})
     if not bot_profiles.path_available(request.url.path, profile):
         raise HTTPException(status_code=404, detail="Раздел недоступен.")
+    if result.get("guild_id") is not None and result.get("tier") in ("member", "officer"):
+        from services import game_account
+        accounts = game_account.personal_accounts(result["discord_id"], result["guild_id"])
+        preference = request.session.get("active_game_account")
+        wanted = None
+        if isinstance(preference, dict) and preference.get("owner") == str(result["discord_id"]):
+            wanted = preference.get("code")
+        default = next((code for code, (_, main) in accounts.items() if main), next(iter(accounts), None))
+        result["active_ally_code"] = wanted if wanted in accounts else default
+        result["game_accounts"] = accounts
+        if len(accounts) > 1:
+            result["account_switch_csrf"] = request.session.setdefault("account_switch_csrf", secrets.token_urlsafe(32))
     return _with_subscription_status(result)
 
 
@@ -149,6 +163,16 @@ def own_accounts(user: dict) -> list:
     """[(ally_code, ingame_name, is_main), ...] — свои аккаунты из /регистрация в текущей гильдии."""
     import database
     return database.get_user_registrations(str(user["discord_id"]), guild_id=user["guild_id"])
+
+
+def selected_roster_account(user: dict, code: str | None = None) -> str | None:
+    """An account can use the current guild's personal assignments only while on its roster."""
+    import database
+    code = code or user.get("active_ally_code")
+    if not code or code not in {str(row[0]) for row in own_accounts(user)}:
+        return None
+    roster = database.get_roster_by_player_id(user["guild_id"])
+    return code if any(str(registered) == code for registered, _ in roster.values()) else None
 
 
 def require_real_super_admin(request: Request) -> dict:

@@ -5,7 +5,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 {{ tw.tw_hero("Командный центр", "command") }}
-{% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}<a class="button button-secondary" href="/game-account/events/tw{% if plan %}?plan={{ plan.id }}{% endif %}">ВГ сейчас</a>{% endif %}
+{% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}<a class="button button-secondary" href="/game-account/events/tw{% if plan %}?plan={{ plan.id }}{% endif %}">Анализ ВГ</a>{% endif %}
 {% if error %}<p class="config-warning">{{ error }}</p>{% endif %}
 {% if message %}<p class="dash-flash">{{ message }}</p>{% endif %}
 {% if not plan %}

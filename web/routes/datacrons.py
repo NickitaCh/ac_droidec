@@ -267,7 +267,9 @@ async def check_form(request: Request, user: dict = Depends(feature_flags.requir
                         error = "Код союзника должен состоять из 9 цифр."
                     player_name = None
                 elif not player_name:
-                    reg = database.get_user_registration(user["discord_id"], guild_id=guild_id)
+                    active = user.get("active_ally_code")
+                    account = user.get("game_accounts", {}).get(active)
+                    reg = (active, account[0]) if account else database.get_user_registration(user["discord_id"], guild_id=guild_id)
                     if reg:
                         ally_code, player_name = reg
                     else:

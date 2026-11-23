@@ -158,7 +158,7 @@ async def action(request: Request, ticket: str, csrf: str = Form(...),
                     login_required = True
                     raise ga.AccountError('Сессия игры истекла. Войдите заново, чтобы проверить защиту.') from None
                 await ga.reconnect(str(user['discord_id']), user['guild_id'], user['bot_profile'],
-                                   user['tier'], record['code'])
+                                   user['tier'], record['code'], optimizer_read=user['bot_profile'] == 'prod')
                 if action in ('prepare', 'reconnect'):
                     await deploy.prepare(user, ticket, choices)
         elif action == 'apply' and confirm_deploy:

@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 
 import database
-from services import game_account as ga, game_event_live, game_personal_modes, game_read_probes, tb_live
+from services import game_account as ga, game_event_live, game_personal_modes, game_read_probes, tb_live, tw_battle_log
 
 
 _EVENT_READS = {
@@ -37,7 +37,7 @@ def own_main(user, *, connected_only=True, member_read=False):
     guild_id, profile = user.get("guild_id"), user.get("bot_profile")
     owner = str(user["discord_id"])
     try:
-        authorize = ga.require_account_read if member_read else ga.require_pilot
+        authorize = ga.require_account_read if member_read else ga.require_game_officer
         authorize(owner, guild_id, profile, user["tier"])
         code = ga.select_account(owner, guild_id)
     except ga.AccountError:
@@ -50,12 +50,13 @@ def _group(rows, label):
             for _, data in entries if isinstance(data, list)]
 
 
-def _load(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False):
+def _load(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False, personal=False):
     from cryptography.fernet import InvalidToken
 
-    authorize = ga.require_account_read if optimizer_read else ga.require_pilot
+    authorize = ga.require_account_read if optimizer_read else ga.require_game_officer
     authorize(owner, guild_id, profile, tier)
-    code = ga.select_account(owner, guild_id, ally_code=ally_code)
+    select = ga.select_personal_account if personal else ga.select_account
+    code = select(owner, guild_id, ally_code=ally_code)
     connection = _connection(owner, code)
     if connection is None:
         raise ga.ConnectionRequired("Подключите аккаунт через EA.")
@@ -71,24 +72,48 @@ def _load(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False):
 
     def is_current(current_connection=connection):
         authorize(owner, guild_id, profile, tier)
-        return (ga.select_account(owner, guild_id, ally_code=code) == code
+        return (select(owner, guild_id, ally_code=code) == code
                 and _connection(owner, code) == current_connection)
 
     return connection, credentials, is_current
 
 
 async def _read_event(raw, expected_id, event, is_current):
+    service, method, arguments, parse = _EVENT_READS[event]
+    payload = await _read_rpc(raw, expected_id, service, method, arguments, is_current)
+    state = parse(payload)
+    channels = tw_battle_log.zone_channels(state) if event == "tw" and state and state["round"] else {}
+    if channels:
+        try:
+            session = ga.fields(await _read_rpc(raw, expected_id, "GameChannelRpc", "CreateSession", (), is_current))
+            channel_identity = (ga._one(session, 1, 2), ga._one(session, 2, 2))
+            log = await _read_rpc(raw, expected_id, tw_battle_log.SERVICE, tw_battle_log.METHOD,
+                                  tw_battle_log.arguments(channels), is_current, channel_identity=channel_identity)
+            state["battles"] = tw_battle_log.parse(log, channels, state)
+        except ga.AccountError:
+            if not is_current():
+                raise
+            state["battle_log_unavailable"] = True
+    return state
+
+
+async def _read_rpc(raw, expected_id, service, method, arguments, is_current, *, channel_identity=None):
     if not is_current():
         raise ga.AccountError("Подключение изменилось.")
-    service, method, arguments, parse = _EVENT_READS[event]
     rows = ga.fields(ga.read_request(raw, expected_id))
+    transport = {}
+    if channel_identity:
+        rows = [row for row in rows if row[0] not in (7, 8)] + [
+            (7, 2, channel_identity[0]), (8, 2, channel_identity[1]),
+        ]
+        transport["endpoint"] = tw_battle_log.ENDPOINT
     body = ga.pack([row for row in rows if row[0] not in (4, 5, 6)] + [
         (4, 2, service.encode()), (5, 2, method.encode()), (6, 2, ga.pack(arguments)),
     ])
-    payload = await ga._read_payload(body, service, method, allow_empty=True)
+    payload = await ga._read_payload(body, service, method, allow_empty=True, **transport)
     if not is_current():
         raise ga.AccountError("Подключение изменилось во время чтения.")
-    return parse(payload)
+    return payload
 
 
 async def login_for_events(owner, guild_id, profile, tier, ally_code):
@@ -130,10 +155,11 @@ async def login_for_events(owner, guild_id, profile, tier, ally_code):
     return read_event
 
 
-async def read(owner, guild_id, profile, tier, ally_code, *, territory=False, active_tb=False, event=None, include_supplies=False, member_read=False):
+async def read(owner, guild_id, profile, tier, ally_code, *, territory=False, active_tb=False, event=None, include_supplies=False, member_read=False, personal=False):
     if member_read and (territory or active_tb or event not in (None, "arena", "conquest")):
         raise ga.AccountError("Доступно только офицерам.")
-    connection, credentials, is_current = _load(owner, guild_id, profile, tier, ally_code, optimizer_read=member_read)
+    connection, credentials, is_current = _load(owner, guild_id, profile, tier, ally_code, optimizer_read=member_read,
+                                                **({"personal": True} if personal else {}))
     _, expected_id, _ = connection
     try:
         raw = base64.b64decode(credentials["read_request"], validate=True)

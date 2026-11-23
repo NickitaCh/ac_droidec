@@ -10,6 +10,7 @@
                 <h1>Рейды{% call ui.help(side="left") %}<p>Очки каждого участника за завершённые рейды. Бот сохраняет рейд после его окончания, поэтому история копится с момента подключения. Идущий рейд игра без входа в аккаунт не показывает.</p><p>Красным — меньше половины среднего по гильдии в этом рейде. В Discord то же самое — <code>/рейд итоги</code> и <code>/рейд игрок</code>.</p>{% endcall %}</h1>
             </div>
             <div class="hero-links">
+                <a class="hero-link" href="/raids/plan">Мой план</a>
 {% if user.bot_profile == "test" and user.guild_id == 1 and user.tier == "officer" %}<a class="hero-link" href="/game-account/events/raid">Рейд сейчас</a>{% endif %}
                 {% if departed %}<a class="hero-link" href="/raids">Текущий состав</a>{% elif departed_count %}<a class="hero-link" href="/raids?departed=1">Выбывшие ({{ departed_count }})</a>{% endif %}
             </div>

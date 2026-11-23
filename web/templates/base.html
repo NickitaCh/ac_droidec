@@ -94,6 +94,20 @@
             {% endif %}
             {% if user and user.tier in ("officer", "member") %}
                 {{ nav_link("/me", "👤", "Мой профиль") }}
+                {% if user.account_switch_csrf %}
+                <form method="post" action="/me/account">
+                    <input type="hidden" name="csrf" value="{{ user.account_switch_csrf }}">
+                    <input type="hidden" name="return_to" value="{{ request.url.path }}">
+                    <label>Игровой аккаунт
+                        <select name="ally_code">
+                            {% for code, (name, main) in user.game_accounts.items() %}
+                            <option value="{{ code }}"{% if code == user.active_ally_code %} selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button type="submit">Переключить</button>
+                </form>
+                {% endif %}
             {% endif %}
 
             {% set is_officer = user and user.tier == "officer" %}
@@ -116,14 +130,20 @@
                     {{ nav_link("/tw/history", "📚", "История", exact=true) }}
                 {% endcall %}{% endif %}
                 {{ nav_link("/raids", "🐉", "Рейды") }}
+            {% elif user.guild_id and user.tier == "member" %}
+                {{ nav_link("/raids/plan", "🐉", "Мой план рейда") }}
             {% endif %}
-            {% if user.bot_profile == 'test' and user.guild_id and user.tier in ('officer', 'member') %}
+            {% if user.bot_profile == 'prod' and user.guild_id and user.tier == 'officer' %}
+                {{ nav_link("/game-account/events/tw", "", "ВГ в игре") }}
+                {{ nav_link("/tb/live", "", "ТБ в игре") }}
+            {% endif %}
+            {% if user.guild_id and user.tier in ('officer', 'member') %}
                 {{ nav_link("/game-account/personal/arena", "🏟️", "Великая арена") }}
             {% endif %}
             {% if conquest_ok %}
                 {% call nav_group("🏆", "Завоевание", ("/conquest", "/game-account/personal/conquest")) %}
                     {{ nav_link("/conquest", "🏆", "Калькулятор", exact=true) }}
-                    {% if user.bot_profile == 'test' and user.guild_id and user.tier in ('officer', 'member') %}
+                    {% if user.guild_id and user.tier in ('officer', 'member') %}
                     {{ nav_link("/game-account/personal/conquest", "🎮", "Моё Завоевание") }}
                     {% endif %}
                     {{ nav_link("/conquest/effects", "✨", "Эффекты способностей") }}
@@ -177,8 +197,9 @@
             {% elif user and user.tier == "member" %}
                 {{ nav_link("/mod-builder", "🛠️", "Калькулятор модулей") }}
             {% endif %}
-            {% if user and user.guild_id and user.bot_profile == 'test' %}
+            {% if user and user.guild_id and user.tier in ('officer', 'member') %}
                 {{ nav_link("/game-account/modules", "📦", "Мои модули") }}
+                {{ nav_link("/farm", "🌾", "Фарм по запасам") }}
                 {{ nav_link("/mod-loadouts", "💾", "Подборки модулей") }}
                 {% if user.bot_profile == 'test' %}{{ nav_link("/personal-plates", "🎛️", "Личные плейты") }}{% endif %}
             {% endif %}

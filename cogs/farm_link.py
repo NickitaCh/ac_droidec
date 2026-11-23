@@ -1,4 +1,4 @@
-"""Private inventory calculations for AbsoluteChaos officers on TEST."""
+"""Farm calculations using a player's own inventory on AbsoluteChaos TEST."""
 
 import asyncio
 import logging
@@ -21,9 +21,18 @@ def _profile():
 
 
 def _allowed(inter):
+    if _profile() == "prod":
+        access = guild_resolver.resolve_access(inter.author)
+        guild_id = access.get("guild_id")
+        config = database.get_guild_config(guild_id) if guild_id else None
+        if not inter.guild_id or not config or str(config.get("discord_guild_id")) != str(inter.guild_id):
+            raise game_account.AccountError("Откройте команду на сервере своей гильдии.")
+        game_account.require_account_read(str(inter.author.id), guild_id, _profile(), access.get("tier"))
+        return guild_id
     if inter.guild_id != AC_DISCORD_SERVER:
-        raise game_account.AccountError("Команда доступна офицерам АС на сервере гильдии.")
-    game_account.require_pilot(str(inter.author.id), GUILD_ID, _profile())
+        raise game_account.AccountError("Команда доступна участникам АС на сервере гильдии.")
+    game_account.require_account_read(str(inter.author.id), GUILD_ID, _profile())
+    return GUILD_ID
 
 
 async def _autocomplete_access(inter):
@@ -54,13 +63,13 @@ async def _guides(inter, query):
 async def _accounts(inter, query):
     if not await _autocomplete_access(inter):
         return {}
-    accounts = await asyncio.to_thread(database.get_user_registrations, str(inter.author.id), guild_id=GUILD_ID)
+    accounts = await asyncio.to_thread(database.get_user_registrations, str(inter.author.id), guild_id=await asyncio.to_thread(_allowed, inter))
     labels = [(f"{name or code} · {'основной' if main else 'альт'} · {code}", str(code)) for code, name, main in accounts]
     return {label[:100]: code for label, code in labels if query.casefold() in label.casefold()}
 
 
 class FarmLinkCog(commands.Cog):
-    @commands.slash_command(name="фарм", description="Рассчитать недостающие материалы по запасам", guild_ids=[AC_DISCORD_SERVER])
+    @commands.slash_command(name="фарм", description="Рассчитать недостающие материалы по запасам", guild_ids=[AC_DISCORD_SERVER] if _profile() == "test" else None)
     async def farm(self, inter: disnake.ApplicationCommandInteraction):
         pass
 
@@ -89,14 +98,14 @@ class FarmLinkCog(commands.Cog):
     async def _calculate(self, inter, account, *, targets=None, guide_id=None, include_reward=False):
         await inter.response.defer(ephemeral=True)
         try:
-            await asyncio.to_thread(_allowed, inter)
+            guild_id = await asyncio.to_thread(_allowed, inter)
             if targets:
                 ids = [unit_id for unit_id, _, _ in targets]
                 types = await asyncio.to_thread(database.get_unit_types, ids)
                 if any(unit_id not in types or types[unit_id] == "ship" for unit_id in ids):
                     raise game_account.AccountError("Выберите персонажа из подсказок Discord.")
             owner = str(inter.author.id)
-            code = await asyncio.to_thread(game_account.select_account, owner, GUILD_ID, ally_code=account)
+            code = await asyncio.to_thread(game_account.select_account, owner, guild_id, ally_code=account)
             requirements = None
             if guide_id is not None:
                 requirements = await asyncio.to_thread(database.get_journey_guide_requirements, guide_id)
@@ -121,12 +130,13 @@ class FarmLinkCog(commands.Cog):
 
     async def _send_report(self, inter, code, targets, guide_id, requirements, include_reward):
         owner = str(inter.author.id)
-        snapshot = await game_account_readonly.read(owner, GUILD_ID, _profile(), "officer", code)
+        guild_id = await asyncio.to_thread(_allowed, inter)
+        snapshot = await game_account_readonly.read(owner, guild_id, _profile(), None, code, member_read=True)
         report = await asyncio.to_thread(
             farm_inventory.build_report, snapshot, targets, guide_id=guide_id,
             requirements=requirements, include_reward=include_reward,
         )
-        accounts = await asyncio.to_thread(database.get_user_registrations, owner, guild_id=GUILD_ID)
+        accounts = await asyncio.to_thread(database.get_user_registrations, owner, guild_id=guild_id)
         player = next((name for ally_code, name, _ in accounts if str(ally_code) == code and name), "Игрок")
         portrait_id = guide_id or targets[0][0]
         images = await asyncio.to_thread(farm_report_image.render, report, player, portrait_id)
@@ -140,7 +150,8 @@ class FarmLinkCog(commands.Cog):
 
 
 async def _offer_connection(inter, owner, code):
-    path = await asyncio.to_thread(game_account.link_path, owner, GUILD_ID, code)
+    guild_id = await asyncio.to_thread(_allowed, inter)
+    path = await asyncio.to_thread(game_account.link_path, owner, guild_id, code)
     view = disnake.ui.View()
     view.add_item(disnake.ui.Button(style=disnake.ButtonStyle.link, label="Подключить через EA",
                                     url=f"https://swgoh-sng.ru{path}"))
@@ -149,7 +160,7 @@ async def _offer_connection(inter, owner, code):
 
 class FarmSessionView(disnake.ui.View):
     def __init__(self, cog, owner, code, targets, guide_id, requirements, include_reward):
-        super().__init__(timeout=120)
+        super().__init__(timeout=600)
         self.cog = cog
         self.owner = owner
         self.code = code
@@ -163,14 +174,14 @@ class FarmSessionView(disnake.ui.View):
 
     @disnake.ui.button(label="Войти и рассчитать", style=disnake.ButtonStyle.success)
     async def confirm(self, button, inter):
+        await inter.response.defer(with_message=False)
         if self.is_finished():
-            await inter.response.defer()
             return
         self.stop()
-        await inter.response.edit_message(content="Восстанавливаю сессию и рассчитываю фарм…", view=None)
         try:
-            await asyncio.to_thread(_allowed, inter)
-            await game_account.reconnect(self.owner, GUILD_ID, _profile(), "officer", self.code)
+            await inter.edit_original_response(content="Восстанавливаю сессию и рассчитываю фарм…", view=None)
+            guild_id = await asyncio.to_thread(_allowed, inter)
+            await game_account.reconnect(self.owner, guild_id, _profile(), None, self.code, optimizer_read=True)
             await self.cog._send_report(inter, self.code, *self.plan)
         except game_account.ConnectionRequired:
             await _offer_connection(inter, self.owner, self.code)
@@ -182,13 +193,12 @@ class FarmSessionView(disnake.ui.View):
 
     @disnake.ui.button(label="Отмена", style=disnake.ButtonStyle.secondary)
     async def cancel(self, button, inter):
+        await inter.response.defer(with_message=False)
         if self.is_finished():
-            await inter.response.defer()
             return
         self.stop()
-        await inter.response.edit_message(content="Расчёт отменён.", view=None)
+        await inter.edit_original_response(content="Расчёт отменён.", view=None)
 
 
 def setup(bot):
-    if _profile() == "test":
-        bot.add_cog(FarmLinkCog())
+    bot.add_cog(FarmLinkCog())

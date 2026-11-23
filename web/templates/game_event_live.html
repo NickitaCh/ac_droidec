@@ -2,21 +2,25 @@
 {% block title %}{{ title }} — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
+    {% if kind == "tw" %}<link rel="stylesheet" href="/static/tw_score.css">{% endif %}
     <section class="page-hero">
         <h1>{{ title }}</h1>
         <a class="hero-link" href="{{ '/tw' if kind == 'tw' else '/raids' }}">К разделу</a>
     </section>
     {% set event_url = "/game-account/events/" ~ kind %}
     {% set query = "?plan=" ~ plan.id if plan else "" %}
-    {% with refresh_url = event_url ~ query, watch_url = event_url ~ "/watch" ~ query %}
+    {% set battle_query = (("&" if query else "?") ~ "battle_zone=" ~ (battle_zone|urlencode)) if battle_zone else "" %}
+    {% with refresh_url = event_url ~ query ~ battle_query, watch_url = event_url ~ "/watch" ~ query %}
         {% include "_game_watch.html" %}
     {% endwith %}
     <p id="tb-live-feedback" role="status"></p>
     <div id="tb-live-state"{% if watch and watch.status != "ended" %} data-watch-active{% endif %}>
         {% if error %}<p class="error">{{ error }}</p>{% endif %}
-        {% if cached %}<p class="muted">Снимок {{ clock(cached.at) }} МСК</p>{% endif %}
+        {% if cached %}<p class="muted">Снимок {{ clock(cached.at) }} МСК{% if kind == "tw" and cached.data %} · {{ "Раунд " ~ cached.data.round if cached.data.round else "Расстановка" }} до {{ clock(cached.data.end) }} МСК{% endif %}</p>{% endif %}
+        {% if kind == "tw" %}{% include "_tw_score.html" %}{% endif %}
         {% if kind == "tw" and cached.data %}
-            <h2>Раунд {{ cached.data.round }} · до {{ clock(cached.data.end) }} МСК</h2>
+            <details class="panel" data-live-details="tw-map-zones">
+                <summary>Состояние зон</summary>
             {% if cached.data.opponent_guild and cached.data.opponent_guild.id %}
             <p>Соперник — <strong>{{ cached.data.opponent_guild.name or cached.data.opponent_guild.id }}</strong> · <a href="/tw/scout?opp={{ cached.data.opponent_guild.id|urlencode }}">Открыть разведку</a></p>
             {% endif %}
@@ -25,15 +29,17 @@
                     <div class="panel">
                         <h3>{{ side }}</h3>
                         <div class="table-scroll"><table class="data">
-                            <thead><tr><th>Зона</th><th>Выставлено / мест</th><th>Побеждено</th><th>Очки</th></tr></thead>
+                            <thead><tr><th>Зона</th><th>{{ "Осталось / мест" if cached.data.round else "Выставлено / мест" }}</th><th>Побеждено</th><th>Очки</th></tr></thead>
                             <tbody>{% for z in zones %}<tr><td>{{ z.id }}</td>
-                                <td>{{ z.deployed if z.deployed is not none else "—" }} / {{ z.capacity if z.capacity is not none else "—" }}</td>
+                                {% set count = z.get("remaining", z.deployed) if cached.data.round else z.deployed %}
+                                <td>{{ count if count is not none else "—" }} / {{ z.capacity if z.capacity is not none else "—" }}</td>
                                 <td>{{ z.defeated if z.defeated is not none else "—" }}</td>
                                 <td>{{ z.points if z.points is not none else "—" }}</td></tr>{% endfor %}</tbody>
                         </table></div>
                     </div>
                 {% endif %}
             {% endfor %}
+            </details>
         {% elif kind == "raid" and cached.data %}
             {% for raid in cached.data.active %}
                 <div class="panel">
@@ -53,6 +59,49 @@
         {% elif not error %}
             <p class="empty-state">Обновите данные, чтобы получить первый снимок.</p>
         {% endif %}
+        {% if kind == "tw" %}
+            <section class="panel" id="battle-log">
+                <h2>Журнал боёв</h2>
+                <form method="get" action="/game-account/events/tw#battle-log">
+                    {% if plan %}<input type="hidden" name="plan" value="{{ plan.id }}">{% endif %}
+                    <label>Зона
+                        <select name="battle_zone" onchange="this.form.submit()">
+                            {% for key, label in battle_zones.items() %}
+                                <option value="{{ key }}"{% if key == battle_zone %} selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <noscript><button type="submit">Открыть</button></noscript>
+                </form>
+                {% if battle_log.at %}<p class="muted">Последнее чтение журнала {{ clock(battle_log.at) }} МСК</p>{% endif %}
+                {% if cached.data and cached.data.battle_log_unavailable %}
+                    <p>При последнем обновлении игровой журнал был недоступен.</p>
+                {% endif %}
+                {% if battle_rows %}
+                    <div class="table-scroll"><table class="data">
+                        <thead><tr><th>Начало (МСК)</th><th>Сторона</th><th>Атакующий</th><th>Защитник</th><th>Лидер защиты</th><th>Исход</th><th>Конец (МСК)</th></tr></thead>
+                        <tbody>{% for row in battle_rows %}<tr>
+                            <td>{{ clock(row.started_at) if row.started_at is not none else "—" }}</td><td>{{ row.side }}</td>
+                            <td>{{ row.attacker }}</td><td>{{ row.defender }}</td><td>{{ row.leader or "—" }}</td><td>{{ row.result }}</td>
+                            <td>{{ clock(row.finished_at) if row.finished_at is defined else "—" }}</td>
+                        </tr>{% endfor %}</tbody>
+                    </table></div>
+                {% else %}<p>В этой зоне пока нет записей об атаках.</p>{% endif %}
+            </section>
+        {% endif %}
+        {% if kind == "tw" %}<p><a href="/tw/def/plans">Открыть планировщик защиты</a></p>{% endif %}
+        {% if defense_plans %}
+            <form method="get" action="/game-account/events/tw" class="panel">
+                <label>План защиты
+                    <select name="plan" required>
+                        {% for option in defense_plans %}
+                        <option value="{{ option.id }}"{% if plan and plan.id == option.id %} selected{% endif %}>{{ option.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit">Открыть план</button>
+            </form>
+        {% endif %}
         {% if plan %}
             <section class="panel" id="personal-preview">
                 <h2>Моя защита · {{ plan.name }}</h2>
@@ -62,7 +111,15 @@
                     <p>{{ entry.units|join(", ") or "Нет состава" }}</p>
                     {% for datacron in entry.datacrons %}<p>{{ datacron }}</p>{% endfor %}
                     {% for issue in entry.issues %}<p class="error">{{ issue }}</p>{% endfor %}
-                {% else %}<p>В этом плане у основного аккаунта нет назначений.</p>{% endfor %}
+                {% else %}<p>{{ "В этом плане у выбранного аккаунта нет назначений." if personal_code else "Выберите аккаунт из состава этой гильдии." }}</p>{% endfor %}
+                {% if preview and deployment_open and personal_connected %}
+                <form method="post" action="/game-account/events/tw/defense">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="ally_code" value="{{ personal_code }}">
+                    <input type="hidden" name="plan" value="{{ plan.id }}">
+                    <button type="submit">Подготовить постановку</button>
+                </form>
+                {% endif %}
             </section>
         {% endif %}
     </div>

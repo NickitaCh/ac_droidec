@@ -97,7 +97,7 @@ async def refresh_saved(owner, guild_id, profile, tier, code, kind, *, reconnect
                 _end_session(account)
                 raise
             try:
-                await game_account.reconnect(owner, guild_id, profile, tier, code)
+                await game_account.reconnect(owner, guild_id, profile, tier, code, optimizer_read=profile == "prod")
                 return await _capture(reader, guild_id, owner, kind)
             except game_account.AccountError:
                 _end_session(account)

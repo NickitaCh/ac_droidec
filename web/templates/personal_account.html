@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ account[1] }} — Мой профиль{% endblock %}
+{% block content %}
+    <section class="page-hero">
+        <p class="page-hero-eyebrow">Мой профиль</p>
+        <h1>{{ account[1] }}</h1>
+        <p class="page-hero-lead">Код союзника {{ account[0] }}</p>
+    </section>
+    {% include "_my_accounts.html" %}
+{% endblock %}

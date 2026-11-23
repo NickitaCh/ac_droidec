@@ -57,6 +57,14 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ga.AccountError):
                 ga.require_pilot("owner", 1, "test", "officer")
 
+    def test_personal_reads_in_prod_require_own_guild_and_profile(self):
+        with patch.object(bot_profiles, "guild_profile", return_value="prod"):
+            ga.require_account_read("owner", 1, "prod", "member")
+            for guild, profile, tier in [(2, "prod", "member"), (1, "test", "member"), (1, "prod", "guest")]:
+                with self.subTest(guild=guild, profile=profile, tier=tier):
+                    with self.assertRaises(ga.AccountError):
+                        ga.require_account_read("owner", guild, profile, tier)
+
     def test_allowlist_and_identity_checked_before_network(self):
         for method in [b"UpdateMods", b"DoAuthGuest", b"LinkNucleusAccount"]:
             raw = request_bytes().replace(b"GetInitialData", method)
@@ -224,7 +232,8 @@ class PilotTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Привязать EA", response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
             self.assertEqual(client.post("/game-account/disconnect", data={"csrf": "wrong"}).status_code, 403)
-        self.assertFalse(bot_profiles.path_available("/game-account", "prod"))
+        self.assertTrue(bot_profiles.path_available("/game-account/link", "prod"))
+        self.assertFalse(bot_profiles.path_available("/admin/game-lab", "prod"))
 
 
 if __name__ == "__main__":

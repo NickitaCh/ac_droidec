@@ -5,6 +5,7 @@
 <link rel="stylesheet" href="/static/game_lab.css">
 <section class="page-hero">
     <h1>Модули из игры</h1>
+    <p>{{ user.game_accounts.get(ally_code, (ally_code,))[0] if user.game_accounts else ally_code }}</p>
     <a class="hero-link" href="/player/{{ ally_code }}">Мой профиль</a>
 </section>
 <main class="game-lab">

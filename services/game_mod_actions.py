@@ -18,11 +18,11 @@ class LockedModError(ga.AccountError):
         self.holder = old
 
 
-async def snapshot(user, code, *, read_only=False):
+async def snapshot(user, code, *, read_only=False, personal=False):
     scope = (str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'], code)
     if not read_only:
         ga.require_mod_actions(*scope[:4])
-    connection, credentials, connection_current = accounts._load(*scope, optimizer_read=True)
+    connection, credentials, connection_current = accounts._load(*scope, optimizer_read=True, **({"personal": True} if personal else {}))
     def is_current():
         if not read_only:
             ga.require_mod_actions(*scope[:4])
@@ -149,14 +149,15 @@ def request(snapshot, op):
 
 
 async def apply(user, code, data, save):
-    fresh = await snapshot(user, code)
+    options = {"personal": True} if data.get("external_account") else {}
+    fresh = await snapshot(user, code, **options)
     if fresh['connection'] != data['connection'] or fresh['fingerprint'] != data['fingerprint']:
         raise ga.AccountError('Инвентарь, прокачка или подключение изменились. Выполните новый Dry run.')
     ops = operations(fresh['mods'], data['results'], set(data.get('locked', [])))
     expected = [dict(m) for m in fresh['mods']]
     for index, op in enumerate(ops):
         # Re-read before every write, including after a possibly long prior step.
-        current = await snapshot(user, code) if index else fresh
+        current = await snapshot(user, code, **options) if index else fresh
         if (current['connection'] != data['connection'] or
                 current['fingerprint'] != plans.fingerprint(expected, fresh['progress'])):
             raise ga.AccountError('Расстановка изменилась во время применения. Дальнейшие действия остановлены.')
@@ -173,7 +174,7 @@ async def apply(user, code, data, save):
                 m['equipped_to'] = None
             elif m['id'] in op['equip']:
                 m['equipped_to'] = op['unit']
-        actual = await snapshot(user, code)
+        actual = await snapshot(user, code, **options)
         if (actual['connection'] != data['connection'] or
                 actual['fingerprint'] != plans.fingerprint(expected, fresh['progress'])):
             raise ga.AccountError('Итог операции отличается от плана. Остановлено; проверьте текущую расстановку в игре.')

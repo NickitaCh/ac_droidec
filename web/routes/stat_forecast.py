@@ -66,6 +66,12 @@ async def stats_check_form(
     guild_id = user["guild_id"]
     plates = database.get_all_stat_requirement_plates(guild_id=guild_id)
     roster = _roster_choices(guild_id)
+    choices = dict(roster)
+    for code, (name, _) in user.get("game_accounts", {}).items():
+        choices.setdefault(code, name)
+    roster = sorted(choices.items(), key=lambda row: row[1].casefold())
+    if "ally_code" not in request.query_params and not ally_code_manual and action != "run":
+        ally_code = user.get("active_ally_code") or ally_code
     if scenario not in SCENARIO_LABELS:
         scenario = SCENARIO_RAW
     if scheme not in SCHEME_LABELS:

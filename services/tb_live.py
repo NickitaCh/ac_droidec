@@ -115,3 +115,13 @@ def history(guild_id, owner, limit=12):
         return [(ts, json.loads(state)) for ts, state in db.execute(
             "SELECT captured,state FROM tb_live_snapshots WHERE guild_id=? AND owner=? ORDER BY id DESC LIMIT ?",
             (guild_id, owner, limit))]
+
+
+def latest_guild_state(guild_id):
+    with closing(sqlite3.connect(database.DB_NAME)) as db:
+        _ensure(db)
+        row = db.execute(
+            "SELECT state FROM tb_live_snapshots WHERE guild_id=? ORDER BY captured DESC, id DESC LIMIT 1",
+            (guild_id,),
+        ).fetchone()
+    return json.loads(row[0]) if row else None

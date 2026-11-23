@@ -35,9 +35,15 @@ def _db():
 
 
 def _authorize(user, code):
-    ga.require_pilot(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'])
-    if accounts.own_main(user) != str(code):
-        raise ga.AccountError('Доступна защита только своего подключённого основного аккаунта.')
+    owner, guild_id = str(user['discord_id']), user['guild_id']
+    ga.require_game_officer(owner, guild_id, user['bot_profile'], user['tier'])
+    if accounts.own_main(user) == str(code):
+        return
+    roster = database.get_roster_by_player_id(guild_id)
+    if (ga.select_account(owner, guild_id, ally_code=code) != str(code)
+            or not any(str(registered) == str(code) for registered, _ in roster.values())
+            or not accounts._connection(owner, code)):
+        raise ga.AccountError('Доступна защита своего подключённого аккаунта из состава гильдии.')
 
 
 def load(user, ticket):
@@ -57,14 +63,15 @@ def create(user, code, event, assignments):
         raise ga.AccountError('Нет назначений для расстановки.')
     data = {'assignments': assignments, 'results': []}
     with closing(_db()) as db, db:
-        old = db.execute('SELECT ticket,state FROM tw_game_deploy WHERE owner=? AND guild_id=? AND code=? AND event=?',
-                         (str(user['discord_id']), user['guild_id'], code, event)).fetchone()
-        if old:
-            raise ga.AccountError('Для этого аккаунта и ВГ уже создано назначение: ' + old['ticket'])
         ticket = secrets.token_urlsafe(24)
-        db.execute('INSERT INTO tw_game_deploy VALUES (?,?,?,?,?,?,?,?)',
-                   (ticket, str(user['discord_id']), user['guild_id'], code, event,
-                    'draft', json.dumps(data, ensure_ascii=False), int(time.time())))
+        db.execute(
+            'INSERT INTO tw_game_deploy VALUES (?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(owner,guild_id,code,event) DO NOTHING',
+            (ticket, str(user['discord_id']), user['guild_id'], code, event,
+             'draft', json.dumps(data, ensure_ascii=False), int(time.time())))
+        ticket = db.execute(
+            'SELECT ticket FROM tw_game_deploy WHERE owner=? AND guild_id=? AND code=? AND event=?',
+            (str(user['discord_id']), user['guild_id'], code, event)).fetchone()['ticket']
     return ticket
 
 

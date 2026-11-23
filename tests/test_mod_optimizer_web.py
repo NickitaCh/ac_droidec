@@ -120,6 +120,28 @@ class OptimizerWebTests(unittest.TestCase):
             self.user.clear()
             self.user.update(original)
 
+    def test_external_alt_loadouts_are_separate_and_other_accounts_are_denied(self):
+        code = '987654321'
+        plans.save_baseline('owner', 1, '123456789', [], name='Main layout', units=['A'], scope='all')
+        plans.save_baseline('owner', 1, code, [], name='Alt layout', units=['A'], scope='all')
+
+        def local_account(*_, ally_code=None):
+            if ally_code != '123456789':
+                raise ga.AccountError('Account not in this guild')
+            return ally_code
+
+        with TestClient(self.app) as client, patch.object(ga, 'select_account', side_effect=local_account), patch.object(
+                route.database, 'get_all_registrations_for_discord_id', return_value=[(0, code, 'Alt', 1)]):
+            main = client.get('/mod-loadouts')
+            self.assertIn('Main layout', main.text)
+            self.assertNotIn('Alt layout', main.text)
+            self.assertIn('Alt · ' + code, main.text)
+            alt = client.get('/mod-loadouts', params={'ally_code': code})
+            self.assertIn(f'value="{code}" selected', alt.text)
+            self.assertIn('Alt layout', alt.text)
+            self.assertNotIn('Main layout', alt.text)
+            self.assertEqual(client.get('/mod-loadouts', params={'ally_code': '999999999'}).status_code, 403)
+
     def test_member_of_another_test_guild_can_open_optimizer_with_dry_run(self):
         self.actual_guild_id = 2
         self.user.update(guild_id=2, tier='member', is_super_admin=False)
@@ -353,6 +375,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         user = {'discord_id': 'owner', 'guild_id': 1, 'bot_profile': 'test', 'tier': 'member'}
         with patch.object(plans, 'requirements_fingerprint', return_value='current'), \
                 patch.object(plans, 'finish') as finish, \
+                patch.object(ga, 'select_account', return_value='123'), \
                 patch.object(ga, 'reconnect', new_callable=AsyncMock) as reconnect:
             async def snapshot(*args, **kwargs):
                 reconnect.assert_awaited_once_with('owner', 1, 'test', 'member', '123', optimizer_read=True)

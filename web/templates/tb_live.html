@@ -30,7 +30,7 @@
                                 <td>{{ "Есть" if row.in_roster else "Нет" if row.in_roster is not none else "Нет данных" }}</td>
                             </tr>{% endfor %}</tbody>
                         </table></div>
-                    {% else %}<p>Незакрытых назначений по сверенным взводам открытых зон нет.</p>{% endif %}
+                    {% else %}<p>{{ "Незакрытых назначений по сверенным взводам открытых зон нет." if personal_code else "Выберите аккаунт из состава этой гильдии." }}</p>{% endif %}
                 </details>
             {% endif %}
             {% for zone in zones %}

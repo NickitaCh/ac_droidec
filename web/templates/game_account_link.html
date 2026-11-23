@@ -12,12 +12,18 @@
         <p>{{ success.ally_code }} · {{ 'Альт привязан' if success.is_alt else 'Основной аккаунт подключён' }}</p>
         <p>Доступ сохранён. При следующих проверках повторно вводить код не потребуется, пока EA сохраняет разрешение.</p>
         <a href="/me" class="btn btn-primary">Мой профиль</a>
+        <a href="/mod-loadouts?ally_code={{ success.ally_code }}" class="btn">К подборкам этого аккаунта</a>
     </section>
     {% else %}
     <section class="card">
+        {% if ea_pending and ea_pending.status == 'checking' %}
+        <p role="status">Проверяем код EA.</p>
+        <a class="btn btn-primary" href="/game-account/link?alt={{ 1 if is_alt else 0 }}">Проверить состояние</a>
+        {% else %}
         {% if is_alt %}<p>После входа игрок будет определён автоматически и привязан как ваш альт. Основной аккаунт сохранится.</p>{% else %}<p>Введите почту EA, которая связана с вашим зарегистрированным основным аккаунтом.</p>{% endif %}
         {% if ea_pending %}
-        <form method="post" action="/game-account/link/ea-finish">
+        {% if ea_pending.email %}<p>Код отправлен на <strong style="overflow-wrap:anywhere">{{ ea_pending.email }}</strong>.</p>{% endif %}
+        <form method="post" action="/game-account/link/ea-finish?alt={{ 1 if is_alt else 0 }}" data-ea-submit>
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="alt" value="{{ 1 if is_alt else 0 }}"><input type="hidden" name="flow_id" value="{{ ea_pending.id }}">
             <label for="link-code">Код из письма EA</label>
             <input id="link-code" name="one_time_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required autofocus>
@@ -26,7 +32,7 @@
         </form>
         <details class="lab-technical"><summary>Отправить код заново или указать другую почту</summary>
         {% endif %}
-        <form method="post" action="/game-account/link/ea-start">
+        <form method="post" action="/game-account/link/ea-start?alt={{ 1 if is_alt else 0 }}" data-ea-submit>
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="alt" value="{{ 1 if is_alt else 0 }}">
             <label for="link-email">Почта EA Connect</label>
             <input id="link-email" name="ea_email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
@@ -36,7 +42,24 @@
         {% if ea_pending %}</details>{% endif %}
         {% if not ea_available %}<p class="lab-muted">Подключение EA временно недоступно. Попробуйте позже.</p>{% endif %}
         <p class="lab-muted">Пароль не нужен. Почта должна быть подключена через EA Connect в самой игре. Доступ хранится зашифрованно.</p>
+        {% endif %}
     </section>
     {% endif %}
 </div>
+<script>
+    document.querySelectorAll("[data-ea-submit]").forEach((form) => {
+        const button = form.querySelector('button[type="submit"]');
+        const initiallyDisabled = button.disabled;
+        form.addEventListener("submit", (event) => {
+            if (button.disabled) {
+                event.preventDefault();
+                return;
+            }
+            button.disabled = true;
+        });
+        window.addEventListener("pageshow", () => {
+            button.disabled = initiallyDisabled;
+        });
+    });
+</script>
 {% endblock %}

@@ -46,7 +46,7 @@ def _render(request, user, message=None, ally_code=None, *, reconnect_needed=Fal
 async def page(request: Request, ally_code: str = None, user=Depends(require_member_access)):
     args = _scope(user, account_read=True)
     try:
-        code = game_account.select_account(args[0], args[1], ally_code=ally_code)
+        code = game_account.select_personal_account(args[0], args[1], ally_code or user.get("active_ally_code"))
     except game_account.AccountError as error:
         raise HTTPException(403, str(error)) from None
     return RedirectResponse(f"/player/{code}#ea-connection", status_code=303)
@@ -64,14 +64,15 @@ def _render_link(request, user, alt=False, message=None, linked=None):
             raise HTTPException(404, "Подключение не найдено.") from None
         if row["added_by"] != args[0] or not ea_connect.linked(linked):
             raise HTTPException(404, "Подключение не найдено.")
-        own = next((r for r in database.get_user_registrations(args[0], guild_id=args[1]) if str(r[0]) == row["ally_code"]), None)
+        own = game_account.personal_accounts(args[0], args[1]).get(row["ally_code"])
         if own is None:
             raise HTTPException(404, "Привязка не найдена.")
-        success = {"name": row["name"], "ally_code": row["ally_code"], "is_alt": not bool(own[2])}
+        success = {"name": row["name"], "ally_code": row["ally_code"], "is_alt": not own[1]}
     return templates.TemplateResponse(request=request, name="game_account_link.html", context={
         "user": user, "is_alt": alt, "message": message, "success": success,
         "csrf": request.session["game_account_csrf"], "ea_available": ea_connect.available(),
-        "ea_pending": ea_connect.pending(args[0], ea_connect.registration_target(args[0], alt, args[1])),
+        "ea_pending": ea_connect.pending(args[0], ea_connect.registration_target(args[0], alt, args[1]),
+                                         include_email=True, include_checking=True),
     }, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
@@ -80,6 +81,15 @@ async def link_page(request: Request, alt: int = 0, linked: str = None, user=Dep
     if alt not in (0, 1) or set(request.query_params) - {"alt", "linked"}:
         raise HTTPException(400)
     return _render_link(request, user, bool(alt), linked=linked)
+
+
+@router.get("/link/ea-start", include_in_schema=False)
+@router.get("/link/ea-finish", include_in_schema=False)
+async def link_resume(alt: int = 0, user=Depends(require_member_access)):
+    _scope(user, account_read=True)
+    if alt not in (0, 1):
+        raise HTTPException(400)
+    return RedirectResponse(f"/game-account/link?alt={alt}", status_code=303)
 
 
 @router.post("/link/{step}")
@@ -94,14 +104,15 @@ async def link_action(step: str, request: Request, user=Depends(require_member_a
         raise HTTPException(403, "Обновите страницу и повторите действие.")
     alt = form.get("alt", "0")
     allowed = {"csrf", "alt", "ea_email", "consent"} if step == "ea-start" else {"csrf", "alt", "flow_id", "one_time_code"}
-    if alt not in ("0", "1") or set(form) - allowed:
+    if (alt not in ("0", "1") or set(form) - allowed
+            or request.query_params.get("alt", alt) != alt):
         raise HTTPException(400)
     is_alt = alt == "1"
     try:
         if step == "ea-start":
             await ea_connect.start_registration(args[0], is_alt, str(form.get("ea_email", "")), form.get("consent") == "yes",
                                                 guild_id=args[1])
-            return _render_link(request, user, is_alt, "Код отправлен. Введите код из последнего письма EA.")
+            return RedirectResponse(f"/game-account/link?alt={alt}", status_code=303)
         from web.routes.registration import _get_comlink
         result = await ea_connect.finish_registration(args[0], is_alt, str(form.get("flow_id", "")), str(form.get("one_time_code", "")),
                                                       _get_comlink(), guild_id=args[1])
@@ -132,7 +143,7 @@ def _render_modules(request, user, code, *, snapshot=None, error=None, prompt=No
 def modules_page(request: Request, ally_code: str = "", user=Depends(require_member_access)):
     args = _scope(user, account_read=True)
     try:
-        code = game_account.select_account(args[0], args[1], ally_code=ally_code or None)
+        code = game_account.select_personal_account(args[0], args[1], ally_code or user.get("active_ally_code"))
     except game_account.AccountError as error:
         raise HTTPException(403, str(error)) from None
     return _render_modules(request, user, code, prompt=connection_prompt(user, code))
@@ -147,13 +158,13 @@ async def modules_read(request: Request, csrf: str = Form(...), ally_code: str =
     if not expected or not secrets.compare_digest(csrf.encode(), expected.encode()):
         raise HTTPException(403)
     try:
-        code = game_account.select_account(args[0], args[1], ally_code=ally_code)
+        code = game_account.select_personal_account(args[0], args[1], ally_code)
     except game_account.AccountError as error:
         raise HTTPException(403, str(error)) from None
     try:
         if reconnect:
-            await game_account.reconnect(*args, code, optimizer_read=True)
-        snapshot = await game_account_readonly.read(*args, code, member_read=True)
+            await game_account.reconnect(*args, code, optimizer_read=True, personal=True)
+        snapshot = await game_account_readonly.read(*args, code, member_read=True, personal=True)
     except game_account.ConnectionRequired as error:
         return _render_modules(request, user, code, prompt=connection_prompt(user, code, error, reconnect=reconnect))
     except game_account.AccountError as error:
@@ -166,7 +177,7 @@ def _personal_account(user, mode, ally_code):
         raise HTTPException(404)
     scope = _scope(user, account_read=True)
     try:
-        code = game_account.select_account(scope[0], scope[1], ally_code=ally_code or None)
+        code = game_account.select_personal_account(scope[0], scope[1], ally_code or user.get("active_ally_code"))
     except game_account.AccountError as error:
         raise HTTPException(403, str(error)) from None
     return scope, code
@@ -205,8 +216,8 @@ async def personal_read(request: Request, mode: str, csrf: str = Form(...), ally
     scope, code = await asyncio.to_thread(_personal_account, user, mode, ally_code)
     try:
         if reconnect:
-            await game_account.reconnect(*scope, code, optimizer_read=True)
-        snapshot = await game_account_readonly.read(*scope, code, event=mode, member_read=True)
+            await game_account.reconnect(*scope, code, optimizer_read=True, personal=True)
+        snapshot = await game_account_readonly.read(*scope, code, event=mode, member_read=True, personal=True)
     except game_account.ConnectionRequired as error:
         return _render_personal(request, user, mode, code,
                                 prompt=connection_prompt(user, code, error, reconnect=reconnect))

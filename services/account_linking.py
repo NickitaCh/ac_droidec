@@ -25,8 +25,8 @@ async def validate_player(owner, is_alt, preview_id, comlink, *, guild_id=1):
     if not is_alt and code != str(main[0]):
         raise ga.AccountError("Эта почта относится к другому игроку. Для второго аккаунта откройте форму с «альт: Да».")
     if is_alt and bot_profiles.current_profile() == "prod" and not any(
-            str(registered) == code and not is_main
-            for registered, _, is_main in database.get_user_registrations(str(owner), guild_id=guild_id)):
+            str(registered) == code
+            for _, registered, _, _ in database.get_all_registrations_for_discord_id(str(owner))):
         raise ga.AccountError("Сначала зарегистрируйте альт в боте.")
     if any(str(other) != str(owner) for _gid, other in database.get_ally_code_registrations(code)):
         raise ga.AccountError("Этот игрок уже зарегистрирован у другого пользователя. Привязка не изменена.")
@@ -61,8 +61,8 @@ def enroll(owner, is_alt, player, *, pending_id=None, pending_target=None, guild
                 or conn.execute("SELECT 1 FROM test_account_links WHERE ally_code=? AND owner!=?", (code, str(owner))).fetchone()):
             raise ga.AccountError("Игрок уже привязан к другому пользователю.")
         if is_alt and bot_profiles.current_profile() == "prod" and not conn.execute(
-                "SELECT 1 FROM user_registration WHERE guild_id=? AND discord_id=? AND ally_code=? AND is_main=0",
-                (guild_id, str(owner), code)).fetchone():
+                "SELECT 1 FROM user_registration WHERE discord_id=? AND ally_code=?",
+                (str(owner), code)).fetchone():
             raise ga.AccountError("Альт больше не зарегистрирован в боте.")
         existing = conn.execute("SELECT id,player_id,added_by FROM game_lab_accounts WHERE ally_code=?", (code,)).fetchone()
         if existing and (existing["player_id"] != player["playerId"] or existing["added_by"] != str(owner)):

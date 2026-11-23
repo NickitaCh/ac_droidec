@@ -13,13 +13,16 @@ class SharedWatchTests(unittest.IsolatedAsyncioTestCase):
         await game_watch.shutdown()
 
     async def test_manual_update_reconnects_only_after_expiry_and_retries_once(self):
-        with patch.object(game_watch, "_capture", AsyncMock(side_effect=[
-                game_account.SessionExpired(), {"active": [{}]}])) as capture, \
-                patch.object(game_account, "reconnect", AsyncMock()) as reconnect:
-            self.assertEqual(await game_watch.refresh_saved(*self.account, "raid", reconnect_if_expired=True),
-                             {"active": [{}]})
-        reconnect.assert_awaited_once_with(*self.account)
-        self.assertEqual(capture.await_count, 2)
+        for profile in ("test", "prod"):
+            account = (*self.account[:2], profile, *self.account[3:])
+            with self.subTest(profile=profile), \
+                    patch.object(game_watch, "_capture", AsyncMock(side_effect=[
+                        game_account.SessionExpired(), {"active": [{}]}])) as capture, \
+                    patch.object(game_account, "reconnect", AsyncMock()) as reconnect:
+                self.assertEqual(await game_watch.refresh_saved(*account, "raid", reconnect_if_expired=True),
+                                 {"active": [{}]})
+            reconnect.assert_awaited_once_with(*account, optimizer_read=profile == "prod")
+            self.assertEqual(capture.await_count, 2)
 
     async def test_concurrent_watches_share_login_and_expiry_stops_both(self):
         tw_sampled = asyncio.Event()

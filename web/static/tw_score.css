@@ -1,0 +1,43 @@
+#attack-analysis { scroll-margin-top: 4rem; }
+.tw-score-matchup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .85rem;
+    align-items: start;
+}
+.tw-score-side {
+    --team-color: var(--accent);
+    min-width: 0;
+    padding: .9rem 1.15rem;
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--team-color);
+    border-radius: 12px;
+    background: linear-gradient(150deg, color-mix(in srgb, var(--team-color) 11%, var(--surface)), var(--surface) 70%);
+}
+.tw-score-away { --team-color: var(--status-critical); }
+.tw-score-side h2, .tw-score-breakdown h3 { margin: 0 0 .7rem; overflow-wrap: anywhere; }
+.tw-score-side dl {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .45rem;
+    margin: 0;
+}
+.tw-score-side dt { color: var(--fg-secondary); font-size: .78rem; }
+.tw-score-side dd { margin: .2rem 0 0; font-size: clamp(1.05rem, 2.8vw, 1.8rem); line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tw-score-note { margin: .55rem 0 .95rem; font-size: .82rem; }
+.tw-score-breakdown { min-width: 0; margin: 0; }
+.tw-score-table { width: 100%; font-variant-numeric: tabular-nums; }
+.data.tw-score-table th, .data.tw-score-table td { padding: .37rem .42rem; text-align: right; white-space: nowrap; }
+.data.tw-score-table th:first-child { text-align: left; }
+.tw-score-captured span { color: var(--status-good); }
+.tw-score-breakdown h4 { margin: .85rem 0 .4rem; }
+.tw-score-defenders { display: flex; flex-wrap: wrap; gap: .3rem .6rem; margin: 0; padding: 0; list-style: none; }
+.tw-score-defenders li { padding: .2rem .5rem; border-radius: 5px; border: 1px solid var(--border); overflow-wrap: anywhere; }
+.tw-score-defenders b { margin-left: .25rem; }
+@media (max-width: 860px) {
+    .tw-score-matchup { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 420px) {
+    .tw-score-breakdown { padding: .7rem .55rem; }
+    .data.tw-score-table th, .data.tw-score-table td { padding: .36rem .24rem; font-size: .78rem; }
+}

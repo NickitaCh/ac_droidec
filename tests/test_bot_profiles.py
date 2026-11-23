@@ -173,24 +173,28 @@ class BotProfileTests(unittest.TestCase):
 
     def test_product_policy_overrides_guild_feature_toggle(self):
         prod = self.production_guild()
-        database.set_bot_state("feature:tw_order", "1", guild_id=prod)
-        self.assertFalse(feature_flags.is_enabled(prod, "tw_order"))
+        database.set_bot_state("feature:mod_scan", "1", guild_id=prod)
+        self.assertFalse(feature_flags.is_enabled(prod, "mod_scan"))
         with self.assertRaises(ValueError):
-            feature_flags.set_enabled(prod, "tw_order", True, "owner")
+            feature_flags.set_enabled(prod, "mod_scan", True, "owner")
         self.assertTrue(feature_flags.is_enabled(self.gid, "tw_order"))
-        for key in ("birthdays", "omicron", "stat_requirements", "mod_builder", "mod_search", "tasks"):
+        for key in ("birthdays", "omicron", "stat_requirements", "mod_builder", "mod_search", "tasks", "tw_order"):
             self.assertTrue(feature_flags.is_enabled(prod, key), key)
+        feature_flags.set_enabled(prod, "tw_order", False, "owner")
+        self.assertFalse(feature_flags.is_enabled(prod, "tw_order"))
+        feature_flags.set_enabled(prod, "tw_order", True, "owner")
+        self.assertTrue(feature_flags.is_enabled(prod, "tw_order"))
 
     def test_removed_routes_include_nested_actions_but_not_similar_paths(self):
-        for path in ("/tw", "/tw/def/plans/1/notify", "/mod-analysis/compare", "/omicron/phrases/set", "/admin/fun/enable"):
+        for path in ("/tw", "/tw/attack", "/mod-analysis/compare", "/omicron/phrases/set", "/admin/fun/enable"):
             self.assertFalse(profiles.path_available(path, "prod"), path)
             self.assertTrue(profiles.path_available(path, "test"), path)
-        for path in ("/mod-progress", "/mod-builder", "/admin/guilds", "/omicrons/report", "/twilight"):
+        for path in ("/tw/def", "/tw/def/plans/1/notify", "/mod-progress", "/mod-builder", "/admin/guilds", "/omicrons/report", "/twilight"):
             self.assertTrue(profiles.path_available(path, "prod"), path)
 
     def test_prod_route_policy_applies_to_super_admin(self):
         prod = self.production_guild()
-        req = request("/tw/def", {"user": self.user, "bot_profile": "prod"})
+        req = request("/tw/attack", {"user": self.user, "bot_profile": "prod"})
         with patch.object(deps, "_refresh_access", return_value=self.user):
             with self.assertRaises(HTTPException) as raised:
                 deps.get_current_user(req)
@@ -223,9 +227,9 @@ class BotProfileTests(unittest.TestCase):
         req = SimpleNamespace(url=SimpleNamespace(path="/admin/guilds"), scope={})
         user = {**self.user, "real_super_admin": True, "bot_profile": "prod"}
         html = template.render(request=req, user=user)
-        for href in ("/tw", "/mod-analysis", "/mod-scan", "/admin/fun", "/farm", "/mod-ku", "/omicron/phrases"):
+        for href in ("/tw", "/mod-analysis", "/mod-scan", "/admin/fun", "/mod-ku", "/omicron/phrases"):
             self.assertNotIn('href="' + href + '"', html)
-        for href in ("/admin/guilds", "/admin/access", "/mod-progress", "/mod-builder", "/birthdays"):
+        for href in ("/admin/guilds", "/admin/access", "/mod-progress", "/mod-builder", "/birthdays", "/farm"):
             self.assertIn('href="' + href + '"', html)
         self.assertIn('action="/admin/switch-profile"', html)
         self.assertIn('class="brand-full">Droidec', html)

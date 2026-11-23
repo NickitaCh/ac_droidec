@@ -3,6 +3,7 @@
 {% block content %}
 <div class="page-hero">
     <h1>{{ title }}</h1>
+    <p>{{ user.game_accounts.get(ally_code, (ally_code,))[0] if user.game_accounts else ally_code }}</p>
     <a class="hero-link" href="/player/{{ ally_code }}">Мой профиль</a>
 </div>
 <section class="card">
@@ -10,7 +11,7 @@
         {% for key, label in modes.items() %}
         <a class="btn" href="/game-account/personal/{{ key }}?ally_code={{ ally_code }}"{% if key == mode %} aria-current="page"{% endif %}>{{ label }}</a>
         {% endfor %}
-        {% if mode == "conquest" %}<a class="btn" href="/conquest">Калькулятор Завоевания</a>{% endif %}
+        {% if mode == "conquest" %}<a class="btn" href="/conquest?acc={{ ally_code }}">Калькулятор Завоевания</a>{% endif %}
     </nav>
     <form action="/game-account/personal/{{ mode }}" method="post">
         <input type="hidden" name="csrf" value="{{ csrf }}">

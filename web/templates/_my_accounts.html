@@ -1,0 +1,52 @@
+    {% if own_accounts is not none %}
+        <div class="panel my-accounts">
+            <div class="panel-title"><span>👤 Переключить аккаунт</span></div>
+            <p class="my-accounts-list">
+                {% for code, name, is_main in own_accounts %}
+                    {% if code == active_account_code %}
+                        <strong aria-current="page">{{ name }}</strong>
+                    {% elif user.account_switch_csrf %}
+                        <form method="post" action="/me/account" style="display:inline">
+                            <input type="hidden" name="csrf" value="{{ user.account_switch_csrf }}">
+                            <input type="hidden" name="ally_code" value="{{ code }}">
+                            <button type="submit" class="link-btn">{{ name }}</button>
+                        </form>
+                    {% else %}
+                        <a href="/player/{{ code }}">{{ name }}</a>
+                    {% endif %}
+                    <span class="muted">{{ "основной" if code == primary_account_code else "альт" }}</span>{% if not loop.last %} · {% endif %}
+                {% endfor %}
+            </p>
+            {% if ea_link_path %}
+            <div id="ea-connection">
+                {% if ea_linked %}
+                <span class="badge badge-ok">EA привязан</span>
+                {% else %}
+                <a class="link-btn" href="{{ ea_link_path }}">Привязать EA</a>
+                <span class="muted">— для функций, которым нужен вход в игру</span>
+                {% endif %}
+            </div>
+            <p><a href="/mod-loadouts?ally_code={{ active_account_code }}">Подборки модулей</a>
+                · <a href="/game-account/modules?ally_code={{ active_account_code }}">Мои модули</a>
+                · <a href="/game-account/personal/arena?ally_code={{ active_account_code }}">Великая арена</a>
+                · <a href="/game-account/personal/conquest?ally_code={{ active_account_code }}">Моё Завоевание</a></p>
+            {% endif %}
+            {% if alt_added %}<p class="badge badge-ok">✅ Альт «{{ alt_added }}» привязан.</p>{% endif %}
+            {% if alt_error %}<p class="error">{{ alt_error }}</p>{% endif %}
+            <details{% if alt_error %} open{% endif %}>
+                <summary class="link-btn">➕ Добавить альт-аккаунт</summary>
+                <form method="post" action="/me/alt" class="inline-form">
+                    <input type="text" name="ally_code" placeholder="Код союзника альта, 9 цифр" pattern="[0-9]{9}" maxlength="9" inputmode="numeric" required>
+                    <button type="submit">Привязать</button>
+                </form>
+                <p class="muted">Можно добавить аккаунт из любой гильдии или без гильдии.</p>
+            </details>
+            {% if card_tg %}
+            <p>📱 Telegram привязан: {{ card_tg|join(", ") }}
+                <span class="muted">— <a href="/me/telegram" target="_blank" rel="noopener">привязать другой</a></span></p>
+            {% elif card is defined and telegram_bot_username() %}
+            <p><a class="link-btn" href="/me/telegram" target="_blank" rel="noopener">📱 Привязать Telegram</a>
+                <span class="muted">— бот в Telegram будет знать вас как этого же игрока</span></p>
+            {% endif %}
+        </div>
+    {% endif %}

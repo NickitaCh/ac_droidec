@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import secrets
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -27,9 +28,10 @@ import tb_platoon_engine
 import tb_platoon_filters
 import tb_platoon_notify
 from cogs.violations import WARNS_STRUCTURE
-from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, omicron_priority, resource_spend, tb_schedule
+from services import activity_diff, channel_health, dashboard_data, discord_rest, feature_flags, game_account, omicron_priority, resource_spend, tb_schedule
 from services import discord_preview, mod_grade, player_compare, tb_advisor, tb_forecast, tb_missions, tb_my, tb_order_store, tb_plan, tb_projection, tb_results
 from services.config_status import config_warning_html
+from services.ea_connect import target_for_registration
 from tg_bot import outbox as tg_outbox
 from tg_bot import store as tg_store
 from services.guild_admin import add_guild_scoped_grant, list_grants_for_guild, remove_guild_scoped_grant
@@ -2624,10 +2626,36 @@ async def _run_player_stats_check(guild_id: int, ally_code: str, player_label: s
 async def my_profile(request: Request, user: dict = Depends(require_member_access)):
     """«Мой профиль» — карточка игрока на своём основном аккаунте (альты — переключателем
     в самой карточке). Без привязки — подсказка про /регистрация."""
-    accounts = own_accounts(user)
+    accounts = own_accounts(user) or [
+        (code, name, is_main)
+        for _, code, name, is_main in database.get_all_registrations_for_discord_id(str(user["discord_id"]))
+    ]
     if not accounts:
-        return templates.TemplateResponse(request, "my_profile_empty.html", {"user": user})
-    return RedirectResponse(f"/player/{accounts[0][0]}", status_code=303)
+        return templates.TemplateResponse(request, "my_profile_empty.html", {
+            "user": user, "alt_error": request.query_params.get("alt_error"),
+        })
+    alt_error = request.query_params.get("alt_error")
+    query = f"?{urlencode({'alt_error': alt_error})}" if alt_error else ""
+    code = user.get("active_ally_code") or accounts[0][0]
+    return RedirectResponse(f"/player/{code}{query}", status_code=303)
+
+
+@router.post("/me/account")
+def switch_account(request: Request, ally_code: str = Form(...), csrf: str = Form(...),
+                   return_to: str = Form("/me"), user: dict = Depends(require_member_access)):
+    expected = request.session.get("account_switch_csrf")
+    if not expected or not secrets.compare_digest(csrf.encode(), expected.encode()):
+        raise HTTPException(403)
+    owner = str(user["discord_id"])
+    if ally_code not in game_account.personal_accounts(owner, user["guild_id"]):
+        raise HTTPException(403, "Выберите свой зарегистрированный аккаунт.")
+    request.session["active_game_account"] = {"owner": owner, "code": ally_code}
+    personal_pages = {"/mod-loadouts", "/mod-optimizer", "/game-account/modules",
+                      "/game-account/personal/arena", "/game-account/personal/conquest",
+                      "/farm", "/conquest", "/conquest/effects", "/raids/plan", "/stats-check", "/datacrons/check",
+                      "/tb/live", "/game-account/events/tw", "/game-account/events/raid"}
+    same_page = return_to in personal_pages or re.fullmatch(r"/personal-plates/[a-f0-9]{16}", return_to)
+    return RedirectResponse(return_to if same_page else "/me", status_code=303)
 
 
 @router.post("/me/alt", response_class=HTMLResponse)
@@ -2635,11 +2663,9 @@ async def my_profile_add_alt(ally_code: str = Form(...), user: dict = Depends(re
     """Привязать альт-аккаунт к себе — то же, что /регистрация альт:True в Discord."""
     from services.registration import register_player
     from swgoh_comlink import SwgohComlink
-    accounts = own_accounts(user)
-    back = f"/player/{accounts[0][0]}" if accounts else "/me"
     result = await register_player(SwgohComlink(url="http://localhost:3000"), str(user["discord_id"]), ally_code, is_alt=True)
     if not result.ok:
-        return RedirectResponse(f"{back}?{urlencode({'alt_error': result.error})}", status_code=303)
+        return RedirectResponse(f"/me?{urlencode({'alt_error': result.error})}", status_code=303)
     return RedirectResponse(f"/player/{result.ally_code}?{urlencode({'alt_added': result.ingame_name})}", status_code=303)
 
 
@@ -2883,9 +2909,28 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
     is_officer = user.get("tier") == "officer"
     accounts = own_accounts(user)
     own_codes = {a[0] for a in accounts}
-    if not is_officer and ally_code not in own_codes:
+    profile_accounts = {account[0]: account for account in accounts}
+    for _, code, name, is_main in database.get_all_registrations_for_discord_id(str(user["discord_id"])):
+        profile_accounts.setdefault(code, (code, name, is_main))
+    own_account = profile_accounts.get(ally_code)
+    if not is_officer and not own_account:
         return RedirectResponse("/me", status_code=303)
-    card = dashboard_data.get_player_card(guild_id, ally_code)
+    card = dashboard_data.get_player_card(guild_id, ally_code) if is_officer or ally_code in own_codes else None
+    account_context = {
+        "own_accounts": list(profile_accounts.values()) if own_account else None,
+        "active_account_code": ally_code,
+        "primary_account_code": next(iter(profile_accounts), None),
+        "account_in_current_guild": ally_code in own_codes,
+        "alt_error": request.query_params.get("alt_error"),
+        "alt_added": request.query_params.get("alt_added"),
+        "ea_linked": bool(own_account and guild_id and target_for_registration(
+            user["discord_id"], guild_id, ally_code, personal=True)),
+        "ea_link_path": game_account.link_path(user["discord_id"], guild_id, ally_code) if own_account and guild_id else None,
+    }
+    if card is None and own_account:
+        return templates.TemplateResponse(request, "personal_account.html", {
+            "user": user, "account": own_account, **account_context,
+        })
     if card is None:
         raise HTTPException(status_code=404, detail=f"Игрок с кодом союзника «{ally_code}» не найден в составе гильдии")
 
@@ -2959,10 +3004,8 @@ async def player_card(request: Request, ally_code: str, user: dict = Depends(req
         "tb_report_events": tb_report.events if tb_report else [],
         "tb_row": tb_row,
         "is_officer": is_officer,
-        "own_accounts": accounts if ally_code in own_codes else None,
+        **account_context,
         "resources": _player_resources(guild_id, ally_code, request.query_params.get("res_period") or "month") if not card.departed_at else None,
-        "alt_error": request.query_params.get("alt_error"),
-        "alt_added": request.query_params.get("alt_added"),
         "can_add_personal_task": ally_code in own_codes and not card.departed_at and feature_flags.is_enabled(guild_id, "tasks"),
         "target_type_options": tasks_routes.TARGET_TYPE_OPTIONS,
         "task_error": request.query_params.get("task_error"),

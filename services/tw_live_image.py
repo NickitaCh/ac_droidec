@@ -8,6 +8,8 @@ import re
 from PIL import Image, ImageDraw
 
 import database
+from services.game_event_live import TW_ACTIVE_SQUAD_STATUSES, tw_remaining
+from services.tb_live import OPEN_ZONE
 from services.player_profile import galactic_legends
 from services.profile_image import _font, _portrait
 from tw_def_engine import ZONES
@@ -34,17 +36,115 @@ def zone_key(zone_id):
     return _POSITION.get(tuple(map(int, match.groups()))) if match else None
 
 
-def _unit_icon(unit):
+def open_zone_groups(state):
+    order = {entry["key"]: index for index, entry in enumerate(ZONES)}
+    zones = (zone for zone in state.get("opponent", ()) if zone.get("status") == OPEN_ZONE)
+    for zone in sorted(zones, key=lambda entry: order.get(zone_key(entry["id"]), 99)):
+        teams_in_zone = zone.get("teams", ()) if tw_remaining(zone) != 0 else ()
+        groups = {}
+        for team in teams_in_zone:
+            units = team.get("units", ())
+            if units and team.get("status") in TW_ACTIVE_SQUAD_STATUSES:
+                composition = (units[0], *sorted(units[1:]))
+                groups.setdefault(composition, []).append(team)
+        yield zone, sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))
+
+
+def zone_pages(state):
+    pages = []
+    labels = {entry["key"]: entry["label"] for entry in ZONES}
+    for zone, groups in open_zone_groups(state):
+        remaining = tw_remaining(zone)
+        label = labels.get(zone_key(zone["id"]), zone["id"])
+        count = "—" if remaining is None else str(remaining)
+        capacity = zone.get("capacity")
+        title = f"{label.capitalize()} · осталось {count} / {capacity if capacity is not None else '—'}"
+        shown = sum(len(teams) for _, teams in groups)
+        if remaining == 0:
+            note = "Нет оставшихся отрядов."
+        elif any(team.get("status") is None for team in zone.get("teams", ())):
+            note = "В этом снимке нет статусов части отрядов. Обновите сводку."
+        elif not groups:
+            note = "Составы пока не раскрыты."
+        elif remaining is not None and shown < remaining:
+            note = f"Раскрыто составов: {shown} из {remaining}."
+        else:
+            note = ""
+        pages.append((title, note, groups))
+    return sorted(pages, key=lambda page: not page[2])
+
+
+def render_zone(title, groups):
+    """One strip of unit portraits and ownership details per composition."""
+    size, width, header = 58, 720, 76
+    unit_ids = sorted({unit for units, _ in groups for unit in units})
+    names = database.get_game_unit_names(unit_ids)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        icons = dict(zip(unit_ids, pool.map(lambda unit: _unit_icon(unit, size), unit_ids)))
+    heading, count_font, normal, small = _font(27, True), _font(24, True), _font(18), _font(12, True)
+    label_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    details = []
+    for _, teams in groups:
+        chips = []
+        for team in sorted(teams, key=lambda row: (-row.get("holds", 0), row.get("player_name") or "")):
+            owner = (team.get("player_name") or "Имя скрыто")[:45]
+            holds = team.get("holds", 0)
+            locked = team.get("status") == 2
+            # The counter already includes the current attempt once a squad is locked.
+            holds = max(0, holds - locked)
+            label = f"{owner} · удерж. {holds}" if holds else owner
+            if locked:
+                label += " · в бою"
+            chips.append((label, "#ffcf78" if holds else "#a1dcff" if locked else "#ecf3f9"))
+        positions, x, y = [], 26, 78
+        for label, color in chips:
+            chip_width = round(label_draw.textlength(label, font=normal)) + 22
+            if x + chip_width > width - 24:
+                x, y = 26, y + 27
+            positions.append((x, y, chip_width, label, color))
+            x += chip_width + 6
+        details.append((positions, y + 38))
+    image = Image.new("RGB", (width, header + sum(height for _, height in details) + 12), "#111923")
+    draw = ImageDraw.Draw(image)
+    draw.text((24, 18), title, fill="#e5f5ff", font=heading)
+    draw.text((24, 52), "Жёлтым отмечены пачки, которые удержали атаку", fill="#ffcf78", font=small)
+    y = header
+    for (units, teams), (positions, row_height) in zip(groups, details):
+        draw.rounded_rectangle((12, y, width - 12, y + row_height - 8), radius=10, fill="#202d3b")
+        draw.text((28, y + 20), f"×{len(teams)}", fill="#a1dcff", font=count_font)
+        for position, unit in enumerate(units):
+            x = 83 + position * (size + 5)
+            draw.rectangle((x, y + 12, x + size, y + 12 + size), fill="#293a4a")
+            if icon := icons[unit]:
+                image.paste(icon, (x, y + 12), icon)
+            else:
+                words = (names.get(unit) or unit).split()
+                draw.multiline_text((x + size // 2, y + 44), "\n".join(word[:8] for word in words[:3]),
+                                    fill="#ebf2f7", font=small, anchor="mm", align="center", spacing=1)
+            if position == 0:
+                draw.rectangle((x, y + 12, x + size, y + 12 + size), outline="#f5c867", width=2)
+        for x, offset, chip_width, label, color in positions:
+            top = y + offset
+            draw.rounded_rectangle((x, top, x + chip_width, top + 23), radius=6, fill="#2a3b4d")
+            draw.text((x + 10, top + 1), label, fill=color, font=normal)
+        y += row_height
+    result = BytesIO()
+    image.save(result, "PNG", optimize=True)
+    return result.getvalue()
+
+
+def _unit_icon(unit, size=53):
     if not _UNIT_ID.fullmatch(unit):
         return None
     try:
-        return _portrait(unit, 53)
+        return _portrait(unit, size)
     except OSError:
         return None
 
 
-def breakdown(zone, legends):
-    teams = [team for team in zone.get("teams", ()) if team.get("units")]
+def breakdown(zone, legends, *, battle=False):
+    teams = [team for team in zone.get("teams", ())
+             if team.get("units") and (not battle or team.get("status") in TW_ACTIVE_SQUAD_STATUSES)]
     counts = Counter(team["units"][0] for team in teams)
     leader, count = min(counts.items(), key=lambda pair: (-pair[1], pair[0])) if counts else (None, 0)
     return {
@@ -62,7 +162,8 @@ def render(state):
     if not any(boards):
         return None
     legends = set(galactic_legends())
-    stats = [{key: breakdown(zone, legends) for key, zone in board.items()} for board in boards]
+    stats = [{key: breakdown(zone, legends, battle=state["round"] != 0) for key, zone in board.items()}
+             for board in boards]
     leaders = sorted({d["leader"] for data in stats for d in data.values() if d["leader"]})
     names = database.get_game_unit_names(leaders) if leaders else {}
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -107,11 +208,13 @@ def render(state):
             if state["round"] == 0:
                 amount, target = placed, zone["capacity"]
             else:
-                amount, target = zone["defeated"], placed
-            display = "?" if amount is None else str(amount)
+                amount, target = tw_remaining(zone), zone["capacity"]
+            display = "—" if amount is None else str(amount)
             if target is not None:
                 display += f" / {target}"
             marker(47, display, label, "#ffffff")
+            if amount == 0:
+                continue
             if info["leader"]:
                 icon = icons.get(info["leader"])
                 if icon is not None:
@@ -119,15 +222,15 @@ def render(state):
                     draw.rectangle((x - 26, y - 39, x + 26, y + 13), outline=accent, width=2)
                 name = names.get(info["leader"]) or info["leader"]
                 marker(68, fit(f"{name} ×{info['count']}", small, 126), small, "#fff")
-                more = info["known"] != placed
+                more = info["known"] != amount
                 numbers = f"ГЛ: {info['legends']} · удерж.: {info['holds']}"
                 if more:
                     numbers += " *"
                 marker(85, numbers, small, "#ffdc57")
-            elif placed != 0:
+            else:
                 text = "Зона закрыта" if i == 1 and state["round"] != 0 and zone["status"] == 1 else "Составы скрыты"
                 marker(68, text, small, "#e3eaf1")
-    subtitle = "Расстановка · занятые слоты / вместимость" if state["round"] == 0 else "Бой · побеждённые отряды / выставленные"
+    subtitle = "Расстановка · занятые слоты / вместимость" if state["round"] == 0 else "Бой · осталось отрядов / вместимость зоны"
     draw.text((22, height - 27), subtitle + "   ·   * по раскрытым составам", font=normal, fill="#b8c5d1")
     result = BytesIO()
     image.save(result, "PNG", optimize=True)

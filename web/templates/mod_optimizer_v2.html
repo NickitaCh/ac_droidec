@@ -86,7 +86,12 @@
 <div class="panel" id="mo-settings">
     <details class="mo-settings-fold" {% if results is none %}open{% endif %}><summary>Параметры подбора</summary>
     {% if accounts|length > 1 %}
-    <form method="get" action="/mod-optimizer"><label>Аккаунт
+    <form method="{{ 'post' if user.account_switch_csrf else 'get' }}" action="{{ '/me/account' if user.account_switch_csrf else '/mod-optimizer' }}">
+        {% if user.account_switch_csrf %}
+        <input type="hidden" name="csrf" value="{{ user.account_switch_csrf }}">
+        <input type="hidden" name="return_to" value="/mod-optimizer">
+        {% endif %}
+        <label>Аккаунт
         <select name="ally_code" onchange="this.form.submit()">{% for code, name in accounts %}<option value="{{ code }}" {% if code == self_ally_code|string %}selected{% endif %}>{{ name }} · {{ code }}</option>{% endfor %}</select>
     </label><noscript><button>Выбрать</button></noscript></form>
     {% else %}<p>{{ self_player_name }} · {{ self_ally_code or 'Сначала зарегистрируйте аккаунт' }}</p>{% endif %}
@@ -154,12 +159,17 @@
 {% else %}
 <div class="panel">
     {% if accounts|length > 1 %}
-    <form method="get" action="/mod-loadouts"><label>Аккаунт
+    <form method="{{ 'post' if user.account_switch_csrf else 'get' }}" action="{{ '/me/account' if user.account_switch_csrf else '/mod-loadouts' }}">
+        {% if user.account_switch_csrf %}
+        <input type="hidden" name="csrf" value="{{ user.account_switch_csrf }}">
+        <input type="hidden" name="return_to" value="/mod-loadouts">
+        {% endif %}
+        <label>Аккаунт
         <select name="ally_code" onchange="this.form.submit()">{% for code, name in accounts %}<option value="{{ code }}" {% if code == self_ally_code|string %}selected{% endif %}>{{ name }} · {{ code }}</option>{% endfor %}</select>
     </label><noscript><button>Выбрать</button></noscript></form>
     {% elif self_ally_code %}<p>{{ self_player_name }} · {{ self_ally_code }}</p>
     {% else %}<p>Сначала зарегистрируйте игровой аккаунт.</p>{% endif %}
-    {% if alt_added %}<p role="status">Альт «{{ alt_added }}» добавлен.{% if alt_outside_guild %} Он доступен в «Моём профиле». Для подборок доступны аккаунты текущей гильдии.{% endif %}</p>{% endif %}
+    {% if alt_added %}<p role="status">Альт «{{ alt_added }}» добавлен.</p>{% endif %}
     <details{% if alt_error %} open{% endif %}>
         <summary>Добавить альт-аккаунт</summary>
         {% if alt_error %}<p class="error" role="alert">{{ alt_error }}</p>{% endif %}
@@ -200,7 +210,7 @@
         {% endif %}
     </form>{% else %}
     <p>Для сохранения раскладки подключите аккаунт EA.</p>
-    <p><a href="/player/{{ self_ally_code }}#ea-connection">Подключить EA в профиле</a></p>
+    <p><a href="{{ link_path }}">Подключить EA</a></p>
     {% endif %}
     </details>
 </div>

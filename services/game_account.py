@@ -38,21 +38,26 @@ LOGIN_WARNING = "Новый вход может завершить игру на
 
 
 def link_path(owner, guild_id, ally_code):
-    registrations = database.get_user_registrations(owner, guild_id=guild_id)
-    is_alt = any(str(code) == str(ally_code) and not main for code, _, main in registrations)
+    is_alt = not personal_accounts(owner, guild_id).get(str(ally_code), ("", True))[1]
     return f"/game-account/link?alt={int(is_alt)}"
 
 
-async def reconnect(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False):
+async def reconnect(owner, guild_id, profile, tier, ally_code, *, optimizer_read=False, personal=False):
     from services import ea_connect, game_lab
 
     authorize = require_account_read if optimizer_read else require_pilot
     authorize(owner, guild_id, profile, tier)
-    code = select_account(owner, guild_id, ally_code=ally_code)
-    target = ea_connect.target_for_registration(owner, guild_id, code)
+    if personal:
+        code = select_personal_account(owner, guild_id, ally_code)
+        target = ea_connect.target_for_registration(owner, guild_id, code, personal=True)
+    else:
+        code = select_account(owner, guild_id, ally_code=ally_code)
+        target = ea_connect.target_for_registration(owner, guild_id, code)
     if not target:
         raise ConnectionRequired("Подключите аккаунт через EA.")
-    if game_lab._row(target)["player_id"] != _identity(owner, guild_id, code):
+    local = personal and any(str(registered) == code for registered, _, _ in
+                             database.get_user_registrations(str(owner), guild_id=guild_id))
+    if (not personal or local) and game_lab._row(target)["player_id"] != _identity(owner, guild_id, code):
         raise ConnectionRequired("Подключите выбранный аккаунт через EA заново.")
     await ea_connect.read(target, guild_id=guild_id)
 
@@ -238,10 +243,12 @@ async def read_initial(raw, expected_id, *, report=None, supplies=None):
             "inventory_records": len(fields(inventory))}
 
 
-async def _read_payload(body, service, method, *, allow_empty=False):
+async def _read_payload(body, service, method, *, allow_empty=False,
+                        endpoint="https://sw-live.cgswprod.com/rpc"):
+    body = current_client_version(body)
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
-            async with client.stream("POST", "https://sw-live.cgswprod.com/rpc", content=body,
+            async with client.stream("POST", endpoint, content=body,
                                      headers={"Content-Type": "application/x-protobuf",
                                               "X-Rpc-Service-Name": service,
                                               "X-Rpc-Method-Name": method,
@@ -265,6 +272,25 @@ async def _read_payload(body, service, method, *, allow_empty=False):
     if allow_empty and not any(n == 4 for n, _, _ in envelope):
         return b""
     return _unzip(_one(envelope, 4, 2))
+
+
+def current_client_version(body):
+    """Use the shared client version without changing stored sessions."""
+    path = Path(database.DB_NAME).resolve().parent / "cache" / "game-client-version.json"
+    try:
+        version = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return body
+    except (OSError, ValueError):
+        raise AccountError("Не удалось прочитать версию игрового клиента.") from None
+    try:
+        versions = {14: version["external"].encode("ascii"), 15: version["build"].encode("ascii")}
+    except (KeyError, TypeError, AttributeError, UnicodeError):
+        raise AccountError("Некорректная настройка версии игрового клиента.") from None
+    rows = fields(body)
+    if not all(value and all(part.isdigit() for part in value.split(b".")) for value in versions.values()):
+        raise AccountError("Некорректная настройка версии игрового клиента.")
+    return pack([(n, w, versions.get(n, v) if w == 2 else v) for n, w, v in rows])
 
 
 def _identity(owner, guild_id, ally_code):
@@ -294,6 +320,26 @@ def select_account(owner, guild_id, *, alt=False, ally_code=None):
     if len(candidates) > 1:
         raise AccountError("У вас несколько альтов — укажите код союзника.")
     return str(candidates[0][0])
+
+
+def personal_accounts(owner, guild_id):
+    local = database.get_user_registrations(str(owner), guild_id=guild_id) if guild_id is not None else ()
+    accounts = {str(code): (name, bool(main)) for code, name, main in local}
+    for _, code, name, _ in database.get_all_registrations_for_discord_id(str(owner)):
+        accounts.setdefault(str(code), (name, False))
+    return accounts
+
+
+def select_personal_account(owner, guild_id, ally_code=None):
+    try:
+        return select_account(owner, guild_id, ally_code=ally_code)
+    except AccountError:
+        accounts = personal_accounts(owner, guild_id)
+        if ally_code and str(ally_code) in accounts:
+            return str(ally_code)
+        if not ally_code and accounts:
+            return next(iter(accounts))
+        raise
 
 
 async def provision(owner, guild_id, profile, ally_code, provider, request_bytes, *, consent=False):

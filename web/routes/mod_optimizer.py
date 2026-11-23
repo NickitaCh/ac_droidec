@@ -225,10 +225,12 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
     try:
         data['requirements_fingerprint'] = plans.requirements_fingerprint(plates, user['guild_id'])
         if source == 'game':
+            personal = _external_account(user['discord_id'], user['guild_id'], code)
+            data['external_account'] = bool(personal)
             if reconnect:
                 await game_account.reconnect(str(user['discord_id']), user['guild_id'], user['bot_profile'],
-                                             user['tier'], code, optimizer_read=True)
-            snap = await game_mod_actions.snapshot(user, code, read_only=True)
+                                             user['tier'], code, optimizer_read=True, **personal)
+            snap = await game_mod_actions.snapshot(user, code, read_only=True, **personal)
             mods = snap['mods']
             data.update(fingerprint=snap['fingerprint'], connection=snap['connection'])
         else:
@@ -324,7 +326,7 @@ async def browser_inputs(plan: str, user: dict = Depends(require_optimizer_acces
         job = await asyncio.to_thread(plans.get, plan, user['discord_id'], user['guild_id'])
         if job['expired'] or job['state'] != 'browser':
             raise ValueError('Расчёт устарел или уже завершён.')
-        await asyncio.to_thread(game_account.select_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
+        await asyncio.to_thread(game_account.select_personal_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
         with personal_plates.scope(user):
             fingerprint = await asyncio.to_thread(plans.requirements_fingerprint, job['data']['selected_plates'], user['guild_id'])
         if fingerprint != job['data']['requirements_fingerprint']:
@@ -358,7 +360,7 @@ async def browser_result(request: Request, user: dict = Depends(require_optimize
             data.pop('browser_inputs', None)
             await asyncio.to_thread(plans.finish, token, 'error', data, 'Подбор отменён.', expected='browser')
             return JSONResponse({'url': '/mod-optimizer?plan=' + token})
-        await asyncio.to_thread(game_account.select_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
+        await asyncio.to_thread(game_account.select_personal_account, str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
         with personal_plates.scope(user):
             fingerprint = await asyncio.to_thread(plans.requirements_fingerprint, data['selected_plates'], user['guild_id'])
         if fingerprint != data['requirements_fingerprint']:
@@ -398,7 +400,6 @@ async def loadouts_form(request: Request, plan: str = '', ally_code: str = '', u
     context['loadouts_page'] = True
     context['alt_error'] = request.query_params.get('alt_error')
     context['alt_added'] = request.query_params.get('alt_added')
-    context['alt_outside_guild'] = request.query_params.get('outside_guild') == '1'
     return _render(request, context)
 
 
@@ -409,10 +410,8 @@ async def loadouts_add_alt(request: Request, ally_code: str = Form(), csrf: str 
     result = await register_player(_get_comlink(), str(user['discord_id']), ally_code, is_alt=True)
     if not result.ok:
         query = {'alt_error': result.error}
-    elif result.guild_id == user['guild_id']:
-        query = {'ally_code': result.ally_code, 'alt_added': result.ingame_name}
     else:
-        query = {'alt_added': result.ingame_name, 'outside_guild': 1}
+        query = {'ally_code': result.ally_code, 'alt_added': result.ingame_name}
     return RedirectResponse('/mod-loadouts?' + urlencode(query), status_code=303)
 
 
@@ -422,7 +421,12 @@ def _is_loadout(job):
 
 def _optimizer_context(user, plan='', ally_code=''):
     context = _base_context(user, user["guild_id"])
-    code = ally_code or context['self_ally_code']
+    account_names = dict(context['accounts'])
+    account_names.update({code: name for code, (name, _) in
+                          game_account.personal_accounts(user['discord_id'], user['guild_id']).items()})
+    context['accounts'] = list(account_names.items())
+    active = user.get('active_ally_code')
+    code = ally_code or (active if active in account_names else None) or context['self_ally_code'] or next(iter(account_names), None)
     if plan:
         try:
             job = plans.get(plan, user['discord_id'], user['guild_id'])
@@ -449,7 +453,7 @@ def _optimizer_context(user, plan='', ally_code=''):
         code = job['ally_code']
     if code:
         try:
-            game_account.select_account(str(user['discord_id']), user['guild_id'], ally_code=code)
+            game_account.select_personal_account(str(user['discord_id']), user['guild_id'], ally_code=code)
         except game_account.AccountError:
             raise HTTPException(403, 'Выберите свой зарегистрированный аккаунт.') from None
         context['self_ally_code'] = code
@@ -479,11 +483,19 @@ async def optimizer_save(request: Request, plan: str = Form(), csrf: str = Form(
         job = plans.get(plan, owner, guild_id)
         if _is_loadout(job):
             raise ValueError('Выберите готовый результат оптимизатора.')
-        game_account.select_account(str(owner), guild_id, ally_code=job['ally_code'])
+        game_account.select_personal_account(str(owner), guild_id, job['ally_code'])
         plans.save_result(plan, owner, guild_id, name.strip())
     except (ValueError, game_account.AccountError) as error:
         raise HTTPException(409, str(error)) from None
     return RedirectResponse('/mod-loadouts?plan=saved-' + plan, status_code=303)
+
+
+def _external_account(owner, guild_id, code):
+    try:
+        game_account.select_account(str(owner), guild_id, ally_code=code)
+    except game_account.AccountError:
+        return {"personal": True}
+    return {}
 
 
 @router.post('/baseline', include_in_schema=False)
@@ -499,15 +511,16 @@ async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: st
     scope = scope or ('selected' if characters else 'all')
     selected = set(characters)
     try:
-        code = game_account.select_account(str(owner), guild_id, ally_code=ally_code)
+        code = game_account.select_personal_account(str(owner), guild_id, ally_code)
+        personal = _external_account(owner, guild_id, code)
         if scope not in ('all', 'selected') or action not in ('save', 'refresh'):
             raise ValueError('Выберите действие и состав раскладки.')
         if action == 'save' and scope == 'selected' and not selected:
             raise ValueError('Выберите хотя бы одного персонажа.')
         if reconnect:
             await game_account.reconnect(str(owner), guild_id, user['bot_profile'], user['tier'],
-                                         code, optimizer_read=True)
-        snap = await game_mod_actions.snapshot(user, code, read_only=True)
+                                         code, optimizer_read=True, **personal)
+        snap = await game_mod_actions.snapshot(user, code, read_only=True, **personal)
         equipped = Counter(mod['equipped_to'] for mod in snap['mods'] if mod.get('equipped_to'))
         live_chars = sorted(_characters(code, {*snap.get('unit_ids', {}), *equipped}), key=lambda row: row[1].casefold())
         units = {base for base, _ in live_chars}
@@ -535,7 +548,7 @@ async def optimizer_baseline(request: Request, ally_code: str = Form(), csrf: st
 
 def _baseline_context(user, code, name, selected, scope, action):
     guild_id = user['guild_id']
-    context = _base_context(user, guild_id)
+    context = _optimizer_context(user, ally_code=code)
     characters = dict(_characters(code))
     missing = selected - characters.keys()
     if missing:
@@ -563,7 +576,8 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
     owner, guild_id = user['discord_id'], user['guild_id']
     try:
         preset = plans.get(plan, owner, guild_id)
-        code = game_account.select_account(str(owner), guild_id, ally_code=preset['ally_code'])
+        code = game_account.select_personal_account(str(owner), guild_id, preset['ally_code'])
+        personal = _external_account(owner, guild_id, code)
         data = preset['data']
         if preset['state'] != 'saved' or ('baseline' not in data and not data.get('game_source')):
             raise ValueError('Выберите сохранённую раскладку с игрового аккаунта.')
@@ -579,8 +593,8 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
                 mutable = False
         if reconnect:
             await game_account.reconnect(str(owner), guild_id, user['bot_profile'], user['tier'],
-                                         code, optimizer_read=True)
-        snap = await game_mod_actions.snapshot(user, code, read_only=True)
+                                         code, optimizer_read=True, **personal)
+        snap = await game_mod_actions.snapshot(user, code, read_only=True, **personal)
         results = plans.restore_results(data, snap, selected=set(characters) if scope == 'selected' else None)
         locked = plans.get_locks(owner, guild_id, code)
         moves = game_mod_actions.operations(snap['mods'], results, set(locked))
@@ -588,6 +602,7 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
         names = database.get_game_unit_names(sorted({op['unit'] for op in moves}))
         by_id = {mod['id']: mod for mod in snap['mods']}
         preview = {'results': results, 'preset_restore': True, 'preset_name': data.get('preset_name'),
+                   'external_account': bool(personal),
                    'saved_preset_id': plan, 'game_source': True, 'dry_run': not mutable, 'fingerprint': snap['fingerprint'],
                    'connection': snap['connection'], 'locked': locked, 'operation_count': len(moves),
                    'restore_moves': [{'name': names.get(op['unit'], op['unit']), 'remove': bool(op['remove']),
@@ -645,13 +660,13 @@ async def optimizer_run(
     user: dict = Depends(require_optimizer_access),
 ):
     guild_id = user["guild_id"]
-    context = _base_context(user, guild_id)
+    _csrf(request, csrf)
+    context = _optimizer_context(user, ally_code=ally_code)
     context["selected_plates"] = plates
     context['relic_mode'] = relic_mode
     context['deep_search'] = deep_search
     dry_run = bool(dry_run) or not can_apply(user)
     context['dry_run'] = dry_run
-    _csrf(request, csrf)
     if engine not in ('server', 'browser'):
         raise HTTPException(400, 'Неизвестный вычислитель.')
     engine = 'browser' if user.get('bot_profile') == 'prod' else engine
@@ -664,7 +679,7 @@ async def optimizer_run(
     try:
         if relic_mode not in ('current', 'plate'):
             raise ValueError('Выберите расчёт по текущей реликвии или по реликвии плейта.')
-        code = game_account.select_account(str(user['discord_id']), guild_id, ally_code=ally_code)
+        code = game_account.select_personal_account(str(user['discord_id']), guild_id, ally_code)
         context['self_ally_code'] = code
         context['self_player_name'] = dict(context['accounts']).get(code, code)
         context['characters'] = _characters(code)
@@ -743,7 +758,7 @@ async def optimizer_apply(request: Request, plan: str = Form(), csrf: str = Form
         if user['bot_profile'] == 'prod' and not job['data'].get('preset_restore'):
             raise HTTPException(404)
         game_account.require_mod_actions(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'])
-        game_account.select_account(str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
+        game_account.select_personal_account(str(user['discord_id']), user['guild_id'], ally_code=job['ally_code'])
         data = plans.claim(plan, user['discord_id'], user['guild_id'])
     except ValueError as error:
         raise HTTPException(409, str(error)) from None

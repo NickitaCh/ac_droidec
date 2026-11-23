@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 import database
 from services import ea_connect, feature_flags, game_account, game_watch, tb_forecast, tb_live, tb_live_order
 import tb_plan_reader
+from web.deps import selected_roster_account
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
@@ -26,7 +27,7 @@ _min_refresh_interval = 60
 def _pilot(user):
     owner, guild_id = str(user["discord_id"]), user["guild_id"]
     try:
-        game_account.require_pilot(owner, guild_id, user.get("bot_profile"), user.get("tier"))
+        game_account.require_game_officer(owner, guild_id, user.get("bot_profile"), user.get("tier"))
         code = game_account.select_account(owner, guild_id)
     except game_account.AccountError as error:
         raise HTTPException(403, str(error)) from None
@@ -38,6 +39,7 @@ def _clock(epoch, fmt="%d.%m %H:%M:%S"):
 
 
 def _render(request, user, owner, ally_code, selected=None, error=None):
+    personal_code = selected_roster_account(user) if user.get("active_ally_code") else ally_code
     recent = tb_live.history(user["guild_id"], owner)
     index = next((i for i, (ts, _) in enumerate(recent) if ts == selected), 0)
     captured, state = recent[index] if recent else (None, None)
@@ -54,9 +56,9 @@ def _render(request, user, owner, ally_code, selected=None, error=None):
                     for operation in zone["operations"] for slot in operation["slots"] if slot["unit"]}
         unit_names = database.get_game_unit_names(sorted(unit_ids)) if unit_ids else {}
         player_names = database.get_player_names(user["guild_id"]) if state.get("order_name") else {}
-        if not selected and not stale and state.get("order_name"):
-            owned = database.get_player_units(ally_code)
-            personal = tb_live_order.personal_preview(state, ally_code, set(owned) if owned else None)
+        if personal_code and not selected and not stale and state.get("order_name"):
+            owned = database.get_player_units(personal_code)
+            personal = tb_live_order.personal_preview(state, personal_code, set(owned) if owned else None)
             for row in personal:
                 row["unit"] = unit_names.get(row["unit"], row["unit"])
                 row["planet"] = tb_plan_reader.PLANET_NAME_TO_RU.get(row["planet"], row["planet"]).capitalize()
@@ -94,7 +96,7 @@ def _render(request, user, owner, ally_code, selected=None, error=None):
         "user": user, "csrf": request.session["tb_live_csrf"],
         "captured": _clock(captured) if captured else None, "state": state, "zones": zones, "players": players,
         "end": _clock(state["end_ms"] / 1000, "%d.%m %H:%M") if state else None,
-        "stale": stale, "personal": personal,
+        "stale": stale, "personal": personal, "personal_code": personal_code,
         "history": [(ts, _clock(ts), snap["phase"] if snap else None) for ts, snap in recent],
         "selected": selected, "error": error,
         "watch": game_watch.get(user["guild_id"], owner, "tb"), "watch_intervals": game_watch.INTERVALS,

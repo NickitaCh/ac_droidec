@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Мой план рейда — AC Droidec{% endblock %}
+{% block main_class %}wide raid-plan-page{% endblock %}
+{% block content %}
+<style>
+    main.wide.raid-plan-page { max-width: none; }
+    .raid-plan-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+        gap: 1rem;
+        align-items: start;
+    }
+    .raid-plan-card.panel { min-width: 0; margin: 0; }
+    .raid-plan-card h2 { margin: 0; }
+    .raid-plan-card summary { cursor: pointer; }
+    .raid-plan-card details { margin-top: .65rem; }
+    .raid-plan-roster {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: .35rem;
+        padding: 0;
+        list-style: none;
+    }
+    .raid-plan-unit { text-align: center; font-size: .8rem; overflow-wrap: anywhere; }
+    .raid-plan-portrait { position: relative; width: min(100%, 4.5rem); margin: 0 auto .3rem; }
+    .raid-plan-portrait img {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+        border-radius: .55rem;
+        border: 1px solid var(--border-strong);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .raid-plan-level {
+        position: absolute;
+        right: .12rem;
+        bottom: .12rem;
+        padding: .05rem .24rem;
+        border-radius: .25rem;
+        background: #151822;
+        color: #fff;
+        font-weight: 700;
+    }
+    .raid-plan-tier { display: grid; grid-template-columns: repeat(8, 1fr); gap: .25rem; margin: .5rem 0 1rem; }
+    .raid-plan-tier span { height: .35rem; border-radius: 1rem; background: var(--border); }
+    .raid-plan-tier .reached { background: var(--accent); }
+</style>
+<section class="page-hero page-hero-light">
+    <div class="page-hero-top">
+        <div>
+            <p class="page-hero-eyebrow">Droid Destruction</p>
+            <h1>Мой план рейда</h1>
+        </div>
+        {% if user.tier == "officer" %}<div class="hero-links"><a class="hero-link" href="/raids">Итоги рейдов</a></div>{% endif %}
+    </div>
+    {% if plan and plan.runs %}
+    <div class="hero-kpis">
+        <div class="hero-kpi"><span class="hero-kpi-value">{{ millions(plan.hi) }}</span><span class="hero-kpi-label">потенциальные очки</span></div>
+        {% if plan.lo < plan.hi %}<div class="hero-kpi"><span class="hero-kpi-value">{{ millions(plan.lo) }}</span><span class="hero-kpi-label">если сыграть на уровень ниже</span></div>{% endif %}
+    </div>
+    {% endif %}
+</section>
+{% if accounts|length > 1 %}
+<form class="panel" action="/raids/plan">
+    <label for="raid-account">Аккаунт</label>
+    <select id="raid-account" name="account">
+        {% for code, name, main in accounts %}<option value="{{ code }}" {% if code == selected %}selected{% endif %}>{{ name or code }}</option>{% endfor %}
+    </select>
+    <button class="button" type="submit">Показать план</button>
+</form>
+{% endif %}
+{% if not selected %}
+    <div class="panel">Привяжите игровой аккаунт через <code>/регистрация</code>.</div>
+{% elif not roster %}
+    <div class="panel">Ростер ещё не загружен. План появится после синхронизации.</div>
+{% elif not catalog %}
+    <div class="panel">Каталог рейда временно недоступен. Попробуйте позже.</div>
+{% elif not plan.runs %}
+    <div class="panel">В ростере пока нет полного состава или подходящего соло из каталога.</div>
+{% else %}
+    <div class="raid-plan-grid">
+    {% for run in plan.runs %}
+    <section class="panel raid-plan-card">
+        <h2>{{ loop.index }}. {{ run.name }}</h2>
+        <p>Уровень {{ run.tier }} · до {{ millions(run.hi) }}</p>
+        <div class="raid-plan-tier" aria-hidden="true">
+            {% for tier in catalog.raid.tiers %}<span{% if tier.tier <= run.tier %} class="reached"{% endif %}></span>{% endfor %}
+        </div>
+        <ul class="raid-plan-roster">
+            {% for id in run.units %}
+            {% set unit = roster[id] %}
+            <li class="raid-plan-unit">
+                <div class="raid-plan-portrait">
+                    <img src="/unit-img/{{ id|urlencode }}" alt="" width="72" height="72" loading="lazy">
+                    <span class="raid-plan-level">{{ "R" ~ unit.relic if unit.gear >= 13 else "G" ~ unit.gear }}</span>
+                </div>
+                {{ names.get(id) or catalog.names.get(id, id) }}
+            </li>
+            {% endfor %}
+        </ul>
+        {% if run.blockers %}
+        <p class="muted">Для следующего уровня нужно поднять:
+            {% for id in run.blockers %}{{ names.get(id) or catalog.names.get(id, id) }}{{ ", " if not loop.last }}{% endfor %}.
+        </p>
+        {% endif %}
+        {% set order = catalog.get("turn_order", {}).get(run.id, {}).get("units", []) %}
+        {% if order %}
+        <p>Порядок ходов по каталогу:
+            {% for id in order if id in run.units %}{{ names.get(id) or catalog.names.get(id, id) }}{{ " → " if not loop.last }}{% endfor %}.
+        </p>
+        {% endif %}
+        {% if run.team.get("strategy") %}
+        <details>
+            <summary>Тактика из каталога</summary>
+            {% for guide in run.team.strategy %}
+            {% if guide.label or guide.source %}<p>{{ guide.label or guide.source }}</p>{% endif %}
+            <ol>{% for step in guide.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+            {% endfor %}
+        </details>
+        {% endif %}
+        {% if run.team.get("sources") %}
+        <details>
+            <summary>Примеры прохождений</summary>
+            <ul>
+                {% for example in run.team.sources if example.video %}
+                <li><a href="https://www.youtube.com/watch?v={{ example.video|urlencode }}&amp;t={{ example.t|default(0, true)|int }}s" target="_blank" rel="noopener">{{ example.creator }}{% if example.tier is number %} · уровень {{ example.tier }}{% endif %}</a>{% if example.confirmed %} · подтверждено каталогом{% endif %}</li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endif %}
+    </section>
+    {% endfor %}
+    </div>
+    <p class="muted">Очки зависят от модулей и прохождения. Источник составов и примеров — <a href="{{ source }}">Raid Planner</a>{% if catalog.updated %} · каталог от {{ catalog.updated }}{% endif %}.</p>
+{% endif %}
+{% endblock %}

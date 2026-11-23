@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +38,41 @@ class EventPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(panels.handoff("discord", 1, "tb", new, 88, 300, "one", "watch"))
         self.assertTrue(panels.handoff("telegram", 1, "tb", tg_token, 88, 200, "one", "watch"))
 
+    async def test_tw_analysis_uses_the_newest_guild_snapshot_on_each_click(self):
+        serial, token = panels.reserve("discord", 1, "tw")
+        panels.activate("discord", 1, "tw", serial, token, 77, 100)
+        view = discord_panels._view("tw", token)
+        button = next(item for item in view.children if item.label == "Анализ ВГ")
+        inter = SimpleNamespace(
+            author=SimpleNamespace(id=123), guild_id=discord_panels.AC_DISCORD_SERVER, channel_id=77,
+            message=SimpleNamespace(id=100), component=button,
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock(),
+        )
+        zone = {"id": "tw_jakku01_phase01_conflict01", "points": 60, "deployed": 2, "remaining": 2,
+                "defeated": 0, "capacity": 2, "status": 3}
+        war = {"round": 1, "home_guild": {"name": "Свои"}, "opponent_guild": {"name": "Гости"},
+               "own": [zone], "opponent": [zone]}
+        panels.database.set_bot_state("live_game:tw:111", json.dumps({"at": 1_800_000_000, "data": war}), guild_id=1)
+        cog = EventPanelCog()
+        with patch.object(panels, "allowed", return_value=True), patch.object(
+            discord_panels.guild_resolver, "resolve_access", return_value={"guild_id": 1, "tier": "officer"},
+        ):
+            await cog.event_panel_button(inter)
+            before = inter.edit_original_response.await_args.kwargs["embed"]
+            war["own"] = [{**zone, "points": 75}]
+            war["opponent"] = [{**zone, "remaining": 1, "defeated": 1,
+                                "teams": [{"status": 3, "holds": 2}, {"status": 2, "holds": 1}]}]
+            panels.database.set_bot_state("live_game:tw:222", json.dumps({"at": 1_800_000_001, "data": war}), guild_id=1)
+            panels.database.set_bot_state("live_game:tw:222", json.dumps({"at": 1_800_000_002, "data": None}), guild_id=2)
+            await cog.event_panel_button(inter)
+            after = inter.edit_original_response.await_args.kwargs["embed"]
+        inter.response.defer.assert_awaited_with(with_message=True, ephemeral=True)
+        self.assertIn("**60** · текущий счёт", before.fields[0].value)
+        self.assertIn("**75** · текущий счёт", after.fields[0].value)
+        self.assertIn("1/2", after.fields[2].value)
+        self.assertIn("0%", after.fields[2].value)
+        self.assertIn("0/2", after.fields[3].value)
+
     def test_older_command_response_cannot_take_over_if_it_finishes_late(self):
         old, old_token = panels.reserve("discord", 1, "tw")
         new, new_token = panels.reserve("discord", 1, "tw")
@@ -72,6 +108,21 @@ class EventPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({call.args[0]["message"] for call in edit.await_args_list}, {"100", "200"})
         for call in edit.await_args_list:
             self.assertIn("Снимок", call.args[1])
+
+    async def test_raid_panel_shows_next_reward_and_uploads_guild_card(self):
+        from services.raid_live_image import progress
+
+        serial, token = panels.reserve("discord", 1, "raid")
+        panels.activate("discord", 1, "raid", serial, token, 77, 100)
+        raid = {"id": "droiddestruction", "points": 24_786_000, "players": []}
+        with patch.object(panels, "allowed", return_value=True), patch.object(panels, "edit", AsyncMock()) as edit:
+            await panels.publish(1, "raid", {"active": [raid]}, 1_900_000_000)
+        self.assertIn("Достигнут сундук №3", edit.await_args.args[1])
+        self.assertIn("сундук №4: 28 500 000 · осталось 3 714 000", edit.await_args.args[1])
+        self.assertTrue(edit.await_args.kwargs["raid_board"].startswith(b"\x89PNG"))
+        self.assertEqual(progress({**raid, "points": 28_500_000}), (4, 41_500_000))
+        self.assertEqual(progress({**raid, "points": 520_000_000}), (11, None))
+        self.assertIsNone(progress({**raid, "id": "unknown"}))
 
     async def test_tw_map_updates_the_registered_discord_message(self):
         serial, token = panels.reserve("discord", 1, "tw")
@@ -138,23 +189,55 @@ class EventPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details.call_count, 1)
         inter.followup.send.assert_not_awaited()
 
-    async def test_my_defense_is_ephemeral_and_does_not_edit_public_panel(self):
+    async def test_tw_zone_image_preserves_the_map_attachment(self):
+        from services import game_event_live, tw_live_image
         serial, token = panels.reserve("discord", 1, "tw")
         panels.activate("discord", 1, "tw", serial, token, 77, 100)
-        message = SimpleNamespace(id=100, edit=AsyncMock())
-        inter = SimpleNamespace(author=SimpleNamespace(id=123), channel_id=77, message=message,
-            component=SimpleNamespace(custom_id=f"glp:tw:{token}:mine"),
-            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock(),
-            followup=SimpleNamespace(send=AsyncMock()))
+        board = SimpleNamespace(filename="tw-map.png")
+        old_zone = SimpleNamespace(filename="tw-zone.png")
+        message = SimpleNamespace(id=100, embeds=[], attachments=[board, old_zone], edit=AsyncMock())
+        inter = SimpleNamespace(
+            author=SimpleNamespace(id=123), channel_id=77,
+            channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message)), message=message,
+            component=SimpleNamespace(custom_id=f"glp:tw:{token}:details"),
+            response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()),
+        )
+        zone = {"id": "tw_jakku01_phase01_conflict01", "status": 3, "remaining": 1, "capacity": 41,
+                "teams": [{"units": ["VADER"], "status": 1}]}
         with patch.object(panels, "allowed", return_value=True), \
                 patch.object(discord_panels.guild_resolver, "resolve_access", return_value={"guild_id": 1, "tier": "officer"}), \
                 patch.object(discord_panels.game_account, "select_account", return_value="456"), \
-                patch.object(panels, "discord_details", return_value=["Рей · Бен Соло"]) as details:
+                patch.object(game_event_live, "snapshot", return_value={"data": {"opponent": [zone]}}), \
+                patch.object(tw_live_image, "render_zone", return_value=b"png"):
             await EventPanelCog().event_panel_button(inter)
-        inter.response.defer.assert_awaited_once_with(with_message=True, ephemeral=True)
-        self.assertIn("Рей · Бен Соло", inter.edit_original_response.await_args.kwargs["content"])
-        self.assertEqual(details.call_args.args, (1, "123", "456", "tw", "mine"))
-        message.edit.assert_not_awaited()
+        args = message.edit.await_args.kwargs
+        self.assertEqual(args["attachments"], [board])
+        self.assertEqual(args["file"].filename, "tw-zone.png")
+        self.assertEqual(args["embeds"][0].image.url, "attachment://tw-zone.png")
+
+    async def test_member_personal_buttons_are_private_and_use_own_registration(self):
+        for kind in ("tb", "tw"):
+            with self.subTest(kind=kind):
+                serial, token = panels.reserve("discord", 1, kind)
+                panels.activate("discord", 1, kind, serial, token, 77, 100)
+                message = SimpleNamespace(id=100, edit=AsyncMock())
+                inter = SimpleNamespace(author=SimpleNamespace(id=123), channel_id=77, message=message,
+                    component=SimpleNamespace(custom_id=f"glp:{kind}:{token}:mine"),
+                    response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock(),
+                    followup=SimpleNamespace(send=AsyncMock()))
+                with patch.object(panels.bot_profiles, "accepts", return_value=True), \
+                        patch.object(discord_panels, "_profile", return_value="test"), \
+                        patch.object(discord_panels.guild_resolver, "resolve_access", return_value={"guild_id": 1, "tier": "member"}), \
+                        patch.object(discord_panels.game_account, "select_account", return_value="456") as account, \
+                        patch.object(panels, "discord_details", return_value=["Рей"]) as details:
+                    await EventPanelCog().event_panel_button(inter)
+                    self.assertFalse(panels.allowed(1, "member", "test"))
+                    self.assertFalse(panels.personal_allowed(2, "member", "test"))
+                inter.response.defer.assert_awaited_once_with(with_message=True, ephemeral=True)
+                self.assertIn("Рей", inter.edit_original_response.await_args.kwargs["content"])
+                account.assert_called_once_with("123", 1)
+                details.assert_called_once_with(1, "123", "456", kind, "mine")
+                message.edit.assert_not_awaited()
 
     def test_commands_registered_and_callbacks_fit_telegram_limit(self):
         discord = {c.name: set(c.children) for c in EventPanelCog.__cog_app_commands__ if getattr(c, "children", None)}
@@ -172,14 +255,25 @@ class EventPanelTests(unittest.IsolatedAsyncioTestCase):
     def test_tw_zones_only_open_opponent_and_group_same_composition(self):
         from services import game_event_live, tb_live
         zone = {"id": "tw_jakku01_phase01_conflict01", "status": tb_live.OPEN_ZONE,
-                "teams": [{"units": ["A", "B", "C"], "player_name": "Nick1"},
-                          {"units": ["A", "C", "B"], "player_name": "Nick2"}]}
+                "remaining": 2, "capacity": 41,
+                "teams": [{"units": ["A", "B", "C"], "player_name": "Nick1", "status": 1},
+                          {"units": ["A", "C", "B"], "player_name": "Nick2", "status": 2},
+                          {"units": ["A", "B"], "player_name": "Nick3", "status": 3}]}
         state = {"own": [zone], "opponent": [zone, {**zone, "status": 1}]}
         with patch.object(game_event_live, "snapshot", return_value={"data": state}), \
                 patch.object(panels.database, "get_game_unit_names", return_value={"A": "Лидер", "B": "Б", "C": "В"}):
             lines = panels.discord_details(1, "owner", "code", "tw", "details")
         self.assertEqual(len(lines), 2)
-        self.assertIn("Nick1, Nick2 — Лидер · Б · В", lines[1])
+        self.assertIn("осталось 2 / 41", lines[0])
+        self.assertEqual(lines[1], "**Лидер ×2**\nБ · В\n-# Защита: Nick1, Nick2")
+
+    def test_tw_zone_keeps_more_than_eight_compositions_on_one_page(self):
+        from services import tw_live_image
+        zone = {"id": "tw_jakku01_phase01_conflict01", "status": 3, "remaining": 12, "capacity": 41,
+                "teams": [{"units": [f"UNIT_{index}"], "status": 1} for index in range(12)]}
+        pages = tw_live_image.zone_pages({"opponent": [zone]})
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages[0][2]), 12)
 
     async def test_repeated_refresh_is_rejected_and_error_restores_buttons(self):
         serial, token = panels.reserve("discord", 1, "tw")

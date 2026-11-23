@@ -124,6 +124,8 @@ def _render_farm(request, user, inventory_account, *, inventory_result=None, inv
     job = _get_job(user)
     if inventory_account:
         request.session.setdefault("farm_inventory_csrf", secrets.token_urlsafe(32))
+        if not game_account_readonly._connection(user["discord_id"], inventory_account) and retry is None:
+            retry = connection_prompt(user, inventory_account)
     return templates.TemplateResponse(request, "gear_farm.html", {
         "user": user,
         "job": job,
@@ -132,6 +134,7 @@ def _render_farm(request, user, inventory_account, *, inventory_result=None, inv
         "inventory_csrf": request.session.get("farm_inventory_csrf") if inventory_account else None,
         "guide_options": journey_guide.guide_options() if inventory_account else (),
         "inventory_result": inventory_result,
+        "inventory_account": inventory_account,
         "inventory_error": inventory_error,
         "inventory_retry": retry,
         "inventory_link": not inventory_account and bool(game_account_readonly.own_main(user, connected_only=False, member_read=True)),
@@ -141,23 +144,29 @@ def _render_farm(request, user, inventory_account, *, inventory_result=None, inv
 
 @router.get("", response_class=HTMLResponse)
 async def farm_page(request: Request, user: dict = Depends(require_inventory_access)):
-    return _render_farm(request, user, game_account_readonly.own_main(user, member_read=True))
+    try:
+        code = game_account.select_personal_account(user["discord_id"], user["guild_id"], user.get("active_ally_code"))
+    except game_account.AccountError:
+        code = None
+    return _render_farm(request, user, code)
 
 
-def _validate_inventory_form(request, user, csrf):
-    code = game_account_readonly.own_main(user, member_read=True)
+def _validate_inventory_form(request, user, csrf, ally_code):
     expected = request.session.get("farm_inventory_csrf")
-    if not code or not expected or not secrets.compare_digest(csrf.encode(), expected.encode()):
+    if not expected or not secrets.compare_digest(csrf.encode(), expected.encode()):
         raise HTTPException(status_code=403)
-    return code
+    try:
+        return game_account.select_personal_account(user["discord_id"], user["guild_id"], ally_code)
+    except game_account.AccountError as error:
+        raise HTTPException(403, str(error)) from None
 
 
 async def _plan(request, user, code, targets=None, *, guide_id=None, requirements=None, reconnect=False):
     scope = (str(user["discord_id"]), user["guild_id"], user["bot_profile"], user["tier"], code)
     try:
         if reconnect:
-            await game_account.reconnect(*scope, optimizer_read=True)
-        snapshot = await game_account_readonly.read(*scope, include_supplies=True, member_read=True)
+            await game_account.reconnect(*scope, optimizer_read=True, personal=True)
+        snapshot = await game_account_readonly.read(*scope, include_supplies=True, member_read=True, personal=True)
         result = await asyncio.to_thread(
             farm_inventory.build_report, snapshot, targets, guide_id=guide_id, requirements=requirements,
         )
@@ -181,9 +190,10 @@ async def _plan(request, user, code, targets=None, *, guide_id=None, requirement
 
 @router.post("/guide", response_class=HTMLResponse)
 async def farm_guide(request: Request, guide_id: str = Form(..., max_length=64), csrf: str = Form(...),
+                     ally_code: str = Form(...),
                      reconnect: bool = Form(False),
                      user: dict = Depends(require_inventory_access)):
-    code = _validate_inventory_form(request, user, csrf)
+    code = _validate_inventory_form(request, user, csrf, ally_code)
     requirements = database.get_journey_guide_requirements(guide_id)
     if not requirements:
         return _render_farm(request, user, code, inventory_error="В справочнике нет требований для выбранной цели.")
@@ -193,11 +203,12 @@ async def farm_guide(request: Request, guide_id: str = Form(..., max_length=64),
 @router.post("/inventory", response_class=HTMLResponse)
 async def farm_inventory(request: Request, base_id: str = Form(..., max_length=64),
                          kind: str = Form(...), target: int = Form(...), csrf: str = Form(...),
+                         ally_code: str = Form(...),
                          extra_base_id: str = Form("", max_length=64),
                          extra_kind: str = Form("gear"), extra_target: int = Form(13),
                          reconnect: bool = Form(False),
                          user: dict = Depends(require_inventory_access)):
-    code = _validate_inventory_form(request, user, csrf)
+    code = _validate_inventory_form(request, user, csrf, ally_code)
     targets = [(base_id, kind, target)]
     if extra_base_id:
         if extra_base_id == base_id:

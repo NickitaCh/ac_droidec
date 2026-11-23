@@ -20,17 +20,21 @@
     {% if inventory_csrf %}
         <div class="panel">
             <div class="panel-title"><span>По запасам игрового аккаунта</span></div>
+            <p>{{ user.game_accounts.get(inventory_account, (inventory_account,))[0] if user.game_accounts else inventory_account }}</p>
             {% if inventory_retry %}
-            <form method="post" action="{{ inventory_retry.path }}">
+            {% if inventory_retry.path %}<form method="post" action="{{ inventory_retry.path }}">{% endif %}
                 <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                <input type="hidden" name="ally_code" value="{{ inventory_account }}">
                 {% for name, value in inventory_retry.fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
                 {% with connection_action=inventory_retry.connection_action, login_warning=inventory_retry.login_warning, link_path=inventory_retry.link_path %}
                     {% include "_game_connection.html" %}
                 {% endwith %}
-            </form>
+            {% if inventory_retry.path %}</form>{% endif %}
             {% endif %}
+            {% if not inventory_retry or inventory_retry.connection_action != "link" %}
             <form method="post" action="/farm/inventory" class="filter-row">
                 <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                <input type="hidden" name="ally_code" value="{{ inventory_account }}">
                 <div>Персонаж
                     <div class="unit-search" data-live-search data-required="true" data-url="/me/api/units" data-value-field="base_id" data-label-field="name">
                         <input type="text" class="unit-search-input" aria-label="Персонаж" placeholder="Начните вводить имя…" autocomplete="off" required>
@@ -63,6 +67,7 @@
             {% if guide_options %}
                 <form method="post" action="/farm/guide" class="filter-row">
                     <input type="hidden" name="csrf" value="{{ inventory_csrf }}">
+                    <input type="hidden" name="ally_code" value="{{ inventory_account }}">
                     <label>Цель из «Руководства»
                         <select name="guide_id" required><option value="">Выберите цель</option>
                             {% for option in guide_options %}<option value="{{ option.base_id }}">{{ option.name }}{% if option.entry %} · условия входа{% endif %}</option>{% endfor %}
@@ -70,6 +75,7 @@
                     </label>
                     <button type="submit">Рассчитать по «Руководству»</button>
                 </form>
+            {% endif %}
             {% endif %}
             {% if inventory_error %}<p class="error">{{ inventory_error }}</p>{% endif %}
             {% if inventory_result %}

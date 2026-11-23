@@ -1,11 +1,16 @@
 """Structured read-only snapshots for Territory War and guild raids."""
 from collections import Counter
+from contextlib import closing
 import json
+import sqlite3
 
 import database
 
-from services import game_account as ga, guild_compare
+from services import game_account as ga, guild_compare, tw_battle_log
 from services.tb_live import _messages, _number, _text
+
+TW_ACTIVE_SQUAD_STATUSES = (1, 2)
+TW_SQUAD_DEFEATED = 3
 
 
 def _single(rows, tag, label):
@@ -15,21 +20,24 @@ def _single(rows, tag, label):
     return records[0] if records else None
 
 
-def _tw_teams(conflict):
+def _tw_teams(records):
     teams = []
-    for record in _messages(conflict, 3):
+    for record in records:
         squad = next(_messages(record, 4), None)
         if not squad:
             continue
         units = [base for cell in _messages(squad, 1)
                  if (base := _text(cell, 2).partition(":")[0])]
         if units:
-            teams.append({"units": units, "holds": _number(record, 8) or 0,
-                          "player_name": _text(record, 2), "player_id": _text(record, 1)})
+            team = {"units": units, "holds": _number(record, 8) or 0,
+                    "player_name": _text(record, 2), "player_id": _text(record, 1)}
+            if (status := _number(record, 6)) is not None:
+                team["status"] = status
+            teams.append(team)
     return teams
 
 
-def _tw_zones(war, field):
+def _tw_zones(war, field, battle):
     result = []
     for guild in _messages(war, field):
         for conflict in _messages(guild, 2):
@@ -39,8 +47,22 @@ def _tw_zones(war, field):
             row = {"id": _text(zone, 1), "status": _number(zone, 2), "points": _number(zone, 3),
                    "capacity": _number(conflict, 2), "deployed": _number(conflict, 4),
                    "defeated": _number(conflict, 5)}
-            if teams := _tw_teams(conflict):
+            if channel := _text(zone, 4):
+                row["channel_id"] = channel
+            records = list(_messages(conflict, 3))
+            if teams := _tw_teams(records):
                 row["teams"] = teams
+            if battle:
+                # Field 4 counts surviving squads during combat, including hidden ones.
+                row["remaining"] = row.pop("deployed")
+                statuses = [_number(team, 6) for team in records]
+                defeated = statuses.count(TW_SQUAD_DEFEATED)
+                known_statuses = (*TW_ACTIVE_SQUAD_STATUSES, TW_SQUAD_DEFEATED)
+                if row["defeated"] is None and statuses and all(status in known_statuses for status in statuses):
+                    if len(records) - defeated == row["remaining"]:
+                        row["defeated"] = defeated
+                row["deployed"] = (row["remaining"] + row["defeated"]
+                                   if row["remaining"] is not None and row["defeated"] is not None else None)
             result.append(row)
     return result
 
@@ -60,10 +82,16 @@ def parse_tw(payload):
     if round_number is None or not end:
         raise ga.AccountError("Ответ ВГ не содержит раунд или время его окончания.")
     return {
-        "event_id": _text(war, 1), "map": _text(war, 2), "round": round_number, "end": end,
-        "own": _tw_zones(war, 6), "opponent": _tw_zones(war, 7),
+        "event_id": _text(war, 1), "channel_id": _text(war, 5),
+        "map": _text(war, 2), "round": round_number, "end": end,
+        "own": _tw_zones(war, 6, round_number != 0), "opponent": _tw_zones(war, 7, round_number != 0),
         "home_guild": _tw_profile(war, 6), "opponent_guild": _tw_profile(war, 7),
     }
+
+
+def tw_remaining(zone):
+    # Older saved snapshots stored the combat counter under deployed.
+    return zone.get("remaining", zone.get("deployed"))
 
 
 def parse_raid(payload):
@@ -122,6 +150,20 @@ def snapshot(guild_id, owner, kind):
     return json.loads(raw) if raw else {}
 
 
+def latest_tw_snapshot(guild_id):
+    return latest_guild_snapshot(guild_id, "tw")
+
+
+def latest_guild_snapshot(guild_id, kind):
+    with closing(sqlite3.connect(database.DB_NAME)) as db:
+        cursor = db.cursor()
+        database._ensure_bot_state_table(cursor)
+        row = cursor.execute("SELECT value FROM bot_state WHERE guild_id = ? AND key LIKE ? "
+                             "ORDER BY json_extract(value, '$.at') DESC, rowid DESC LIMIT 1",
+                             (guild_id, f"live_game:{kind}:%")).fetchone()
+    return json.loads(row[0]) if row else {}
+
+
 def save(guild_id, owner, kind, captured, data):
     database.set_bot_state(
         f"live_game:{kind}:{owner}", json.dumps({"at": captured, "data": data}), guild_id=guild_id,
@@ -130,3 +172,5 @@ def save(guild_id, owner, kind, captured, data):
         guild_compare.save_current_opponent(
             guild_id, data["home_guild"], data["opponent_guild"], data["event_id"], epoch(data["end"]),
         )
+    if kind == "tw" and data:
+        tw_battle_log.record(guild_id, data, captured)

@@ -15,7 +15,8 @@ from fastapi.templating import Jinja2Templates
 import database
 import guild_resolver
 from services import conquest, guild_units, unit_effects
-from web.deps import get_current_user, own_accounts
+from services import game_account
+from web.deps import get_current_user
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -71,14 +72,8 @@ def require_conquest_access(request: Request) -> dict:
 def _accounts(user: dict) -> list:
     """[(ally_code, имя, is_main)]: свои аккаунты в гильдии, как в «Моём профиле»; если их
     нет — регистрации в других гильдиях бота (супер-админ), потом код из ручного гранта."""
-    accounts = own_accounts(user) if user.get("guild_id") is not None else []
-    if not accounts:
-        seen = set()
-        for _gid, code, name, is_main in database.get_all_registrations_for_discord_id(str(user["discord_id"])):
-            if code not in seen:
-                seen.add(code)
-                accounts.append((code, name, is_main))
-        accounts.sort(key=lambda a: not a[2])
+    accounts = [(code, name, main) for code, (name, main) in
+                game_account.personal_accounts(user["discord_id"], user.get("guild_id")).items()]
     if not accounts:
         code = guild_resolver.resolve_access(user["discord_id"]).get("ally_code")
         if code:
@@ -86,20 +81,25 @@ def _accounts(user: dict) -> list:
     return accounts
 
 
+def _progress_owner(user, account):
+    owner = str(user["discord_id"])
+    return f"{owner}:{account[0]}" if account and not account[2] else owner
+
+
 @router.get("", response_class=HTMLResponse)
 async def conquest_page(request: Request, diff: str = "", acc: str = "", user: dict = Depends(require_conquest_access)):
     state = conquest.state()
     ctx = {"user": user, "state": state}
     accounts = _accounts(user)
-    account = (next((a for a in accounts if a[0] == acc), None)
+    account = (next((a for a in accounts if a[0] == (acc or user.get("active_ally_code"))), None)
                or next((a for a in accounts if a[2]), None) or (accounts[0] if accounts else None))
     roster = database.get_player_units_bulk([account[0]]).get(account[0]) if account else None
     if state:
         keys = [d["key"] for d in state["difficulties"]]
         if diff not in keys:
-            diff = database.get_conquest_last_difficulty(user["discord_id"], state["id"]) or "hard"
+            diff = database.get_conquest_last_difficulty(_progress_owner(user, account), state["id"]) or "hard"
         d = next(x for x in state["difficulties"] if x["key"] == diff)
-        done, battles = database.get_conquest_marks(user["discord_id"], state["id"], diff)
+        done, battles = database.get_conquest_marks(_progress_owner(user, account), state["id"], diff)
         groups = [("Общие подвиги", [f for f in d["feats"] if f["sector"] is None])]
         for sector in sorted({f["sector"] for f in d["feats"] if f["sector"]}):
             groups.append((f"Сектор {sector}", [f for f in d["feats"] if f["sector"] == sector]))
@@ -128,7 +128,7 @@ async def effects_page(request: Request, acc: str = "", user: dict = Depends(req
     с уровнями первыми — для подвигов «наложите X»."""
     effects = unit_effects.load()
     accounts = _accounts(user)
-    account = (next((a for a in accounts if a[0] == acc), None)
+    account = (next((a for a in accounts if a[0] == (acc or user.get("active_ally_code"))), None)
                or next((a for a in accounts if a[2]), None) or (accounts[0] if accounts else None))
     roster = (database.get_player_units_bulk([account[0]]).get(account[0]) if account else None) or {}
     ids = sorted({b for e in effects.values() for b in e["units"]})
@@ -171,6 +171,9 @@ async def conquest_save(request: Request, user: dict = Depends(require_conquest_
         battles = max(0, min(10000, int(form.get("battles") or 0)))
     except ValueError:
         battles = 0
-    database.set_conquest_marks(user["discord_id"], state["id"], diff, feats, battles)
     acc = form.get("acc", "")
+    account = next((a for a in _accounts(user) if a[0] == acc), None)
+    if acc and account is None:
+        raise HTTPException(403)
+    database.set_conquest_marks(_progress_owner(user, account), state["id"], diff, feats, battles)
     return RedirectResponse(f"/conquest?diff={diff}" + (f"&acc={acc}" if acc.isdigit() else ""), status_code=303)

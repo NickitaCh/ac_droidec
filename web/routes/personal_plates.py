@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import database
-from services import feature_flags, hotbot_import as hb, personal_plates as plates
+from services import feature_flags, game_account, hotbot_import as hb, personal_plates as plates
 from web.routes.stat_plates import STAT_OPTIONS, OPERATOR_OPTIONS, PRIORITY_OPTIONS, _stat_ru, _fmt_value
 
 router = APIRouter()
@@ -116,13 +116,16 @@ async def detail(request: Request, plate_id: str, ally_code: str = '', check_sta
                 'norm': row[4] + ' ' + _fmt_value(row[5]),
                 'priority_label': dict((value, name) for name, value in PRIORITY_OPTIONS).get(row[6], row[6]),
                 'numeric': row[3] in {v for _, v in STAT_OPTIONS} and not row[13]} for row in rows]
-    accounts = database.get_user_registrations(str(user['discord_id']), guild_id=user['guild_id'])
+    accounts = [(code, name, main) for code, (name, main) in
+                game_account.personal_accounts(user['discord_id'], user['guild_id']).items()]
+    selected = ally_code or user.get('active_ally_code')
     results, error = None, None
     if check_stats:
-        from services import game_account, stat_forecast
+        from services import stat_forecast
         from web.routes.stat_forecast import _get_comlink
         try:
-            code = game_account.select_account(str(user['discord_id']), user['guild_id'], ally_code=ally_code or None)
+            code = game_account.select_personal_account(str(user['discord_id']), user['guild_id'],
+                                                       selected)
             comlink = _get_comlink()
             calc = await stat_forecast.get_stat_calc(comlink)
             results = []
@@ -137,7 +140,8 @@ async def detail(request: Request, plate_id: str, ally_code: str = '', check_sta
         except Exception:
             error = 'Не удалось проверить статы. Попробуйте позже.'
     return render(request, user, plate=plate, entries=entries, own=plate['owner'] == str(user['discord_id']),
-                  reference=plates.reference(plate), accounts=accounts, results=results, **({'error': error} if error else {}))
+                  reference=plates.reference(plate), accounts=accounts, selected_account=selected,
+                  results=results, **({'error': error} if error else {}))
 
 
 @router.post('/{plate_id}/{action}')

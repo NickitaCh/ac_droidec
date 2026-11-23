@@ -4,18 +4,45 @@ cogs/raids.py после каждого завершённого рейда). З
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import database
-from services import feature_flags
+from services import activity_diff, feature_flags, game_account, raid_planner
 from services import raids as rs
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 TABLE_RAIDS = 10
 CHART_RAIDS = 20
+
+
+@router.get("/plan", response_class=HTMLResponse)
+async def raid_plan_page(request: Request, account: str = "", user: dict = Depends(feature_flags.require_feature_member("raids"))):
+    accounts = [(code, name, main) for code, (name, main) in
+                game_account.personal_accounts(user["discord_id"], user["guild_id"]).items()]
+    codes = {code for code, _, _ in accounts}
+    if account and account not in codes:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден.")
+    selected = account or user.get("active_ally_code") or next(iter(accounts), ("",))[0]
+    units = database.get_player_units(selected) if selected else {}
+    if selected and not units:
+        from swgoh_comlink import SwgohComlink
+        try:
+            await activity_diff.refresh_player_units(SwgohComlink(url="http://localhost:3000"), selected)
+        except Exception:
+            pass  # The page already renders an empty-roster state.
+        units = database.get_player_units(selected)
+    catalog = raid_planner.load_catalog() if units else None
+    roster = raid_planner.comlink_roster(units)
+    plan = raid_planner.build_plan(roster, catalog) if catalog else None
+    names = database.get_game_unit_names(list({u for run in plan["runs"] for u in run["units"]})) if plan and plan["runs"] else {}
+    return templates.TemplateResponse(request, "raid_plan.html", {
+        "user": user, "accounts": accounts, "selected": selected, "roster": roster,
+        "plan": plan, "catalog": catalog, "names": names, "millions": rs.millions,
+        "source": raid_planner.SOURCE,
+    }, status_code=503 if units and catalog is None else 200)
 
 
 @router.get("", response_class=HTMLResponse)
