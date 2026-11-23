@@ -143,13 +143,20 @@ def item_data(item):
 
 
 def add(user, plate_id, item):
+    add_many(user, plate_id, [item])
+
+
+def add_many(user, plate_id, items):
+    """Save a character's conditions together, including the capacity check."""
     get(plate_id, user, edit=True)
-    data = item_data(item)
+    records = [item_data(item) for item in items]
     with _db() as db:
-        if db.execute('SELECT count(*) FROM personal_stat_rows WHERE plate_id=?', (plate_id,)).fetchone()[0] >= MAX_REQUIREMENTS:
+        db.execute('BEGIN IMMEDIATE')
+        count = db.execute('SELECT count(*) FROM personal_stat_rows WHERE plate_id=?', (plate_id,)).fetchone()[0]
+        if count + len(records) > MAX_REQUIREMENTS:
             raise ValueError(f'В одном плейте допускается до {MAX_REQUIREMENTS} требований.')
-        db.execute('INSERT INTO personal_stat_rows(plate_id,data) VALUES (?,?)',
-                   (plate_id, json.dumps(data, ensure_ascii=False)))
+        db.executemany('INSERT INTO personal_stat_rows(plate_id,data) VALUES (?,?)',
+                       [(plate_id, json.dumps(data, ensure_ascii=False)) for data in records])
 
 
 def remove_row(user, plate_id, row_id):

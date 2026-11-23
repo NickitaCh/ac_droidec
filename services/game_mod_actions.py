@@ -10,6 +10,14 @@ from services import game_account as ga, game_account_readonly as accounts
 from services import game_mod_inventory, mod_optimizer, mod_optimizer_plans as plans
 
 
+class LockedModError(ga.AccountError):
+    def __init__(self, mod, old, new, locked):
+        super().__init__('План затрагивает заблокированного персонажа или модуль.')
+        self.characters = sorted({base for base in (old, new) if base in locked})
+        self.module_locked = bool(mod.get('locked'))
+        self.holder = old
+
+
 async def snapshot(user, code, *, read_only=False):
     scope = (str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'], code)
     if not read_only:
@@ -112,7 +120,7 @@ def operations(mods, results, locked):
         if old == new:
             continue
         if old in locked or new in locked or mod.get('locked'):
-            raise ga.AccountError('План затрагивает заблокированного персонажа или модуль.')
+            raise LockedModError(mod, old, new, locked)
         if old:
             remove.setdefault(old, []).append(mid)
         if new:

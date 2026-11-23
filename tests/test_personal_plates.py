@@ -16,6 +16,34 @@ from web.routes import personal_plates as route
 
 
 class PersonalPlateTests(unittest.IsolatedAsyncioTestCase):
+    def test_batch_character_conditions_are_validated_before_saving(self):
+        with TestClient(self.app()) as client, patch.object(database, 'get_game_unit_name', return_value='Вейдер'), \
+                patch.object(database, 'get_game_unit_names', return_value={'VADER': 'Вейдер'}), \
+                patch.object(ga, 'personal_accounts', return_value={}, create=True):
+            csrf = re.search('name="csrf" value="([^"]+)"', client.get('/personal-plates').text).group(1)
+            pid = plates.create(self.user, 'Набор')
+            path = '/personal-plates/' + pid
+            payload = {'csrf': csrf, 'base_id': 'VADER', 'stat': ['Speed', 'Health'],
+                       'operator': ['>=', '>='], 'value': ['320', 'nan'],
+                       'priority': ['required', 'optional']}
+            invalid = client.post(path + '/add', data=payload)
+            self.assertIn('Условие 2', invalid.text)
+            self.assertIn('value="320"', invalid.text)
+            self.assertEqual(plates.rows(plates.get(pid, self.user)), [])
+            payload['value'] = ['320', '100000']
+            response = client.post(path + '/add', data=payload)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([row[2:7] for row in plates.rows(plates.get(pid, self.user))],
+                             [('VADER', 'Speed', '>=', 320, 'required'),
+                              ('VADER', 'Health', '>=', 100000, 'optional')])
+
+    def test_batch_capacity_failure_does_not_save_partial_conditions(self):
+        pid = plates.create(self.user, 'Набор', [self.item])
+        with patch.object(plates, 'MAX_REQUIREMENTS', 2):
+            with self.assertRaises(ValueError):
+                plates.add_many(self.user, pid, [self.item, self.item])
+        self.assertEqual(len(plates.rows(plates.get(pid, self.user))), 1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db = patch.object(database, 'DB_NAME', str(Path(self.temp.name) / 'test.db'))
@@ -187,6 +215,7 @@ class PersonalPlateTests(unittest.IsolatedAsyncioTestCase):
             shared = client.get(path)
             self.assertEqual(shared.status_code, 200)
             self.assertNotIn('action="'+path+'/edit"', shared.text)
+            self.assertNotIn('action="'+path+'/add"', shared.text)
             client.post(path+'/remove', data={'csrf': csrf, 'row_id': row_id})
             self.assertEqual(len(plates.rows(plate)), 1)
             self.user['guild_id'] = 2

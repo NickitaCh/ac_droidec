@@ -15,6 +15,20 @@ from web.deps import require_member_access
 
 
 class OptimizerWebTests(unittest.TestCase):
+    def test_restore_lock_error_stays_on_loadout_page(self):
+        mod = {'id': 'm1', 'equipped_to': 'A', 'slot_id': 1, 'set_id': 1,
+               'set_name': 'Health', 'primary': {'name': 'Health', 'value': 5, 'is_percent': True}}
+        token = plans.save_baseline('owner', 1, '123456789', [mod], name='Рейд', units=['A'], scope='all')
+        fresh = {'mods': [{**mod, 'equipped_to': 'B', 'locked': True}],
+                 'unit_ids': {'A': 'a', 'B': 'b'}, 'fingerprint': 'fresh', 'connection': 'c'}
+        with TestClient(self.app) as client, patch.object(actions, 'snapshot', new=AsyncMock(return_value=fresh)):
+            response = client.post('/mod-loadouts/restore', data={'csrf': self.csrf(client), 'plan': token})
+        self.assertIn('text/html', response.headers['content-type'])
+        self.assertIn('модуль заблокирован в игре', response.text)
+        self.assertIn('Снимите его блокировку в игре', response.text)
+        self.assertIn('action="/mod-loadouts/restore"', response.text)
+        self.assertEqual(plans.get(token, 'owner', 1)['state'], 'saved')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.user = {'discord_id': 'owner', 'guild_id': 1, 'bot_profile': 'test',

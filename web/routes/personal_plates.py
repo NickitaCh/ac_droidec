@@ -31,7 +31,8 @@ def render(request, user, **context):
     return templates.TemplateResponse(request, 'personal_plates.html', {
         'user': user, 'csrf': csrf, 'stat_options': STAT_OPTIONS,
         'operator_options': OPERATOR_OPTIONS, 'priority_options': PRIORITY_OPTIONS,
-        'error': request.query_params.get('error'), **context}, headers={'Cache-Control': 'no-store'})
+        'add_draft': getattr(request.state, 'personal_plate_draft', {}),
+        'error': getattr(request.state, 'personal_plate_error', request.query_params.get('error')), **context}, headers={'Cache-Control': 'no-store'})
 
 
 def check(request, form):
@@ -169,19 +170,32 @@ async def change(request: Request, plate_id: str, action: str, user=Depends(acce
                 if skipped or not items:
                     raise ValueError(skipped[0]['reason'] if skipped else 'Не удалось прочитать требование.')
             else:
-                base, stat, op = str(form.get('base_id', '')), str(form.get('stat', '')), str(form.get('operator', ''))
-                priority = str(form.get('priority', 'required'))
-                if (stat not in dict((v, n) for n, v in STAT_OPTIONS) or op not in {v for _, v in OPERATOR_OPTIONS}
-                        or priority not in {v for _, v in PRIORITY_OPTIONS} or not database.get_game_unit_name(base)):
-                    raise ValueError('Выберите персонажа, характеристику, оператор и приоритет.')
-                value = float(str(form.get('value', '')).replace(',', '.'))
-                if not math.isfinite(value) or abs(value) > 1e9:
-                    raise ValueError('Введите допустимое числовое значение.')
-                items = [{'kind': 'num', 'char': base, 'stat': stat, 'op': op, 'value': value, 'priority': priority}]
-            for item in items:
-                plates.add(user, plate_id, item)
+                base = str(form.get('base_id', ''))
+                fields = [form.getlist(key) for key in ('stat', 'operator', 'value', 'priority')]
+                request.state.personal_plate_draft = {'base_id': base, 'name': str(form.get('character_name', '')),
+                                                     'rows': [list(row) for row in zip(*fields)]}
+                if not 1 <= len(fields[0]) <= 30 or len({len(values) for values in fields}) != 1:
+                    raise ValueError('Добавьте от 1 до 30 полных условий.')
+                if not database.get_game_unit_name(base):
+                    raise ValueError('Выберите персонажа из списка.')
+                items = []
+                for index, (stat, op, raw_value, priority) in enumerate(zip(*fields), 1):
+                    if (stat not in {v for _, v in STAT_OPTIONS} or op not in {v for _, v in OPERATOR_OPTIONS}
+                            or priority not in {v for _, v in PRIORITY_OPTIONS}):
+                        raise ValueError(f'Условие {index}: выберите характеристику, оператор и приоритет.')
+                    try:
+                        value = float(str(raw_value).replace(',', '.'))
+                    except ValueError:
+                        raise ValueError(f'Условие {index}: введите числовое значение.') from None
+                    if not math.isfinite(value) or abs(value) > 1e9:
+                        raise ValueError(f'Условие {index}: введите допустимое числовое значение.')
+                    items.append({'kind': 'num', 'char': base, 'stat': stat, 'op': op, 'value': value, 'priority': priority})
+            plates.add_many(user, plate_id, items)
         else:
             raise HTTPException(404)
     except ValueError as error:
+        if action == 'add' and hasattr(request.state, 'personal_plate_draft'):
+            request.state.personal_plate_error = str(error)
+            return await detail(request, plate_id, user=user)
         return redirect(path, error)
     return redirect(path)

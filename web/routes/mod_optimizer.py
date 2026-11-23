@@ -605,7 +605,24 @@ async def optimizer_restore(request: Request, plan: str = Form(), csrf: str = Fo
             context['game_connected'] = False
         return _render(request, context)
     except (ValueError, game_account.AccountError) as error:
-        raise HTTPException(409, str(error)) from None
+        context = _optimizer_context(user, plan)
+        message = str(error)
+        if isinstance(error, game_mod_actions.LockedModError):
+            ids = error.characters + ([error.holder] if error.holder else [])
+            names = database.get_game_unit_names(ids)
+            reasons = []
+            if error.characters:
+                labels = ', '.join(names.get(base, base) for base in error.characters)
+                reasons.append(f'Заблокированы персонажи: {labels}. Проверьте блокировки в оптимизаторе перед новым подбором.')
+            if error.module_locked:
+                holder = names.get(error.holder, error.holder) if error.holder else 'склад'
+                reasons.append(f'Нужный модуль заблокирован в игре (сейчас: {holder}). Снимите его блокировку в игре и повторите проверку.')
+            message = 'Не удалось подготовить переодевание. ' + ' '.join(reasons)
+        context.update(loadouts_page=True, restore_characters=set(characters), restore_scope=scope,
+                       error=message)
+        response = _render(request, context)
+        response.status_code = 409
+        return response
     return RedirectResponse('/mod-loadouts?plan=' + token, status_code=303)
 
 

@@ -29,6 +29,17 @@ main.wide.personal-plates-page { max-width: none; padding: 0 24px 48px; }
 .pp-edit > form { margin-top: 12px; min-width: 160px; }
 .pp-check-form { display: grid; grid-template-columns: minmax(140px, 320px) max-content; align-items: end; gap: 12px; }
 .pp-add-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 12px; }
+.pp-batch-rows { display: grid; gap: 12px; }
+.pp-batch-row { display: grid; grid-template-columns: minmax(130px, 2fr) minmax(70px, 1fr) minmax(90px, 1fr) minmax(130px, 1.4fr) auto; gap: 10px; align-items: end; padding: 12px 0; border-top: 1px solid var(--border); }
+.pp-batch-row label { margin: 0; }
+.pp-batch-row button { margin-bottom: 0; }
+.pp-source ol { padding-left: 20px; }
+.pp-source li + li { margin-top: 8px; }
+@media (max-width: 1350px) {
+    .pp-batch-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+    .pp-batch-row > label:first-child { grid-column: 1 / -1; }
+    .pp-batch-row > label:nth-child(4) { grid-column: 1 / 3; }
+}
 .pp-span { grid-column: 1 / -1; }
 .pp-field > label { display: block; margin-bottom: 4px; }
 .pp-field .unit-search-input { font-size: 1rem; padding: .55em .65em; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--page); color: var(--fg); }

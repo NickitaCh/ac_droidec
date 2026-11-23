@@ -4,8 +4,17 @@
 {% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
 {% macro priority_select(current='required') %}<select name="priority">{% for name,value in priority_options %}<option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>{% endmacro %}
 {% macro operator_select(current='>=') %}<select name="operator">{% for name,value in operator_options %}<option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>{% endmacro %}
+{% macro condition_row(row) %}
+<div class="pp-batch-row">
+    <label>Характеристика<select name="stat">{% for name,value in stat_options %}<option value="{{ value }}"{% if value == row[0] %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label>Условие{{ operator_select(row[1]) }}</label>
+    <label>Значение<input name="value" type="number" step="any" value="{{ row[2] }}" required></label>
+    <label>Приоритет{{ priority_select(row[3]) }}</label>
+    <button type="button" class="button-secondary" data-remove-condition aria-label="Удалить условие">×</button>
+</div>
+{% endmacro %}
 {% block content %}
-<link rel="stylesheet" href="/static/personal_plates.css?v=20261119layout">
+<link rel="stylesheet" href="/static/personal_plates.css?v=20261123batch">
 <section class="page-hero pp-hero">
     {% if plate or importing %}<a class="page-hero-back" href="/personal-plates">← Личные плейты</a>{% endif %}
     <div class="page-hero-top">
@@ -19,10 +28,13 @@
 {% if importing %}
 <form method="post" action="/personal-plates/import" class="pp-import-layout">
     {{ csrf_field() }}
-    <section class="panel pp-source"><h2>Источник</h2>
+    <section class="panel pp-source"><h2>Как импортировать плейт</h2>
+        <p class="muted pp-help">Плейт задаёт нужные характеристики персонажей. Сохранённая сборка хранит конкретные модули.</p>
+        <ol class="pp-help"><li>Вызовите в HotBot проверку нужного шаблона: <code>templates test</code>.</li><li>Перешлите ответ целиком в личку Дроидецу. Несколько сообщений перешлите подряд.</li><li>Скопируйте ссылки на первое и последнее пересланные сообщения и вставьте ниже.</li><li>Нажмите «Показать требования», проверьте строки и сохраните плейт.</li></ol>
         <label>Ссылка на первое сообщение<input type="url" name="link" value="{{ link|default('') }}" placeholder="https://discord.com/channels/…" required aria-describedby="pp-link-help"></label>
         <label>Ссылка на последнее сообщение (если их несколько)<input type="url" name="end_link" value="{{ end_link|default('') }}" placeholder="https://discord.com/channels/@me/…/…"></label>
-        <p class="muted pp-help" id="pp-link-help">Перешлите сообщения шаблона HotBot подряд в личку Дроидецу и укажите начало и конец. Все требования сохранятся в один личный плейт. Также подходит ссылка на ответ /статы из своей лички.</p>
+        <p class="muted pp-help" id="pp-link-help">Для одного сообщения достаточно первой ссылки. Также подходит ссылка на ответ /статы из своей лички.</p>
+        <details class="pp-details"><summary>Нужна сборка модулей из HotBot?</summary><p>Наденьте её через HotBot, затем откройте <a href="/mod-loadouts">сохранённые сборки</a> в Дроидеце и сохраните текущую расстановку из игры. Для чтения модулей нужен подключённый EA-аккаунт.</p></details>
         <label>Название плейта<input name="name" maxlength="80" value="{{ name|default('') }}" {% if preview %}required{% endif %}></label>
         {% if preview %}<input type="hidden" name="digest" value="{{ digest }}"><button name="action" value="save">Сохранить выбранное</button>{% else %}<button name="action" value="preview">Показать требования</button>{% endif %}
     </section>
@@ -48,9 +60,22 @@
                     </div>{% endif %}
                 </div>{% endfor %}
             </section>
-            {% else %}<div class="pp-empty"><h3>{{ 'Добавьте первое требование' if own else 'Требований пока нет' }}</h3>{% if own %}<p>Выберите персонажа и нужную характеристику.</p><a class="button button-secondary" href="#pp-add">Добавить требование</a>{% endif %}</div>{% endfor %}
+            {% else %}<div class="pp-empty"><h3>{{ 'Добавьте первое требование' if own else 'Требований пока нет' }}</h3>{% if own %}<p>Выберите персонажа и задайте его характеристики.</p><a class="button button-secondary" href="#pp-add">Добавить требование</a>{% endif %}</div>{% endfor %}
         </section>
-        <section class="panel" id="pp-check"><h2>Проверить себя</h2>
+        {% if own %}<section class="panel" id="pp-add"><h2>Требования к персонажу</h2>
+            <form method="post" action="/personal-plates/{{ plate.id }}/add" class="pp-add-form" data-character-conditions>{{ csrf_field() }}
+                <div class="pp-field pp-span"><label for="pp-unit">Персонаж</label><div class="unit-search" data-live-search data-url="/personal-plates/api/units" data-value-field="base_id" data-label-field="name" data-required="true"><input id="pp-unit" name="character_name" value="{{ add_draft.name|default('') }}" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off"><input type="hidden" name="base_id" value="{{ add_draft.base_id|default('') }}" class="unit-search-value"><div class="unit-search-results"></div></div></div>
+                <p class="muted pp-help pp-span">Выберите персонажа один раз и добавьте все нужные условия.</p>
+                <div class="pp-span pp-batch-rows" data-condition-rows>
+                {% for row in add_draft.rows|default([['Speed', '>=', '', 'required']]) %}
+                    {{ condition_row(row) }}
+                {% endfor %}
+                </div>
+                <div class="pp-actions pp-span"><button type="button" class="button-secondary" data-add-condition>+ Ещё условие</button><button>Сохранить условия</button></div>
+            </form>
+            <details class="pp-details"><summary>Добавить строку из HotBot</summary><form method="post" action="/personal-plates/{{ plate.id }}/add">{{ csrf_field() }}<label>Строка требования<textarea name="line" required placeholder="Darth Vader Speed: 200 (requires 300)"></textarea></label><button>Добавить строку</button></form></details>
+        </section>
+        {% endif %}<section class="panel" id="pp-check"><h2>Проверить себя</h2>
             <form method="get" action="/personal-plates/{{ plate.id }}" class="pp-check-form"><input type="hidden" name="check_stats" value="true"><label>Аккаунт<select name="ally_code">{% for code,name,main in accounts %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></label><button {% if not entries or not accounts %}disabled{% endif %}>Проверить статы</button></form>
             {% if not entries %}<p class="muted pp-help">Проверка станет доступна после добавления требований.</p>{% endif %}
             {% if results is not none %}<div class="pp-results">{% for r in results %}<article><h3>{{ r.name }} · {{ r.matched }} из {{ r.total }}</h3><pre>{{ r.block }}</pre></article>{% else %}<p>Нет требований для проверки.</p>{% endfor %}</div>{% endif %}
@@ -58,15 +83,6 @@
     </div>
     <aside class="pp-side">
     {% if own %}
-        <section class="panel" id="pp-add"><h2>Добавить требование</h2>
-            <form method="post" action="/personal-plates/{{ plate.id }}/add" class="pp-add-form">{{ csrf_field() }}
-                <div class="pp-field pp-span"><label for="pp-unit">Персонаж</label><div class="unit-search" data-live-search data-url="/personal-plates/api/units" data-value-field="base_id" data-label-field="name" data-required="true"><input id="pp-unit" class="unit-search-input" placeholder="Начните вводить имя…" autocomplete="off"><input type="hidden" name="base_id" class="unit-search-value"><div class="unit-search-results"></div></div></div>
-                <label class="pp-span">Характеристика<select name="stat">{% for name,value in stat_options %}<option value="{{ value }}" {% if value == 'Speed' %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
-                <label>Условие{{ operator_select() }}</label><label>Значение<input name="value" type="number" step="any" placeholder="Например, 320" required></label>
-                <label class="pp-span">Приоритет{{ priority_select() }}</label><button class="pp-span">Добавить</button>
-            </form>
-            <details class="pp-details"><summary>Добавить строку из HotBot</summary><form method="post" action="/personal-plates/{{ plate.id }}/add">{{ csrf_field() }}<label>Строка требования<textarea name="line" required placeholder="Darth Vader Speed: 200 (requires 300)"></textarea></label><button>Добавить строку</button></form></details>
-        </section>
         <section class="panel pp-settings"><h2>Настройки плейта</h2>
             <div class="pp-share"><div><strong>Доступ гильдии</strong><p class="muted">{{ 'Участники могут использовать плейт. Правки — только у вас.' if plate.shared else 'Сейчас плейт виден только вам.' }}</p></div><form method="post" action="/personal-plates/{{ plate.id }}/share">{{ csrf_field() }}<input type="hidden" name="shared" value="{{ 0 if plate.shared else 1 }}"><button class="button-secondary">{{ 'Закрыть доступ' if plate.shared else 'Открыть гильдии' }}</button></form></div>
             <details class="pp-details"><summary>Переименовать</summary><form method="post" action="/personal-plates/{{ plate.id }}/rename">{{ csrf_field() }}<label>Название<input name="name" value="{{ plate.name }}" maxlength="80" required></label><button>Сохранить</button></form></details>
@@ -81,4 +97,6 @@
     <aside class="panel"><h2>Новый плейт</h2><form method="post" action="/personal-plates/create">{{ csrf_field() }}<label>Название<input name="name" maxlength="80" placeholder="Например, Мой рейд" required></label><button>Создать плейт</button></form></aside>
 </div>
 {% endif %}
+<template id="pp-condition-template">{{ condition_row(['Speed', '>=', '', 'required']) }}</template>
+<script src="/static/personal_plates.js?v=20261123batch" defer></script>
 {% endblock %}
