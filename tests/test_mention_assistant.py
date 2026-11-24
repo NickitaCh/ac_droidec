@@ -148,6 +148,16 @@ class AssistantTests(unittest.TestCase):
         model.assert_not_called()
         self.assertFalse(a.injection_request("Как зарегистрироваться по коду союзника?"))
 
+    def test_personal_status_does_not_invent_report_or_commands(self):
+        with patch.object(a.openrouter_router, "call_json") as model:
+            plan, _, _ = a.parse_plan("ПРивет! Какой статус у меня на ва?", "test", "key", LIMITS)
+        model.assert_not_called()
+        self.assertEqual(plan["action"], "answer")
+        self.assertIn("пока не получаю", plan["text"])
+        self.assertNotIn("команд", plan["text"])
+        self.assertTrue(a.safe_answer(plan["text"]))
+        self.assertFalse(a.safe_answer("Используй команду бота ва или команду игровой_аккаунт."))
+
     def test_channel_destination_persists_with_restart_and_claim(self):
         rid = a.add_reminder(1, "1", "test", "channel", self.due, "ВГ", channel_id=50, discord_guild_id=60)
         row = a.list_reminders(1, "1", "test")[0]

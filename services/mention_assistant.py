@@ -141,6 +141,7 @@ def validate_plan(data, effects, docs):
 def safe_answer(text):
     return (isinstance(text, str) and 1 <= len(text.strip()) <= 1700
             and not re.search(r"https?://|www\.|discord\.gg|<[@#]|@everyone|@here|```|[\x00-\x08\x0b-\x1f\x7f]", text, re.I)
+            and not re.search(r"(?:используй|введи|вызови|выполни|напиши|командой|командами).{0,100}(?:команд|регистраци|/[а-яa-z_])|команд[ау]\s+бота|(?<!\w)/[а-яa-z_]{2,}", text, re.I | re.S)
             and not injection_request(text))
 
 
@@ -174,6 +175,11 @@ def reminder_fields(due, text, now=None):
 def parse_plan(question, profile, api_key, limits):
     if injection_request(question):
         return {"action": "help"}, {}, []
+    if re.search(r"\bстатус\w*\b", question, re.I) and re.search(r"\b(?:у меня|мой|моего)\b", question, re.I):
+        # No personal-status tool is wired to mentions. Never let a model invent
+        # either a live report or a command for obtaining it.
+        return {"action": "answer", "topic": "swgoh", "text":
+                "Привет! О каком режиме речь? Личный игровой статус я пока не получаю из обычных сообщений."}, {}, []
     effects, docs = catalog(profile)
     if database.get_openrouter_requests_today() >= limits["shared_daily_cap"]:
         raise ValueError("Общий бюджет ИИ на сегодня исчерпан. Напоминания можно просмотреть и отменить без ИИ.")
@@ -185,6 +191,8 @@ def parse_plan(question, profile, api_key, limits):
 {"action":"answer","topic":"swgoh","text":"ответ до 1700 символов"} — игровые механики, тактика, развитие, подбор команды, подготовка к событиям SWGOH.
 {"action":"answer","topic":"guild","text":"ответ до 1700 символов"} — организация гильдии, планы, координация, распределение обязанностей, обсуждение игровых решений.
 Отвечай по-русски, по делу. Можно дать совет или уточняющий вопрос. Не заявляй, что выполнил действие.
+В answer не называй команды бота, кнопки или адреса страниц: такие инструкции бери только из docs по существующим ID.
+Не выдумывай команды по названиям игровых режимов. Сейчас обычные сообщения не подключены к личным игровым отчётам.
 Ты не знаешь текущие состав, показатели, планы, переписку и настройки конкретной гильдии: не выдумывай их.
 Если нужна свежая информация о балансе/событии, честно укажи, что она не проверена. Не выдумывай точные характеристики способностей.
 Для поиска эффектов используй effect из каталога, для работы бота — docs; для общих игровых вопросов и дел гильдии — answer.
