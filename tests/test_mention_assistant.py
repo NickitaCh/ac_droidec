@@ -31,7 +31,7 @@ class AssistantTests(unittest.TestCase):
 
     def test_officer_active_guild_and_profile_required(self):
         with patch.object(a.guild_resolver, "resolve_access") as resolve, patch.object(database, "get_guild_config", return_value={"is_active": 1}), patch.object(a.bot_profiles, "accepts", return_value=True):
-            for tier, gid in [(None, 1), ("member", 1), ("officer", None)]:
+            for tier, gid in [(None, 1), ("member", 1), ("officer", None), ("officer", 2)]:
                 resolve.return_value = {"tier": tier, "guild_id": gid}
                 self.assertIsNone(a.access_for("1"))
             resolve.return_value = {"tier": "officer", "guild_id": 1}
@@ -40,6 +40,15 @@ class AssistantTests(unittest.TestCase):
                 self.assertIsNone(a.access_for("1"))
             with patch.object(database, "get_guild_config", return_value={"is_active": 0}):
                 self.assertIsNone(a.access_for("1"))
+
+    def test_admin_bypass_does_not_grant_assistant_to_ac_members(self):
+        access = {"tier": "officer", "guild_id": 1, "is_super_admin": True, "ally_code": "123456789"}
+        with patch.object(a.guild_resolver, "resolve_access", return_value=access), patch.object(database, "get_guild_config", return_value={"is_active": 1}), patch.object(a.bot_profiles, "accepts", return_value=True), patch.object(database, "get_manual_grant", return_value=None), patch.object(database, "get_member_level", return_value=2):
+            self.assertIsNone(a.access_for("1"))
+            with patch.object(database, "get_member_level", return_value=3):
+                self.assertIsNotNone(a.access_for("1"))
+            with patch.object(database, "get_manual_grant", return_value={"guild_id": 1, "tier": "officer"}):
+                self.assertIsNotNone(a.access_for("1"))
 
     def test_reminders_persist_and_are_owner_guild_profile_scoped(self):
         reminder_id = self.add()

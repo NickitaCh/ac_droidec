@@ -21,11 +21,13 @@ HELP = ("Отвечаю на вопросы по SWGOH, гильдейским �
         "«как проверить плейт?», «напомни завтра в 20:00 зайти на ВГ», "
         "«напомни завтра в 20:00 в канале #общий зайти на ВГ».\n"
         "По умолчанию напомню здесь; для личного сообщения добавьте «в личку».\n"
-        "Управление: «мои напоминания», «отмени напоминание 12». Время — МСК. Только офицерам.")
+        "Управление: «мои напоминания», «отмени напоминание 12». Время — МСК. Только офицерам АС.")
 MAX_QUESTION = 700
 MAX_REMINDER_TEXT = 300
 MAX_ACTIVE = 10
 MAX_HORIZON = 90 * 86400
+# The assistant pilot is restricted to AbsoluteChaos; no global admin bypass.
+ASSISTANT_GUILD_ID = 1
 
 
 @contextmanager
@@ -58,8 +60,14 @@ def connection():
 def access_for(owner):
     access = guild_resolver.resolve_access(owner)
     gid = access.get("guild_id")
-    if access.get("tier") != "officer" or gid is None or not bot_profiles.accepts(gid):
+    if access.get("tier") != "officer" or gid != ASSISTANT_GUILD_ID or not bot_profiles.accepts(gid):
         return None
+    if access.get("is_super_admin"):
+        # resolve_access promotes admins to officer even when their game rank is member.
+        grant = database.get_manual_grant(str(owner))
+        officer_grant = grant and grant["guild_id"] == gid and grant["tier"] == "officer"
+        if not officer_grant and database.get_member_level(gid, access.get("ally_code")) not in (3, 4):
+            return None
     cfg = database.get_guild_config(gid)
     if not cfg or not cfg.get("is_active"):
         return None
