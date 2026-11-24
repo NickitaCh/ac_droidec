@@ -18,11 +18,72 @@ def safe(text):
     return disnake.utils.escape_mentions(disnake.utils.escape_markdown(text))
 
 
+async def checked_channel(bot, owner, server_id, channel_id):
+    """Only accessible text channels/public threads in the original Discord server."""
+    guild = bot.get_guild(int(server_id))
+    if guild is None:
+        raise ValueError("Сервер напоминания больше недоступен.")
+    channel = guild.get_channel_or_thread(int(channel_id))
+    if not isinstance(channel, (disnake.TextChannel, disnake.Thread)):
+        raise ValueError("Нужен текстовый канал этого сервера или открытая ветка.")
+    if isinstance(channel, disnake.Thread) and (channel.is_private() or channel.archived or channel.locked):
+        raise ValueError("Нельзя отправить напоминание в закрытую, архивную или приватную ветку.")
+    # Fetch current membership rather than trusting a cached role payload.
+    member = await guild.fetch_member(int(owner))
+    me = await guild.fetch_member(bot.user.id)
+    for actor in (member, me):
+        perms = channel.permissions_for(actor)
+        can_send = perms.send_messages_in_threads if isinstance(channel, disnake.Thread) else perms.send_messages
+        if not perms.view_channel or not can_send:
+            raise ValueError("У вас или бота нет доступа на просмотр и отправку сообщений в этот канал.")
+    return channel
+
+
+def destination_request(message, question):
+    """Destination is extracted from explicit user syntax, never from model output."""
+    default = {"channel_id": message.channel.id, "discord_guild_id": message.guild.id} if message.guild else {}
+    if not re.search(r'напомни|напоминан', question, re.I):
+        return question, default
+    explicit = list(re.finditer(r'\bв\s+канал(?:е)?\s+(<#\d+>|«[^»]+»|"[^"]+"|[^\s,;]+)', question, re.I))
+    private = re.search(r'\b(?:в\s+личку|в\s+лс|личным\s+сообщением)\b', question, re.I)
+    here = re.search(r'\b(?:в\s+этом\s+канале|в\s+тот\s+же\s+канал|сюда|здесь)\b', question, re.I)
+    if not (explicit or private or here):
+        return question, default
+    if len(explicit) > 1 or (explicit and private) or (private and here):
+        raise ValueError("Укажите одно место доставки: канал или личку.")
+    if private:
+        return (question[:private.start()] + question[private.end():]).strip(), {}
+    if not message.guild:
+        raise ValueError("Напоминание в канал создавайте на нужном сервере, упомянув канал через #.")
+    destination = message.channel
+    span = here
+    if explicit:
+        span = explicit[0]
+        raw = span.group(1)
+        match = re.fullmatch(r'<#(\d+)>', raw)
+        if match:
+            destination = message.guild.get_channel_or_thread(int(match[1]))
+        else:
+            name = raw.strip('#«»"').casefold()
+            candidates = [c for c in message.guild.text_channels if c.name.casefold() == name]
+            if len(candidates) != 1:
+                raise ValueError("Канал не найден или название неоднозначно. Выберите его через #.")
+            destination = candidates[0]
+        if destination is None:
+            raise ValueError("Канал не найден на этом сервере. Выберите его через #.")
+    return (question[:span.start()] + question[span.end():]).strip(), {"channel_id": destination.id, "discord_guild_id": message.guild.id}
+
+
+def destination_label(destination):
+    return f"в канал <#{destination['channel_id']}>" if destination.get("channel_id") else "вам в личку"
+
+
 class ReminderConfirmation(disnake.ui.View):
-    def __init__(self, cog, owner, gid, source_id, plan):
+    def __init__(self, cog, owner, gid, source_id, plan, destination=None):
         super().__init__(timeout=120)
         self.cog, self.owner, self.gid = cog, str(owner), gid
         self.source_id, self.plan = str(source_id), dict(plan)
+        self.destination = dict(destination or {})
 
     async def interaction_check(self, inter):
         access = await asyncio.to_thread(assistant.access_for, inter.author.id)
@@ -31,26 +92,28 @@ class ReminderConfirmation(disnake.ui.View):
             return False
         return True
 
-    @disnake.ui.button(label="Создать личное напоминание", style=disnake.ButtonStyle.success)
+    @disnake.ui.button(label="Создать напоминание", style=disnake.ButtonStyle.success)
     async def confirm(self, button, inter):
         await inter.response.defer(with_message=False)
         if self.is_finished():
             return
         self.stop()
         try:
-            # Check DM availability before saving; never fall back to a guild channel.
-            user = self.cog.bot.get_user(int(self.owner)) or await self.cog.bot.fetch_user(int(self.owner))
-            await user.send("Создаю личное напоминание: " + safe(self.plan["text"])
-                            + "\n" + assistant.format_due(assistant.reminder_fields(self.plan["due"], self.plan["text"])[0]),
-                            allowed_mentions=NO_MENTIONS)
+            if self.destination:
+                await checked_channel(self.cog.bot, self.owner, self.destination["discord_guild_id"], self.destination["channel_id"])
+            else:
+                user = self.cog.bot.get_user(int(self.owner)) or await self.cog.bot.fetch_user(int(self.owner))
+                await user.send("Создаю личное напоминание: " + safe(self.plan["text"])
+                                + "\n" + assistant.format_due(assistant.reminder_fields(self.plan["due"], self.plan["text"])[0]),
+                                allowed_mentions=NO_MENTIONS)
             access = await asyncio.to_thread(assistant.access_for, self.owner)
             if not access or access["guild_id"] != self.gid:
                 raise ValueError("Доступ офицера изменился. Напоминание не создано.")
             reminder_id = await asyncio.to_thread(assistant.add_reminder, self.gid, self.owner,
-                                                  self.cog.profile, self.source_id, self.plan["due"], self.plan["text"])
-            text = f"Напоминание №{reminder_id} создано. Пришлю в личку " + assistant.format_due(assistant.reminder_fields(self.plan["due"], self.plan["text"])[0]) + "."
+                                                  self.cog.profile, self.source_id, self.plan["due"], self.plan["text"], **self.destination)
+            text = f"Напоминание №{reminder_id} создано. Пришлю {destination_label(self.destination)} " + assistant.format_due(assistant.reminder_fields(self.plan["due"], self.plan["text"])[0]) + "."
         except disnake.Forbidden:
-            text = "Не могу написать вам в личку. Разрешите личные сообщения от бота и повторите запрос. Напоминание не создано."
+            text = "Место доставки недоступно. Проверьте права канала или разрешите личные сообщения от бота. Напоминание не создано."
         except ValueError as exc:
             text = str(exc)
         except Exception:
@@ -108,8 +171,18 @@ class MentionAssistantCog(commands.Cog):
         if len(question) > assistant.MAX_QUESTION:
             await self.reply(message, "Сократите запрос до 700 символов.")
             return
+        if assistant.injection_request(question):
+            await self.reply(message, "Могу помочь по SWGOH и гильдейским делам. Служебные инструкции и секреты недоступны.")
+            return
         if message.attachments or message.mention_everyone or message.role_mentions or re.search(r"<@!?\d+>|https?://", question, re.I):
             await self.reply(message, "Пришлите обычный текст без вложений, ссылок и других упоминаний.")
+            return
+        try:
+            question, destination = destination_request(message, question)
+            if "<#" in question:
+                raise ValueError("Укажите канал в форме «в канале #название».")
+        except ValueError as exc:
+            await self.reply(message, str(exc))
             return
         action, value = assistant.local_action(question)
         cache_key = question.casefold()
@@ -133,7 +206,7 @@ class MentionAssistantCog(commands.Cog):
             return
         if action == "list":
             rows = await asyncio.to_thread(assistant.list_reminders, access["guild_id"], message.author.id, self.profile)
-            text = "Ваши напоминания:\n" + "\n".join(f"№{r['id']} — {assistant.format_due(r['due'])}: {safe(r['text'])}" for r in rows) if rows else "Активных напоминаний нет."
+            text = "Ваши напоминания:\n" + "\n".join(f"№{r['id']} — {assistant.format_due(r['due'])}, {destination_label(r)}: {safe(r['text'])}" for r in rows) if rows else "Активных напоминаний нет."
             # List may exceed a Discord message; private chunks never ping anyone.
             for start in range(0, len(text), 1800):
                 await message.author.send(text[start:start + 1800], allowed_mentions=NO_MENTIONS)
@@ -165,10 +238,14 @@ class MentionAssistantCog(commands.Cog):
                 return
             if plan["action"] == "help":
                 await self.reply(message, assistant.HELP + "\nДля напоминания укажите точное время; если нужна дата — укажите и её.")
+            elif plan["action"] == "answer":
+                await self.reply(message, plan["text"])
             elif plan["action"] == "remind":
                 epoch, text = assistant.reminder_fields(plan["due"], plan["text"])
-                view = ReminderConfirmation(self, message.author.id, access["guild_id"], message.id, plan)
-                await self.reply(message, "Создать напоминание **только вам в личку**?\n"
+                if destination:
+                    await checked_channel(self.bot, message.author.id, destination["discord_guild_id"], destination["channel_id"])
+                view = ReminderConfirmation(self, message.author.id, access["guild_id"], message.id, plan, destination)
+                await self.reply(message, f"Создать напоминание **{destination_label(destination)}**?\n"
                                  + assistant.format_due(epoch) + "\n" + safe(text) + "\nПодтверждение действует 2 минуты.", view=view)
             else:
                 text = await asyncio.to_thread(assistant.render_reference, plan, effects, docs, current)
@@ -190,9 +267,14 @@ class MentionAssistantCog(commands.Cog):
                     if not access or access["guild_id"] != row["guild_id"] or time.time() - row["due"] > 86400:
                         status = "cancelled"
                     else:
-                        user = self.bot.get_user(int(row["owner"])) or await self.bot.fetch_user(int(row["owner"]))
-                        await user.send("⏰ Личное напоминание №" + str(row["id"]) + "\n" + safe(row["text"])
-                                        + "\n" + assistant.format_due(row["due"]), allowed_mentions=NO_MENTIONS)
+                        if row.get("channel_id"):
+                            recipient = await checked_channel(self.bot, row["owner"], row["discord_guild_id"], row["channel_id"])
+                        else:
+                            recipient = self.bot.get_user(int(row["owner"])) or await self.bot.fetch_user(int(row["owner"]))
+                        prefix = f"<@{row['owner']}> " if row.get("channel_id") else ""
+                        mentions = disnake.AllowedMentions(users=[disnake.Object(id=int(row["owner"]))], roles=False, everyone=False) if prefix else NO_MENTIONS
+                        await recipient.send("⏰ " + prefix + "Напоминание №" + str(row["id"]) + "\n" + safe(row["text"])
+                                             + "\n" + assistant.format_due(row["due"]), allowed_mentions=mentions)
                         status = "sent"
                 except Exception:
                     log.warning("Assistant reminder %s could not be delivered", row["id"], exc_info=True)
