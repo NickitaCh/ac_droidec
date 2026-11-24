@@ -42,29 +42,44 @@ def _fields(embed, fields):
 
 
 def _arena(embed, state):
-    embed.description = "Вы участвуете в событии." if state["joined"] else "Вы не записаны на событие."
-    _fields(embed, (("Рейтинг", state["rating"]), ("Лига", state["league"]), ("Дивизион", state["division"])))
     current = next((match for match in state["matches"] if match["current"]), None)
-    if current:
-        _fields(embed, (
-            ("Матч", current["number"]), ("Соперник", current["opponent"] or None),
-            ("Раунд", current["round"]), ("Конец раунда", current["round_end"]),
-        ))
-        if current["defense"] is not None:
-            placed, capacity = current["defense"]
-            _fields(embed, (("Выставлено в защиту", f"{placed} из {capacity}"),))
-        for side, heading in (("home", "Моя защита"), ("away", "Зоны атаки")):
-            zones = current[side]
-            if zones:
-                counts = []
-                for index, zone in enumerate(zones, 1):
-                    summary = game_personal_modes.arena_zone_summary(zone)
-                    remaining = summary["remaining"]
-                    amount = "—" if remaining is None else str(remaining)
-                    capacity = "—" if zone["capacity"] is None else str(zone["capacity"])
-                    counts.append(f"Зона {index} · осталось {amount} из {capacity}")
-                embed.add_field(name=heading, value="\n".join(counts), inline=True)
-    _fields(embed, (("Конец текущего матча", state["match_end"]),))
+    division = state.get("division")
+    division = (30 - division) // 5 if division in (5, 10, 15, 20, 25) else None
+    league = " ".join(str(value) for value in (state.get("league"), division) if value is not None)
+    info = [league] if league else []
+    if state.get("rating") is not None:
+        info.append(f"Рейтинг {state['rating']}")
+    embed.clear_fields()
+    if not current:
+        embed.description = " · ".join(info) + ("\nНет текущего матча." if state["joined"] else "\nВы не записаны на событие.")
+        return
+    embed.title = f"Великая арена · матч {current.get('number') or '—'}"
+    home = disnake.utils.escape_markdown(state.get("name") or "Вы")
+    away = disnake.utils.escape_markdown(current.get("opponent") or "Соперник")
+    phase = {0: "Подбор соперника", 1: "Расстановка", 2: "Атака"}.get(current.get("round"), "")
+    if phase:
+        info.append(phase)
+    end = current.get("round_end") or state.get("match_end")
+    if end:
+        info.append(f"До {end}")
+    embed.description = f"**{home}**  vs  **{away}**\n" + " · ".join(info)
+    score = current.get("score") or {}
+    maximum = current.get("maximum") or {}
+
+    def pair(left, right):
+        values = ["—" if value is None else str(value) for value in (left, right)]
+        width = max(map(len, values))
+        return f"```\n{values[0]:>{width}}  :  {values[1]:<{width}}\n```"
+
+    embed.add_field(name="Счёт", value=pair(score.get("home"), score.get("away")), inline=False)
+    for key, label in (("full", "Максимум полным составом"), ("undersized", "Максимум неполным составом")):
+        values = []
+        for side in ("home", "away"):
+            projection = maximum.get(side) or {}
+            value, bonus = projection.get(key), projection.get("first_attack_bonus")
+            values.append(f"{value} +{bonus}" if value is not None and bonus else value)
+        embed.add_field(name=label, value=pair(*values), inline=False)
+    embed.set_footer(text="Максимум — идеальные оставшиеся бои. +10 — ещё не полученный бонус первой атаки.")
 
 
 def _conquest(embed, state):
@@ -130,6 +145,8 @@ class PersonalGameModesCog(commands.Cog):
         embed = disnake.Embed(title=f"{_TITLES[mode]} · {code}")
         if mode == "arena":
             await asyncio.to_thread(game_personal_modes.name_arena_units, state)
+            registrations = await asyncio.to_thread(database.get_user_registrations, args[0], guild_id=args[1])
+            state["name"] = next((name for account, name, _ in registrations if str(account) == code and name), code)
             _arena(embed, state)
         else:
             await asyncio.to_thread(_conquest, embed, state)
@@ -169,8 +186,9 @@ class PersonalReportView(disnake.ui.View):
                         await inter.response.send_message("Игра пока не раскрыла эти зоны.", ephemeral=True)
                         return
                     await inter.response.defer(ephemeral=True)
-                    for index, zone in enumerate(zones, 1):
-                        lines = [f"**{label} · зона {index}**"]
+                    for _, index, zone in arena_map_image.positioned_zones(zones):
+                        title = arena_map_image.zone_label(zone, index, match.get("map", ""))
+                        lines = [f"**{label} · {title.lower()}**"]
                         summary = game_personal_modes.arena_zone_summary(zone)
                         if summary["remaining"] is not None:
                             lines.append(f"Осталось {summary['remaining']} отрядов")

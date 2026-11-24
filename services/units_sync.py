@@ -338,9 +338,11 @@ async def sync_units(comlink) -> int:
     except Exception as e:
         print(f"⚠️ [Справочник] Не удалось обновить фракции: {e}")
     try:
-        from services import tb_covert
-        tb_defs = (await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.GUILD_DATA_FLAG),
-                                           include_pve_units=False)).get("territoryBattleDefinition") or []
+        from services import arena_rules, tb_covert
+        guild_defs = await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.GUILD_DATA_FLAG),
+                                            include_pve_units=False)
+        arena_rules.update_catalog(guild_defs)
+        tb_defs = guild_defs.get("territoryBattleDefinition") or []
         campaigns = (await asyncio.to_thread(comlink.get_game_data, items=str(tb_covert.CAMPAIGN_FLAG),
                                              include_pve_units=False)).get("campaign") or []
         canonical = [u for u in _canonical_units(units_list) if u.get("baseId") in units_to_db]

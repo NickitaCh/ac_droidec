@@ -3,6 +3,28 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from cogs import personal_game_modes as cog
+import disnake
+
+
+class ArenaPresentationTests(unittest.TestCase):
+    def test_live_report_uses_compact_aligned_score_instead_of_inline_field_grid(self):
+        # The live comparison is match 3 in attack phase 2, not "round 2".
+        state = {"joined": True, "rating": 3067, "league": "Кайбер", "division": 10,
+                 "match_end": "25.11 01:00 МСК", "matches": [{
+                     "current": True, "number": 3, "round": 2, "round_end": "25.11 01:00 МСК",
+                     "opponent": "tsuner", "defense": (18, 18), "home": [], "away": [],
+                     "score": {"home": 0, "away": 0},
+                     "maximum": {"home": {"full": 2085, "undersized": 2133},
+                                 "away": {"full": 2085, "undersized": 2133}},
+                 }]}
+        embed = disnake.Embed(title="Великая арена · 881789523")
+        cog._arena(embed, state)
+        self.assertLessEqual(len(embed.fields), 3)
+        self.assertTrue(all(not field.inline for field in embed.fields))
+        text = str(embed.to_dict())
+        self.assertIn("2085", text)
+        self.assertIn("2133", text)
+        self.assertNotIn("Зона 1", text)
 
 
 class PersonalGameModeVisibilityTests(unittest.IsolatedAsyncioTestCase):

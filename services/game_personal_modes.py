@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import database
-from services import game_account, game_read_decode
+from services import arena_score, game_account, game_read_decode
 from services.game_event_live import epoch
 from services.tb_live import _messages, _number, _text, _values
 
@@ -36,14 +36,23 @@ def _arena_zones(participant, *, battle=False):
         for record in _messages(zone, 3):
             squad = _only(record, 4)
             units = []
+            health = []
             if squad is not None:
                 for cell in _messages(squad, 1):
                     base = _text(cell, 2).partition(":")[0]
                     if base:
                         units.append(base)
-            teams.append({"units": units, "defends": _number(record, 8), "state": _number(record, 6)})
+                        unit_state = _only(cell, 15)
+                        try:
+                            value = float(_text(unit_state, 5)) if unit_state is not None else None
+                        except ValueError:
+                            value = None
+                        health.append(value if value is not None and 0 <= value <= 100 else None)
+            teams.append({"units": units, "health": health, "defends": _number(record, 8), "state": _number(record, 6)})
         count = _number(zone, 4)
         row = {"id": _text(status, 1) if status else "", "status": _number(status, 2) if status else None,
+                      "points": _number(status, 3) if status else None,
+                      "attacked": _number(zone, 6),
                       "capacity": _number(zone, 2), "placed": max(count or 0, len(teams)),
                       "defeated": _number(zone, 5), "teams": teams}
         if battle:
@@ -93,6 +102,14 @@ def arena_zone_summary(zone):
     return {"remaining": remaining, "defeated": defeated, "capacity": zone.get("capacity")}
 
 
+def _arena_score(participant):
+    if participant is None:
+        return None
+    statuses = [next(_messages(zone, 1), []) for tag in (2, 3) for zone in _messages(participant, tag)]
+    points = [_number(status, 3) for status in statuses]
+    return sum(points) if points and None not in points else None
+
+
 def arena(payload):
     event = _only(game_account.fields(payload), 4)
     if event is None or not _text(event, 1):
@@ -103,9 +120,10 @@ def arena(payload):
         opponent = _only(match, 16)
         home = _only(match, 2)
         round_number = _number(match, 5)
-        battle = round_number is not None and round_number != 0
+        battle = round_number is not None and round_number >= 2
         home_zones = _arena_zones(home, battle=battle)
-        away_zones = _arena_zones(_only(match, 3), battle=battle)
+        away = _only(match, 3)
+        away_zones = _arena_zones(away, battle=battle)
         capacity = [zone["capacity"] for zone in home_zones]
         index = _number(match, 8)
         matches.append({
@@ -116,7 +134,10 @@ def arena(payload):
             "defense": (sum(zone["placed"] for zone in home_zones), sum(capacity))
             if home_zones and None not in capacity and all(z["placed"] is not None for z in home_zones) else None,
             "home": home_zones, "away": away_zones,
+            "score": {"home": _arena_score(home), "away": _arena_score(away)},
         })
+        if matches[-1]["current"]:
+            matches[-1]["maximum"] = arena_score.project(matches[-1])
     league = _text(event, 11)
     leagues = {"KYBER": "Кайбер", "AURODIUM": "Ауродий", "CHROMIUM": "Хром",
                "BRONZIUM": "Бронзий", "CARBONITE": "Карбонит"}

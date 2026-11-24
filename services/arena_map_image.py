@@ -1,4 +1,4 @@
-"""Private Grand Arena board; defeated defenders stay on the map."""
+"""Grand Arena board; defeated defenders stay on the map."""
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import math
@@ -11,7 +11,7 @@ from services.profile_image import _font, _portrait
 _ID = re.compile(r"[A-Z0-9_]{1,80}", re.ASCII)
 _ICON, _CARD = 64, 300
 _COLORS = {1: "#78d6c3", 2: "#ffc765", 3: "#fa7581"}
-_ZONE = re.compile(r"(?:4zone|tt4v4|2zone|tt2v2)_phase0([12])_conflict0([12])", re.ASCII)
+_ZONE = re.compile(r"(?:4zone|tt4v4|2zone|tt2v2)_phase0([12])_conflict0([12])(?:_duel\d+)?", re.ASCII)
 _POSITIONS = {(1, 1): 0, (2, 1): 1, (1, 2): 2, (2, 2): 3}
 
 
@@ -32,7 +32,7 @@ def zone_label(zone, fallback, map_id=""):
     if zone["id"].startswith(("2zone_", "tt2v2_")) and position == 2:
         return "ФЛОТ" if "1ship" in map_id else "НИЖНЯЯ ЗОНА"
     if position == 1:
-        return "ТЫЛ · ВЕРХ" if "3v3" in map_id or "0ship" in map_id else "ФЛОТ · ТЫЛ"
+        return "ТЫЛ · ВЕРХ" if "0ship" in map_id or "c4s0" in map_id else "ФЛОТ · ТЫЛ"
     return {0: "ПЕРЕДНЯЯ · ВЕРХ", 2: "ПЕРЕДНЯЯ · НИЗ", 3: "ЗАДНЯЯ · НИЗ"}[position]
 
 
@@ -176,7 +176,7 @@ def render(match):
     draw.ellipse((cx - 94, cy - 78, cx + 94, cy + 78), fill="#091321", outline="#6a7f99", width=3)
     draw.regular_polygon((cx, cy - 7, 49), 6, rotation=30, fill="#d8dda2")
     draw.regular_polygon((cx, cy - 7, 39), 3, rotation=0, fill="#15293b")
-    draw.text((cx, cy + 55), "РАУНД " + str(match.get("round") if match.get("round") is not None else "—"),
+    draw.text((cx, cy + 55), "МАТЧ " + str(match.get("number") or "—"),
               anchor="mm", fill="#bacbdf", font=tiny)
     bottom = height - footer + 24
     for x, color, text in ((32, _COLORS[1], "В защите"), (245, _COLORS[3], "Побеждён · ×"),

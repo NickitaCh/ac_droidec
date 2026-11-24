@@ -15,6 +15,15 @@ def num(tag, value):
 
 
 class ArenaMapTests(unittest.TestCase):
+    def test_duel_zone_ids_match_the_game_definitions_and_hotbot_geography(self):
+        # WarConflict reports duel zones; the map definitions also have parent
+        # conflict zones. Both IDs describe the same location on the board.
+        zones = [{'id': f'4zone_phase0{p}_conflict0{c}_duel01'}
+                 for p, c in ((1, 1), (1, 2), (2, 1), (2, 2))]
+        placed = image.positioned_zones(zones)
+        self.assertEqual([z['id'] for _, _, z in placed], [zones[i]['id'] for i in (0, 2, 1, 3)])
+        self.assertEqual(image.zone_label(zones[2], 2, '4zone_3v3_ga2_c3s1_85a'), 'ФЛОТ · ТЫЛ')
+
     def test_real_zone_ids_place_fleet_behind_upper_front_despite_response_order(self):
         zones = [{'id':f'tt4v4_phase0{p}_conflict0{c}'} for p,c in ((2,2),(1,2),(2,1),(1,1))]
         placed = image.positioned_zones(zones)
@@ -35,7 +44,7 @@ class ArenaMapTests(unittest.TestCase):
         def squad(state):
             return msg(3, num(6, state), num(8, 1), msg(4, msg(1, (2, 2, b'VADER:SEVEN_STAR'))))
         zone = msg(3, msg(1, (1, 2, b'zone')), num(2, 5), num(4, 2), squad(1), squad(2), squad(3))
-        match = msg(2, num(5, 1), num(8, 1), msg(2, zone), msg(3, zone))
+        match = msg(2, num(5, 2), num(8, 1), msg(2, zone), msg(3, zone))
         state = modes.arena(ga.pack([msg(4, (1, 2, b'arena'), num(3, 1), match)]))
         current = state['matches'][0]
         zone = current['away'][0]

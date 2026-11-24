@@ -1,0 +1,1193 @@
+{
+  "maps": {
+    "4zone_5v5_ga2_c3s1": "r0",
+    "4zone_3v3_ga2_c3s1": "r1",
+    "4zone_5v5_ga2_c3s1_24b": "r0",
+    "4zone_5v5_ga2_c3s1_25a": "r0",
+    "4zone_5v5_ga2_c3s1_26a": "r0",
+    "4zone_3v3_ga2_c3s1_27a": "r1",
+    "4zone_5v5_ga2_c3s1_28a": "r0",
+    "4zone_3v3_ga2_c3s1_29a": "r1",
+    "4zone_5v5_ga2_c3s1_30a": "r0",
+    "4zone_3v3_ga2_c3s1_31a": "r1",
+    "4zone_5v5_ga2_c3s1_32a": "r0",
+    "4zone_3v3_ga2_c3s1_33a": "r1",
+    "4zone_5v5_ga2_c3s1_34a": "r0",
+    "4zone_3v3_ga2_c3s1_35a": "r1",
+    "4zone_5v5_ga2_c3s1_36a": "r0",
+    "4zone_3v3_ga2_c3s1_37a": "r1",
+    "4zone_5v5_ga2_c3s1_38a": "r0",
+    "4zone_3v3_ga2_c3s1_39a": "r1",
+    "4zone_5v5_ga2_c3s1_40a": "r0",
+    "4zone_3v3_ga2_c3s1_41a": "r1",
+    "4zone_5v5_ga2_c3s1_42a": "r0",
+    "4zone_3v3_ga2_c3s1_43a": "r1",
+    "4zone_5v5_ga2_c3s1_44a": "r0",
+    "4zone_3v3_ga2_c3s1_45a": "r1",
+    "4zone_5v5_ga2_c3s1_46a": "r0",
+    "4zone_3v3_ga2_c3s1_47a": "r1",
+    "4zone_5v5_ga2_c3s1_48a": "r0",
+    "4zone_3v3_ga2_c3s1_49a": "r1",
+    "4zone_5v5_ga2_c3s1_50a": "r0",
+    "4zone_3v3_ga2_c3s1_51a": "r1",
+    "4zone_5v5_ga2_c3s1_52a": "r0",
+    "4zone_3v3_ga2_c3s1_53a": "r1",
+    "4zone_5v5_ga2_c3s1_54a": "r0",
+    "4zone_3v3_ga2_c3s1_55a": "r1",
+    "4zone_5v5_ga2_c3s1_56a": "r0",
+    "4zone_3v3_ga2_c3s1_57a": "r1",
+    "4zone_5v5_ga2_c3s1_58a": "r0",
+    "4zone_3v3_ga2_c3s1_59a": "r1",
+    "4zone_5v5_ga2_c3s1_60a": "r0",
+    "4zone_3v3_ga2_c3s1_61a": "r1",
+    "4zone_5v5_ga2_c3s1_62a": "r0",
+    "4zone_3v3_ga2_c3s1_63a": "r1",
+    "4zone_5v5_ga2_c3s1_64a": "r0",
+    "4zone_3v3_ga2_c3s1_65a": "r1",
+    "4zone_5v5_ga2_c3s1_66a": "r0",
+    "4zone_3v3_ga2_c3s1_67a": "r1",
+    "4zone_5v5_ga2_c3s1_68a": "r0",
+    "4zone_3v3_ga2_c3s1_69a": "r1",
+    "4zone_5v5_ga2_c3s1_70a": "r0",
+    "4zone_3v3_ga2_c3s1_71a": "r1",
+    "4zone_5v5_ga2_c3s1_72a": "r0",
+    "4zone_3v3_ga2_c3s1_73a": "r1",
+    "4zone_5v5_ga2_c3s1_74a": "r0",
+    "4zone_3v3_ga2_c3s1_75a": "r1",
+    "4zone_5v5_ga2_c3s1_76a": "r0",
+    "4zone_3v3_ga2_c3s1_77a": "r1",
+    "4zone_5v5_ga2_c3s1_78a": "r0",
+    "4zone_3v3_ga2_c3s1_79a": "r1",
+    "4zone_5v5_ga2_c3s1_80a": "r0",
+    "4zone_3v3_ga2_c3s1_81a": "r1",
+    "4zone_5v5_ga2_c3s1_82a": "r0",
+    "4zone_3v3_ga2_c3s1_83a": "r1",
+    "4zone_5v5_ga2_c3s1_84a": "r0",
+    "4zone_3v3_ga2_c3s1_85a": "r1",
+    "2zone_5v5_ga_c2s0_1round": "r2",
+    "2zone_5v5_ga_c1s1": "r3",
+    "4zone_3v3_ga_c4s0": "r4",
+    "4zone_3v3_ga_c4s0_1round": "r4",
+    "4zone_3v3_ga_c3s1": "r1",
+    "4zone_5v5_ga_c4s0": "r5",
+    "4zone_5v5_ga_c4s0_redo": "r5",
+    "4zone_5v5_ga_c4s0_1round": "r5",
+    "4zone_5v5_ga_c3s1": "r6",
+    "4zone_5v5_ga_c3s1_1round": "r0",
+    "tt4v4_5v5char_1ship": "r7",
+    "tt2v2_5v5char_1ship": "r8",
+    "tt4v4_3v3char_0ship": "r9",
+    "tt2v2_5v5char_0ship_1round": "r10",
+    "tt4v4_5v5char_1ship_1round": "r7",
+    "tt4v4_5v5char_0ship_1round": "r11",
+    "tt4v4_3v3char_0ship_1round": "r9",
+    "grand_arena_map_event_01": "r10",
+    "grand_arena_map_event_01_redo": "r10",
+    "grand_arena_map_event_02": "r7",
+    "grand_arena_map_event_03": "r9",
+    "grand_arena_map_event_04": "r8",
+    "grand_arena_map_event_05": "r9",
+    "grand_arena_map_event_06": "r7",
+    "grand_arena_map_event_07": "r9",
+    "grand_arena_map_event_5v5": "r11",
+    "grand_arena_map_event_5v5_redo": "r11",
+    "grand_arena_map_event_3v3_1ship": "r12",
+    "grand_arena_map_event_02B": "r11",
+    "grand_arena_map_event_03B": "r9",
+    "grand_arena_map_event_04B": "r11",
+    "grand_arena_map_event_05B": "r9",
+    "grand_arena_map_event_06B": "r11",
+    "grand_arena_map_event_07B": "r9"
+  },
+  "rules": {
+    "r0": [
+      {
+        "id": "4zone_phase01_conflict01_duel01",
+        "parent": "4zone_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase01_conflict02_duel01",
+        "parent": "4zone_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict01_duel01",
+        "parent": "4zone_phase02_conflict01",
+        "kind": 2,
+        "size": 4,
+        "minimum": 2,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 33,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict02_duel01",
+        "parent": "4zone_phase02_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r1": [
+      {
+        "id": "4zone_phase01_conflict01_duel01",
+        "parent": "4zone_phase01_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase01_conflict02_duel01",
+        "parent": "4zone_phase01_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict01_duel01",
+        "parent": "4zone_phase02_conflict01",
+        "kind": 2,
+        "size": 4,
+        "minimum": 2,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 33,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict02_duel01",
+        "parent": "4zone_phase02_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r2": [
+      {
+        "id": "2zone_phase01_conflict01_duel01",
+        "parent": "2zone_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "2zone_phase01_conflict02_duel01",
+        "parent": "2zone_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r3": [
+      {
+        "id": "2zone_phase01_conflict01_duel01",
+        "parent": "2zone_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "2zone_phase01_conflict02_duel01",
+        "parent": "2zone_phase01_conflict02",
+        "kind": 2,
+        "size": 4,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 35,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r4": [
+      {
+        "id": "4zone_phase01_conflict01_duel01",
+        "parent": "4zone_phase01_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase01_conflict02_duel01",
+        "parent": "4zone_phase01_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict01_duel01",
+        "parent": "4zone_phase02_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict02_duel01",
+        "parent": "4zone_phase02_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r5": [
+      {
+        "id": "4zone_phase01_conflict01_duel01",
+        "parent": "4zone_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase01_conflict02_duel01",
+        "parent": "4zone_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict01_duel01",
+        "parent": "4zone_phase02_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict02_duel01",
+        "parent": "4zone_phase02_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r6": [
+      {
+        "id": "4zone_phase01_conflict01_duel01",
+        "parent": "4zone_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 5,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase01_conflict02_duel01",
+        "parent": "4zone_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 1,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict01_duel01",
+        "parent": "4zone_phase02_conflict01",
+        "kind": 2,
+        "size": 4,
+        "minimum": 2,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 33,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 5,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "4zone_phase02_conflict02_duel01",
+        "parent": "4zone_phase02_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 0,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 10,
+          "enemyDefeatedBonus": 5,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r7": [
+      {
+        "id": "tt4v4_phase01_conflict01_duel01",
+        "parent": "tt4v4_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase01_conflict02_duel01",
+        "parent": "tt4v4_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict01_duel01",
+        "parent": "tt4v4_phase02_conflict01",
+        "kind": 2,
+        "size": 4,
+        "minimum": 2,
+        "points": {
+          "deployDefensiveSquadReward": 100,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 33,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict02_duel01",
+        "parent": "tt4v4_phase02_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r8": [
+      {
+        "id": "tt2v2_phase01_conflict01_duel01",
+        "parent": "tt2v2_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt2v2_phase01_conflict02_duel01",
+        "parent": "tt2v2_phase01_conflict02",
+        "kind": 2,
+        "size": 4,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 100,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 35,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r9": [
+      {
+        "id": "tt4v4_phase01_conflict01_duel01",
+        "parent": "tt4v4_phase01_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase01_conflict02_duel01",
+        "parent": "tt4v4_phase01_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict01_duel01",
+        "parent": "tt4v4_phase02_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict02_duel01",
+        "parent": "tt4v4_phase02_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r10": [
+      {
+        "id": "tt2v2_phase01_conflict01_duel01",
+        "parent": "tt2v2_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt2v2_phase01_conflict02_duel01",
+        "parent": "tt2v2_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r11": [
+      {
+        "id": "tt4v4_phase01_conflict01_duel01",
+        "parent": "tt4v4_phase01_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase01_conflict02_duel01",
+        "parent": "tt4v4_phase01_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict01_duel01",
+        "parent": "tt4v4_phase02_conflict01",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict02_duel01",
+        "parent": "tt4v4_phase02_conflict02",
+        "kind": 1,
+        "size": 5,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 90,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 30,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ],
+    "r12": [
+      {
+        "id": "tt4v4_phase01_conflict01_duel01",
+        "parent": "tt4v4_phase01_conflict01",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase01_conflict02_duel01",
+        "parent": "tt4v4_phase01_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict01_duel01",
+        "parent": "tt4v4_phase02_conflict01",
+        "kind": 2,
+        "size": 4,
+        "minimum": 2,
+        "points": {
+          "deployDefensiveSquadReward": 100,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 33,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      },
+      {
+        "id": "tt4v4_phase02_conflict02_duel01",
+        "parent": "tt4v4_phase02_conflict02",
+        "kind": 1,
+        "size": 3,
+        "minimum": 1,
+        "points": {
+          "deployDefensiveSquadReward": 82,
+          "offensiveWinReward": 15,
+          "completeZoneReward": 120,
+          "completeZoneRewardPerDefensiveSquad": 28,
+          "emptySquadSlotBonus": 4,
+          "survivingSquadUnitBonus": 1,
+          "fullHealthUnitBonus": 1,
+          "fullProtectionUnitBonus": 1,
+          "firstAttackBonus": 0,
+          "enemyDefeatedBonus": 0,
+          "attempts": {
+            "0": 30,
+            "1": 10,
+            "2": 0
+          }
+        }
+      }
+    ]
+  },
+  "divisions": {
+    "5": 5,
+    "10": 4,
+    "15": 3,
+    "20": 2,
+    "25": 1
+  }
+}
