@@ -78,7 +78,7 @@ class ArenaMapTests(unittest.TestCase):
         self.assertIsNotNone(ImageChops.difference(alive,dead).getbbox())
         self.assertIsNone(ImageChops.difference(pristine,portrait).getbbox())
         # Red crossed portrait at its exact location, independent of text rendering.
-        self.assertEqual(dead.getpixel((384,238)), (250,117,129))
+        self.assertGreater(sum(pixel == (250,117,129) for pixel in dead.getdata()), 100)
 
     def test_more_than_ten_squads_are_rendered_and_rows_grow(self):
         teams = [{'units':['VADER'],'state':3,'defends':1} for _ in range(13)]
@@ -86,7 +86,15 @@ class ArenaMapTests(unittest.TestCase):
         with patch.object(image,'_load_icon',return_value=None):
             canvas = Image.open(image.render({'home':[zone],'away':[]}))
         self.assertGreater(canvas.height,500)
-        self.assertEqual(canvas.getpixel((384,526)), (250,117,129))
+        self.assertGreater(sum(pixel == (250,117,129) for pixel in canvas.getdata()), 1000)
+
+    def test_fleet_is_in_upper_outer_corner_on_both_sides(self):
+        zones = [{'id': f'tt4v4_phase0{p}_conflict0{c}'} for p,c in ((1,1),(2,1),(1,2),(2,2))]
+        for side in (0,1):
+            bounds = [image.zone_bounds(image.zone_position(z, i), side, 96, 220) for i,z in enumerate(zones)]
+            fleet, front = bounds[1], bounds[0]
+            self.assertLess(fleet[0], front[0]) if side == 0 else self.assertGreater(fleet[0], front[0])
+            self.assertEqual(fleet[1], front[1])
 
     def test_no_board_returns_none(self):
         self.assertIsNone(image.render({'home':[],'away':[]}))

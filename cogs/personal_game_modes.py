@@ -98,7 +98,7 @@ class PersonalGameModesCog(commands.Cog):
 
     async def _report(self, inter, mode, account, *, reconnect=False):
         if not inter.response.is_done():
-            await inter.response.defer(ephemeral=True)
+            await inter.response.defer(ephemeral=mode != "arena")
         try:
             args = await asyncio.to_thread(_scope, inter.author)
             code = await asyncio.to_thread(game_account.select_account, args[0], args[1], ally_code=account)
