@@ -28,6 +28,7 @@ import time
 import requests
 
 import database
+from services import ai_usage
 
 KIND_VISION = "vision"
 KIND_TEXT = "text"
@@ -190,7 +191,7 @@ def _bad_output_cooldown(consecutive_fails: int) -> float:
 
 def call_json(kind: str, messages: list, api_key: str, *, validate=None, temperature: float = 0,
               timeout: int = 90, max_models: int = 4, max_bad_outputs: int = 2,
-              deadline_seconds: float = 300) -> dict:
+              deadline_seconds: float = 300, source: str | None = None) -> dict:
     """Синхронный вызов (из async-кода — через asyncio.to_thread). Возвращает JSON-объект
     ответа. validate(data) -> bool | str: False или строка-причина = ответ отбракован,
     пробуем следующую модель. max_bad_outputs ограничивает попытки на отбракованных
@@ -199,6 +200,12 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
     attempts = []
     bad_outputs = 0
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    def track(model, status, outcome, t0, usage=None):
+        try:
+            ai_usage.record(source or kind, kind, model, status, outcome, time.time() - t0, usage)
+        except Exception as exc:
+            print(f"⚠️ [ИИ] Не удалось записать расход: {type(exc).__name__}")
 
     for model, health in ranked_candidates(kind)[:max_models]:
         if time.time() - started > deadline_seconds:
@@ -212,6 +219,7 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
         try:
             response = requests.post(CHAT_URL, headers=headers, json=request_json, timeout=timeout)
         except requests.RequestException as e:
+            track(model["id"], 0, "network_error", t0)
             reason = f"сеть/таймаут: {type(e).__name__}"
             database.record_openrouter_model_result(model["id"], kind, False, error=reason, cooldown_seconds=_COOLDOWN_SERVER)
             attempts.append((model["id"], reason))
@@ -219,6 +227,7 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
 
         status = response.status_code
         if status != 200:
+            track(model["id"], status, "http_error", t0)
             try:
                 body = str(response.json()["error"]["message"])[:200]
             except Exception:
@@ -243,8 +252,12 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
             continue
 
         database.record_openrouter_request()
+        payload = {}
         try:
-            payload = response.json()
+            response_data = response.json()
+            if not isinstance(response_data, dict):
+                raise _BadOutput('ответ провайдера не объект')
+            payload = response_data
             if payload.get("error"):
                 raise _BadOutput(f"ошибка провайдера: {str(payload['error'])[:150]}")
             content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
@@ -253,6 +266,7 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
             if verdict is not True and verdict is not None:
                 raise _BadOutput(verdict if isinstance(verdict, str) else "ответ не прошёл проверку")
         except (_BadOutput, ValueError) as e:
+            track(model["id"], 200, "rejected", t0, payload.get("usage"))
             bad_outputs += 1
             reason = str(e)
             database.record_openrouter_model_result(
@@ -264,6 +278,7 @@ def call_json(kind: str, messages: list, api_key: str, *, validate=None, tempera
                 break
             continue
 
+        track(model["id"], 200, "ok", t0, payload.get("usage"))
         database.record_openrouter_model_result(model["id"], kind, True, latency=round(time.time() - t0, 1))
         if attempts:
             print(f"🔀 [OpenRouter] {kind}: ответила {model['id']} после {len(attempts)} неудач: {attempts}")

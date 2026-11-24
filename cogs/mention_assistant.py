@@ -8,7 +8,7 @@ import time
 import disnake
 from disnake.ext import commands, tasks
 
-from services import bot_profiles, mention_assistant as assistant
+from services import bot_profiles, mention_assistant as assistant, unit_abilities
 
 log = logging.getLogger(__name__)
 NO_MENTIONS = disnake.AllowedMentions.none()
@@ -78,6 +78,43 @@ def destination_label(destination):
     return f"в канал <#{destination['channel_id']}>" if destination.get("channel_id") else "вам в личку"
 
 
+def answer_embed(pages, index, footer):
+    embed = disnake.Embed(description=pages[index], color=0x5865F2)
+    embed.set_footer(text=(f'Страница {index+1}/{len(pages)} · ' if len(pages)>1 else '') + footer)
+    return embed
+
+
+class AnswerPages(disnake.ui.View):
+    def __init__(self, owner, gid, pages, footer):
+        super().__init__(timeout=600)
+        self.owner, self.gid, self.pages, self.footer = str(owner), gid, pages, footer
+        self.index = 0
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.previous.disabled = self.index == 0
+        self.next.disabled = self.index >= len(self.pages)-1
+
+    async def interaction_check(self, inter):
+        access = await asyncio.to_thread(assistant.access_for, inter.author.id)
+        if str(inter.author.id) == self.owner and access and access['guild_id'] == self.gid:
+            return True
+        await inter.response.send_message('Эти страницы доступны автору с доступом офицера АС.', ephemeral=True)
+        return False
+
+    @disnake.ui.button(label='Назад', style=disnake.ButtonStyle.secondary)
+    async def previous(self, button, inter):
+        self.index = max(0, self.index-1)
+        self.update_buttons()
+        await inter.response.edit_message(embed=answer_embed(self.pages, self.index, self.footer), view=self)
+
+    @disnake.ui.button(label='Дальше', style=disnake.ButtonStyle.secondary)
+    async def next(self, button, inter):
+        self.index = min(len(self.pages)-1, self.index+1)
+        self.update_buttons()
+        await inter.response.edit_message(embed=answer_embed(self.pages, self.index, self.footer), view=self)
+
+
 class ReminderConfirmation(disnake.ui.View):
     def __init__(self, cog, owner, gid, source_id, plan, destination=None):
         super().__init__(timeout=120)
@@ -136,13 +173,24 @@ class MentionAssistantCog(commands.Cog):
         self.profile = bot_profiles.worker_profile() or bot_profiles.runtime_profile()
         self.ai_lock = asyncio.Lock()
         self.reference_cache = {}
+        self.usage_checks = {}
         self.reminders.start()
+        if self.profile == 'test':
+            self.ability_catalog.start()
 
     def cog_unload(self):
         self.reminders.cancel()
+        self.ability_catalog.cancel()
 
     async def reply(self, message, text, **kwargs):
         return await message.reply(text, mention_author=False, allowed_mentions=NO_MENTIONS, **kwargs)
+
+    async def send_pages(self, message, pages, access, *, fresh_quota=False):
+        snapshot = await asyncio.to_thread(assistant.usage_snapshot, message.author.id, access['guild_id'],
+                                           self.bot.AI_ASSISTANT_LIMITS, self.bot.openrouter_api_key, refresh=fresh_quota)
+        footer = assistant.usage_footer(snapshot)
+        view = AnswerPages(message.author.id, access['guild_id'], pages, footer) if len(pages) > 1 else None
+        await self.reply(message, None, embed=answer_embed(pages, 0, footer), view=view)
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -185,11 +233,21 @@ class MentionAssistantCog(commands.Cog):
             await self.reply(message, str(exc))
             return
         action, value = assistant.local_action(question)
+        if action == 'usage':
+            now = time.monotonic()
+            if now - self.usage_checks.get(message.author.id, -10) < 5:
+                return
+            self.usage_checks[message.author.id] = now
+            snapshot = await asyncio.to_thread(assistant.usage_snapshot, message.author.id, access['guild_id'],
+                                               self.bot.AI_ASSISTANT_LIMITS, self.bot.openrouter_api_key)
+            await self.reply(message, None, embed=disnake.Embed(description=assistant.render_usage(snapshot, self.bot.AI_ASSISTANT_LIMITS), color=0x5865F2))
+            return
         cache_key = question.casefold()
         cached = self.reference_cache.get(cache_key)
         if cached and time.monotonic() - cached[0] > 300:
             cached = None
-        needs_ai = bool(question) and action is None and cached is None
+        local = await asyncio.to_thread(assistant.local_plan, question) if question and action is None and not cached else None
+        needs_ai = bool(question) and action is None and cached is None and local is None
         if needs_ai and not self.bot.openrouter_api_key:
             await self.reply(message, "ИИ сейчас не настроен. " + assistant.HELP)
             return
@@ -203,6 +261,14 @@ class MentionAssistantCog(commands.Cog):
             return
         if not question or action == "help":
             await self.reply(message, assistant.HELP)
+            return
+        if action == 'ability_info':
+            data = await asyncio.to_thread(unit_abilities.load)
+            text = ('Да. У меня есть **описания способностей из Comlink**, включая максимальные уровни и ульты. '
+                    'Использую игровой текст, а не догадки модели.\n\n'
+                    'Например: «какими скилами СЛКР не промахивается?» или «способности Доктора Афры».') if data['units'] else (
+                    'Справочник описаний способностей из Comlink сейчас готовится. Повторите вопрос после его обновления.')
+            await self.send_pages(message, [text], access)
             return
         if action == "list":
             rows = await asyncio.to_thread(assistant.list_reminders, access["guild_id"], message.author.id, self.profile)
@@ -223,12 +289,14 @@ class MentionAssistantCog(commands.Cog):
                 return
             if cached:
                 plan, effects, docs = cached[1:]
+            elif local:
+                plan, effects, docs = local, {}, []
             else:
                 async with self.ai_lock:
                     async with message.channel.typing():
                         plan, effects, docs = await asyncio.to_thread(assistant.parse_plan, question, self.profile,
                                                                      self.bot.openrouter_api_key, self.bot.AI_ASSISTANT_LIMITS)
-                if plan["action"] in {"effect", "docs"}:
+                if plan["action"] in {"effect", "docs", "abilities"}:
                     if len(self.reference_cache) >= 128:
                         self.reference_cache.pop(next(iter(self.reference_cache)))
                     self.reference_cache[cache_key] = (time.monotonic(), plan, effects, docs)
@@ -237,9 +305,14 @@ class MentionAssistantCog(commands.Cog):
             if not current or current["guild_id"] != access["guild_id"]:
                 return
             if plan["action"] == "help":
-                await self.reply(message, assistant.HELP + "\nДля напоминания укажите точное время; если нужна дата — укажите и её.")
+                await self.send_pages(message, ['Могу помочь с вопросами по SWGOH, делами гильдии, игровыми шутками и напоминаниями. '
+                                               'Уточните персонажа или задачу. Для напоминания нужны дата и время.'], current, fresh_quota=needs_ai)
             elif plan["action"] == "answer":
-                await self.reply(message, plan["text"])
+                await self.send_pages(message, [assistant.format_answer(plan["text"])], current, fresh_quota=needs_ai)
+            elif plan['action'] == 'abilities':
+                data = await asyncio.to_thread(unit_abilities.load)
+                pages = await asyncio.to_thread(unit_abilities.evidence_pages, plan, data, question)
+                await self.send_pages(message, pages, current, fresh_quota=needs_ai)
             elif plan["action"] == "remind":
                 epoch, text = assistant.reminder_fields(plan["due"], plan["text"])
                 if destination:
@@ -248,8 +321,8 @@ class MentionAssistantCog(commands.Cog):
                 await self.reply(message, f"Создать напоминание **{destination_label(destination)}**?\n"
                                  + assistant.format_due(epoch) + "\n" + safe(text) + "\nПодтверждение действует 2 минуты.", view=view)
             else:
-                text = await asyncio.to_thread(assistant.render_reference, plan, effects, docs, current)
-                await self.reply(message, text)
+                pages = await asyncio.to_thread(assistant.reference_pages, plan, effects, docs, current)
+                await self.send_pages(message, pages, current, fresh_quota=needs_ai)
         except ValueError as exc:
             await self.reply(message, str(exc))
         except Exception:
@@ -285,6 +358,17 @@ class MentionAssistantCog(commands.Cog):
 
     @reminders.before_loop
     async def before_reminders(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=1)
+    async def ability_catalog(self):
+        try:
+            await unit_abilities.refresh(self.bot.comlink)
+        except Exception:
+            log.exception('Ability catalog refresh failed')
+
+    @ability_catalog.before_loop
+    async def before_ability_catalog(self):
         await self.bot.wait_until_ready()
 
 

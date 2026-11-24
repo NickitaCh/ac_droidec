@@ -7,12 +7,33 @@
             <div>
                 <p class="page-hero-eyebrow">Администрирование</p>
                 <h1>Модели ИИ</h1>
-                <p class="page-hero-lead">Бесплатные модели OpenRouter в порядке, в котором их пробует бот. Модель со сбоем временно уходит в конец списка, после 404 — на сутки. Запросов сегодня: {{ used_today }} из {{ daily_limit }}.</p>
+                <p class="page-hero-lead">Расход запросов и доступность бесплатных моделей OpenRouter.</p>
             </div>
         </div>
     </section>
 
-    <p><a href="/admin/ai-models?refresh=1">Обновить список моделей с OpenRouter</a></p>
+    <div class="panel">
+        <h2>Расход за сутки OpenRouter</h2>
+        {% if quota %}
+            <p>Осталось <strong>{{ quota.remaining }} из {{ quota.limit }}</strong> запросов. Использовано {{ quota.used }}. Обновление суточной квоты — в 03:00 МСК.</p>
+            <p class="muted">{{ 'Последние сохранённые данные' if quota.stale else 'Данные провайдера' }} на {{ quota_checked }} МСК. Квота общая для всех функций и экземпляров бота.</p>
+        {% else %}
+            <p>Остаток провайдера сейчас недоступен. Локально учтено {{ used_today }} ответов за сутки UTC; это не подтверждённый остаток.</p>
+        {% endif %}
+        {% if usage %}
+        <div class="table-scroll"><table class="data">
+            <thead><tr><th>Функция</th><th>Попытки</th><th>Результат</th><th>Токены</th></tr></thead>
+            <tbody>{% for row in usage %}<tr>
+                <td>{{ {'mention_assistant':'Помощник в Discord','vision':'Картинки','text':'Другие текстовые задачи'}.get(row.source, row.source) }}</td>
+                <td>{{ row.attempts }}</td>
+                <td>{{ row.ok }} ответов · {{ row.rejected }} отклонено · {{ row.attempts - row.ok - row.rejected }} сбоев{% if row.rate_limited %} (429: {{ row.rate_limited }}){% endif %}</td>
+                <td>{{ row.input_tokens }} вход · {{ row.output_tokens }} выход</td>
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% endif %}
+        <p class="muted">Подробный учёт ведётся с момента включения. В нём сохраняются модель, результат, время ответа и токены; тексты вопросов и ответов не записываются. Отклонённый ответ модели тоже может расходовать квоту.</p>
+    </div>
+    <p><a href="/admin/ai-models?refresh=1">Обновить расход и список моделей</a></p>
 
     {% for k in kinds %}
         <div class="panel">

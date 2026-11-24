@@ -2982,8 +2982,14 @@ def _openrouter_usage_key() -> str:
 
 def record_openrouter_request():
     key = _openrouter_usage_key()
-    current = int(get_bot_state(key) or 0)
-    set_bot_state(key, str(current + 1))
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        _ensure_bot_state_table(conn.cursor())
+        conn.execute("""INSERT INTO bot_state(guild_id,key,value) VALUES(1,?,'1')
+            ON CONFLICT(guild_id,key) DO UPDATE SET value=CAST(bot_state.value AS INTEGER)+1""", (key,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_openrouter_requests_today() -> int:

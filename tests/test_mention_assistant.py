@@ -20,9 +20,12 @@ class AssistantTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = patch.object(database, "DB_NAME", str(Path(self.tmp.name) / "assistant.db"))
         self.db.start()
+        self.quota_patch = patch.object(a.ai_usage, 'provider_quota', return_value=None)
+        self.quota_patch.start()
         self.due = datetime.fromtimestamp(time.time() + 3600, a.MSK).isoformat()
 
     def tearDown(self):
+        self.quota_patch.stop()
         self.db.stop()
         self.tmp.cleanup()
 
@@ -125,6 +128,32 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(a.local_action("Мои напоминания!"), ("list", None))
         self.assertEqual(a.local_action("Отмени напоминание #12"), ("cancel", 12))
         self.assertEqual(a.local_action("отмени все чужие напоминания"), (None, None))
+        self.assertEqual(a.local_action('сколько осталось запросов?'), ('usage', None))
+        self.assertEqual(a.local_action('у тебя нет в бд или через комлинк списка способностей?'), ('ability_info', None))
+
+    def test_long_effect_list_is_complete_and_paged_without_wall_of_text(self):
+        effects = {'effect': {'name': 'Снижение стойкости', 'units': [str(n) for n in range(50)]}}
+        names = {str(n): f'Персонаж {n:02d}' for n in range(50)}
+        with patch.object(database, 'get_game_unit_names', return_value=names):
+            pages = a.reference_pages({'action':'effect','effect':'effect','own':False}, effects, [], {})
+        self.assertEqual(len(pages), 4)
+        joined = '\n'.join(pages)
+        for name in names.values():
+            self.assertIn('• '+name, joined)
+        self.assertTrue(all(len(page) < 2000 for page in pages))
+
+    def test_usage_lookup_is_free_and_does_not_increment_any_limits(self):
+        a.reserve_request('1', 1, LIMITS, ai=True)
+        before = a.usage_snapshot('1', 1, LIMITS, 'key')
+        after = a.usage_snapshot('1', 1, LIMITS, 'key')
+        self.assertEqual(before, after)
+        self.assertEqual(before['user_left'], 9)
+        self.assertEqual(before['ai_left'], 19)
+        self.assertIn('Остаток', a.render_usage(before, LIMITS).replace('остаток', 'Остаток'))
+
+    def test_formatting_breaks_long_prose_into_paragraphs(self):
+        text = 'Длинное предложение про гильдию и подготовку к событиям. ' * 12
+        self.assertIn('\n\n', a.format_answer(text))
 
     def test_no_question_or_private_data_is_added_to_system_prompt(self):
         effects, docs = {"stun": {"name": "Оглушение"}}, [{"id": "1", "name": "test", "desc": "test"}]
@@ -183,6 +212,7 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
         self.cog.profile = "test"
         self.cog.ai_lock = asyncio.Lock()
         self.cog.reference_cache = {}
+        self.cog.usage_checks = {}
         self.message = SimpleNamespace(author=SimpleNamespace(id=456, bot=False), webhook_id=None,
                                        content="<@123> кто оглушает?", id=42, reply=AsyncMock())
         import disnake
@@ -203,6 +233,33 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
             self.message.webhook_id = 7
             await self.cog.on_message(self.message)
         access.assert_not_called()
+
+    async def test_usage_command_is_available_without_spending_request_quota(self):
+        self.message.content = '<@123> лимиты'
+        self.message.channel = SimpleNamespace(id=40)
+        self.message.guild = SimpleNamespace(id=60)
+        self.message.attachments = []
+        self.message.mention_everyone = False
+        self.message.role_mentions = []
+        snapshot = {'user_left':10,'user_used':0,'guild_left':25,'guild_used':0,'ai_left':20,'ai_used':0,'provider':None,'local_used':14}
+        with patch.object(a, 'access_for', return_value={'guild_id':1}), patch.object(a, 'usage_snapshot', return_value=snapshot), patch.object(a, 'reserve_request') as reserve, patch.object(a, 'parse_plan') as model:
+            await self.cog.on_message(self.message)
+        reserve.assert_not_called()
+        model.assert_not_called()
+        self.message.reply.assert_awaited_once()
+        self.assertIn('Ваши обращения', self.message.reply.call_args.kwargs['embed'].description)
+
+    async def test_pages_can_be_navigated_without_another_model_call(self):
+        from cogs.mention_assistant import AnswerPages
+        view = AnswerPages(456,1,['first','second'],'quota')
+        inter = SimpleNamespace(author=SimpleNamespace(id=456),response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock()))
+        with patch.object(a, 'access_for', return_value={'guild_id':1}):
+            self.assertTrue(await view.interaction_check(inter))
+        await view.next.callback(inter)
+        self.assertEqual(view.index, 1)
+        self.assertTrue(view.next.disabled)
+        self.assertEqual(inter.response.edit_message.call_args.kwargs['embed'].description, 'second')
+        view.stop()
 
     async def test_confirmation_is_bound_to_author_and_rechecks_access(self):
         from cogs.mention_assistant import ReminderConfirmation

@@ -607,7 +607,9 @@ async def datacron_shorts_generate(request: Request, user: dict = Depends(requir
 # =====================================================================
 @router.get("/ai-models", response_class=HTMLResponse)
 async def ai_models_page(request: Request, user: dict = Depends(require_super_admin)):
+    import os
     import time as _time
+    from services import ai_usage
     from datetime import datetime, timedelta, timezone
     msk = timezone(timedelta(hours=3))
 
@@ -634,11 +636,18 @@ async def ai_models_page(request: Request, user: dict = Depends(require_super_ad
                 "last_error": h.get("last_error") or "",
             })
         kinds.append({"label": label, "rows": rows})
+    quota, usage = await asyncio.gather(
+        asyncio.to_thread(ai_usage.provider_quota, os.getenv('OPENROUTER_API_KEY'), refresh=bool(request.query_params.get('refresh'))),
+        asyncio.to_thread(ai_usage.summary),
+    )
     return templates.TemplateResponse(request, "admin_ai_models.html", {
         "user": user,
         "kinds": kinds,
         "used_today": database.get_openrouter_requests_today(),
         "daily_limit": openrouter_vision.OPENROUTER_DAILY_REQUEST_LIMIT,
+        "quota": quota,
+        "quota_checked": fmt(quota['checked_at']) if quota else None,
+        "usage": usage,
     })
 
 
