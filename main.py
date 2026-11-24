@@ -55,6 +55,10 @@ MISTRAL_BUDGET_WARNING_RATIO = 0.9
 # database.record_openrouter_request/get_openrouter_requests_today.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_DAILY_BUDGET_WARNING_RATIO = 0.9
+AI_ASSISTANT_LIMITS = {
+    "cooldown_seconds": 30, "user_daily": 10, "guild_daily": 25,
+    "ai_daily": 20, "shared_daily_cap": 40,
+}
 
 # Ключ для Groq API — не используется: их API целиком (не только vision) блокирует
 # запросы с датацентр-IP этого VPS (проверено 2026-08-24 изнутри контейнера,
@@ -292,6 +296,7 @@ class GuildManagerBot(commands.Bot):
         self.mistral_monthly_budget_usd = MISTRAL_MONTHLY_BUDGET_USD
         self.mistral_budget_warning_ratio = MISTRAL_BUDGET_WARNING_RATIO
         self.openrouter_api_key = OPENROUTER_API_KEY
+        self.AI_ASSISTANT_LIMITS = AI_ASSISTANT_LIMITS
         self.openrouter_daily_warning_ratio = OPENROUTER_DAILY_BUDGET_WARNING_RATIO
         self.groq_api_key = GROQ_API_KEY
 
