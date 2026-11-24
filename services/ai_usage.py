@@ -64,12 +64,20 @@ def provider_quota(api_key, *, refresh=False):
     """
     day = datetime.now(timezone.utc).date().isoformat()
     key = 'ai_quota:' + hashlib.sha256((api_key or '').encode()).hexdigest()[:16]
+    def snapshot(data, stale):
+        # /key is eventually consistent: two accepted calls can appear a minute
+        # later. Never display more remaining requests than our receipt counter.
+        local_used = database.get_openrouter_requests_today()
+        used = max(data['used'], local_used)
+        return {**data, 'reported_used': data['used'], 'used': used,
+                'remaining': min(data['remaining'], max(0, data['limit']-used)),
+                'estimated': local_used > data['used'], 'stale': stale}
     raw = database.get_bot_state(key, guild_id=0)
     cached = json.loads(raw) if raw else None
     if cached and cached.get('day') != day:
         cached = None
     if cached and not refresh and time.time() - cached['checked_at'] < 60:
-        return {**cached, 'stale': False}
+        return snapshot(cached, False)
     if api_key:
         try:
             response = requests.get('https://openrouter.ai/api/v1/key',
@@ -80,9 +88,9 @@ def provider_quota(api_key, *, refresh=False):
                 result = {k: max(0, data[k]) for k in ('used', 'limit', 'remaining')}
                 result.update(day=day, checked_at=time.time())
                 database.set_bot_state(key, json.dumps(result), guild_id=0)
-                return {**result, 'stale': False}
+                return snapshot(result, False)
         except (requests.RequestException, KeyError, TypeError, ValueError):
             pass
     if cached:
-        return {**cached, 'stale': True}
+        return snapshot(cached, True)
     return None

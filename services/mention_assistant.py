@@ -336,7 +336,7 @@ def usage_snapshot(owner, gid, limits, api_key, *, refresh=False):
 def usage_footer(snapshot):
     quota = snapshot['provider']
     if quota:
-        balance = f"OpenRouter: {'≈' if quota['stale'] else ''}{quota['remaining']}/{quota['limit']} осталось"
+        balance = f"OpenRouter: {'≈' if quota['stale'] or quota.get('estimated') else ''}{quota['remaining']}/{quota['limit']} осталось"
     else:
         balance = f"OpenRouter: остаток недоступен · локально {snapshot['local_used']} запросов"
     return balance + f" · Вам: {snapshot['user_left']} · Подробнее: «лимиты»"
@@ -354,6 +354,8 @@ def render_usage(snapshot, limits):
         text += (f"**Общий OpenRouter (все функции бота)**\n"
                  f"Израсходовано **{quota['used']} из {quota['limit']}**, осталось **{quota['remaining']}**.\n"
                  f"{'Последние сохранённые данные' if quota['stale'] else 'Данные провайдера'} на {stamp}. Обновление суточного счётчика — в 03:00 МСК.\n")
+        if quota.get('estimated'):
+            text += f"Остаток оценён с учётом локальных запросов: провайдер пока показывает {quota['reported_used']}, его счётчик обновляется с задержкой.\n"
     else:
         text += f"**OpenRouter**\nТочный остаток сейчас недоступен. Локально учтено {snapshot['local_used']} ответов за текущие сутки UTC.\n"
     return text + (f"\nПомощник прекращает новые ИИ-вызовы при {limits['shared_daily_cap']} общих запросах, оставляя запас другим функциям. "

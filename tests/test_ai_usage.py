@@ -45,6 +45,14 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(quota['remaining'], 30)
             self.assertIsNone(ai_usage.provider_quota('another-key', refresh=True))
 
+    def test_eventual_provider_counter_cannot_overstate_remaining_quota(self):
+        response = Mock()
+        response.json.return_value = {'data': {'free_model_daily_requests': {'used': 14, 'limit': 50, 'remaining': 36}}}
+        with patch.object(ai_usage.requests, 'get', return_value=response), patch.object(database, 'get_openrouter_requests_today', return_value=16):
+            quota = ai_usage.provider_quota('key')
+        self.assertEqual((quota['used'],quota['remaining'],quota['reported_used']), (16,34,14))
+        self.assertTrue(quota['estimated'])
+
     def test_atomic_legacy_counter_does_not_lose_parallel_worker_updates(self):
         database.get_bot_state('init')
         with ThreadPoolExecutor(max_workers=4) as executor:
