@@ -49,6 +49,8 @@ async def _capture(reader, guild_id, owner, kind):
     data = await reader(kind)
     captured = int(time.time())
     if kind == "tb":
+        from services import tb_commands
+        data = await tb_commands.process(guild_id, owner, data)
         if data:
             await asyncio.to_thread(tb_live_order.capture, guild_id, data)
         await asyncio.to_thread(tb_live.save, guild_id, owner, captured, data)
@@ -126,6 +128,7 @@ async def start(owner, guild_id, profile, tier, code, kind, interval, *, saved_s
 
 
 async def _run(account, watch, owner, guild_id, kind, *, delay_first=False):
+    cancelled = False
     try:
         reader = await asyncio.shield(account.login)
         if delay_first:
@@ -149,6 +152,9 @@ async def _run(account, watch, owner, guild_id, kind, *, delay_first=False):
                 await asyncio.wait_for(watch.wake.wait(), timeout=watch.interval)
             except TimeoutError:
                 continue
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     except game_account.SessionExpired:
         _end_session(account)
     except game_account.AccountError as error:
@@ -162,6 +168,9 @@ async def _run(account, watch, owner, guild_id, kind, *, delay_first=False):
         elif watch.status == "stopping":
             watch.message = "Наблюдение остановлено вручную."
         watch.status = "ended"
+        if kind == "tb" and not cancelled:
+            from services import tb_commands
+            await asyncio.to_thread(tb_commands.pause_owner, guild_id, owner, watch.message)
         if not any(other is not watch and _running(other) for other in account.watches.values()):
             account.login = None
 

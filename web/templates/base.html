@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    {% set is_account_auth = request.url.path.startswith(('/game-account', '/admin/game-lab', '/mod-loadouts', '/login/telegram')) or request.url.path in ('/farm/inventory', '/farm/guide', '/mod-optimizer', '/tb/live') %}
+    {% set is_account_auth = request.url.path.startswith(('/game-account', '/admin/game-lab', '/mod-loadouts', '/login/telegram')) or request.url.path in ('/farm/inventory', '/farm/guide', '/mod-optimizer', '/tb/live', '/tb/commands') %}
     {% if request.url.hostname == 'swgoh-sng.ru' and not is_account_auth %}
     <!-- Yandex.Metrika counter -->
     <script>

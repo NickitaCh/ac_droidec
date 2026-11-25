@@ -167,6 +167,13 @@ def summary(kind, data, captured):
             complete = sum(all(slot["donor"] for slot in slots) for slots in operations)
             missing = sum(not slot["donor"] for slots in operations for slot in slots)
             lines.append(f"**{name}** · {_score(score)} очков")
+            if 'command' in zone:
+                from services.tb_commands import STATES
+                lines.append(f"Заливка: {STATES.get(zone['command'], 'неизвестно')}")
+                focus = [str(i) for i, mission in enumerate(zone.get('missions', []), 1)
+                         if mission.get('command') == 2]
+                if focus:
+                    lines.append('Концентрация на боях: ' + ', '.join(focus))
             if next_star is not None:
                 lines.append(f"До следующей ★ {_score(next_star)} очков")
             if operations:

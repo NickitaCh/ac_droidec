@@ -49,6 +49,8 @@ def _view(kind, token, expanded=()):
     if kind == "tw" and "details" in expanded:
         view.add_item(disnake.ui.Button(label="Следующая страница зон", row=2,
                                        custom_id=f"glp:{kind}:{token}:zones_next"))
+    if kind == "tb":
+        view.add_item(disnake.ui.Button(label="Приказы", row=2, custom_id=f"glp:tb:{token}:commands"))
     if kind == "tw":
         view.add_item(disnake.ui.Button(label="Журнал боёв", style=disnake.ButtonStyle.secondary,
                                        row=2, custom_id=f"glp:{kind}:{token}:battles"))
@@ -125,6 +127,10 @@ class EventPanelCog(commands.Cog):
         _, kind, token, action = parts
         if kind not in event_panels.BUTTONS:
             return
+        if kind == "tb" and action == "commands":
+            await inter.response.defer(with_message=True, ephemeral=True)
+            await self._tb_commands(inter, token)
+            return
         if kind == "tw" and action == "zones_next":
             await inter.response.defer(with_message=False)
             await self._toggle_details(inter, kind, token, "details", advance=True)
@@ -154,6 +160,31 @@ class EventPanelCog(commands.Cog):
             return
         await inter.response.defer(with_message=True, ephemeral=True)
         await self._action(inter, kind, token, action, inter.message.id)
+
+    async def _tb_commands(self, inter, token):
+        from services.tb_command_discord import OrderEditor
+        from services import tb_commands
+
+        access = await asyncio.to_thread(guild_resolver.resolve_access, inter.author)
+        gid = access.get('guild_id')
+        if not event_panels.allowed(gid, access.get('tier'), _profile()):
+            await inter.edit_original_response(content='Доступно офицерам АС в тестовой версии.')
+            return
+        panel = await asyncio.to_thread(event_panels.current, 'discord', gid, 'tb')
+        if not panel or (panel['token'], panel['channel'], panel['message']) != (
+                token, str(inter.channel_id), str(inter.message.id)):
+            await inter.edit_original_response(content='Эта панель устарела. Откройте последнюю сводку.')
+            return
+        try:
+            user = {'discord_id': str(inter.author.id), 'guild_id': gid,
+                    'tier': access['tier'], 'bot_profile': _profile()}
+            code = await asyncio.to_thread(game_account.select_account, str(inter.author.id), gid)
+            state = await tb_commands.read(user, code)
+            editor = OrderEditor(user, code, state)
+            await inter.edit_original_response(content=editor.text(), view=editor,
+                                               allowed_mentions=disnake.AllowedMentions.none())
+        except game_account.AccountError as error:
+            await inter.edit_original_response(content=str(error))
 
     @commands.Cog.listener("on_dropdown")
     async def event_battle_zone(self, inter: disnake.MessageInteraction):

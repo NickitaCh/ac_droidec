@@ -16,6 +16,8 @@ import tb_plan_reader
 from web.deps import selected_roster_account
 
 router = APIRouter()
+from web.routes import tb_commands
+router.include_router(tb_commands.router)
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
 templates.env.globals["tb_classic_nav"] = lambda user: feature_flags.is_enabled(user["guild_id"], "tb_classic_nav")
 _access = feature_flags.require_feature("tb_reports")

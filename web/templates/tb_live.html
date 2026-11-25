@@ -4,6 +4,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
     {{ tbui.tb_hero("ТБ сейчас", "live") }}
+    <p><a class="btn" href="/tb/commands">Приказы в игре и автоматические правила</a></p>
     {% if not selected %}
         {% with refresh_url = "/tb/live", watch_url = "/tb/live/watch" %}
             {% include "_game_watch.html" %}

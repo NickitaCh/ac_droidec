@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Приказы ТБ — AC Droidec{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% macro scope() -%}
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="event" value="{{ state.event if state else '' }}">
+<input type="hidden" name="phase" value="{{ state.phase if state else '' }}">
+<input type="hidden" name="revision" value="{{ revision }}">
+{%- endmacro %}
+{% macro rule_form(rule=none) %}
+<form method="post" class="tbc-form">
+{{ scope() }}<input type="hidden" name="action" value="save_rule">
+{% if rule %}<input type="hidden" name="rule_id" value="{{ rule.id }}">{% endif %}
+<div class="tbc-grid">
+<label>Название<input name="name" required maxlength="100" value="{{ rule.name if rule else '' }}"></label>
+<label>Приоритет (1 — высший)<input name="priority" type="number" min="1" max="999" required value="{{ rule.priority if rule else 10 }}"></label>
+<label>Куда<select name="target" required>{% for key,row in targets.items() %}<option value="{{ key }}"{% if rule and rule.target == key %} selected{% endif %}>{{ row.label }}</option>{% endfor %}</select></label>
+<label>Приказ<select name="command">{% for key,label in states.items() %}<option value="{{ key }}"{% if (rule and rule.command == key) or (not rule and key == 2) %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Подпись в игре<input name="message" maxlength="140" value="{{ rule.message if rule else '' }}"></label>
+<label>Когда осталось не больше, минут<input name="minutes" type="number" min="0" max="2880" value="{% if rule %}{% for c in rule.conditions if c.kind == 'remaining' %}{{ c.value // 60 }}{% endfor %}{% endif %}" placeholder="Весь этап"></label>
+</div>
+<p class="muted">Все заданные условия должны выполняться одновременно. Без условий приказ действует весь текущий этап.</p>
+<div class="tbc-grid">
+{% for planet in planets %}<label>{{ planet.label|replace(' · Заливка','') }}: не менее, млн очков<input type="number" name="points:{{ planet.planet }}" min="0" max="1000000" step="0.001" value="{% if rule %}{% for c in rule.conditions if c.kind == 'points' and c.zone == planet.planet %}{{ c.value / 1000000 }}{% endfor %}{% endif %}" placeholder="Не учитывать"></label>{% endfor %}
+<label>После заполнения всех взводов<select name="platoons"><option value="">Не учитывать</option>{% for p in planets %}<option value="{{ p.planet }}"{% if rule %}{% for c in rule.conditions if c.kind == 'platoons' and c.zone == p.planet %} selected{% endfor %}{% endif %}>{{ p.label|replace(' · Заливка','') }}</option>{% endfor %}</select></label>
+<label>Пока не взяты все звёзды<select name="below_max"><option value="">Не учитывать</option>{% for p in planets %}<option value="{{ p.planet }}"{% if rule %}{% for c in rule.conditions if c.kind == 'below_max' and c.zone == p.planet %} selected{% endfor %}{% endif %}>{{ p.label|replace(' · Заливка','') }}</option>{% endfor %}</select></label>
+</div>
+<div class="tbc-actions"><label><input type="checkbox" name="enabled"{% if not rule or rule.enabled %} checked{% endif %}> Правило включено</label><button class="btn btn-primary" type="submit">{{ 'Сохранить изменения' if rule else 'Добавить правило' }}</button></div>
+</form>
+{% endmacro %}
+{% block content %}
+<link rel="stylesheet" href="/static/tb_commands.css">
+<div class="tbc-page">
+<section class="page-hero"><h1>Приказы ТБ</h1><a class="hero-link" href="/tb/live">ТБ сейчас</a></section>
+<p>Заливка, взводы, каждый бой и ОЗ. Изменения отправляются в игру от вашего подключённого аккаунта и проверяются повторным чтением.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post">{{ scope() }}<button class="btn" name="action" value="refresh">Обновить из игры</button></form>
+{% if state %}
+<p>Этап {{ state.phase }} · аккаунт {{ code }}. Перед сохранением проверяем, что приказ и этап не изменились.</p>
+{% if stale %}<p class="error">Время этого этапа прошло. Обновите данные из игры.</p>{% endif %}
+<h2>Ручные приказы</h2>
+<p class="muted">Концентрация на конкретном бое задаётся в строке «Бой». Ручное изменение отключает автоправила для выбранной цели до их повторного включения.</p>
+<div class="tbc-orders">
+{% for key,row in targets.items() %}
+<form method="post" class="panel tbc-order">{{ scope() }}
+<input type="hidden" name="action" value="manual"><input type="hidden" name="target" value="{{ key }}">
+<input type="hidden" name="old_command" value="{{ row.command|default(1) }}"><input type="hidden" name="old_message" value="{{ row.message|default('') }}">
+<h3>{{ row.label }}</h3><label>Приказ<select name="command">{% for value,label in states.items() %}<option value="{{ value }}"{% if row.command|default(1) == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Подпись<input name="message" maxlength="140" value="{{ row.message|default('') }}"></label><button type="submit" class="btn"{% if stale %} disabled{% endif %}>Применить в игре</button>
+</form>
+{% else %}<p>Нет открытых целей. Обновите данные из игры.</p>{% endfor %}
+</div>
+<h2>Автоматические правила</h2>
+<p>Меньшее число приоритета главнее. Для каждой цели действует первое подходящее правило. Правила привязаны к этой ТБ и этому этапу.</p>
+{% if cfg %}<p role="status">{{ 'Автоматика включена' if cfg.enabled else 'Автоматика на паузе' }}{% if cfg.status %} · {{ cfg.status }}{% endif %}</p>{% endif %}
+{% if watch %}<p>Наблюдение: {{ watch.message }}</p>{% endif %}
+<p class="muted">После включения используется сохранённая игровая сессия. При её завершении автоматика прекращает работу. Опрос — раз в минуту, если наблюдение ещё не запущено; уже выбранный интервал сохраняется.</p>
+<form method="post" class="tbc-actions">{{ scope() }}<button class="btn btn-primary" name="action" value="enable">Включить автоматику от моего аккаунта</button><button class="btn" name="action" value="pause">Пауза</button></form>
+<details class="panel"><summary>Подготовить пять правил заливки</summary>
+<p>Выберите только планеты, которые закрываем на этом этапе. Подготовка заменит список правил текущего этапа и поставит автоматику на паузу.</p>
+<form method="post">{{ scope() }}<input type="hidden" name="action" value="recipe">
+<div class="tbc-grid">{% for planet in planets %}<div><label><input type="checkbox" name="planet" value="{{ planet.key }}"> {{ planet.label|replace(' · Заливка','') }}</label><label>Порог остановки, млн<input name="threshold:{{ planet.key }}" type="number" min="0" max="1000000" step="0.001" value="{{ planet.threshold / 1000000 }}"></label></div>{% endfor %}
+<label>Буфер до последней звезды, млн<input name="buffer" type="number" min="0" step="0.001" value="5" required></label><label>Финальная заливка за, минут<input name="final" type="number" min="1" max="2880" value="60" required></label></div>
+<p>Порог → ожидание остальных → общая заливка → стоп у буфера → финальная заливка. Последняя звезда считается по игровым порогам планеты.</p>
+<button class="btn" type="submit">Подготовить правила</button></form></details>
+<details class="panel"><summary>Добавить своё правило — в том числе ОЗ после взводов</summary>{{ rule_form() }}</details>
+{% for rule in rules|sort(attribute='priority') %}<details class="panel"><summary>{{ rule.priority }} · {{ rule.name }} · {{ targets[rule.target].label if rule.target in targets else 'Цель больше недоступна' }} · {{ states[rule.command] }}{% if not rule.enabled %} · выключено{% endif %}</summary>
+{{ rule_form(rule) }}<form method="post">{{ scope() }}<input type="hidden" name="rule_id" value="{{ rule.id }}"><button class="btn" name="action" value="delete">Удалить правило</button></form></details>{% endfor %}
+{% endif %}
+<h2>Последние изменения</h2>
+<div class="table-scroll"><table class="data"><thead><tr><th>Этап</th><th>Цель</th><th>Приказ</th><th>Причина</th><th>Результат</th></tr></thead><tbody>{% for row in log %}<tr><td>{{ row.phase }}</td><td>{{ targets[row.target].label if row.target in targets else 'Цель прошлого этапа' }}</td><td>{{ states.get(row.command, '—') }}{% if row.message %} · {{ row.message }}{% endif %}</td><td>{{ row.reason }}</td><td>{{ row.result }}</td></tr>{% else %}<tr><td colspan="5">Изменений ещё нет.</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

@@ -28,6 +28,11 @@ def _number(rows, tag):
     return next(_values(rows, tag, 0), None)
 
 
+def _command(rows):
+    # TerritoryZoneStatus, verified in Android 6000.3.27f2 / ProtoOutput.
+    return {"command": _number(rows, 6) or 1, "message": _text(rows, 5)}
+
+
 def parse(payload):
     active = list(_messages(ga.fields(payload), 1))
     if not active:
@@ -47,13 +52,15 @@ def parse(payload):
                 zones[match[1]] = {
                     "id": zone_id, "status": _number(zone, 2), "points": _number(zone, 3),
                     "missions": [], "special": [], "operations": [],
+                    **_command(zone),
                 }
     for strike in _messages(tb, 6):
         for zone in _messages(strike, 5):
             zone_id = _text(zone, 1)
             match = _ZONE.match(zone_id)
             if match and match[1] in zones:
-                zones[match[1]]["missions"].append({"id": zone_id, "players": _number(strike, 3)})
+                zones[match[1]]["missions"].append({"id": zone_id, "players": _number(strike, 3),
+                                                     "status": _number(zone, 2), **_command(zone)})
     for mission in _messages(tb, 13):
         for zone in _messages(mission, 1):
             zone_id = _text(zone, 1)
@@ -61,12 +68,14 @@ def parse(payload):
             if match and match[1] in zones:
                 zones[match[1]]["special"].append({
                     "id": zone_id, "players": _number(mission, 2), "wins": _number(mission, 3),
+                    "status": _number(zone, 2), **_command(zone),
                 })
     for recon in _messages(tb, 7):
         for zone in _messages(recon, 6):
             match = _ZONE.match(_text(zone, 1))
             if match and match[1] in zones:
                 zones[match[1]]["recon_id"] = _text(zone, 1)
+                zones[match[1]]["recon_command"] = {"id": _text(zone, 1), "status": _number(zone, 2), **_command(zone)}
                 zones[match[1]]["operations"] = [
                     {"id": _text(operation, 1), "slots": [
                         {"unit": _text(slot, 1).partition(":")[0], "donor": _text(slot, 5),
