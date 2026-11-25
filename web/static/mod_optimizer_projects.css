@@ -1,0 +1,30 @@
+.mo-projects [hidden], #mo-run [data-project-plate-settings][hidden] { display: none; }
+.mo-project-toolbar, .mo-project-rule, .mo-project-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: .6rem;
+}
+.mo-project-toolbar { margin-block: .75rem; }
+.mo-project-picker { display: flex; flex-wrap: wrap; gap: .35rem; }
+.mo-project-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    gap: .6rem;
+}
+.mo-project-cards article {
+    padding: .65rem;
+    border: 1px solid currentColor;
+    border-radius: .5rem;
+}
+.mo-project-cards h3 { display: flex; align-items: center; gap: .6rem; margin: 0 0 .5rem; }
+.mo-project-dialog {
+    max-width: min(58rem, calc(100vw - 2rem));
+    max-height: 85vh;
+    overflow: auto;
+}
+.mo-project-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.mo-project-rule { padding: .6rem 0; border-bottom: 1px solid currentColor; }
+.mo-project-rule input { max-width: 9rem; }
+
+.mo-project-picker button { display: inline-flex; align-items: center; gap: .4rem; }

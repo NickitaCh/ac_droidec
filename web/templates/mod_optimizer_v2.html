@@ -64,7 +64,7 @@
     <p>Держите вкладку открытой до завершения подбора.</p>
     <button type="button" data-browser-cancel>Отменить подбор</button>
 </div>
-<script src="/static/mod_optimizer_browser.js?v=20261120farm" defer></script>
+<script src="/static/mod_optimizer_browser.js?v=20261125projects" defer></script>
 {% elif plan and plan.state in ('running', 'applying') %}
 <div class="panel" role="status">
     <h2>{% if plan.state == 'running' %}Идёт подбор{% else %}Применение расстановки{% endif %}</h2>
@@ -113,6 +113,8 @@
             <button type="button" class="button-secondary" data-order-remove>Удалить правило</button>
         </div>
         {% endmacro %}
+        {% if project_options is defined %}{% include "_mod_optimizer_projects.html" %}{% endif %}
+        <div data-project-plate-settings>
         <fieldset><legend>Плейты</legend>
         <div class="mo-options">{% for p in plates %}<label class="checkbox"><input type="checkbox" name="plates" value="{{ p }}" {% if p in selected_plates %}checked{% endif %}>{{ p|plate_label }}</label>{% else %}<p>Сначала создайте плейты в <a href="/plates">разделе требований</a>.</p>{% endfor %}</div>
         </fieldset>
@@ -131,6 +133,7 @@
             </select>
         </label>
         <p class="muted">Во втором режиме, например, сборка для R1 подбирается по статам на требуемом R7. Уже более высокая реликвия сохраняется.</p>
+        </div>
         <details class="mo-locks"><summary>Заблокированные персонажи · {{ locked|length }}</summary>
             <p class="muted">Их сборки сохраняются. Модули этих персонажей не участвуют в подборе.</p>
             <label>Найти персонажа<input type="search" id="mo-lock-search" autocomplete="off"></label>
@@ -267,9 +270,13 @@
 {% endif %}
 {% if results is not none and not preset_restore %}
 <div class="panel" id="{{ 'mo-saved' if loadouts_page and not game_source else 'mo-results' }}"><h2>Результат подбора{% if loadouts_page and preset_name %} · {{ preset_name }}{% endif %}</h2>
+    {% if project is defined %}
+    <p>{{ mods_total }} модулей · {{ player_name }} · обязательные цели выполнены у <strong>{{ results|selectattr('ok')|list|length }} из {{ results|length }}</strong> персонажей.</p>
+    {% else %}
     <p>{{ mods_total }} модулей · {{ player_name }} · плейтов {% if relic_mode == 'plate' %}по прогнозу {% endif %}выполнено: <strong>{{ plates_passed|length }} из {{ plates_total }}</strong>.</p>
+    {% endif %}
     {% if relic_mode == 'plate' %}<p>Результат учитывает будущий ап до обязательной реликвии активной схемы. Кнопка применения переставляет только модули; персонажей нужно прокачать отдельно.</p>{% endif %}
-    {% if plates_passed %}<p>{{ plates_passed|join(', ') }}</p>{% endif %}
+    {% if plates_passed and project is not defined %}<p>{{ plates_passed|join(', ') }}</p>{% endif %}
     <p class="muted">Показана лучшая найденная расстановка. Невыполненная норма не означает, что подходящей сборки не существует.</p>
     {% if solver_timed_out %}<p class="muted">Поиск распределения завершился без доказанного оптимума среди найденных сборок.</p>{% endif %}
     {% if plan.state in ('ready', 'complete') %}<form method="post" action="/mod-optimizer/save">

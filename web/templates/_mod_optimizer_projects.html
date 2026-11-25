@@ -1,0 +1,45 @@
+<section id="mo-projects" class="mo-projects" hidden aria-label="Личные проекты">
+    <div class="mo-project-toolbar">
+        <label>Режим<select data-project-mode><option value="plates">По плейтам</option><option value="project"{% if project is defined %} selected{% endif %}>Личный проект</option></select></label>
+        <label>Открыть проект<select data-project-open><option value="">Выберите проект</option>
+            {% for id, name in project_list %}<option value="{{ id }}"{% if id == project_id|default('') %} selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <div data-project-editor hidden>
+        <div class="mo-project-toolbar">
+            <label>Название<input data-project-name maxlength="80"></label>
+            <button type="button" data-project-save>Сохранить проект</button>
+            <button type="button" class="button-secondary" data-project-new>Новый проект</button>
+            <button type="button" class="button-secondary" data-project-delete hidden>Удалить проект</button>
+            {% if plates %}<label>Начать с плейта<select data-project-seed><option value="">Выберите плейт</option>
+                {% for p in plates %}<option value="{{ p }}">{{ p|plate_label }}</option>{% endfor %}
+            </select></label>{% endif %}
+        </div>
+        {% if project_import_skipped %}<p class="muted">Пропущено при копировании: {{ project_import_skipped }}. Редактор переносит поддерживаемые требования и персонажей из вашего ростера.</p>{% endif %}
+        <p data-project-status role="status"></p>
+        <div class="mo-project-toolbar">
+            <label>Добавить персонажа<input type="search" data-project-search autocomplete="off" placeholder="Имя персонажа"></label>
+            <div class="mo-project-picker" data-project-picker></div>
+        </div>
+        <p class="muted">При равном числе выполненных сборок приоритет у персонажей выше в списке. Замок сохраняет текущие модули.</p>
+        <div class="mo-project-cards" data-project-cards></div>
+        <dialog class="mo-project-dialog" data-project-dialog aria-labelledby="mo-project-unit">
+            <h3 id="mo-project-unit" data-project-unit></h3>
+            <div data-project-rules></div>
+            <div class="mo-project-toolbar">
+                <label>Тип требования<select data-project-kind>
+                    <option value="num">Характеристика</option><option value="cmp">Сравнение с персонажем</option>
+                    <option value="set">Конкретный сет</option><option value="any">Один из сетов</option>
+                    <option value="only">Только указанные сеты</option><option value="pri">Основа</option>
+                </select></label>
+                <button type="button" data-project-add-rule>Добавить требование</button>
+                <button type="button" class="button-secondary" data-project-done>Готово</button>
+            </div>
+        </dialog>
+    </div>
+    <input type="hidden" name="project_id" value="{{ project_id|default('') }}">
+    <input type="hidden" name="project_payload">
+    <script type="application/json" data-project-data>{{ {'draft': project|default(none), 'options': project_options, 'characters': characters}|tojson }}</script>
+</section>
+<script src="/static/mod_optimizer_projects.js?v=1" defer></script>
+<link rel="stylesheet" href="/static/mod_optimizer_projects.css?v=1">

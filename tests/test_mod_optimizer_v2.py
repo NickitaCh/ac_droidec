@@ -324,6 +324,26 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(comparison['current'], comparison['threshold'])
         self.assertEqual(comparison['before'], 130)
 
+    async def test_project_order_distributes_scarce_mod_and_honors_locks(self):
+        mods = [mod(f'{base}{slot}', slot, base, speed=5) for base in ('A', 'B') for slot in range(1, 7)]
+        mods.append(mod('fast-arrow', 2, speed=20))
+        units = {base: {'currentTier': 13} for base in ('A', 'B')}
+        project = {'name': 'Priority', 'characters': [
+            {'base': base, 'enabled': True, 'rules': [
+                {'kind': 'num', 'char': base, 'stat': 'Speed', 'op': '>=', 'value': 145, 'priority': 'required'}]}
+            for base in ('B', 'A')]}
+        with patch.object(engine.database, 'get_unit_types', return_value={}), \
+                patch.object(engine.database, 'get_skill_omicron_tiers', return_value={}), \
+                patch.object(engine.database, 'get_game_unit_name', side_effect=lambda base: base), \
+                patch.object(engine.stat_engine, 'calc_final_stats', calc):
+            results, _, _, _ = await engine.optimize(None, None, [], '123', mods, 1, units_override=units, project=project)
+            self.assertEqual([result['base_id'] for result in results if result['ok']], ['B'])
+            results, _, _, _ = await engine.optimize(None, None, [], '123', mods, 1, units_override=units,
+                                                     project=project, locked=['B'])
+            self.assertEqual([result['base_id'] for result in results if result['ok']], ['A'])
+            locked = next(result for result in results if result['base_id'] == 'B')
+            self.assertEqual({mod['id'] for mod in locked['used_mods']}, {f'B{s}' for s in range(1, 7)})
+
     async def test_comparison_uses_each_characters_future_relic(self):
         from swgoh_comlink import StatCalc
         real_calc = StatCalc(json.loads((Path(__file__).parent / 'fixtures/mod_optimizer_statcalc.json').read_text()))

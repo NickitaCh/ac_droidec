@@ -61,7 +61,8 @@ def _browser_recommend(context, base):
 mod_recommendations.recommend = _browser_recommend
 calculated = calculate(StatCalc(payload['calculator']), payload['members'], payload['rows'], payload['units'],
                        payload['tiers'], payload['mods'], payload['names'], locked=payload['locked'],
-                       relic_mode=payload['relic_mode'], turn_order=payload['turn_order'], deep_search=payload['deep_search'])
+                       relic_mode=payload['relic_mode'], turn_order=payload['turn_order'], deep_search=payload['deep_search'],
+                       character_priority=payload.get('character_priority', False))
 browser_result_json = json.dumps({'allocation': {r['base_id']: [m['id'] for m in r['used_mods']]
                                                for r in calculated[0] if r['owned']},
                                  'optimal': calculated[2],

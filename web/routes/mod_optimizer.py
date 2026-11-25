@@ -23,7 +23,7 @@ import stat_engine
 import services.stat_forecast as stat_forecast
 import services.mod_optimizer as mod_optimizer
 from services import mod_optimizer_v2, mod_optimizer_plans as plans, game_mod_actions, mod_optimizer_browser
-from services import personal_plates
+from services import mod_optimizer_projects as projects, personal_plates
 from services.registration import register_player
 from web.deps import require_member_access
 
@@ -164,6 +164,9 @@ def _render(request, context):
         context['dry_run'] = True
     request.session.setdefault("mod_optimizer_csrf", secrets.token_urlsafe(32))
     context["game_csrf"] = request.session["mod_optimizer_csrf"]
+    if not context.get('loadouts_page') and context.get('characters'):
+        context['project_options'] = projects.editor_options()
+        context['project_list'] = projects.list_projects(context['user'], context['self_ally_code'])
     return templates.TemplateResponse(request, "mod_optimizer_v2.html", context,
                                       headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
@@ -218,10 +221,12 @@ def _spawn(coro):
 
 
 @personal_plates.scoped_job
-async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=(), deep_search=False):
+async def _calculate(token, user, plates, code, source, raw_csv, locked, force_refresh, relic_mode='current', dry_run=True, *, reconnect=False, thresholds=None, turn_order=(), deep_search=False, project=None, project_id=""):
     dry_run = bool(dry_run) or not can_apply(user)
     data = {'selected_plates': plates, 'locked': locked, 'game_source': source == 'game', 'ally_code': code,
             'relic_mode': relic_mode, 'dry_run': dry_run, 'deep_search': deep_search, 'thresholds': thresholds or {}, 'turn_order': turn_order}
+    if project is not None:
+        data.update(project=project, project_id=project_id)
     try:
         data['requirements_fingerprint'] = plans.requirements_fingerprint(plates, user['guild_id'])
         if source == 'game':
@@ -243,16 +248,19 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
             members, rows, units, tiers = await mod_optimizer_v2.prepare_inputs(
                 comlink, plates, code, mods, user['guild_id'], force_refresh,
                 units_override=snap['roster'] if source == 'game' else None,
-                relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order)
+                relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order,
+                **({'project': project} if project is not None else {}))
             names = await asyncio.to_thread(database.get_game_unit_names, list(rows.keys() | units.keys()))
             data['browser_inputs'] = dict(members=members, rows=rows, units=units, tiers=tiers, mods=mods,
-                names=names, locked=locked, relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search)
+                names=names, locked=locked, relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search,
+                character_priority=project is not None)
             data['browser_engine'] = True
             plans.finish(token, 'browser', data)
             return
         results, passed, optimal, donors = await mod_optimizer_v2.optimize(
             comlink, calc, plates, code, mods, user['guild_id'], locked, force_refresh,
             units_override=snap['roster'] if source == 'game' else None, relic_mode=relic_mode,
+            **({'project': project} if project is not None else {}),
             **({'deep_search': True} if deep_search else {}),
             **({'thresholds': thresholds} if thresholds else {}),
             **({'turn_order': turn_order} if turn_order else {}))
@@ -270,7 +278,7 @@ async def _calculate(token, user, plates, code, source, raw_csv, locked, force_r
             data['operation_count'] = len(ops)
         if plans.requirements_fingerprint(plates, user['guild_id']) != data['requirements_fingerprint']:
             raise ValueError('Требования плейтов изменились во время расчёта. Запустите новый Dry run.')
-        data.update(results=results, plates_passed=passed, plates_total=len({p for r in results for p in r['plates']} & set(plates)),
+        data.update(results=results, plates_passed=passed, plates_total=1 if project is not None else len({p for r in results for p in r['plates']} & set(plates)),
                     mods_total=len(mods), solver_timed_out=not optimal, donors=donors)
         plans.finish(token, 'ready', data)
     except asyncio.CancelledError:
@@ -313,11 +321,55 @@ async def _apply(token, user, code, data):
 
 
 @router.get("", response_class=HTMLResponse)
-async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', user: dict = Depends(require_optimizer_access)):
+async def optimizer_form(request: Request, plan: str = '', ally_code: str = '', project_id: str = '',
+                         seed_plate: str = '', user: dict = Depends(require_optimizer_access)):
     context = _optimizer_context(user, plan, ally_code)
     if plan and _is_loadout(context['plan']):
         return RedirectResponse('/mod-loadouts?plan=' + context['plan']['id'], status_code=303)
+    if not plan and (project_id or seed_plate):
+        try:
+            code = context['self_ally_code']
+            if project_id:
+                context.update(project=projects.get(user, code, project_id), project_id=project_id)
+            else:
+                if seed_plate not in context['plates']:
+                    raise ValueError('Плейт недоступен.')
+                with personal_plates.scope(user):
+                    project, skipped = projects.seed(seed_plate, user['guild_id'], {base for base, _ in context['characters']})
+                context.update(project=project, project_import_skipped=skipped)
+        except ValueError as error:
+            context['error'] = str(error)
     return _render(request, context)
+
+
+@router.post('/projects/save')
+async def optimizer_project_save(request: Request, ally_code: str = Form(), csrf: str = Form(),
+                                 project_payload: str = Form(), project_id: str = Form(default=''),
+                                 locked: list[str] = Form(default=[]),
+                                 user: dict = Depends(require_optimizer_access)):
+    _csrf(request, csrf)
+    try:
+        code = game_account.select_personal_account(str(user['discord_id']), user['guild_id'], ally_code)
+        allowed = {base for base, _ in _characters(code)}
+        if not set(locked) <= allowed:
+            raise ValueError('Список заблокированных персонажей устарел. Обновите страницу.')
+        project = projects.validate(project_payload, allowed)
+        project_id = projects.save(user, code, project_id, project, locked)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return JSONResponse({'id': project_id, 'name': project['name']}, headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/projects/delete')
+async def optimizer_project_delete(request: Request, ally_code: str = Form(), csrf: str = Form(),
+                                   project_id: str = Form(), user: dict = Depends(require_optimizer_access)):
+    _csrf(request, csrf)
+    try:
+        code = game_account.select_personal_account(str(user['discord_id']), user['guild_id'], ally_code)
+        projects.delete(user, code, project_id)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return Response(status_code=204)
 
 
 @router.get('/browser/inputs')
@@ -657,6 +709,8 @@ async def optimizer_run(
     faster: list[str] = Form(default=[]),
     slower: list[str] = Form(default=[]),
     engine: str = Form(default='server'),
+    project_id: str = Form(default=''),
+    project_payload: str = Form(default=''),
     user: dict = Depends(require_optimizer_access),
 ):
     guild_id = user["guild_id"]
@@ -693,7 +747,22 @@ async def optimizer_run(
         allowed = {base for base, _ in context['characters']}
         if any(a == b or a not in allowed or b not in allowed for a, b in turn_order):
             raise ValueError('В каждом правиле порядка ходов выберите двух разных персонажей.')
-        if not plates:
+        project = None
+        if project_payload:
+            project = projects.validate(project_payload, allowed)
+            context.update(project=project, project_id=project_id)
+            if project_id:
+                projects.get(user, code, project_id)
+            active = {entry['base'] for entry in project['characters'] if entry['enabled']}
+            if not active:
+                raise ValueError('Включите хотя бы одного персонажа в подбор.')
+            if any(rule.get('compare') not in active for entry in project['characters'] if entry['enabled']
+                   for rule in entry['rules'] if rule['kind'] == 'cmp'):
+                raise ValueError('Включите обоих персонажей из каждого сравнения в подбор.')
+            plates = []
+            turn_order = []
+            context.update(selected_plates=[], turn_order=[])
+        if project is None and not plates:
             raise ValueError("Выберите хотя бы один плейт.")
         if not set(plates) <= set(context['plates']):
             raise ValueError('Один из плейтов больше недоступен.')
@@ -731,14 +800,18 @@ async def optimizer_run(
             mod_optimizer_v2.validate_inventory(mod_optimizer.parse_mods_csv(raw_csv))
         else:
             raise ValueError('Выберите чтение из игры или загрузите CSV.')
-        token = plans.create(user['discord_id'], guild_id, code, {'selected_plates': plates, 'locked': locked,
-                             'relic_mode': relic_mode, 'dry_run': dry_run, 'deep_search': deep_search, 'turn_order': turn_order})
+        job_data = {'selected_plates': plates, 'locked': locked, 'relic_mode': relic_mode,
+                    'dry_run': dry_run, 'deep_search': deep_search, 'turn_order': turn_order}
+        if project is not None:
+            job_data.update(project=project, project_id=project_id)
+        token = plans.create(user['discord_id'], guild_id, code, job_data)
         plans.set_locks(user['discord_id'], guild_id, code, locked)
     except ValueError as error:
         context['error'] = str(error)
         return _render(request, context)
     _spawn(_calculate(token, {**user, 'optimizer_engine': engine}, plates, code, source, raw_csv, locked, force_refresh, relic_mode, dry_run,
-                      reconnect=reconnect, **({'deep_search': True} if deep_search else {}), **({'thresholds': thresholds} if thresholds else {}),
+                      reconnect=reconnect, **({'project': project, 'project_id': project_id} if project is not None else {}),
+                      **({'deep_search': True} if deep_search else {}), **({'thresholds': thresholds} if thresholds else {}),
                       **({'turn_order': turn_order} if turn_order else {})))
     return RedirectResponse('/mod-optimizer?plan=' + token, status_code=303)
 

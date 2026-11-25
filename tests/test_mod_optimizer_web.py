@@ -1,3 +1,4 @@
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -87,6 +88,42 @@ class OptimizerWebTests(unittest.TestCase):
             pending = client.get(response.headers['location'])
             self.assertIn('Идёт подбор', pending.text)
             self.assertNotIn('action="/mod-optimizer/apply"', pending.text)
+
+    def test_private_project_save_reopen_and_run_without_plate(self):
+        draft = {'name': 'Raid project', 'characters': [{'base': 'A', 'enabled': True, 'rules': [
+            {'kind': 'num', 'stat': 'Speed', 'op': '<=', 'value': 200, 'priority': 'required'},
+            {'kind': 'pri', 'slot': 'arrow', 'ids': [5], 'priority': 'optional'}]}]}
+        def close(coroutine):
+            coroutine.close()
+
+        with TestClient(self.app) as client, patch.object(route, '_spawn', side_effect=close) as spawn:
+            fields = {'csrf': self.csrf(client), 'ally_code': '123456789',
+                      'project_payload': json.dumps(draft), 'locked': 'A'}
+            self.assertEqual(client.post('/mod-optimizer/projects/save', data={**fields, 'csrf': 'bad'}).status_code, 403)
+            saved = client.post('/mod-optimizer/projects/save', data=fields)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            fields['project_id'] = saved.json()['id']
+            page = client.get('/mod-optimizer', params={'project_id': fields['project_id']})
+            self.assertIn('data-project-data', page.text)
+            self.assertIn('Raid project', page.text)
+            self.assertEqual(plans.get_locks('owner', 1, '123456789'), ['A'])
+
+            with self.assertRaisesRegex(ValueError, 'Проект недоступен'):
+                route.projects.get({**self.user, 'discord_id': 'other'}, '123456789', fields['project_id'])
+
+            started = client.post('/mod-optimizer', data={**fields, 'source': 'game'}, follow_redirects=False)
+            self.assertEqual(started.status_code, 303, started.text)
+            spawn.assert_called_once()
+            token = started.headers['location'].split('plan=')[1]
+            job = plans.get(token, 'owner', 1)['data']
+            self.assertEqual(job['selected_plates'], [])
+            self.assertEqual(job['project']['characters'][0]['rules'][0]['op'], '<=')
+            self.assertEqual(job['locked'], ['A'])
+            delete_fields = {key: fields[key] for key in ('ally_code', 'csrf', 'project_id')}
+            self.assertEqual(client.post('/mod-optimizer/projects/delete', data=delete_fields).status_code, 204)
+            with self.assertRaises(ValueError):
+                route.projects.get(self.user, '123456789', fields['project_id'])
+            self.assertEqual(plans.get(token, 'owner', 1)['data']['project'], job['project'])
 
     def test_loadouts_register_alt_and_select_its_saved_items(self):
         code = '987654321'

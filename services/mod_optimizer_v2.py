@@ -313,7 +313,7 @@ def search(calc, base_id, unit, rows, pool, current, peers, locked=False, omicro
     return kept
 
 
-def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, seconds=45):
+def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, seconds=45, *, character_priority=False):
     """Global allocation with cross-character constraints and strict priorities."""
     prob = pulp.LpProblem('mod_optimizer_v2', pulp.LpMaximize)
     y = {(b, i): pulp.LpVariable(f'b_{n}_{i}', cat='Binary')
@@ -384,7 +384,7 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
                 expr = pulp.lpSum(terms)
                 row_ok[b, plate, ri] = expr
                 (required_terms if r[6] == 'required' else optional_terms).append(expr)
-    plate_vars, char_vars = {}, []
+    plate_vars, char_vars = {}, {}
     for b, rows in rows_by_char.items():
         if b not in candidates:
             continue
@@ -393,7 +393,7 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
             for ri, r in enumerate(rs):
                 if r[6] == 'required':
                     prob += cv <= row_ok[b, plate, ri]
-        char_vars.append(cv)
+        char_vars[b] = cv
     for plate, bs in members.items():
         pv = pulp.LpVariable(f'platepass_{len(plate_vars)}', cat='Binary')
         if not bs or any(b not in candidates for b in bs):
@@ -409,9 +409,14 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
     # large modular plates and can let optional rows outweigh required ones.
     deficit = pulp.lpSum(y[b, i] * c['deficit'] for b, cs in candidates.items() for i, c in enumerate(cs))
     moves = pulp.lpSum(y[b, i] * c['moves'] for b, cs in candidates.items() for i, c in enumerate(cs))
-    objectives = [(pulp.lpSum(plate_vars.values()), True), (pulp.lpSum(char_vars), True),
+    objectives = [(pulp.lpSum(plate_vars.values()), True), (pulp.lpSum(char_vars.values()), True),
                   (pulp.lpSum(required_terms), True), (pulp.lpSum(optional_terms), True),
                   (deficit, False), (moves, False)]
+    if character_priority:
+        # After maximizing the number of passing characters, favor earlier cards.
+        ranked_passes = pulp.lpSum(char_vars[b] * (len(rows_by_char) - index)
+                                  for index, b in enumerate(rows_by_char) if b in char_vars)
+        objectives.insert(2, (ranked_passes, True))
     chosen = {b: next(c for c in cs if c['baseline']) for b, cs in candidates.items()}
     started, optimal = time.monotonic(), True
     for phase, (expression, maximize) in enumerate(objectives):
@@ -447,18 +452,25 @@ def solve(candidates, members, rows_by_char, units, peers, omicron_tiers, second
 
 
 async def prepare_inputs(comlink, plates, code, mods, guild_id, force_refresh=False, *,
-                         units_override=None, relic_mode='current', thresholds=None, turn_order=()):
+                         units_override=None, relic_mode='current', thresholds=None, turn_order=(), project=None):
     if relic_mode not in ('current', 'plate'):
         raise ValueError('Выберите расчёт по текущей реликвии или по реликвии плейта.')
     validate_inventory(mods)
-    members = {p: database.get_stat_requirement_characters(p, guild_id=guild_id) for p in plates}
-    types = database.get_unit_types(list({b for bs in members.values() for b in bs}))
-    members = {p: [b for b in bs if types.get(b) != 'ship'] for p, bs in members.items()}
-    members = {p: bs for p, bs in members.items() if bs}
+    if project is not None:
+        from services.mod_optimizer_projects import GROUP, requirements
+        project_rows = requirements(project)
+        types = database.get_unit_types(list(project_rows))
+        rows = {base: {GROUP: rules} for base, rules in project_rows.items() if types.get(base) != 'ship'}
+        members = {GROUP: list(rows)} if rows else {}
+    else:
+        members = {p: database.get_stat_requirement_characters(p, guild_id=guild_id) for p in plates}
+        types = database.get_unit_types(list({base for group in members.values() for base in group}))
+        members = {p: [b for b in bs if types.get(b) != 'ship'] for p, bs in members.items()}
+        members = {p: bs for p, bs in members.items() if bs}
+        rows = {b: {p: database.get_stat_requirements(p, b, guild_id=guild_id) for p, bs in members.items() if b in bs}
+                for b in dict.fromkeys(b for bs in members.values() for b in bs)}
     if not members:
         raise ValueError('В выбранных плейтах нет персонажей для подбора модулей.')
-    rows = {b: {p: database.get_stat_requirements(p, b, guild_id=guild_id) for p, bs in members.items() if b in bs}
-            for b in dict.fromkeys(b for bs in members.values() for b in bs)}
     if thresholds:
         matched = set()
         for group in rows.values():
@@ -515,12 +527,17 @@ async def prepare_inputs(comlink, plates, code, mods, guild_id, force_refresh=Fa
 
 
 def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), relic_mode='current',
-              turn_order=(), deep_search=False):
+              turn_order=(), deep_search=False, character_priority=False):
     equipped = defaultdict(list)
     for mod in mods:
         if mod.get('equipped_to'):
             equipped[mod['equipped_to']].append(mod)
     slower_units = {slower for _, slower in turn_order}
+    if character_priority:
+        for base, groups in rows.items():
+            for row in itertools.chain.from_iterable(groups.values()):
+                if row[3] == 'Speed' and row[13]:
+                    slower_units.add(base if row[4] == '<=' else row[13])
 
     search_seconds = 18 if deep_search else SEARCH_SECONDS
     repair_seconds = 6 if deep_search else 2
@@ -534,7 +551,7 @@ def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), reli
                             seconds=search_seconds, relic_mode=relic_mode, slow_candidate=b in slower_units,
                             deep_search=deep_search)
                   for b, group in rows.items() if b in units}
-    chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds) if candidates else ({}, True)
+    chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds, character_priority=character_priority) if candidates else ({}, True)
     first_choice = chosen
     # Contention repair: search again with other selected builds reserved.
     for b in candidates:
@@ -548,7 +565,7 @@ def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), reli
         known = {c['mod_ids'] for c in candidates[b]}
         candidates[b].extend(c for c in extra if c['mod_ids'] not in known)
     if candidates:
-        chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds)
+        chosen, optimal = solve(candidates, members, rows, units, before, tiers, seconds=solve_seconds, character_priority=character_priority)
     def assess(allocation):
         allocated = {mid: b for b, c in allocation.items() for mid in c['mod_ids']}
         after = {**before, **{b: c['final_stats'] for b, c in allocation.items()}}
@@ -562,7 +579,9 @@ def calculate(calc, members, rows, units, tiers, mods, names, *, locked=(), reli
         completed = set(members)
         for b, group in rows.items():
             completed -= {p for p in group if b not in checks or not checks[b]['plate_ok'].get(p)}
-        score = (len(completed), sum(c['full_pass'] for c in checks.values()),
+        priority_score = sum((len(rows) - index) for index, base in enumerate(rows)
+                             if base in checks and checks[base]['full_pass']) if character_priority else 0
+        score = (len(completed), sum(c['full_pass'] for c in checks.values()), priority_score,
                  sum(c['required_matched'] for c in checks.values()),
                  sum(c['optional_matched'] for c in checks.values()),
                  -sum(c['deficit'] for c in checks.values()), -sum(c['moves'] for c in allocation.values()))
@@ -646,14 +665,14 @@ def render_allocation(calc, members, rows, units, tiers, mods, names, chosen, *,
 
 
 async def optimize(comlink, calc, plates, code, mods, guild_id, locked=(), force_refresh=False, *,
-                   units_override=None, relic_mode='current', thresholds=None, turn_order=(), deep_search=False):
+                   units_override=None, relic_mode='current', thresholds=None, turn_order=(), deep_search=False, project=None):
     members, rows, units, tiers = await prepare_inputs(
         comlink, plates, code, mods, guild_id, force_refresh, units_override=units_override,
-        relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order)
+        relic_mode=relic_mode, thresholds=thresholds, turn_order=turn_order, project=project)
 
     def run():
         names = {base_id: database.get_game_unit_name(base_id) for base_id in rows.keys() | units.keys()}
         return calculate(calc, members, rows, units, tiers, mods, names, locked=locked,
-                         relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search)
+                         relic_mode=relic_mode, turn_order=turn_order, deep_search=deep_search, character_priority=project is not None)
 
     return await asyncio.to_thread(run)
