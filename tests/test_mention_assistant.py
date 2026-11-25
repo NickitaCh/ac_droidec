@@ -202,6 +202,16 @@ class AssistantTests(unittest.TestCase):
         model.assert_not_called()
         self.assertFalse(a.injection_request("Как зарегистрироваться по коду союзника?"))
 
+    def test_guild_aphra_roast_has_no_invented_mechanics_or_model_cost(self):
+        with patch.object(a.openrouter_router, 'call_json') as model:
+            plan, _, _ = a.parse_plan('Афра достойна уважения? Подколи пожёстче', 'test', 'key', LIMITS)
+        model.assert_not_called()
+        self.assertIn('Афра — говно', plan['text'])
+        self.assertNotIn('ульта', plan['text'])
+        self.assertTrue(a.safe_answer(plan['text']))
+        with patch.object(a.unit_abilities, 'load', return_value={'units': {}}):
+            self.assertIsNone(a.local_plan('Афра говно, но какие модули ей нужны?'))
+
     def test_personal_status_does_not_invent_report_or_commands(self):
         with patch.object(a.openrouter_router, "call_json") as model:
             plan, _, _ = a.parse_plan("ПРивет! Какой статус у меня на ва?", "test", "key", LIMITS)

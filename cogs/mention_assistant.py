@@ -277,6 +277,11 @@ class MentionAssistantCog(commands.Cog):
         if not allowed:
             await self.reply(message, "Лимит помощника: не чаще раза в 30 секунд, до 10 обращений в день на человека и 25 на гильдию. Попробуйте позже.")
             return
+        if action is None and question:
+            refreshed = await assistant_context.refresh_event(message.author.id, access, self.profile, question, context)
+            if refreshed:
+                context = await asyncio.to_thread(assistant_context.build, access)
+                local = await asyncio.to_thread(assistant.local_plan, question, context=context, history=history)
         if not question or action == "help":
             await self.reply(message, assistant.HELP)
             return

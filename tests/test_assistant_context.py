@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, date
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import database
 from services import assistant_context as c, mention_assistant as a
@@ -90,6 +90,69 @@ class ContextTests(unittest.TestCase):
         plan = a.local_plan('а сколько осталось?', context=context, history=history)
         self.assertIn('1 ч 30 мин', plan['text'])
         self.assertIsNone(a.local_plan('А на каком ты этапе эволюции?))', context=context, history=history))
+
+    def test_tw_raid_context_and_history_are_distinct_and_bounded(self):
+        now = self.now('2026-11-25T19:30:00')
+        database.set_bot_state('live_game:tw:someone', json.dumps({'at': now.timestamp(), 'data': {
+            'round': 0, 'end': now.timestamp()+3600, 'opponent_guild': {'name': 'Соперник'},
+            'own': [{'capacity': 25, 'deployed': 20, 'teams': ['PRIVATE']}], 'opponent': []}}), guild_id=1)
+        database.set_bot_state('live_game:raid:someone', json.dumps({'at': now.timestamp(), 'data': {'active': [{
+            'id': 'order66', 'end': (now.timestamp()+7200)*1000, 'points': 123456,
+            'players': [{'id': 'PRIVATE', 'points': 123}]}]}}), guild_id=1)
+        database.save_raid_result(1, {'key': 'old', 'raid_id': 'order66', 'end_time': int(now.timestamp())-86400,
+                                     'guild_score': 900000}, [])
+        database.set_bot_state('tw_recent_opponents', json.dumps([{'name': 'Старый соперник', 'end': 123,
+                                                                  'score': 500, 'opponent_score': 400}]), guild_id=1)
+        with patch.object(database, 'get_guild_config', return_value={'name': 'АС'}):
+            context = c.build({'guild_id': 1}, now=now)
+            foreign = c.build({'guild_id': 2}, now=now)
+        self.assertEqual(context['tw']['phase'], 'расстановка защиты')
+        self.assertEqual(context['tw']['remaining_seconds'], 3600)
+        self.assertEqual(context['tw']['own']['deployed'], 20)
+        self.assertEqual(context['raid']['remaining_seconds'], 7200)
+        self.assertEqual(context['raid']['points'], 123456)
+        self.assertEqual(context['raid']['history'][0]['guild_score'], 900000)
+        self.assertNotIn('PRIVATE', json.dumps(context))
+        self.assertTrue(foreign['tw']['unavailable'])
+        for question, text in [('когда закончится рейд?', '2 ч 0 мин'),
+                               ('через сколько закончится расстановка ВГ?', '1 ч 0 мин')]:
+            self.assertIn(text, a.local_plan(question, context=context)['text'])
+        followup = [{'question': 'когда закончится рейд?', 'answer': 'Через два часа.'}]
+        self.assertIn('Рейд', a.local_plan('а сколько осталось?', context=context, history=followup)['text'])
+
+    def test_expired_event_is_not_presented_as_current_or_resurrected_from_history(self):
+        now = self.now('2026-11-25T19:30:00')
+        for kind, data in [('tw', {'round': 1, 'end': now.timestamp()-1}),
+                           ('raid', {'active': [{'id': 'order66', 'end': now.timestamp()-1}]})]:
+            database.set_bot_state('live_game:'+kind+':owner', json.dumps({'at': now.timestamp(), 'data': data}), guild_id=1)
+        with patch.object(database, 'get_guild_config', return_value={}):
+            context = c.build({'guild_id': 1}, now=now)
+        for kind in ('tw', 'raid'):
+            self.assertNotIn('ends_at', context[kind])
+        plan = a.local_plan('Когда закончится рейд?', context=context)
+        self.assertIn('нет', plan['text'])
+        self.assertNotIn('не идёт', plan['text'])
+
+
+class RefreshTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_event_reads_own_session_only_and_never_logs_in(self):
+        from services import game_account_readonly as reader, game_event_live
+        access = {'tier': 'officer', 'guild_id': 1, 'ally_code': '123456789'}
+        state = {'active': []}
+        with patch.object(reader, 'read', new_callable=AsyncMock, return_value=state) as read, patch.object(reader, 'login_for_events', new_callable=AsyncMock) as login, patch.object(game_event_live, 'save') as save:
+            self.assertTrue(await c.refresh_event('owner', access, 'test', 'Когда закончится рейд?', {}))
+            read.assert_awaited_once_with('owner', 1, 'test', 'officer', '123456789', event='raid')
+            self.assertEqual(save.call_args.args[0:3], (1, 'owner', 'raid'))
+            login.assert_not_called()
+            read.reset_mock()
+            self.assertFalse(await c.refresh_event('owner', access, 'test', 'Пошути про рейд', {}))
+            read.assert_not_called()
+
+    async def test_missing_connection_keeps_saved_facts_without_login_fallback(self):
+        from services import game_account_readonly as reader, game_account
+        with patch.object(reader, 'read', new_callable=AsyncMock, side_effect=game_account.ConnectionRequired('missing')), patch.object(reader, 'login_for_events', new_callable=AsyncMock) as login:
+            self.assertFalse(await c.refresh_event('owner', {'tier': 'officer', 'guild_id': 1, 'ally_code': '123456789'}, 'test', 'Сколько очков в рейде?', {}))
+            login.assert_not_called()
 
 
 if __name__ == '__main__':
