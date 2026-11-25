@@ -35,6 +35,8 @@
 <p>Заливка, взводы, каждый бой и ОЗ. Изменения отправляются в игру от вашего подключённого аккаунта и проверяются повторным чтением.</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <form method="post">{{ scope() }}<button class="btn" name="action" value="refresh">Обновить из игры</button></form>
+<details class="panel"><summary>Если игровая сессия завершилась</summary>
+<p>{{ login_warning }}</p><form method="post">{{ scope() }}<label class="checkbox"><input type="checkbox" name="confirm_login" required> Подтверждаю новый вход</label><button class="btn" name="action" value="reconnect">Войти в игру и обновить</button></form></details>
 {% if state %}
 <p>Этап {{ state.phase }} · аккаунт {{ code }}. Перед сохранением проверяем, что приказ и этап не изменились.</p>
 {% if stale %}<p class="error">Время этого этапа прошло. Обновите данные из игры.</p>{% endif %}

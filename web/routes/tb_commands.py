@@ -59,6 +59,7 @@ def render(request, user, error=None):
         'revision': cfg['revision'] if cfg else 0, 'log': log,
         'stale': bool(state and state['end_ms'] <= time.time() * 1000),
         'csrf': request.session['tb_commands_csrf'], 'error': error,
+        'login_warning': ga.LOGIN_WARNING,
         'watch': game_watch.get(user['guild_id'], str(user['discord_id']), 'tb'),
     }, headers={'Cache-Control': 'no-store'})
 
@@ -108,6 +109,12 @@ async def action(request: Request, user: dict = Depends(_access)):
         code = await asyncio.to_thread(_code, user)
         kind = form.get('action')
         if kind == 'refresh':
+            await orders.read(user, code)
+        elif kind == 'reconnect':
+            if form.get('confirm_login') != 'on':
+                raise ga.AccountError('Подтвердите новый вход в игру.')
+            await ga.reconnect(str(user['discord_id']), user['guild_id'], user['bot_profile'], user['tier'], code,
+                               optimizer_read=user['bot_profile'] == 'prod')
             await orders.read(user, code)
         elif kind == 'manual':
             await orders.change(user, code, str(form['event']), int(form['phase']), str(form['target']),

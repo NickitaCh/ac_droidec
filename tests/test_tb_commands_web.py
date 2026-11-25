@@ -55,6 +55,17 @@ class WebTests(unittest.TestCase):
             read.assert_not_awaited()
             change.assert_not_awaited()
 
+    def test_reconnect_requires_explicit_confirmation(self):
+        csrf = self.csrf()
+        with patch.object(ga, 'reconnect', AsyncMock()) as login, patch.object(orders, 'read', AsyncMock()) as read:
+            self.client.post('/tb/commands', data={'csrf': csrf, 'action': 'reconnect'})
+            login.assert_not_awaited()
+            read.assert_not_awaited()
+            response = self.client.post('/tb/commands', data={'csrf': csrf, 'action': 'reconnect', 'confirm_login': 'on'}, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            login.assert_awaited_once_with('owner', 1, 'test', 'officer', '123', optimizer_read=False)
+            read.assert_awaited_once()
+
     def test_rule_editor_roundtrips_conditions_and_stays_paused(self):
         csrf = self.csrf()
         key = next(iter(state()['zones']))
