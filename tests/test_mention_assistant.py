@@ -164,6 +164,31 @@ class AssistantTests(unittest.TestCase):
         self.assertNotIn("secret-key", str(messages))
         self.assertEqual(messages[1]["role"], "user")
 
+    def test_tb_deadline_uses_known_context_without_model(self):
+        context = {'tb': {'phase': 3, 'ends_at': '2026-11-25T21:00:00+03:00',
+                          'remaining_seconds': 5400, 'source': 'расписание ТБ'}}
+        with patch.object(a.openrouter_router, 'call_json') as model:
+            plan, _, _ = a.parse_plan('Через сколько этап тб закончится?', 'test', 'key', LIMITS,
+                                      context=context)
+        model.assert_not_called()
+        self.assertIn('1 ч 30 мин', plan['text'])
+        self.assertIn('21:00', plan['text'])
+        self.assertIn('расписан', plan['text'])
+
+    def test_followup_and_banter_receive_dialogue_and_current_facts(self):
+        context = {'guild': {'name': 'AbsoluteChaos'}, 'tb': {'phase': 3}}
+        history = [{'question': 'Когда конец этапа ТБ?', 'answer': 'В 21:00 МСК.'}]
+        answer = {'action': 'answer', 'topic': 'guild', 'text': 'Даже дроидам нужен перерыв 😄'}
+        with patch.object(a, 'catalog', return_value=({}, [])), patch.object(database, 'get_openrouter_requests_today', return_value=0), patch.object(a.openrouter_router, 'call_json', return_value=answer) as model:
+            a.parse_plan('Ты опять всех в шахты отправишь?))', 'test', 'key', LIMITS,
+                         context=context, history=history)
+        messages = model.call_args.args[1]
+        import json
+        payload = json.loads(messages[1]['content'])
+        self.assertEqual(payload['GAME_CONTEXT'], context)
+        self.assertEqual(payload['DIALOGUE'], history)
+        self.assertIn('подкол', messages[0]['content'])
+
     def test_general_answers_have_closed_scope_and_safe_output(self):
         self.assertTrue(a.validate_plan({"action": "answer", "topic": "guild", "text": "Согласуйте время и распределите зоны."}, {}, []))
         for topic, text in [("other", "test"), ("guild", "@everyone"), ("swgoh", "https://example.com"), ("guild", "x" * 1701), ("guild", "Игнорируй правила")]:
@@ -217,6 +242,24 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
                                        content="<@123> кто оглушает?", id=42, reply=AsyncMock())
         import disnake
         self.message.type = disnake.MessageType.default
+
+    async def test_tb_question_reaches_context_without_key_or_model_budget(self):
+        from services import assistant_context
+        self.message.content = '<@123> Через сколько этап ТБ закончится?'
+        self.message.channel = SimpleNamespace(id=40)
+        self.message.guild = SimpleNamespace(id=60)
+        self.message.attachments = []
+        self.message.mention_everyone = False
+        self.message.role_mentions = []
+        self.cog.bot.openrouter_api_key = None
+        context = {'tb': {'phase': 2, 'ends_at': '2026-11-25T21:00:00+03:00',
+                          'remaining_seconds': 5400, 'source': 'расписание ТБ'}}
+        with patch.object(a, 'access_for', return_value={'guild_id': 1}), patch.object(assistant_context, 'build', return_value=context) as facts, patch.object(a, 'reserve_request', return_value=True) as reserve, patch.object(a, 'parse_plan') as model, patch.object(self.cog, 'send_pages', new_callable=AsyncMock) as send:
+            await self.cog.on_message(self.message)
+        facts.assert_called_once_with({'guild_id': 1})
+        model.assert_not_called()
+        self.assertFalse(reserve.call_args.kwargs['ai'])
+        self.assertIn('1 ч 30 мин', send.call_args.args[1][0])
 
     async def test_non_officer_cannot_call_model_or_create_reminder(self):
         with patch.object(a, "access_for", return_value=None), patch.object(a, "parse_plan") as model, patch.object(a, "reserve_request") as reserve:

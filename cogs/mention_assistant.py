@@ -1,4 +1,4 @@
-"""Officer-only, explicitly mentioned assistant. No channel history is read."""
+"""Officer-only assistant with isolated direct dialogue; no channel history reads."""
 
 import asyncio
 import logging
@@ -8,7 +8,7 @@ import time
 import disnake
 from disnake.ext import commands, tasks
 
-from services import bot_profiles, mention_assistant as assistant, unit_abilities
+from services import assistant_context, bot_profiles, mention_assistant as assistant, unit_abilities
 
 log = logging.getLogger(__name__)
 NO_MENTIONS = disnake.AllowedMentions.none()
@@ -191,6 +191,18 @@ class MentionAssistantCog(commands.Cog):
         footer = assistant.usage_footer(snapshot)
         view = AnswerPages(message.author.id, access['guild_id'], pages, footer) if len(pages) > 1 else None
         await self.reply(message, None, embed=answer_embed(pages, 0, footer), view=view)
+        question = re.sub(r'<@!?' + str(self.bot.user.id) + r'>', '', message.content).strip()
+        if question and not assistant.injection_request(question):
+            self.dialogue().remember(self.dialogue_key(message, access), question, '\n\n'.join(pages))
+
+    def dialogue(self):
+        if not hasattr(self, '_dialogue'):
+            self._dialogue = assistant_context.Dialogue()
+        return self._dialogue
+
+    @staticmethod
+    def dialogue_key(message, access):
+        return (access['guild_id'], message.channel.id, message.author.id)
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -245,11 +257,14 @@ class MentionAssistantCog(commands.Cog):
                                                self.bot.AI_ASSISTANT_LIMITS, self.bot.openrouter_api_key)
             await self.reply(message, None, embed=disnake.Embed(description=assistant.render_usage(snapshot, self.bot.AI_ASSISTANT_LIMITS), color=0x5865F2))
             return
-        cache_key = question.casefold()
+        history = self.dialogue().get(self.dialogue_key(message, access))
+        context = await asyncio.to_thread(assistant_context.build, access) if action is None and question else {}
+        # A short follow-up can refer to different characters for different people.
+        cache_key = (question.casefold(), tuple(t['question'].casefold() for t in history))
         cached = self.reference_cache.get(cache_key)
         if cached and time.monotonic() - cached[0] > 300:
             cached = None
-        local = await asyncio.to_thread(assistant.local_plan, question) if question and action is None and not cached else None
+        local = await asyncio.to_thread(assistant.local_plan, question, context=context, history=history) if question and action is None and not cached else None
         needs_ai = bool(question) and action is None and cached is None and local is None
         if needs_ai and not self.bot.openrouter_api_key:
             await self.reply(message, "ИИ сейчас не настроен. " + assistant.HELP)
@@ -298,7 +313,8 @@ class MentionAssistantCog(commands.Cog):
                 async with self.ai_lock:
                     async with message.channel.typing():
                         plan, effects, docs = await asyncio.to_thread(assistant.parse_plan, question, self.profile,
-                                                                     self.bot.openrouter_api_key, self.bot.AI_ASSISTANT_LIMITS)
+                                                                     self.bot.openrouter_api_key, self.bot.AI_ASSISTANT_LIMITS,
+                                                                     context=context, history=history)
                 if plan["action"] in {"effect", "docs", "abilities"}:
                     if len(self.reference_cache) >= 128:
                         self.reference_cache.pop(next(iter(self.reference_cache)))
