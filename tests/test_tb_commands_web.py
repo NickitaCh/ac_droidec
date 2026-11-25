@@ -66,6 +66,15 @@ class WebTests(unittest.TestCase):
             login.assert_awaited_once_with('owner', 1, 'test', 'officer', '123', optimizer_read=False)
             read.assert_awaited_once()
 
+    def test_pause_does_not_require_a_working_game_session(self):
+        csrf = self.csrf()
+        orders.save_rules(self.user, '123', state(), [], True, 0)
+        with patch.object(orders, 'read', AsyncMock(side_effect=ga.SessionExpired('expired'))) as read:
+            response = self.client.post('/tb/commands', data={'csrf': csrf, 'action': 'pause', 'revision': '1'}, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            read.assert_not_awaited()
+        self.assertFalse(orders.config(1)['enabled'])
+
     def test_rule_editor_roundtrips_conditions_and_stays_paused(self):
         csrf = self.csrf()
         key = next(iter(state()['zones']))

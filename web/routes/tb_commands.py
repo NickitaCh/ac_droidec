@@ -120,6 +120,13 @@ async def action(request: Request, user: dict = Depends(_access)):
             await orders.change(user, code, str(form['event']), int(form['phase']), str(form['target']),
                                 int(form['command']), str(form.get('message', '')),
                                 [int(form['old_command']), str(form.get('old_message', ''))])
+        elif kind == 'pause':
+            # Stopping automation must work even when the game is unavailable.
+            async with orders.locked(user['guild_id']):
+                cfg = await asyncio.to_thread(orders.config, user['guild_id'])
+                if (cfg['revision'] if cfg else 0) != int(form['revision']):
+                    raise ga.AccountError('Правила уже изменились. Обновите страницу.')
+                await asyncio.to_thread(orders._pause, user['guild_id'], 'Пауза по команде офицера.')
         else:
             async with orders.locked(user['guild_id']):
                 state = await orders.read(user, code)
@@ -141,8 +148,6 @@ async def action(request: Request, user: dict = Depends(_access)):
                     rules = [r for r in rules if r['id'] != rule['id']] + [rule]
                 elif kind == 'delete':
                     rules = [r for r in rules if r['id'] != form.get('rule_id')]
-                elif kind == 'pause':
-                    enabled = False
                 elif kind == 'enable':
                     if not rules:
                         raise ga.AccountError('Добавьте правила.')
