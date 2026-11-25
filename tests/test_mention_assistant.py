@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import time
 import unittest
@@ -163,6 +164,23 @@ class AssistantTests(unittest.TestCase):
         self.assertNotIn("Как организовать подготовку к ВГ?", messages[0]["content"])
         self.assertNotIn("secret-key", str(messages))
         self.assertEqual(messages[1]["role"], "user")
+
+    def test_model_receives_localized_names_without_faction_members_or_raw_units(self):
+        categories = {'profession_scoundrel': {'name': 'Мерзавец', 'units': ['PRIVATE_ROSTER_SENTINEL']}}
+        data = {'units': {'DOCTORAPHRA': {'name': 'Доктор Афра', 'abilities': [], 'private': 'PRIVATE_UNIT_SENTINEL'}}}
+        with patch.object(a, 'catalog', return_value=({}, [])), \
+                patch.object(a.unit_abilities, 'load', return_value=data), \
+                patch.object(database, 'get_bot_state', return_value=json.dumps(categories)), \
+                patch.object(database, 'get_openrouter_requests_today', return_value=0), \
+                patch.object(a.openrouter_router, 'call_json', return_value={'action': 'help'}) as model:
+            a.parse_plan('Чем заменить Афру?', 'test', 'key', LIMITS)
+        payload = json.loads(model.call_args.args[1][1]['content'])
+        self.assertEqual(payload['GAME_TERMS'], {
+            'categories': {'profession_scoundrel': 'Мерзавец'},
+            'units': {'DOCTORAPHRA': 'Доктор Афра'},
+        })
+        self.assertNotIn('PRIVATE_ROSTER_SENTINEL', str(payload))
+        self.assertNotIn('PRIVATE_UNIT_SENTINEL', str(payload['GAME_TERMS']))
 
     def test_tb_deadline_uses_known_context_without_model(self):
         context = {'tb': {'phase': 3, 'ends_at': '2026-11-25T21:00:00+03:00',
