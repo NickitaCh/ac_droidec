@@ -233,6 +233,9 @@ class MentionAssistantCog(commands.Cog):
             await self.reply(message, str(exc))
             return
         action, value = assistant.local_action(question)
+        if action == 'social':
+            await self.reply(message, value)
+            return
         if action == 'usage':
             now = time.monotonic()
             if now - self.usage_checks.get(message.author.id, -10) < 5:

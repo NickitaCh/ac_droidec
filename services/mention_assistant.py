@@ -413,6 +413,24 @@ def finish_reminder(reminder_id, status):
 
 
 def local_action(question):
+    # Match the whole message, never a polite prefix before a real request.
+    # Resolve social replies before reserving quota or loading any AI catalogs.
+    words = re.sub(r"[^\w\s]", " ", question.casefold())
+    words = " ".join(words.split())
+    if '?' not in question:
+        tokens = set(words.split())
+        acknowledgements = {'ок', 'окей', 'okay', 'ok', 'понял', 'понятно', 'ясно',
+                            'принято', 'хорошо', 'ладно', 'отлично', 'супер', 'ага', 'угу'}
+        thanks = {'спасибо', 'спс', 'благодарю', 'thanks'}
+        if tokens & (thanks | acknowledgements) and tokens <= (
+                thanks | acknowledgements | {'большое', 'огромное', 'тебе', 'вам',
+                                             'очень', 'всё', 'все', 'да', 'и', 'бот', 'дроидец'}):
+            return 'social', 'Пожалуйста! 🙂' if tokens & thanks else '👍'
+        if words in {'привет', 'привет бот', 'привет дроидец', 'здравствуй', 'здравствуйте',
+                     'доброе утро', 'добрый день', 'добрый вечер', 'hello', 'hi'}:
+            return 'social', 'Привет! Чем помочь по SWGOH?'
+        if question.strip() and re.fullmatch(r'[\s👍👌🙏❤♥️🙂😊👋🏻🏼🏽🏾🏿!.,]+', question):
+            return 'social', '👍'
     text = question.strip().lower().rstrip(".!?")
     if text in {"помощь", "help", "что умеешь", "что ты умеешь"}:
         return "help", None

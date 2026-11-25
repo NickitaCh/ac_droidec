@@ -249,6 +249,32 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
         self.message.reply.assert_awaited_once()
         self.assertIn('Ваши обращения', self.message.reply.call_args.kwargs['embed'].description)
 
+    async def test_social_messages_do_not_use_ai_or_any_request_quota(self):
+        self.message.channel = SimpleNamespace(id=40)
+        self.message.guild = SimpleNamespace(id=60)
+        self.message.attachments = []
+        self.message.mention_everyone = False
+        self.message.role_mentions = []
+        for text in ('спасибо', 'Спасибо большое! ❤️', 'Ок, понял, спасибо 👍',
+                     'благодарю!', 'Привет 👋', 'добрый вечер', 'ясно', '👍'):
+            with self.subTest(text=text):
+                self.message.content = '<@123> ' + text
+                self.message.reply.reset_mock()
+                with patch.object(a, 'access_for', return_value={'guild_id': 1}), patch.object(a, 'reserve_request') as reserve, patch.object(a, 'parse_plan') as model, patch.object(a, 'local_plan') as local, patch.object(a, 'usage_snapshot') as usage:
+                    await self.cog.on_message(self.message)
+                reserve.assert_not_called()
+                model.assert_not_called()
+                local.assert_not_called()
+                usage.assert_not_called()
+                self.message.reply.assert_awaited_once()
+
+    def test_social_prefix_does_not_hide_a_question_or_reminder(self):
+        for text in ('Спасибо, а кого качать?', 'Привет, кто оглушает?',
+                     'Ок, напомни завтра в 20:00 зайти на ВГ', 'спасибо за помощь с р10',
+                     'понял?', 'а Р10?', 'кто лучше?', 'спасибо https://example.com'):
+            with self.subTest(text=text):
+                self.assertNotEqual(a.local_action(text)[0], 'social')
+
     async def test_pages_can_be_navigated_without_another_model_call(self):
         from cogs.mention_assistant import AnswerPages
         view = AnswerPages(456,1,['first','second'],'quota')
