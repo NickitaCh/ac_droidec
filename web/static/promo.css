@@ -9,3 +9,66 @@
 .chat{--text:#edf2f7;--muted:#b4bfca;--line:#ffffff1a;--lime:#8ccdb6;--green:#9ed8ba;--amber:#efca8b;color:var(--text);box-shadow:0 16px 45px #28465e12}.chat .avatar.bot{background:#8ccdb6;color:#173b31}.chat .reply h3{color:inherit}.chat .chat-caption{color:#bcc6cf}.chat .mock-buttons:empty{display:none}.chat.telegram{--text:#1e394b;--muted:#5b7282;--line:#1e394b20;--lime:#488ca6;--green:#23755c;--amber:#926126;background:#e7f0f4;color:var(--text)}.telegram .chat-header{background:#fff;border-color:#1e394b15}.telegram .reply{background:#fff;border:0;box-shadow:0 2px 5px #1930440c}.telegram .reply p{color:#476172}.telegram .reply-row{border-color:#1e394b12}.telegram .reply .reply-foot{color:#5b7282}.telegram .chat-caption{color:#5b7282;border-color:#1e394b15}.telegram .command{background:#fff;color:#216487}.telegram .avatar{background:#95bed3;color:#133a50}.telegram .bot-badge{background:#2a8db7}.bot-image{width:100%;height:auto;border-radius:5px;margin:8px 0;cursor:zoom-in}.image-link{display:block}.image-caption{font-size:10px;line-height:1.5;color:var(--muted)}.reply .plain-lines{line-height:1.8}.mini-report .mini-icon{color:#227ea5}.mini-report .sample{color:#5d7283}.portrait-main span{color:white}.final-cta .eyebrow{color:#286c8d}.hero-art .status-dot{background:#227ea5}.orbit{border-color:#6498b136}.guild-grid .feature-tag{color:#286c8d}
 
 .bot-image{max-height:355px;object-fit:contain;background:#15171c}.plain-lines{overflow-wrap:anywhere}.chat .reply>.image-link{margin:-2px}.chat .reply:has(.bot-image){background:transparent;border:0;padding:0}.chat .reply:has(.bot-image) h3{font-size:13px}.mini-report{color:#193044}.strip-star{color:#3b86a7}.steps li>span{color:#227ea5}.chat .reply .plain-lines b{font-weight:650}.chat.telegram .image-caption{color:#536d7d}
+
+/* Messenger-specific layouts: Discord application response and Telegram private chat. */
+.brand img{border-radius:50%}
+.scenario>span:last-child{margin-left:0;color:inherit}
+.scenario span:has(strong){flex:1}
+.guild-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.chat{border-radius:9px;min-height:0;overflow:hidden;font-family:"Segoe UI",Arial,sans-serif}
+.chat .chat-header{height:60px;padding:12px 18px;gap:10px;display:flex;align-items:center}
+.chat .chat-header strong{font-size:15px;font-weight:650}
+.chat .chat-content{padding:0;min-height:350px}
+.chat.discord{background:#313338;border:1px solid #202225;color:#dbdee1;--muted:#949ba4}
+.discord .chat-header{background:#313338;border:0;box-shadow:0 1px 0 #1e1f22;color:#f2f3f5}
+.dc-hash{font-size:27px;font-weight:400;color:#949ba4;line-height:1}
+.dc-header-icons{margin-left:auto;color:#b5bac1;font-size:21px}
+.dc-invocation{display:flex;align-items:center;gap:7px;padding:20px 20px 0 72px;font-size:11px;line-height:1.7;color:#b5bac1}
+.dc-invocation-avatar{width:16px;height:16px;flex:none;background:#5865f2;border-radius:50%;display:grid;place-items:center;font-size:9px;color:white}
+.dc-invocation .command{display:inline;background:#5865f226;color:#c9cdfb;border-radius:3px;padding:2px 4px;font-family:inherit;font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+.dc-message{display:flex;gap:12px;padding:10px 18px 22px}
+.dc-avatar{width:40px;height:40px;flex:none;padding-top:2px}
+.dc-avatar img{border-radius:50%}
+.dc-message-main{flex:1;min-width:0}
+.dc-author{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:14px;line-height:1.6;font-weight:600;color:#f2f3f5;margin-bottom:6px}
+.dc-app{font-size:8px;line-height:1.5;padding:1px 4px;border-radius:3px;background:#5865f2;color:white;font-weight:500;letter-spacing:.1px}
+.dc-author time{font-size:10px;font-weight:400;color:#949ba4;margin-left:2px}
+.dc-response{font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.dc-response .plain-lines{line-height:1.65}
+.dc-response h3,.tg-incoming h3{font-size:14px;font-weight:650;letter-spacing:0;line-height:1.45;margin:0 0 10px}
+.dc-embed{background:#2b2d31;border-left:4px solid #5865f2;border-radius:4px;padding:14px 14px 12px}
+.dc-components{background:#2b2d31;border:1px solid #1e1f22;border-radius:8px;padding:16px}
+.dc-select{display:flex;justify-content:space-between;gap:15px;background:#1e1f22;border:1px solid #111214;border-radius:4px;margin-top:16px;padding:9px 12px;color:#b5bac1;font-size:12px}
+.dc-attachment .bot-image{margin:0;max-height:395px;object-fit:contain;object-position:left top;border-radius:7px;background:transparent}
+.dc-attachment .image-link{width:fit-content;max-width:100%}
+.chat-compose{display:flex;align-items:center;gap:12px;font-size:12px;line-height:1.4}
+.discord .chat-compose{margin:0 16px 18px;background:#383a40;color:#949ba4;padding:12px 15px;border-radius:8px}
+.dc-plus{display:grid;place-items:center;background:#b5bac1;color:#383a40;border-radius:50%;width:18px;height:18px;font-weight:700;font-size:17px;line-height:1;flex:none}
+.compose-end{margin-left:auto;font-size:20px;white-space:nowrap}
+.chat.telegram{background:#dce6d5;border:1px solid #c1cbd3;color:#111;--muted:#708499}
+.telegram .chat-header{background:#fff;border-bottom:1px solid #d9dfe3;box-shadow:none}
+.tg-header-avatar{width:38px;height:38px;flex:none}
+.tg-header-avatar img{width:100%;height:100%;border-radius:50%}
+.tg-back{font-size:34px;color:#6b7f90;font-weight:300;margin-right:5px;line-height:1}
+.chat.telegram .chat-header strong{font-size:14px;color:#111}
+.chat.telegram .chat-header small{font-size:12px;color:#708499;line-height:1.2}
+.tg-menu{margin-left:auto;color:#728596;font-size:24px}
+.telegram .chat-content{padding:16px 24px 20px;display:flex;flex-direction:column;align-items:flex-start;gap:14px;background:radial-gradient(ellipse at 10% 20%,#cdddc66b,transparent 55%),#dce6d5}
+.tg-day{align-self:center;background:#99aa9388;color:white;border-radius:12px;font-size:10px;line-height:1.3;padding:4px 10px;margin-bottom:3px}
+.tg-outgoing{align-self:flex-end;max-width:92%;padding:9px 11px 6px;background:#effdde;color:#111;box-shadow:0 1px 1px #0002;border-radius:10px 10px 2px 10px;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.tg-outgoing .command{display:inline;background:none;color:#111;border-radius:0;padding:0;font:inherit}
+.tg-stamp{display:block;font-size:9px;line-height:1.4;color:#7f9e6a;text-align:right;padding-top:4px;white-space:nowrap}
+.tg-stamp>span{font-size:11px;letter-spacing:-3px;padding-right:3px}
+.tg-incoming{background:white;color:#111;box-shadow:0 1px 1px #0002;padding:11px 12px 5px;max-width:97%;border-radius:10px 10px 10px 2px;font-size:12px;line-height:1.6;min-width:0}
+.tg-incoming .plain-lines{line-height:1.7}
+.tg-incoming .tg-stamp{color:#8b9aa5}
+.tg-incoming.tg-photo{padding:3px 3px 4px;background:white}
+.tg-photo .bot-image{border-radius:8px 8px 2px 2px;margin:0;max-height:395px;object-fit:contain;background:#15171c}
+.tg-photo>.tg-stamp{padding-right:7px}
+.telegram .chat-compose{background:white;color:#97a3ad;padding:11px 16px;border-top:1px solid #d9dfe3}
+.tg-clip{font-size:24px;color:#8292a1;transform:rotate(-30deg);line-height:1}
+.chat-area>.chat-caption{font-size:10px;line-height:1.7;color:#617789;padding:0;border:0;margin:12px 0 0}
+@media(max-width:1000px){.guild-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dc-invocation{padding-left:58px}.dc-message{gap:9px;padding-inline:12px}.dc-avatar{width:36px;height:36px}.dc-author time{font-size:9px}}
+@media(max-width:760px){.guild-grid{grid-template-columns:1fr}.chat .chat-header{height:57px;padding:10px 13px}.chat .chat-content{min-height:310px}.dc-invocation{padding-left:57px;padding-right:12px;font-size:10px}.dc-invocation .command{font-size:10px}.dc-response{font-size:11px}.dc-components{padding:12px}.dc-embed{padding:12px}.dc-author{font-size:13px}.dc-author time{font-size:9px}.dc-app{font-size:7px}.dc-attachment .bot-image,.tg-photo .bot-image{max-height:350px}.telegram .chat-content{padding:13px 12px 16px}.tg-incoming{font-size:11px;max-width:100%}.tg-outgoing{font-size:12px;max-width:95%}.chat-compose{font-size:10px}.discord .chat-compose{padding:10px;margin:0 12px 12px}.dc-header-icons{font-size:19px}.scenario small{line-height:1.5}.scenario>span:last-child{display:block}}
+
+.tg-clip{transform:none;display:flex}.chat-compose svg{width:21px;height:21px;vertical-align:middle}.telegram .compose-end{display:flex;gap:13px;align-items:center}.tg-header-avatar img{object-fit:cover}

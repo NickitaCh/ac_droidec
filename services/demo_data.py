@@ -29,6 +29,15 @@ REF_TABLES = (
     "unit_gear_tier_recipe", "unit_omicron_skills", "datacron_ability_shorts",
 )
 
+# Only shared game catalogues; account sessions, billing and operator state stay out.
+REF_STATE_KEYS = frozenset({
+    "unit_factions", "unit_alignments", "unit_selftags", "galactic_legends",
+    "raid_names", "raid_entry_units", "raid_entry_units_order", "conquest_current",
+    "tb_zone_data", "tb_strike_missions", "tb_strike_zones", "tb_covert_missions",
+    "arena_scoring_definitions", "shared_datacron_catalog_v3", "datacron_shorts_version",
+    "inventory_gear_crafting", "mod_grade_reference",
+})
+
 NAMES = [
     "Звёздный Лис", "Kessel Runner", "Мастер Йогурт", "DarkBantha", "Тихий Дроид", "Nova Ray",
     "Банта Мирная", "Lord Pudge", "Ворчун", "Sky Walkman", "Капитан Рекс-2", "Мандо Сибирь",
@@ -148,7 +157,7 @@ def build(src_path: str, dst_path: str, seed: int | None = None) -> dict:
         dst.executemany(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", rows)
     dst.executemany("INSERT INTO bot_state (guild_id, key, value) VALUES (?, ?, ?)", [
         r for r in src.execute("SELECT guild_id, key, value FROM bot_state WHERE guild_id = 0")
-        if not r[1].startswith("openrouter")
+        if r[1] in REF_STATE_KEYS
     ])
 
     unit_types = dict(src.execute("SELECT base_id, unit_type FROM game_units"))
@@ -217,22 +226,20 @@ def build(src_path: str, dst_path: str, seed: int | None = None) -> dict:
 
     # ---- гильдия ----
     cols = [r[1] for r in src.execute("PRAGMA table_info(guilds)")]
-    row = dict(zip(cols, src.execute("SELECT * FROM guilds WHERE id = 1").fetchone()))
-    for k in list(row):
-        if k.endswith("_channel_id") or k.endswith("_role_id"):
-            row[k] = None
-    row.update({
+    row = {
         "id": DEMO_GUILD_ID, "name": "Звёздный патруль", "ally_code": members[0]["code"],
         "swgoh_guild_id": "demo-guild", "swgoh_gg_guild_id": None, "discord_guild_id": "900000000000000001",
         "is_active": 1, "created_at": _utc(now - timedelta(days=120)), "tb_active_plan_id": None,
         "subscription_expires_at": None, "subscription_source": None, "payment_customer_id": None,
         "antispam_alert_message": None,
-    })
+        "bot_profile": "prod",
+    }
+    row = {key: value for key, value in row.items() if key in cols}
     for k, (cid, _) in CHANNELS.items():
-        if k in row:
+        if k in cols:
             row[k] = cid
     for k, rid in ROLES.items():
-        if k in row:
+        if k in cols:
             row[k] = rid
     dst.execute(f"INSERT INTO guilds ({','.join(row)}) VALUES ({','.join('?' * len(row))})", list(row.values()))
     dst.executemany(
@@ -449,12 +456,123 @@ def build(src_path: str, dst_path: str, seed: int | None = None) -> dict:
     dst.executemany("INSERT INTO guild_omicron_priority (guild_id, skill_id, priority) VALUES (?, ?, ?)",
                     [(DEMO_GUILD_ID, s, i + 1) for i, s in enumerate(omis)])
 
+    _current_sections(src, dst, rng, now, members, rosters, pool)
     dst.commit()
     dst.execute("VACUUM")
     dst.close()
     src.close()
     os.replace(tmp, dst_path)
     return {"players": len(players), "events": len(events), "tasks": len(tasks), "warns": len(warns)}
+
+
+def _demo_profiles(dst, now, members):
+    import database
+    database._ensure_player_profile_cache_table(dst.cursor())
+    weight = sum(p["strength"] for p in members)
+    for player in members:
+        gp = int(585_000_000 * player["strength"] / weight)
+        profile = {"name": player["name"], "ally_code": player["code"],
+                   "stats": {"STAT_GALACTIC_POWER_ACQUIRED_NAME": gp}}
+        dst.execute("INSERT OR REPLACE INTO player_profile_cache VALUES (?, ?, ?)",
+                    (player["code"], json.dumps(profile), _utc(now)))
+
+
+def _current_sections(src, dst, rng, now, members, rosters, pool):
+    """Current public workflows, populated only with invented demo identities."""
+    import database
+    from services import guild_snapshot, tb_order_image, tb_order_store, tb_plan
+    from services.tb_projection import BRANCHES
+
+    author = members[0]["discord_id"]
+    stamp = _utc(now)
+    _demo_profiles(dst, now, members)
+
+    database._ensure_raid_results_tables(dst.cursor())
+    latest = src.execute("SELECT raid_id, difficulty FROM raid_results ORDER BY end_time DESC LIMIT 1").fetchone()
+    if latest:
+        raid_id, difficulty = latest
+        for index in range(8):
+            end = int((now - timedelta(days=2 + 5 * index)).timestamp())
+            key = f"demo-raid-{index}"
+            scores = sorted([(p, int(rng.uniform(0.7, 1.3) * p["strength"] * 3_000_000))
+                             for p in members], key=lambda item: -item[1])
+            dst.execute("INSERT INTO raid_results VALUES (?, ?, ?, ?, ?, ?)",
+                        (DEMO_GUILD_ID, key, raid_id, difficulty, end, sum(score for _, score in scores)))
+            dst.executemany("INSERT INTO raid_member_scores VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            [(DEMO_GUILD_ID, key, p["pid"], p["code"], p["name"], score, rank)
+                             for rank, (p, score) in enumerate(scores, 1)])
+
+    database._ensure_tw_def_tables(dst.cursor())
+    plan_id = dst.execute("""INSERT INTO tw_def_plans
+        (guild_id, name, squads_per_zone, fleets_per_zone, note, created_by, created_at, updated_at)
+        VALUES (?, ?, 18, 18, ?, ?, ?, ?)""",
+        (DEMO_GUILD_ID, "Защита против «Галактических блинов»", "Демонстрационный план защиты.",
+         author, stamp, stamp)).lastrowid
+    squads = [
+        ("Империя", "1t", ["EMPERORPALPATINE", "MARAJADE", "VADER", "GRANDADMIRALTHRAWN", "ROYALGUARD"]),
+        ("Джедаи Ревана", "1b", ["JEDIKNIGHTREVAN", "BASTILASHAN", "JOLEEBINDO", "GRANDMASTERYODA", "GENERALHERMITSYODA"]),
+        ("Геонозийцы", "2b", ["GEONOSIANBROODALPHA", "GEONOSIANSPY", "GEONOSIANSOLDIER", "SUNFAC", "POGGLETHELESSER"]),
+    ]
+    used = {p["code"]: set() for p in members}
+    for name, zone, units in squads:
+        if not all(unit in pool for unit in units):
+            continue
+        slots = [{"options": [{"base_id": unit, "min_stars": 7, "min_relic": 3}]} for unit in units]
+        squad_id = dst.execute("""INSERT INTO tw_def_squads
+            (guild_id, name, combat_type, slots_json, note, created_by, updated_by, updated_at)
+            VALUES (?, ?, 'character', ?, ?, ?, ?, ?)""",
+            (DEMO_GUILD_ID, name, json.dumps(slots), "Пример требований к отряду", author, author, stamp)).lastrowid
+        assigned = 0
+        for player in members:
+            roster = rosters[player["code"]]
+            if used[player["code"]].intersection(units):
+                continue
+            if not all(unit in roster and roster[unit].get("currentRarity", 0) >= 7
+                       and (roster[unit].get("relic") or {}).get("currentTier", 0) >= 5 for unit in units):
+                continue
+            dst.execute("""INSERT INTO tw_def_assignments
+                (guild_id, plan_id, zone, squad_id, squad_name, ally_code, units_json, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (DEMO_GUILD_ID, plan_id, zone, squad_id, name, player["code"], json.dumps(units), author, stamp))
+            used[player["code"]].update(units)
+            assigned += 1
+            if assigned == 8:
+                break
+
+    # A complete six-phase plan and its order, without Discord thread IDs.
+    database._ensure_tb_saved_plans_table(dst.cursor())
+    tb_plan._ensure(dst.cursor())
+    tb_order_store._ensure(dst.cursor())
+    rounds = [{"round": phase, "bonus": [], **{
+        side: {"planet": branch[phase - 1], "stars": 2, "preload": None, "no_platoons": False}
+        for side, branch in BRANCHES.items()}} for phase in range(1, 7)]
+    blocks, stars = tb_order_image.build_order_blocks({"rounds": rounds})
+    order_id = dst.execute("""INSERT INTO tb_saved_plans
+        (guild_id, name, thread_id, total_stars, created_by, created_at) VALUES (?, ?, '', ?, ?, ?)""",
+        (DEMO_GUILD_ID, "План ТБ · Звёздный патруль", stars, author, stamp)).lastrowid
+    choices = {str(row["round"]): {row[side]["planet"]: 2 for side in BRANCHES} for row in rounds}
+    dst.execute("""INSERT INTO tb_calc_plans (guild_id, name, data_json, stars, order_plan_id, created_by)
+        VALUES (?, ?, ?, ?, ?, ?)""", (DEMO_GUILD_ID, "План ТБ · Звёздный патруль",
+        json.dumps({"choices": choices, "bonus": [], "deploy_pct": 95}), stars, order_id, author))
+    dst.executemany("""INSERT INTO tb_order_phases
+        (order_id, phase, text, source, updated_by, updated_at) VALUES (?, ?, ?, 'generated', ?, ?)""",
+        [(order_id, phase, text, author, now.timestamp()) for phase, text in enumerate(blocks, 1)])
+    dst.execute("UPDATE guilds SET tb_active_plan_id=? WHERE id=?", (order_id, DEMO_GUILD_ID))
+
+    guild_snapshot._ensure_table(dst.cursor())
+    units = [unit for p in members for unit in rosters[p["code"]].values()]
+    metrics = {"gp": 585_000_000, "members": len(members),
+               "g13": sum(u.get("currentTier", 0) == 13 for u in units),
+               "relic_levels": sum(max(0, (u.get("relic") or {}).get("currentTier", 0) - 2) for u in units),
+               "r9_plus": sum((u.get("relic") or {}).get("currentTier", 0) >= 11 for u in units),
+               "gls": 260, "zetas": 6150, "omicrons": 820, "six_dot": 23500,
+               "speed20": 10500, "modq": 5.8, "dc_l9": 280}
+    for ago in (14, 7, 0):
+        values = {key: (value if key == "members" else round(value * (1 - ago * .0015), 2)
+                       if key == "modq" else int(value * (1 - ago * .0015))) for key, value in metrics.items()}
+        day = (now + timedelta(hours=3) - timedelta(days=ago)).date().isoformat()
+        dst.execute("INSERT INTO guild_daily_snapshots VALUES (?, ?, ?, ?)",
+                    (DEMO_GUILD_ID, day, json.dumps(values), stamp))
 
 
 def _demo_plates(dst, rng, now, author, pool):

@@ -41,7 +41,7 @@ async def raid_plan_page(request: Request, account: str = "", user: dict = Depen
     return templates.TemplateResponse(request, "raid_plan.html", {
         "user": user, "accounts": accounts, "selected": selected, "roster": roster,
         "plan": plan, "catalog": catalog, "names": names, "millions": rs.millions,
-        "source": raid_planner.SOURCE,
+        "source": raid_planner.SOURCE, "turn_order": raid_planner.turn_order,
     }, status_code=503 if units and catalog is None else 200)
 
 

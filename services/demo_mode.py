@@ -22,7 +22,7 @@ from pathlib import Path
 
 DEMO_GUILD_ID = 900
 DEMO_DB_NAME = "demo.db"
-DEMO_DISCORD_ID = "900000000000000001"
+DEMO_DISCORD_ID = "900000000000001000"  # first (leader) account in demo_data.build
 
 _active: contextvars.ContextVar[bool] = contextvars.ContextVar("demo_active", default=False)
 _installed = False
@@ -59,14 +59,19 @@ class _DbPath(os.PathLike):
 
 def demo_user() -> dict:
     from services import bot_profiles
+    from services import game_account
+    accounts = game_account.personal_accounts(DEMO_DISCORD_ID, DEMO_GUILD_ID)
     return {
-        "bot_profile": bot_profiles.public_profile(),
+        "bot_profile": "prod",
+        "prod_disabled_features": bot_profiles.PROD_DISABLED,
         "discord_id": DEMO_DISCORD_ID,
         "username": "Гость (демо)",
         "guild_id": DEMO_GUILD_ID,
         "tier": "officer",
         "is_super_admin": False,
         "is_demo": True,
+        "game_accounts": accounts,
+        "active_ally_code": next(iter(accounts), None),
     }
 
 

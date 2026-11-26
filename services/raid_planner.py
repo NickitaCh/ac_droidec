@@ -39,6 +39,21 @@ def load_catalog():
         return _catalog
 
 
+def turn_order(run, catalog):
+    """A catalogue may provide several turn orders for different tiers/lineups."""
+    variants = catalog.get("turn_order", {}).get(run["id"], [])
+    if isinstance(variants, dict):
+        variants = [variants]
+    for variant in variants:
+        tiers = variant.get("tiers")
+        if tiers and not tiers[0] <= run["tier"] <= tiers[1]:
+            continue
+        if not set(variant.get("only") or []).issubset(run["units"]):
+            continue
+        return [unit for unit in variant.get("units", []) if unit in run["units"]]
+    return []
+
+
 def comlink_roster(units):
     return {
         base_id: {

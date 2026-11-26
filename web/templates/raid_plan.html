@@ -104,7 +104,7 @@
             {% for id in run.blockers %}{{ names.get(id) or catalog.names.get(id, id) }}{{ ", " if not loop.last }}{% endfor %}.
         </p>
         {% endif %}
-        {% set order = catalog.get("turn_order", {}).get(run.id, {}).get("units", []) %}
+        {% set order = turn_order(run, catalog) %}
         {% if order %}
         <p>Порядок ходов по каталогу:
             {% for id in order if id in run.units %}{{ names.get(id) or catalog.names.get(id, id) }}{{ " → " if not loop.last }}{% endfor %}.
