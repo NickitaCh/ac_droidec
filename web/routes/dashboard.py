@@ -152,6 +152,12 @@ async def start_guide(request: Request, user: dict | None = Depends(get_current_
     return templates.TemplateResponse(request, "start.html", {"user": user})
 
 
+@router.get("/promo", response_class=HTMLResponse)
+async def promo(request: Request):
+    # Public presentation: no user or guild data, same page for every visitor.
+    return templates.TemplateResponse(request, "promo.html", {})
+
+
 @router.get("/commands", response_class=HTMLResponse)
 async def command_docs(request: Request, user: dict | None = Depends(get_current_user_optional)):
     # ВАЖНО: не "/docs" — этот путь занят встроенным Swagger UI FastAPI

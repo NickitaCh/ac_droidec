@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Дроидец — ваша гильдия, один помощник</title>
+  <meta name="description" content="Помощник для гильдий Star Wars: Galaxy of Heroes. Примеры команд в Discord и Telegram, подготовка к ТБ, задачи, модули и датакроны. Откройте демо без регистрации.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Дроидец — ваша гильдия, один помощник">
+  <meta property="og:description" content="Посмотрите, как работают команды в Discord и Telegram. Попробуйте сайт на демонстрационной гильдии — без регистрации.">
+  <meta property="og:url" content="{{ request.url.replace(query='') }}">
+  <meta property="og:image" content="{{ request.url_for('static', path='img/promo-cover.png') }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#f5f8fb">
+  <link rel="icon" href="/static/favicons/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/promo.css?v=1">
+  <script src="/static/promo.js?v=1" defer></script>
+</head>
+<body>
+  <header class="header wrap">
+    <a class="brand" href="/promo" aria-label="Дроидец — начало страницы"><img src="/static/favicons/favicon.svg" alt="" width="36" height="36">Дроидец<span>SWGOH</span></a>
+    <nav aria-label="Навигация"><a href="#examples">Примеры команд</a><a href="#guild">Для гильдии</a><a class="button small" href="/demo">Открыть демо <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main>
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot"></span> DISCORD · TELEGRAM · САЙТ</p>
+        <h1>Меньше рутины.<br>Больше <em>готовых<br class="desktop-break"> отрядов.</em></h1>
+        <p class="lead">Дроидец помогает вашей гильдии в Star Wars: Galaxy of Heroes: следит за прокачкой, проверяет требования и собирает подготовку к ТБ в одном месте.</p>
+        <div class="actions"><a class="button primary" href="/demo">Посмотреть демо <span aria-hidden="true">↗</span></a><a class="text-link" href="#examples">Как это работает <span aria-hidden="true">↓</span></a></div>
+        <p class="fine">Без регистрации · Вымышленная гильдия · Только просмотр</p>
+      </div>
+      <div class="hero-art" aria-label="Иллюстрация проверки готовности отряда">
+        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+        <div class="art-label"><span class="status-dot"></span> ПОДГОТОВКА ОТРЯДА</div>
+        <div class="portrait portrait-main"><img src="/static/img/game/portraits/jedirevan.webp" alt="Реван-джедай" width="240" height="240"><span>Реван-джедай</span></div>
+        <div class="portrait portrait-left"><img src="/static/img/game/portraits/luke_jml.webp" alt="Джедай-мастер Люк Скайуокер" width="128" height="128"></div>
+        <div class="portrait portrait-right"><img src="/static/img/game/portraits/ahsoka.webp" alt="Асока Тано" width="128" height="128"></div>
+        <div class="mini-report"><div class="mini-top"><span class="mini-icon">✓</span><strong>Проверка по плейту</strong><span class="sample">ПРИМЕР</span></div><div class="mini-row"><span>Скорость</span><b>312 <span class="muted">/ 300</span></b><span class="ok">✓</span></div><div class="mini-row"><span>Здоровье</span><b>68 400 <span class="muted">/ 70 000</span></b><span class="amber">−1 600</span></div><p>Сразу видно, что ещё подтянуть.</p></div>
+      </div>
+    </section>
+    <div class="strip"><div class="wrap strip-inner"><span>Игроку — понятная цель</span><span class="strip-star">✦</span><span>Офицеру — общая картина</span><span class="strip-star">✦</span><span>Гильдии — меньше ручных проверок</span></div></div>
+    <section id="examples" class="examples wrap section">
+      <div class="section-heading"><div><p class="eyebrow">НЕ ТОЛЬКО СПИСОК КОМАНД</p><h2>Спросили в чате.<br>Увидели результат.</h2></div><p>Выберите задачу и мессенджер.<br>Так проще понять, чем поможет бот.</p></div>
+      <div class="showcase">
+        <div class="scenarios" role="group" aria-label="Выберите пример команды">
+          <button type="button" class="scenario active" data-example="ready" aria-pressed="true"><span class="scenario-num">01</span><span><strong>Готовность к цели</strong><small>Кого осталось докачать</small></span><span aria-hidden="true">↗</span></button>
+          <button type="button" class="scenario" data-example="unit" aria-pressed="false"><span class="scenario-num">02</span><span><strong>Карточка персонажа</strong><small>Статы, модули и способности</small></span><span aria-hidden="true">↗</span></button>
+          <button type="button" class="scenario" data-example="stats" aria-pressed="false"><span class="scenario-num">03</span><span><strong>Проверка по плейту</strong><small>Что не дотягивает до нормы</small></span><span aria-hidden="true">↗</span></button>
+          <button type="button" class="scenario" data-example="dc" aria-pressed="false"><span class="scenario-num">04</span><span><strong>Нужные датакроны</strong><small>Сверка с требованиями гильдии</small></span><span aria-hidden="true">↗</span></button>
+          <button type="button" class="scenario" data-example="tasks" aria-pressed="false"><span class="scenario-num">05</span><span><strong>Задачи на прокачку</strong><small>Цели и текущий прогресс</small></span><span aria-hidden="true">↗</span></button>
+        </div>
+        <div class="chat-area">
+          <div class="platforms" role="group" aria-label="Мессенджер"><button type="button" data-platform="discord" class="selected" aria-pressed="true">Discord</button><button type="button" data-platform="telegram" aria-pressed="false">Telegram</button></div>
+          <div class="chat discord" id="chat"><div class="chat-header"><span id="chat-symbol" aria-hidden="true">#</span><div><strong id="chat-title">помощник-гильдии</strong><small id="chat-subtitle">Пример команды в Discord</small></div><span class="sample">ДЕМОНСТРАЦИЯ</span></div>
+            <div class="chat-content" id="example-content" aria-live="polite" aria-atomic="true"></div>
+            <div class="chat-caption">Настоящие команды и форматы отчётов. Данные взяты из демонстрационной гильдии.</div>
+          </div>
+          <p class="access-note" id="access-note"></p>
+          <noscript><p>Примеры команд: Discord — <code>/готовность цель: Лорд Вейдер</code>, <code>/юнит юнит: Дарт Вейдер</code>, <code>/задачи отчёт</code>. Telegram — <code>/ready Лорд Вейдер</code>, <code>/unit Дарт Вейдер</code>, <code>/tasks</code>. <a href="/commands">Открыть справочник команд</a>.</p></noscript>
+        </div>
+      </div>
+    </section>
+    <section class="guild-section" id="guild"><div class="wrap section">
+      <div class="section-heading"><div><p class="eyebrow">ЧАТ ДЛЯ БЫСТРОГО ОТВЕТА. САЙТ ДЛЯ ОБЩЕЙ КАРТИНЫ.</p><h2>Управлять гильдией —<br>из одного места.</h2></div><a class="text-link" href="/demo">Посмотреть сайт <span aria-hidden="true">↗</span></a></div>
+      <div class="guild-grid"><article class="guild-main"><span class="feature-tag">ТЕРРИТОРИАЛЬНЫЕ БИТВЫ</span><h3>От плана до итогов</h3><p>Планы этапов, распределение взводов, приказы и отчёты по участникам. Подготовка к ТБ видна целиком.</p><div class="plan-illustration" aria-label="Пример последовательности работы"><span>План</span><i>→</i><span>Взводы</span><i>→</i><span>Приказ</span><i>→</i><span>Итоги</span></div><span class="art-caption">Планируйте на сайте, доставляйте приказы в чат.</span></article>
+      <article><span class="feature-tag">ПРОКАЧКА</span><h3>Цели вместо напоминаний</h3><p>Ставьте задачи, смотрите прогресс и отслеживайте подготовку к целям «Руководства».</p></article>
+      <article><span class="feature-tag">МОДУЛИ И ДАТАКРОНЫ</span><h3>Единые требования</h3><p>Задайте нужные статы и датакроны. Игрок проверит себя, офицер — всю гильдию.</p></article></div>
+      <p class="guild-note">Личные проверки доступны игроку для своих аккаунтов. Проверки гильдии и управление — офицерам и лидеру подключённой гильдии.</p>
+    </div></section>
+    <section class="wrap section start-section"><div><p class="eyebrow">НАЧАТЬ ПРОСТО</p><h2>Сначала посмотрите.<br>Потом подключайте.</h2></div><ol class="steps"><li><span>01</span><div><h3>Откройте демо</h3><p>Изучите страницы на вымышленной гильдии. Вход не нужен.</p></div></li><li><span>02</span><div><h3>Подключите гильдию</h3><p>Добавьте публичного бота и настройте доступ участников.</p></div></li><li><span>03</span><div><h3>Задайте ваши требования</h3><p>Плейты, задачи и уведомления — под правила вашей гильдии.</p></div></li></ol></section>
+    <section class="wrap final-cta"><p class="eyebrow">ВАША СЛЕДУЮЩАЯ ПРОВЕРКА — УЖЕ ПРОЩЕ</p><h2>Познакомьтесь с Дроидцем.</h2><p>Посмотрите, как может выглядеть управление вашей гильдией.</p><div class="actions"><a class="button primary" href="/demo">Открыть демо <span aria-hidden="true">↗</span></a><a class="button secondary" href="/subscribe">Подключить гильдию</a></div><p class="fine">Демо показывает сайт. Команды ботов представлены в примерах выше.</p></section>
+  </main>
+  <footer class="wrap footer"><a class="brand" href="/">Дроидец<span>SWGOH</span></a><nav aria-label="Дополнительные ссылки"><a href="/start">Начало работы</a><a href="/commands">Все команды</a><a href="https://t.me/droidec_bot" target="_blank" rel="noopener noreferrer">Telegram</a><a href="/privacy">Обработка данных</a></nav><p>Неофициальный проект для сообщества Star Wars: Galaxy of Heroes.</p></footer>
+</body>
+</html>
