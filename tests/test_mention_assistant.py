@@ -78,6 +78,20 @@ class AssistantTests(unittest.TestCase):
         self.assertIn('**DARK** — Удар', pages[0])
         self.assertIn('тёмная сторона', pages[0])
 
+    def test_effect_scope_carries_mode_heading_to_later_paragraphs(self):
+        effect = {'name': 'Повышение эффективности', 'units': ['PADAWAN'], 'abilities': {'PADAWAN': ['unique']}}
+        plan = {'own': False, 'side': 'any'}
+        ability = {'id': 'unique', 'name': 'Благородство в сдержанности',
+                   'description': 'Основной эффект.\n\nВо время завоеваний: бонус к здоровью.\n\n'
+                                  'При выносливости 50% или больше союзники получают повышение эффективности.'}
+        units = {'PADAWAN': {'name': 'Оби-Ван (падаван)', 'abilities': [ability]}}
+        with patch.object(a.unit_abilities, 'load', return_value={'units': units}), \
+                patch.object(database, 'get_unit_types', return_value={'PADAWAN': 'character'}):
+            regular, _ = a.effect_search_candidates(plan, effect, {}, requested_modes=set())
+            conquest, _ = a.effect_search_candidates(plan, effect, {}, requested_modes={'Завоевание'})
+        self.assertEqual(regular, {})
+        self.assertEqual(conquest['PADAWAN']['abilities']['unique']['modes'], ['Завоевание'])
+
     def test_officer_active_guild_and_profile_required(self):
         with patch.object(a.guild_resolver, "resolve_access") as resolve, patch.object(database, "get_guild_config", return_value={"is_active": 1}), patch.object(a.bot_profiles, "accepts", return_value=True):
             for tier, gid in [(None, 1), ("member", 1), ("officer", None), ("officer", 2)]:
