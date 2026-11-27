@@ -20,11 +20,10 @@
     {% if not classic and step_plan %}
         {% set step_order = plans|selectattr("id", "equalto", step_plan.order_plan_id)|first if step_plan.order_plan_id else None %}
         <div class="panel">
-            <div class="panel-title"><span>Ордер плана «{{ step_plan.name }}»</span></div>
+            <div class="panel-title"><span>Ордер плана «{{ step_plan.name }}» {% if step_order and step_order.active %}<span class="badge badge-ok">активный</span>{% endif %}</span></div>
             {% if step_order %}
-                <p>{% if step_order.thread_link %}Опубликован в <a href="{{ step_order.thread_link }}" target="_blank" rel="noopener">ветку Discord ↗</a>{% else %}Собран на сайте{% endif %}{% if step_order.total_stars %} · {{ step_order.total_stars }}★{% endif %} ·
-                    {% if step_order.active %}<span class="badge badge-ok">активный</span> — бот публикует по нему этапы{% else %}<span class="muted">не активный</span>{% endif %}</p>
                 <div class="hero-links tb-order-step">
+                    {% if step_order.thread_link %}<a class="hero-link" href="{{ step_order.thread_link }}" target="_blank" rel="noopener">Ветка Discord ↗</a>{% endif %}
                     <a class="hero-link" href="/tb/order?plan={{ step_plan.id }}&preview_plan_id={{ step_order.id }}#preview">Предпросмотр этапов</a>
                     {% if not step_order.active %}<form method="post" action="/tb/plan/{{ step_plan.id }}/activate"><button type="submit">Сделать активным</button></form>{% endif %}
                     <a class="hero-link" href="/tb/plan?id={{ step_plan.id }}">Открыть план</a>
@@ -184,7 +183,10 @@
         </form>
     </dialog>
 
-    <div class="tb-plan-forms">
+    <button type="button" onclick="document.getElementById('import-orders').showModal()">Перенос ордера</button>
+    <dialog class="edit-modal" id="import-orders" aria-label="Перенос ордера" style="width: min(64em, 94vw);">
+        <form method="dialog"><button type="submit" autofocus>Закрыть</button></form>
+        <div class="tb-plan-forms">
         <div class="panel" id="import-new">
             <div class="panel-title"><span>Перенести готовый ордер{{ ui.help("Ордер уже написан в Discord? Вставьте ссылки на сообщения с каждым этапом (ПКМ по сообщению → «Копировать ссылку на сообщение»). Бот сохранит тексты на сайте, тред не нужен. Пустые этапы можно добавить потом в редакторе выше.") }}</span></div>
             <form method="post" action="/tb/order/import-new" class="tbo-import-new">
@@ -210,16 +212,18 @@
                     <input type="text" name="thread_link" placeholder="https://discord.com/channels/…/…" required>
                 </label>
                 <label>
-                    Total Stars
+                    Звёзд всего
                     <input type="number" name="stars" min="0" required>
                 </label>
                 <button type="submit">Перенести</button>
             </form>
         </div>
-    </div>
+        </div>
+    </dialog>
 
     <script>
 document.addEventListener("DOMContentLoaded", () => {
+    if (location.hash === "#import-new") document.getElementById("import-orders").showModal();
     const dialog = document.getElementById("tb-stage-modal");
     const title = document.getElementById("tb-stage-title");
     const planLine = document.getElementById("tb-stage-plan");

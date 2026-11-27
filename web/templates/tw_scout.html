@@ -54,7 +54,10 @@
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
     {% if progress and progress.running %}
-        <p class="config-warning">⏳ {{ progress.stage }}{% if progress.total %}: {{ progress.done }} из {{ progress.total }}{% endif %}… Страница обновится сама.</p>
+        <div class="panel">
+            <p role="status">{{ progress.stage }}{% if progress.total %} · {{ progress.done }} из {{ progress.total }}{% endif %}</p>
+            <progress aria-label="{{ progress.stage }}"{% if progress.total %} value="{{ progress.done }}" max="{{ progress.total }}"{% endif %}></progress>
+        </div>
         <script>setTimeout(() => location.reload(), 5000);</script>
     {% elif progress and progress.error %}
         <p class="error">Не удалось собрать разведку: {{ progress.error }}</p>
@@ -117,8 +120,13 @@
                 {% endfor %}
             </div>
             <p>Мы сильнее на <strong>{{ ranks.ahead }} из {{ ranks.compared }}</strong> мест.</p>
-            <details>
-                <summary class="link-btn">Место к месту</summary>
+            <button type="button" class="link-btn" data-modal-open="scout-ranks">Сравнить игроков по местам</button>
+            <dialog class="edit-modal" id="scout-ranks" aria-labelledby="scout-ranks-title" style="width: min(52em, 94vw);">
+                <div class="edit-modal-header">
+                    <h3 id="scout-ranks-title">Игроки по местам</h3>
+                    <button type="button" data-modal-close autofocus>Закрыть</button>
+                </div>
+                <div class="edit-modal-body">
                 <table class="data cards-on-phone scout-table">
                     <thead><tr><th>№</th><th>{{ report.own_name }}</th><th>{{ report.opp_name }}</th><th class="num">Разница</th></tr></thead>
                     <tbody>
@@ -132,7 +140,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
-            </details>
+                </div>
+            </dialog>
         </div>
 
         <div class="panel">

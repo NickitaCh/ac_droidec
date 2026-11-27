@@ -11,11 +11,18 @@
         <label>Минимум дополнительной характеристики<input data-mod-min type="number" step="any" disabled></label>
     </div>
     <p data-mod-count role="status">Найдено — {{ bank.modules|length }}</p>
-    <div data-mod-export data-columns="{{ bank.csv_columns|tojson|forceescape }}">
-        <button type="button" class="btn" data-mod-download="all">Скачать все модули CSV</button>
-        <button type="button" class="btn" data-mod-download="filtered">Скачать результаты CSV</button>
-        <p role="status" data-mod-export-status></p>
-    </div>
+    <button type="button" class="btn" onclick="this.nextElementSibling.showModal()">Экспорт CSV</button>
+    <dialog class="edit-modal" data-mod-export data-columns="{{ bank.csv_columns|tojson|forceescape }}" aria-label="Экспорт модулей">
+        <div class="edit-modal-header">
+            <h3>Экспорт модулей</h3>
+            <form method="dialog"><button type="submit" autofocus>Закрыть</button></form>
+        </div>
+        <div class="edit-modal-body">
+            <button type="button" class="btn" data-mod-download="all">Скачать все модули</button>
+            <button type="button" class="btn" data-mod-download="filtered">Скачать по текущим фильтрам</button>
+            <span role="status" data-mod-export-status></span>
+        </div>
+    </dialog>
     <table class="lab-stock lab-mod-stock">
         <thead><tr><th scope="col">Модуль</th><th scope="col">Характеристики</th></tr></thead>
         <tbody>

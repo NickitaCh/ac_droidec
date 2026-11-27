@@ -30,7 +30,7 @@
   <label for="tb-phase">Этап
     <select id="tb-phase"><option value="all">Все этапы</option>{% for n in range(1, events[event].phases + 1) %}<option value="{{ n }}">Этап {{ n }}</option>{% endfor %}</select>
   </label>
-  {% if not is_rote %}<p class="tb-map-legend"><span>⚔ Наземный бой</span><span>◈ Бой флота</span><span>★ Спецмиссия</span></p>{% endif %}
+  {% if not is_rote %}<p class="tb-map-legend"><span>⚔ Наземный бой</span><span>◈ Бой флота</span><span>★ Особое задание</span></p>{% endif %}
 </div>
 <nav class="tb-atlas-scroll" id="atlas" aria-label="Карта: {{ events[event].name }}" tabindex="0">
   <div class="tb-atlas tb-atlas-{{ events[event].background }}" style="--atlas-image:url('/static/img/tb/{{ events[event].background }}.webp')">

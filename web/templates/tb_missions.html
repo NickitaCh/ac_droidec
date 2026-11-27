@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_tb.html" as tbui with context %}
 {% import "_ui.html" as ui %}
-{% block title %}Бои и спецмиссии ТБ — AC Droidec{% endblock %}
+{% block title %}Боевые и особые задания ТБ — AC Droidec{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
     {% call tbui.tb_hero("Итоги ТБ", "results") %}{% endcall %}
@@ -9,7 +9,7 @@
 
     {% set ev_q = "&event_id=" ~ selected_event_id if selected_event_id and events and selected_event_id != events[-1][0] else "" %}
     <nav class="hero-links" style="margin: 0 0 1em;" id="tbm-tabs">
-        {% for key, label in [("covert", "Спецмиссии за ТБ"), ("rates", "Спецмиссии: % побед"), ("strikes", "Бои за ТБ")] %}
+        {% for key, label in [("covert", "Особые задания за ТБ"), ("rates", "Особые задания: % побед"), ("strikes", "Боевые задания за ТБ")] %}
             <a class="hero-link" data-tab="{{ key }}" href="/tb/missions?tab={{ key }}{{ ev_q }}"{% if key == tab %} aria-current="page" style="font-weight: 700;"{% endif %}>{{ label }}</a>
         {% endfor %}
     </nav>
@@ -42,11 +42,11 @@
     {% with r = covert %}
         <div class="panel">
             <div class="panel-title">
-                <span>Спецмиссии{% call ui.help() %}<p>Кто прошёл каждую спецмиссию (✓), кто зашёл и проиграл (✗) и — только для последней ТБ — кто мог пройти по своему нынешнему составу, но не пошёл (💤). Порог «мог» — тот же, что в <code>/тб оз_готовность</code>.</p><p>Показаны только миссии, в которые кто-то заходил. Данные — итог ТБ из игры, сохраняется после окончания битвы. В Discord — <code>/тб_отчет</code> → «Спецмиссии за ТБ».</p>{% endcall %}</span>
+                <span>Особые задания{% call ui.help() %}<p>Кто прошёл каждое особое задание (✓), кто зашёл и проиграл (✗) и — только для последней ТБ — кто мог пройти по своему нынешнему составу, но не пошёл (💤). Порог «мог» — тот же, что в <code>/тб оз_готовность</code>.</p><p>Показаны только миссии, в которые кто-то заходил. Данные — итог ТБ из игры, сохраняется после окончания битвы. В Discord — <code>/тб_отчет</code> → «Особые задания за ТБ».</p>{% endcall %}</span>
                 <span class="panel-hint">{{ event_picker() }}</span>
             </div>
             {% if not r.cols %}
-                <p class="muted">В эту ТБ в спецмиссии никто не заходил.</p>
+                <p class="muted">В эту ТБ в особые задания никто не заходил.</p>
             {% else %}
             <p class="muted tbm-small" style="margin-top: 0;">По каждой миссии: ✓ — прошли, ✗ — зашли и проиграли{% if r.with_skipped %}, 💤 — могли пройти по своему нынешнему составу, но не пошли{% endif %}. Ниже — список игроков с проигрышами и пропусками.</p>
             <div class="tbm-cards">
@@ -108,10 +108,10 @@
         {% macro times(n) %}{{ n }} раз{{ "а" if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else "" }}{% endmacro %}
         <div class="panel">
             <div class="panel-title">
-                <span>Процент побед в спецмиссиях</span>
+                <span>Процент побед в особых заданиях</span>
                 <span class="panel-hint">{{ events|length }} ТБ: с {{ events[0][1][8:10] }}.{{ events[0][1][5:7] }} по {{ events[-1][1][8:10] }}.{{ events[-1][1][5:7] }}</span>
             </div>
-            <p class="muted tbm-small" style="margin-top: 0;">Считаются только спецмиссии, в которые игрок заходил: сколько из них он прошёл и сколько проиграл. Сверху — у кого процент хуже. Выбывшие из гильдии не показаны.</p>
+            <p class="muted tbm-small" style="margin-top: 0;">Считаются только особые задания, в которые игрок заходил: сколько из них он прошёл и сколько проиграл. Сверху — у кого процент хуже. Выбывшие из гильдии не показаны.</p>
             <table class="data tbm-table">
                 <thead><tr><th>Игрок</th><th class="num">Прошёл</th><th class="num">% побед</th></tr></thead>
                 <tbody>
@@ -127,7 +127,7 @@
                                         <li class="tbm-battle{% if x and x[0] < x[1] %} tbm-battle-bad{% elif x %} tbm-battle-ok{% endif %}">
                                             <div class="tbm-battle-head"><strong>ТБ {{ at[8:10] }}.{{ at[5:7] }}.{{ at[:4] }}</strong>
                                                 {% if x %} — прошёл {{ x[0] }} из {{ x[1] }}{% if x[0] < x[1] %}, <span class="tbm-label-bad">проиграл {{ x[1] - x[0] }}</span>{% else %}, <span class="tbm-label-good">без проигрышей</span>{% endif %}
-                                                {% else %} — <span class="muted">в спецмиссии не заходил</span>{% endif %}
+                                                {% else %} — <span class="muted">в особые задания не заходил</span>{% endif %}
                                             </div>
                                             {% if b and b.failed %}<div><span class="tbm-label-bad">✗ Проиграл:</span> {{ b.failed|join(", ") }}</div>{% endif %}
                                             {% if b and b.won %}<div class="muted"><span class="tbm-label-good">✓ Прошёл:</span> {{ b.won|join(", ") }}</div>{% endif %}
@@ -146,7 +146,7 @@
         <div class="panel">
             <div class="panel-title"><span>По миссиям</span><span class="panel-hint">все игроки, все сохранённые ТБ</span></div>
             <table class="data tbm-table">
-                <thead><tr><th>Спецмиссия</th><th class="num">Порог</th><th class="num">Прошли</th><th class="num">% побед</th></tr></thead>
+                <thead><tr><th>Особое задание</th><th class="num">Порог</th><th class="num">Прошли</th><th class="num">% побед</th></tr></thead>
                 <tbody>
                     {% for m in r.missions if m.attempts %}
                         <tr><td>{{ m.label }}</td><td class="num">{{ m.threshold }}</td><td class="num">{{ m.won }} из {{ m.attempts }}</td><td class="num">{{ pct_badge(m.pct, 95) }}</td></tr>
@@ -161,11 +161,11 @@
     {% with r = strikes %}
         <div class="panel">
             <div class="panel-title">
-                <span>Бои (боевые задания)</span>
+                <span>Боевые задания</span>
                 <span class="panel-hint">{{ event_picker() }}</span>
             </div>
             {% if not r.zones %}
-                <p class="muted">В эту ТБ в бои никто не заходил.</p>
+                <p class="muted">В этой ТБ никто не начал боевое задание.</p>
             {% else %}
             <p class="muted tbm-small" style="margin-top: 0;">Боёв — сколько боевых заданий игрок начал за всю ТБ, волн — сколько волн в них отбил. «Недобито» — волны, которые он точно не добил: игра хранит бои только по планете целиком, поэтому потери видны лишь на планетах, где игрок сходил во все бои. Сверху — у кого недобито больше. Разбивка по планетам — по кнопке «по планетам».</p>
             <table class="data tbm-table">

@@ -6,8 +6,8 @@
     <div class="panel-title">
         <span>Ордер по этапам{% call ui.help() %}<p>Текст каждого этапа хранится на сайте — тред в Discord не нужен. Перенести готовый этап можно по ссылке на сообщение.</p><p>Активный ордер бот публикует сам в 20:00 МСК в канал плана ВИ. Этап, отправленный кнопкой, автопост в тот день не повторяет.</p>{% endcall %}</span>
         <form method="get" action="/tb/order" class="tbo-pick">
-            <select name="order" onchange="this.form.submit()" aria-label="Ордер">
-                {% for p in plans %}<option value="{{ p.id }}"{{ " selected" if p.id == o.id }}>{{ p.name }}{{ " · активный" if p.active }}</option>{% endfor %}
+            <select name="order" onchange="this.form.submit()" aria-label="Ордер" title="{{ o.name }}{% if o.active %} · активный{% endif %}">
+                {% for p in plans %}<option value="{{ p.id }}"{{ " selected" if p.id == o.id }}>{{ "✓ " if p.active }}{{ p.name }}</option>{% endfor %}
             </select>
             <input type="hidden" name="phase" value="{{ e.phase }}">
             <noscript><button type="submit">Открыть</button></noscript>

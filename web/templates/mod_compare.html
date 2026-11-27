@@ -60,7 +60,17 @@
         <div class="panel">
             <p class="config-warning">Собираю данные гильдий — страница обновится сама.</p>
             <ul class="mc-progress">
-                {% for p in pending %}{% if p %}<li>{{ p.name }} — {{ p.done }} из {{ p.total }} игроков{% if p.errors %} <span class="muted">(не ответили: {{ p.errors }})</span>{% endif %}{% if p.error %} <span class="error">ошибка: {{ p.error }}</span>{% endif %}</li>{% endif %}{% endfor %}
+                {% for p in pending if p %}
+                    <li>
+                        {{ p.name }} — {{ p.done }} из {{ p.total }} игроков
+                        {% if p.errors %}<span class="muted">· не ответили {{ p.errors }}</span>{% endif %}
+                        {% if p.error %}
+                            <span class="error">· {{ p.error }}</span>
+                        {% else %}
+                            <progress aria-label="Загрузка состава · {{ p.name }}"{% if p.total %} value="{{ p.done }}" max="{{ p.total }}"{% endif %}></progress>
+                        {% endif %}
+                    </li>
+                {% endfor %}
             </ul>
         </div>
         <script>setTimeout(function () { location.reload(); }, 5000);</script>

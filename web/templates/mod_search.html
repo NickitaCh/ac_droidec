@@ -151,15 +151,24 @@
                     </thead>
                     <tbody>
                         {% for p in table_result.players %}
-                            <tr><td>{{ p.name }}</td><td>{{ p.count }}</td></tr>
+                            <tr><td>{{ p.name }}</td><td>
+                                {% if p.count > 0 %}
+                                    <button type="button" class="link-btn" data-modal-open="mod-search-player-{{ loop.index }}" aria-label="{{ p.name }} · совпадений {{ p.count }}">{{ p.count }}</button>
+                                {% else %}0{% endif %}
+                            </td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
 
-            {% for p in table_result.players if p.count > 0 %}
-                <details>
-                    <summary class="link-btn">{{ p.name }} — детали ({{ p.count }})</summary>
+            {% for p in table_result.players %}
+                {% if p.count > 0 %}
+                <dialog class="edit-modal" id="mod-search-player-{{ loop.index }}" aria-labelledby="mod-search-title-{{ loop.index }}" style="width: min(58em, 94vw);">
+                    <div class="edit-modal-header">
+                        <h3 id="mod-search-title-{{ loop.index }}">{{ p.name }} · найдено {{ p.count }}</h3>
+                        <button type="button" data-modal-close autofocus>Закрыть</button>
+                    </div>
+                    <div class="edit-modal-body">
                     <div class="table-scroll">
                         <table class="data">
                             <thead>
@@ -178,7 +187,9 @@
                             </tbody>
                         </table>
                     </div>
-                </details>
+                    </div>
+                </dialog>
+                {% endif %}
             {% endfor %}
         </div>
     {% endif %}

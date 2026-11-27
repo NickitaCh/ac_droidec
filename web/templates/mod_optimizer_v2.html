@@ -61,6 +61,7 @@
 <div class="panel" id="mo-browser" data-plan="{{ plan.id }}" data-csrf="{{ game_csrf }}" role="status">
     <h2>Подбор модулей</h2>
     <p data-browser-status>Подготавливаю расчёт…</p>
+    <progress aria-label="Подбор модулей"></progress>
     <p>Держите вкладку открытой до завершения подбора.</p>
     <button type="button" data-browser-cancel>Отменить подбор</button>
 </div>
@@ -69,6 +70,7 @@
 <div class="panel" role="status">
     <h2>{% if plan.state == 'running' %}Идёт подбор{% else %}Применение расстановки{% endif %}</h2>
     <p>{% if plan.state == 'running' %}Расчёт может занять несколько минут. Вкладку можно закрыть и вернуться по этой ссылке.{% else %}Каждая операция проверяется по данным игры. Не меняйте модули до завершения.{% endif %}</p>
+    {% if plan.state == 'running' %}<progress aria-label="Подбор модулей"></progress>{% endif %}
     {% if completed_steps %}<p>Проверено операций: {{ completed_steps }}.</p>{% endif %}
     {% if in_flight %}<p>Операция {{ in_flight.step }} из {{ in_flight.total }}.</p>{% endif %}
     <a href="{{ '/mod-loadouts' if loadouts_page else '/mod-optimizer' }}?plan={{ plan.id }}">Обновить статус</a>

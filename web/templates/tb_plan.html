@@ -69,11 +69,6 @@
     </div>
 
     {% if plan and auto_order %}
-        <p class="muted tbplan-active-note">
-            {% if order_active %}<span class="badge badge-ok">активный</span> бот публикует этапы этого плана в 20:00 МСК, взводы открываются по нему.
-            {% else %}План не активный — бот публикует другой. Взводы и ордер плана уже можно готовить.{% endif %}
-            Ордер обновляется сам, когда вы меняете план{% if manual_phases %}, кроме этапов {{ manual_phases|join(", ") }} — они правлены вручную или перенесены{% endif %}. <a href="/tb/order?plan={{ plan.id }}">Ордер →</a>
-        </p>
         {% if changed_phases %}<p class="tbm-label-warn tbplan-warn">⚠ План изменился после ручной правки этапов {{ changed_phases|join(", ") }} — текст ордера там прежний. <a href="/tb/order?plan={{ plan.id }}&phase={{ changed_phases[0] }}#order-editor">Посмотреть и взять текст из плана</a></p>{% endif %}
     {% elif plan and not tb_classic_nav(user) %}
         <p class="muted tbplan-active-note">
@@ -92,7 +87,7 @@
 
     <div class="panel">
         <div class="panel-title">
-            <span>План по этапам{% call ui.help() %}<p>На каждом этапе выбираете, сколько звёзд брать на каждой открытой планете, или «копим» — набираем очки и закрываем планету на следующем этапе. Маршрут строится сам: планета со звездой закрывается и открывает следующую в ветке; Зеффо и Мандалор — после звезды на Бракке / Татуине и нужного числа побед в спецмиссии.</p><p><b>Как считаем.</b> Залив ГМ идёт в любую планету: {{ (result.deploy_share * 100)|round|int }}% ГМ гильдии на этап (столько гильдия заливала в прошлых ВИ, можно поменять ниже). Бои — только в свою планету: максимум (все игроки проходят все боевые миссии планеты) × доля, которую гильдия отбивала на этой планете в последних ВИ; долю можно поменять в карточке планеты. Взводы — по нынешним складам; операции платят, когда планета берёт звезду (на копящей планете их можно закрыть заранее).</p><p>«Не хватает» — даже весь залив и ожидаемые бои не набирают выбранные звёзды. «Бои: нужно N%» — какую долю максимума боёв этапа пришлось бы отбить, если залить весь доступный ГМ; рядом — сколько ждём по истории.</p><p>Меняете звёзды на этапе — этапы после него подбираются заново под ваш выбор, этапы до него не трогаются.</p>{% endcall %}</span>
+            <span>План по этапам{% call ui.help() %}<p>На каждом этапе выбираете, сколько звёзд брать на каждой открытой планете, или «копим» — набираем очки и закрываем планету на следующем этапе. Маршрут строится сам: планета со звездой закрывается и открывает следующую в ветке; Зеффо и Мандалор — после звезды на Бракке / Татуине и нужного числа побед в особом задании.</p><p><b>Как считаем.</b> Залив ГМ идёт в любую планету: {{ (result.deploy_share * 100)|round|int }}% ГМ гильдии на этап (столько гильдия заливала в прошлых ВИ, можно поменять ниже). Боевые задания — только в свою планету: максимум (все игроки проходят все боевые задания планеты) × доля, которую гильдия отбивала на этой планете в последних ВИ; долю можно поменять в карточке планеты. Взводы — по нынешним складам; операции платят, когда планета берёт звезду (на копящей планете их можно закрыть заранее).</p><p>«Не хватает» — даже весь залив и ожидаемые бои не набирают выбранные звёзды. «БЗ: нужно N%» — какую долю максимума боёв этапа пришлось бы отбить, если залить весь доступный ГМ; рядом — сколько ждём по истории.</p><p>Меняете звёзды на этапе — этапы после него подбираются заново под ваш выбор, этапы до него не трогаются.</p>{% endcall %}</span>
             <span class="panel-hint">{{ plan.name }}{% if order %} · ордер «{{ order.name }}»{% if order_active %} (активный){% endif %} · <a href="/tb/platoons?plan_id={{ order.id }}">взводы</a>{% endif %}</span>
         </div>
         <table class="data cards-on-phone tbplan-summary">
@@ -104,7 +99,7 @@
                         <td data-label="Планеты"><div>{% for row in ph.planets %}<span class="nowrap">{{ planet_ru(row.planet) }} {{ stars_label(row) }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</div></td>
                         <td data-label="Хватает?"><div>
                             {% if ph.ok %}<span class="badge badge-ok">хватает</span> <span class="muted nowrap">запас {{ mln(ph.deploy_left) }}</span>{% else %}<span class="badge badge-danger">не хватает {{ mln(ph.short) }}</span>{% endif %}
-                            <br><span class="muted nowrap">бои: нужно {{ (ph.battle_need_pct * 100)|round|int }}%, обычно {{ (ph.battle_expected_pct * 100)|round|int }}%</span>
+                            <br><span class="muted nowrap">БЗ: нужно {{ (ph.battle_need_pct * 100)|round|int }}%, обычно {{ (ph.battle_expected_pct * 100)|round|int }}%</span>
                             {% if ph.warnings %}<br><span class="tbm-label-warn">⚠ {{ ph.warnings|length }}</span>{% endif %}
                         </div></td>
                         <td data-label="★" class="num"><strong>{{ ph.stars }}</strong></td>
@@ -142,7 +137,7 @@
             <div class="tbplan-daysum-row">
                 <span><b>Залив:</b> нужно {{ mln(ph.deploy_need) }} из {{ mln(ph.deploy) }}</span>
                 <span><b>Взводы:</b> +{{ mln(ph.ops) }}</span>
-                <span><b>Бои:</b> ждём {{ mln(ph.battle_expected) }} из максимума {{ mln(ph.battle_max) }}</span>
+                <span><b>БЗ:</b> ждём {{ mln(ph.battle_expected) }} из максимума {{ mln(ph.battle_max) }}</span>
                 {% if ph.ok %}<span class="badge badge-ok">хватает, запас {{ mln(ph.deploy_left) }}</span>{% else %}<span class="badge badge-danger">не хватает {{ mln(ph.short) }}</span>{% endif %}
             </div>
             {% for w in ph.warnings %}<p class="tbm-label-warn tbplan-warn">⚠ {{ w }}</p>{% endfor %}
@@ -189,7 +184,7 @@
                                 {% else %}<input type="hidden" name="off" value="1"><button type="submit" class="link-btn">не ставить на этом этапе</button>{% endif %}
                             </form>
                         </dd>
-                        <dt>Бои</dt><dd>
+                        <dt>Боевые задания</dt><dd>
                             {{ mln(row.battle_used) }} <span class="muted">из {{ mln(row.battle.expected) }} ждём · макс. {{ mln(row.battle.max) }}{% if row.battle.estimated %} (оценка){% endif %}</span>
                             <form method="post" action="/tb/plan/{{ plan.id }}/expect" class="tbplan-inline tbplan-expect">
                                 <input type="hidden" name="planet" value="{{ row.planet }}">
@@ -212,7 +207,7 @@
                     {% endif %}
                     {% if ready.covert or ready.strikes %}
                         <details class="tbplan-ready">
-                            <summary>Готовность: спецмиссии и бои</summary>
+                            <summary>Готовность к БЗ и ОЗ</summary>
                             {% for c in ready.covert or [] %}
                                 <div class="tbplan-ready-row">
                                     <div><b>ОЗ</b> {% if c.base_id %}{{ game.unit(c.base_id, c.name) }}{% else %}<span class="muted">{{ c.name }}</span>{% endif %}
@@ -282,7 +277,7 @@
 
     {% if auto_order and order %}
     <details class="panel" id="publish">
-        <summary class="panel-title"><span>Пересобрать ордер целиком{% call ui.help() %}<p>Обычно не нужно: этапы ордера «из плана» обновляются сами при каждом изменении плана. Этапы, которые правили вручную или перенесли из сообщения, план не трогает.</p><p>Кнопка заново создаёт все 6 этапов из плана и <b>заменяет ручные правки</b>, включая тексты для Telegram. Назначения во взводах сохраняются, пустые слоты заполняются.</p>{% endcall %}</span></summary>
+        <summary class="button button-secondary"><span>▸ Пересобрать ордер целиком{% call ui.help() %}<p>Обычно не нужно: этапы ордера «из плана» обновляются сами при каждом изменении плана. Этапы, которые правили вручную или перенесли из сообщения, план не трогает.</p><p>Кнопка заново создаёт все 6 этапов из плана и <b>заменяет ручные правки</b>, включая тексты для Telegram. Назначения во взводах сохраняются, пустые слоты заполняются.</p>{% endcall %}</span></summary>
         <form method="post" action="/tb/plan/{{ plan.id }}/publish" class="tbplan-publish" onsubmit="return confirm('Пересобрать все 6 этапов ордера из плана? Ручные правки этапов пропадут.');">
             <button type="submit" class="button-secondary">Пересобрать все 6 этапов из плана</button>
         </form>

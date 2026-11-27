@@ -856,11 +856,15 @@ def _parse_number(raw: str) -> float | None:
 async def tb_plan_page(request: Request, id: int = 0,
                        user: dict = Depends(feature_flags.require_feature("tb_plan_order"))):
     guild_id = user["guild_id"]
-    try:
-        import_errors = await tb_plan.import_orders(guild_id)
-    except Exception as e:  # перенос старых ордеров не должен ронять страницу плана
-        import_errors = [f"Не удалось перенести ордера в планы: {e}"]
     plans = tb_plan.list_plans(guild_id)
+    import_errors = []
+    # A direct link to an existing plan does not need to read legacy Discord orders.
+    if not id or not any(p["id"] == id for p in plans):
+        try:
+            import_errors = await tb_plan.import_orders(guild_id)
+            plans = tb_plan.list_plans(guild_id)
+        except Exception as e:
+            import_errors = [f"Не удалось перенести ордера в планы: {e}"]
     active_id = tb_plan.active_plan_id(guild_id, plans)
     plan = next((p for p in plans if p["id"] == (id or active_id)), None) or (plans[0] if plans else None)
     _built_at, r = await _projection(guild_id, True)

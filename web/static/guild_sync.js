@@ -13,7 +13,8 @@
         button.disabled = active;
         button.textContent = active ? 'Обновление запущено' : 'Обновить сейчас';
         status.textContent = job.state === 'queued' ? 'В очереди обновления… Можно закрыть страницу.' :
-            job.state === 'running' ? 'Обновлено ' + job.completed + ' из ' + job.total + '. Ошибок: ' + job.failed + '.' : job.message || '';
+            job.state === 'running' ? 'Обновлено ' + job.completed + ' из ' + job.total + '. Ошибок: ' + job.failed + '.' :
+            job.state === 'done' && !job.failed ? '' : job.message || '';
         if (active) timer = setTimeout(poll, 3000);
     }
     function poll() {

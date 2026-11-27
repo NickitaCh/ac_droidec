@@ -26,7 +26,7 @@
         {% if round_options %}
             <form method="get" class="platoon-plan-switch">
                 {% if plan %}<input type="hidden" name="plan_id" value="{{ plan.id }}">{% endif %}
-                {% if view != "planet" %}<input type="hidden" name="view" value="{{ view }}">{% endif %}
+                <input type="hidden" id="platoon-stage-view" name="view" value="{{ view }}">
                 <label for="round-select">Этап</label>
                 <select id="round-select" name="round" onchange="this.form.submit()">
                     {% for r in round_options %}
@@ -44,21 +44,6 @@
            2026-09-14): форма этапа сама переносится на 2 строки (label/select) через свой
            собственный flex-wrap при недостатке ширины, а align-items:center внешнего ряда
            после этого центрировал соседний тумблер прямо поверх второй строки формы. #}
-        {% set base_qs = ("plan_id=" ~ plan.id if plan else "") ~ ("&round=" ~ selected_round_num if selected_round_num else "") %}
-        <div class="segmented-toggle">
-            <div class="segmented-toggle-options">
-                {% if view == "planet" %}
-                    <strong>По планетам</strong>
-                {% else %}
-                    <a href="/tb/platoons?{{ base_qs }}">По планетам</a>
-                {% endif %}
-                {% if view == "player" %}
-                    <strong>По игрокам</strong>
-                {% else %}
-                    <a href="/tb/platoons?{{ base_qs }}&view=player">По игрокам</a>
-                {% endif %}
-            </div>
-        </div>
     {% endif %}
 
     {% if plan %}
@@ -78,7 +63,7 @@
                 {% if dm.saved %}<span class="badge badge-ok">Сохранено</span>{% endif %}</div>
             <form method="post" action="/tb/platoons/dm-mode" class="platoon-dm-mode">
                 <input type="hidden" name="back" value="/tb/platoons{% if plan %}?plan_id={{ plan.id }}&round={{ selected_round_num or 1 }}{% endif %}">
-                <label for="dm-mode">Куда уходит личка</label>
+                <label for="dm-mode">Канал доставки</label>
                 <select id="dm-mode" name="mode" onchange="this.form.submit()">
                     {% for key, label in dm.modes.items() %}<option value="{{ key }}"{{ " selected" if key == dm.mode }}>{{ label }}</option>{% endfor %}
                 </select>
@@ -88,9 +73,9 @@
                 <input type="hidden" name="back" value="/tb/platoons{% if plan %}?plan_id={{ plan.id }}&round={{ selected_round_num or 1 }}{% endif %}">
                 <label class="platoon-auto-check">
                     <input type="checkbox" class="checkbox" name="enabled" value="true"{{ " checked" if dm.auto.enabled }}>
-                    <strong>Автоматически отправлять взводы в личку</strong>
+                    <strong>Отправлять автоматически</strong>
                 </label>
-                <p class="muted">Каждому игроку — его назначения на этап из активного плана гильдии. Основной аккаунт и альты придут одним сообщением. Каналы доставки — по настройке выше.</p>
+                <p class="muted">Игрок получит назначения на этап из активного плана одним сообщением для всех своих аккаунтов.</p>
                 <div class="platoon-auto-time">
                     <label for="auto-dm-timing">Время отправки (МСК)</label>
                     <select id="auto-dm-timing" name="timing" onchange="document.getElementById('auto-dm-custom').hidden = this.value !== 'custom'">
@@ -121,29 +106,59 @@
                     На этом этапе никому не назначено ни одного слота.
                 {% endif %}
             </p>
-            <p class="muted platoon-dm-hint">{% if dm.auto.enabled %}Авторассылка включена.{% else %}Авторассылка выключена. Включите галочку и сохраните, чтобы отправлять назначения автоматически.{% endif %} Повторную рассылку можно запустить вручную — с выбором игроков.</p>
+            <p class="muted platoon-dm-hint">{% if dm.auto.enabled %}Авторассылка включена.{% else %}Авторассылка выключена.{% endif %} Повторную рассылку можно запустить вручную — с выбором игроков.</p>
             {% if plan and selected_round_num %}<a class="button" href="/tb/platoons/notify?plan_id={{ plan.id }}&round={{ selected_round_num }}">📨 Разослать этап {{ selected_round_num }} вручную…</a>{% endif %}
         </div>
     {% endif %}
 
     {% if plan and planets %}
-        <p class="platoon-export-actions">
+        <div class="segmented-toggle">
+            <div class="segmented-toggle-options">
+                {% for key, label in [("planet", "По планетам"), ("player", "По игрокам")] %}
+                    <a data-platoon-view="{{ key }}" href="/tb/platoons?plan_id={{ plan.id }}&round={{ selected_round_num }}{% if key == 'player' %}&view=player{% endif %}"{% if view == key %} aria-current="true"{% endif %}>{{ label }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        <script>
+        document.querySelectorAll('[data-platoon-view]').forEach(link => {
+            link.addEventListener('click', event => {
+                if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                const view = link.dataset.platoonView;
+                for (const key of ['planet', 'player']) {
+                    document.getElementById('platoon-view-' + key).hidden = key !== view;
+                    document.querySelector('[data-platoon-view="' + key + '"]').setAttribute('aria-current', String(key === view));
+                }
+                document.querySelector('#platoon-stage-view').value = view;
+                history.replaceState(null, '', link.href);
+            });
+        });
+        </script>
+    {% endif %}
+
+    {% if plan and planets %}
+        <div class="platoon-export-actions">
             <form method="post" action="/tb/platoons/autofill" style="display:inline">
                 <input type="hidden" name="plan_id" value="{{ plan.id }}">
                 <input type="hidden" name="round_num" value="{{ selected_round_num }}">
                 <button type="submit" class="button">⚡ Автозаполнить план (все этапы)</button>
             </form>
+            <button type="button" onclick="document.getElementById('platoon-export').showModal()">Экспорт взводов</button>
+        </div>
+        <dialog class="edit-modal" id="platoon-export" aria-label="Экспорт взводов">
+            <form method="dialog"><button type="submit" autofocus>Закрыть</button></form>
+            <p>Скачиваются заполненные слоты в формате EchoBase для импорта в HotUtils, включая Зеффо и Мандалор.</p>
             <a class="button" href="/tb/platoons/export?plan_id={{ plan.id }}&round={{ selected_round_num }}">⬇ Скачать этап {{ selected_round_num }} (JSON для HotUtils)</a>
             <a class="button" href="/tb/platoons/export/all?plan_id={{ plan.id }}">⬇ Скачать все этапы (ZIP, по файлу на этап)</a>
-        </p>
+
+        </dialog>
         <p class="muted platoon-export-hint">
-            Формат — EchoBase Platoon Assigner, тот же, что импортирует HotUtils. Экспортируются
-            только заполненные слоты, включая Зеффо и Мандалор. Автозаполнение расставляет
+            Автозаполнение расставляет
             донаторов сразу по всем распознанным этапам плана, с учётом
             <a href="/tb/platoons/filters">фильтров</a> и лимита 10 юнитов на планету от игрока
             за этап — уже занятые слоты не трогает.
         </p>
-        <p class="platoon-export-actions">
+        <div class="platoon-export-actions">
             <form method="post" action="/tb/platoons/clear" style="display:inline"
                   onsubmit="return confirm('Очистить ВСЕ назначения на этапе {{ selected_round_num }} (все планеты этого этапа)?')">
                 <input type="hidden" name="plan_id" value="{{ plan.id }}">
@@ -158,7 +173,7 @@
                 <input type="hidden" name="scope" value="plan">
                 <button type="submit" class="button-danger">🗑 Очистить весь план</button>
             </form>
-        </p>
+        </div>
     {% endif %}
 
     {% if autofill_summary %}
@@ -177,7 +192,7 @@
         <p class="empty-state">В плане не нашлось ни одной планеты.</p>
     {% endif %}
 
-    {% if planets and view == "player" %}
+    {% if planets %}<div id="platoon-view-player"{% if view != "player" %} hidden{% endif %}>
         <div class="panel platoon-planet-panel">
             <div class="panel-title">
                 <span>Этап {{ selected_round_num }} — по игрокам</span>
@@ -207,9 +222,9 @@
                 </details>
             {% endfor %}
         </div>
-    {% endif %}
+    </div>{% endif %}
 
-    {% if planets and view == "planet" %}
+    {% if planets %}<div id="platoon-view-planet"{% if view != "planet" %} hidden{% endif %}>
         <div class="panel platoon-planet-panel" id="platoon-layout" data-layout="compact">
             <label class="platoon-layout-control">Вид взводов
                 <select id="platoon-layout-select">
@@ -357,7 +372,7 @@
                 </details>
             {% endfor %}
         </div>
-    {% endif %}
+    </div>{% endif %}
 
     <dialog id="platoon-picker-dialog" class="platoon-picker-dialog">
         <div class="platoon-picker-header">
