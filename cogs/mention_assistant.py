@@ -338,6 +338,16 @@ class MentionAssistantCog(commands.Cog):
                 data = await asyncio.to_thread(unit_abilities.load)
                 pages = await asyncio.to_thread(unit_abilities.evidence_pages, plan, data, question)
                 await self.send_pages(message, pages, current, fresh_quota=needs_ai)
+            elif plan['action'] == 'effect_search':
+                async with self.ai_lock:
+                    async with message.channel.typing():
+                        pages = await asyncio.to_thread(
+                            assistant.effect_search_pages, plan, effects[plan['effect']], current, question,
+                            history, self.bot.openrouter_api_key, self.bot.AI_ASSISTANT_LIMITS,
+                        )
+                current = await asyncio.to_thread(assistant.access_for, message.author.id)
+                if current and current['guild_id'] == access['guild_id']:
+                    await self.send_pages(message, pages, current, fresh_quota=True)
             elif plan["action"] == "remind":
                 epoch, text = assistant.reminder_fields(plan["due"], plan["text"])
                 if destination:

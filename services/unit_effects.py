@@ -14,6 +14,7 @@ import asyncio
 import json
 import re
 from collections import Counter, defaultdict
+from functools import cache
 
 import database
 
@@ -51,7 +52,7 @@ def _counters(effect: dict) -> list[str]:
 
 
 def parse(effects: list, abilities: list, skills: list, units: list, loc: dict) -> dict:
-    """{tag: {name, kind, units: [base_id]}} — по всем персонажам и кораблям units."""
+    """Эффекты, их владельцы и ID способностей каждого владельца."""
     by_id = {e["id"]: e for e in effects if e.get("id")}
     ability_by_id = {a["id"]: a for a in abilities if a.get("id")}
     ability_of_skill = {s["id"]: s.get("abilityReference") for s in skills if s.get("id")}
@@ -78,21 +79,28 @@ def parse(effects: list, abilities: list, skills: list, units: list, loc: dict) 
         for ref in effect.get("effectReference") or []:
             walk(ref.get("id"), seen, out)
 
-    owners: dict[str, set] = defaultdict(set)
+    @cache
+    def tags_for_ability(aid):
+        ability = ability_by_id.get(aid)
+        if not ability:
+            return ()
+        found = set()
+        tiers = ability.get("tier") or []
+        seen = set()
+        for ref_e in (tiers[-1] if tiers else ability).get("effectReference") or []:
+            walk(ref_e.get("id"), seen, found)
+        return sorted(found)
+
+    owners = defaultdict(lambda: defaultdict(set))
     for unit in units:
-        found: set = set()
-        for ref in unit.get("skillReference") or []:
-            ability = ability_by_id.get(ability_of_skill.get(ref.get("skillId")))
-            if not ability:
-                continue
-            tiers = ability.get("tier") or []
-            for ref_e in (tiers[-1] if tiers else ability).get("effectReference") or []:
-                walk(ref_e.get("id"), set(), found)
-        for tag in found:
-            owners[tag].add(unit["baseId"])
+        ability_ids = [ability_of_skill.get(ref.get("skillId")) for ref in unit.get("skillReference") or []]
+        ability_ids += [ref.get("abilityId") for ref in unit.get("limitBreakRef") or []]
+        for aid in dict.fromkeys(ability_ids):
+            for tag in tags_for_ability(aid):
+                owners[tag][unit["baseId"]].add(aid)
 
     result = {}
-    for tag, base_ids in owners.items():
+    for tag, unit_abilities in owners.items():
         name = (loc.get(f"FEATCOUNTER_{FEATCOUNTER_KEYS[tag]}") if tag in FEATCOUNTER_KEYS else None) \
             or loc.get(f"FEATCOUNTER_{tag.upper()}")
         name = _clean(name) if name else (loc_names[tag].most_common(1)[0][0] if loc_names[tag] else None)
@@ -104,10 +112,10 @@ def parse(effects: list, abilities: list, skills: list, units: list, loc: dict) 
         name = name[0].upper() + name[1:]
         # Два тега с одним именем (обычное и «50%» избегание крита) — один пункт списка.
         same = next((k for k, v in result.items() if v["name"] == name and v["kind"] == kind), None)
-        if same:
-            result[same]["units"] = sorted(set(result[same]["units"]) | base_ids)
-            continue
-        result[tag] = {"name": name, "kind": kind, "units": sorted(base_ids)}
+        row = result.setdefault(same or tag, {"name": name, "kind": kind, "units": [], "abilities": {}})
+        for bid, ids in unit_abilities.items():
+            row["abilities"][bid] = sorted(set(row["abilities"].get(bid, ())) | ids)
+        row["units"] = sorted(row["abilities"])
     return result
 
 

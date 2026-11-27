@@ -33,6 +33,49 @@ class AssistantTests(unittest.TestCase):
     def add(self, owner="1", gid=1, profile="test", source="100"):
         return a.add_reminder(gid, owner, profile, source, self.due, "Зайти на ВГ")
 
+    def test_effect_squad_uses_only_catalog_abilities_from_selected_side(self):
+        ids = {'LIGHT': 2, 'DARK': 3, 'DARK_SUPPORT': 3, 'SHIP': 3}
+        database.set_bot_state('unit_alignments', json.dumps(ids), guild_id=0)
+        ability = {'id': 'special', 'name': 'Удар', 'description': 'Даёт всем союзникам повышение эффективности.'}
+        unrelated = {'id': 'other', 'name': 'Другая', 'description': 'Восстанавливает здоровье.'}
+        units = {bid: {'name': bid, 'abilities': [unrelated, ability]} for bid in ids}
+        effects = {'potency_buff': {'name': 'Повышение эффективности', 'units': ['LIGHT', 'DARK', 'SHIP'],
+                                   'abilities': {'DARK': ['special']}}}
+        plan = {'action': 'effect_search', 'effect': 'potency_buff', 'own': False, 'side': 'dark', 'size': 5}
+        question = 'Собери 5 тёмных, чтобы набить 15 повышений эффективности за бой'
+
+        def select(kind, messages, key, *, validate, **kwargs):
+            payload = json.loads(messages[1]['content'])
+            if 'QUESTION' in payload:
+                self.assertEqual(payload['QUESTION'], question)
+                self.assertFalse(validate(dict(plan, side='ship')))
+                self.assertFalse(validate(dict(plan, size=15)))
+                self.assertTrue(validate(plan))
+                return plan
+            self.assertEqual(set(payload['candidates']), {'DARK'})
+            self.assertEqual(set(payload['candidates']['DARK']['abilities']), {'special'})
+            self.assertEqual(set(payload['support']), {'DARK_SUPPORT'})
+            row = {'unit': 'DARK', 'ability': 'special', 'note': 'На всех союзников'}
+            result = {'rows': [row], 'text': 'Повторите массовое наложение трижды.'}
+            for bad in (dict(row, unit='LIGHT'), dict(row, ability='other'), dict(row, ability=[])):
+                self.assertFalse(validate(dict(result, rows=[bad])))
+            self.assertFalse(validate(dict(result, rows=[row, row])))
+            self.assertTrue(validate(result))
+            return result
+
+        with patch.object(a, 'catalog', return_value=(effects, [])), \
+                patch.object(a.unit_abilities, 'load', return_value={'units': units}), \
+                patch.object(database, 'get_unit_types', return_value={bid: 'ship' if bid == 'SHIP' else 'character' for bid in ids}), \
+                patch.object(a.openrouter_router, 'call_json', side_effect=select):
+            parsed, available_effects, _ = a.parse_plan(question, 'test', 'key', LIMITS)
+            pages = a.effect_search_pages(parsed, available_effects[parsed['effect']], {}, question, [], 'key', LIMITS)
+            old_effect = {'name': effects['potency_buff']['name'], 'units': ['LIGHT', 'DARK']}
+            candidates, _ = a.effect_search_candidates(dict(plan, side='any'), old_effect, {})
+        self.assertEqual(set(candidates), {'LIGHT', 'DARK'})
+        self.assertEqual(set(candidates['DARK']['abilities']), {'special'})
+        self.assertIn('**DARK** — Удар', pages[0])
+        self.assertIn('тёмная сторона', pages[0])
+
     def test_officer_active_guild_and_profile_required(self):
         with patch.object(a.guild_resolver, "resolve_access") as resolve, patch.object(database, "get_guild_config", return_value={"is_active": 1}), patch.object(a.bot_profiles, "accepts", return_value=True):
             for tier, gid in [(None, 1), ("member", 1), ("officer", None), ("officer", 2)]:
@@ -300,6 +343,30 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
         model.assert_not_called()
         self.assertFalse(reserve.call_args.kwargs['ai'])
         self.assertIn('1 ч 30 мин', send.call_args.args[1][0])
+
+    async def test_mention_routes_effect_squad_through_verified_search(self):
+        from services import assistant_context
+        question = 'Подбери светлый отряд на 15 повышений эффективности'
+        self.message.content = '<@123> ' + question
+        self.message.channel = SimpleNamespace(id=40, typing=MagicMock())
+        self.message.guild = SimpleNamespace(id=60)
+        self.message.attachments = self.message.role_mentions = []
+        self.message.mention_everyone = False
+        access = {'guild_id': 1}
+        plan = {'action': 'effect_search', 'effect': 'potency_buff', 'own': False, 'side': 'light', 'size': 5}
+        effect = {'name': 'Повышение эффективности'}
+        with patch.object(a, 'access_for', return_value=access), \
+                patch.object(assistant_context, 'build', return_value={}), \
+                patch.object(assistant_context, 'refresh_event', new=AsyncMock(return_value=False)), \
+                patch.object(a, 'local_plan', return_value=None), \
+                patch.object(a, 'reserve_request', return_value=True) as reserve, \
+                patch.object(a, 'parse_plan', return_value=(plan, {'potency_buff': effect}, [])), \
+                patch.object(a, 'effect_search_pages', return_value=['Подбор']) as search, \
+                patch.object(self.cog, 'send_pages', new_callable=AsyncMock) as send:
+            await self.cog.on_message(self.message)
+        self.assertTrue(reserve.call_args.kwargs['ai'])
+        search.assert_called_once_with(plan, effect, access, question, [], 'key', LIMITS)
+        send.assert_awaited_once_with(self.message, ['Подбор'], access, fresh_quota=True)
 
     async def test_non_officer_cannot_call_model_or_create_reminder(self):
         with patch.object(a, "access_for", return_value=None), patch.object(a, "parse_plan") as model, patch.object(a, "reserve_request") as reserve:

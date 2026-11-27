@@ -5,17 +5,24 @@ import database
 COLORS = {"light": (32, 78, 135), "dark": (120, 30, 30), "neutral": (236, 236, 240)}
 
 
-def side(base_id):
+def sides(base_ids):
     raw = database.get_bot_state("unit_alignments", guild_id=0)
     data = json.loads(raw) if raw else {}
-    value = data.get(base_id)
-    if value is not None:
-        return {1: "neutral", 2: "light", 3: "dark"}.get(value)
+    labels = {1: "neutral", 2: "light", 3: "dark"}
+    result = {bid: labels[data[bid]] for bid in base_ids if data.get(bid) in labels}
+    missing = set(base_ids) - result.keys()
+    if not missing:
+        return result
     from services.faction import factions
-    for key, label in (("alignment_light", "light"), ("alignment_dark", "dark"), ("alignment_neutral", "neutral")):
-        if base_id in factions().get(key, {}).get("units", []):
-            return label
-    return None
+    groups = factions()
+    for label in labels.values():
+        for bid in missing.intersection(groups.get(f"alignment_{label}", {}).get("units", [])):
+            result[bid] = label
+    return result
+
+
+def side(base_id):
+    return sides([base_id]).get(base_id)
 
 
 def color(base_id, default=(50, 54, 64)):

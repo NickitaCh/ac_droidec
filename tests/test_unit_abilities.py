@@ -2,10 +2,30 @@ import unittest
 from unittest.mock import patch
 
 from services import unit_abilities as u
+from services import unit_effects
 from services import mention_assistant as a
 
 
 class AbilityTests(unittest.TestCase):
+    def test_effect_index_records_linked_abilities_and_merges_same_effect_labels(self):
+        effect_rows = [
+            {'id': 'wrapper', 'effectReference': [{'id': 'buff'}]},
+            {'id': 'buff', 'descriptiveTag': [{'tag': 'featcounter_potency_buff'}, {'tag': 'countable_buff'}]},
+            {'id': 'copy', 'persistentLocKey': 'label', 'descriptiveTag': [
+                {'tag': 'featcounter_test_buff'}, {'tag': 'countable_buff'}]},
+        ]
+        abilities = [
+            {'id': 'basic', 'tier': [{'effectReference': [{'id': 'wrapper'}]}]},
+            {'id': 'special', 'tier': [{'effectReference': [{'id': 'copy'}]}]},
+        ]
+        skills = [{'id': row['id'], 'abilityReference': row['id']} for row in abilities]
+        units = [{'baseId': 'A', 'skillReference': [{'skillId': row['id']} for row in skills]}]
+        loc = {'FEATCOUNTER_POTENCY_UP': 'Повышение эффективности', 'label': 'Повышение эффективности'}
+        result = unit_effects.parse(effect_rows, abilities, skills, units, loc)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(next(iter(result.values()))['units'], ['A'])
+        self.assertEqual(next(iter(result.values()))['abilities'], {'A': ['basic', 'special']})
+
     def fixture(self):
         return {'updated_at': 1795528800, 'units': {'SUPREMELEADERKYLOREN': {
             'name': 'Верховный лидер Кайло Рен', 'abilities': [
