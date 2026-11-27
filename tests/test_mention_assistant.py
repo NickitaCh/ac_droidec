@@ -39,6 +39,8 @@ class AssistantTests(unittest.TestCase):
         ability = {'id': 'special', 'name': 'Удар', 'description': 'Даёт всем союзникам повышение эффективности.'}
         unrelated = {'id': 'other', 'name': 'Другая', 'description': 'Восстанавливает здоровье.'}
         units = {bid: {'name': bid, 'abilities': [unrelated, ability]} for bid in ids}
+        units['LIGHT']['abilities'] = [unrelated, dict(ability, description='Увеличивает эффективность всех союзников.')]
+        units['DARK']['abilities'] = [unrelated, dict(ability, description='Повышает эффективность всех союзников.')]
         effects = {'potency_buff': {'name': 'Повышение эффективности', 'units': ['LIGHT', 'DARK', 'SHIP'],
                                    'abilities': {'DARK': ['special']}}}
         plan = {'action': 'effect_search', 'effect': 'potency_buff', 'own': False, 'side': 'dark', 'size': 5}

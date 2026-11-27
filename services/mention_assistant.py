@@ -402,7 +402,12 @@ def effect_search_candidates(plan, effect, access):
     indexed = effect.get('abilities', {})
     # Fallback for snapshots saved before the effect index recorded ability IDs.
     words = unit_abilities.normalize(effect['name']).split()
-    pattern = r'\b' + r'\s+'.join(word[:-2] + r'\w*' if len(word) >= 6 else word for word in words) + r'\b'
+    terms = [word[:-2] + r'\w*' if len(word) >= 6 else word for word in words]
+    if words and words[0] == 'повышение':
+        terms[0] = r'(?:повыш|увелич|усили)\w*'
+    elif words and words[0] == 'снижение':
+        terms[0] = r'(?:сниж|уменьш|ослаб)\w*'
+    pattern = re.compile(r'\b' + r'\s+'.join(terms) + r'\b') if terms else None
     candidates = {}
     for bid in effect['units']:
         if bid not in allowed:
@@ -412,7 +417,7 @@ def effect_search_candidates(plan, effect, access):
             matches = [row for row in unit['abilities'] if row['id'] in indexed[bid]]
         else:
             matches = [row for row in unit['abilities']
-                       if words and re.search(pattern, unit_abilities.normalize(row['description']))]
+                       if pattern and pattern.search(unit_abilities.normalize(row['description']))]
         if matches:
             candidates[bid] = {'name': unit['name'], 'abilities': {row['id']: row for row in matches}}
     return candidates, allowed
