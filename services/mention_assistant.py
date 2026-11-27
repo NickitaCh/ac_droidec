@@ -457,7 +457,7 @@ def add_reminder(gid, owner, profile, source_id, due, text, *, channel_id=None, 
         existing = conn.execute("SELECT id FROM assistant_reminders WHERE source_id=?", (str(source_id),)).fetchone()
         if existing:
             return existing[0]
-        count = conn.execute("SELECT count(*) FROM assistant_reminders WHERE owner=? AND status IN ('pending','sending')", (str(owner),)).fetchone()[0]
+        count = conn.execute("SELECT count(*) FROM assistant_reminders WHERE owner=? AND status IN ('pending','claimed','sending')", (str(owner),)).fetchone()[0]
         if count >= MAX_ACTIVE:
             raise ValueError("У вас уже 10 активных напоминаний. Отмените лишние.")
         cursor = conn.execute("INSERT INTO assistant_reminders(guild_id,owner,profile,source_id,due,text,created,channel_id,discord_guild_id) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -469,33 +469,48 @@ def add_reminder(gid, owner, profile, source_id, due, text, *, channel_id=None, 
 
 def list_reminders(gid, owner, profile):
     with connection() as conn:
-        return [dict(row) for row in conn.execute("SELECT * FROM assistant_reminders WHERE guild_id=? AND owner=? AND profile=? AND status='pending' ORDER BY due LIMIT 10", (gid, str(owner), profile))]
+        return [dict(row) for row in conn.execute("SELECT * FROM assistant_reminders WHERE guild_id=? AND owner=? AND profile=? AND status IN ('pending','claimed') ORDER BY due LIMIT 10", (gid, str(owner), profile))]
 
 
 def cancel_reminder(gid, owner, profile, reminder_id):
     with connection() as conn:
-        return conn.execute("UPDATE assistant_reminders SET status='cancelled',finished=? WHERE id=? AND guild_id=? AND owner=? AND profile=? AND status='pending'", (time.time(), reminder_id, gid, str(owner), profile)).rowcount == 1
+        return conn.execute("UPDATE assistant_reminders SET status='cancelled',finished=? WHERE id=? AND guild_id=? AND owner=? AND profile=? AND status IN ('pending','claimed')", (time.time(), reminder_id, gid, str(owner), profile)).rowcount == 1
 
 
 def claim_due(profile, now=None):
     now = time.time() if now is None else now
     with connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        # Ambiguous interrupted sends are never resent automatically.
+        conn.execute("UPDATE assistant_reminders SET status='pending',finished=NULL WHERE profile=? AND status='claimed' AND finished < ?",
+                     (profile, now - 300))
+        # A connection can drop after Discord accepted a send.
         conn.execute("UPDATE assistant_reminders SET status='failed',finished=? WHERE profile=? AND status='sending' AND finished < ?", (now, profile, now - 300))
         rows = conn.execute("SELECT * FROM assistant_reminders WHERE profile=? AND status='pending' AND due<=? ORDER BY due LIMIT 10", (profile, now)).fetchall()
         for row in rows:
-            conn.execute("UPDATE assistant_reminders SET status='sending',finished=? WHERE id=?", (now, row["id"]))
+            conn.execute("UPDATE assistant_reminders SET status='claimed',finished=? WHERE id=?", (now, row["id"]))
         # Only retain completed reminder contents for a week.
-        conn.execute("DELETE FROM assistant_reminders WHERE status NOT IN ('pending','sending') AND finished < ?", (now - 7 * 86400,))
-        return [dict(row) for row in rows]
+        conn.execute("DELETE FROM assistant_reminders WHERE status NOT IN ('pending','claimed','sending') AND finished < ?", (now - 7 * 86400,))
+        return [dict(row, claimed_at=now) for row in rows]
 
 
-def finish_reminder(reminder_id, status):
+def begin_reminder_send(reminder_id, claimed_at):
+    with connection() as conn:
+        return conn.execute("UPDATE assistant_reminders SET status='sending',finished=? "
+                            "WHERE id=? AND status='claimed' AND finished=?",
+                            (time.time(), reminder_id, claimed_at)).rowcount == 1
+
+
+def finish_reminder(reminder_id, status, *, claimed_at=None):
     if status not in {"sent", "failed", "cancelled"}:
         raise ValueError("Неверный статус.")
     with connection() as conn:
-        conn.execute("UPDATE assistant_reminders SET status=?,finished=? WHERE id=? AND status='sending'", (status, time.time(), reminder_id))
+        if claimed_at is None:
+            conn.execute("UPDATE assistant_reminders SET status=?,finished=? WHERE id=? AND status='sending'",
+                         (status, time.time(), reminder_id))
+        else:
+            conn.execute("UPDATE assistant_reminders SET status=?,finished=? "
+                         "WHERE id=? AND status='claimed' AND finished=?",
+                         (status, time.time(), reminder_id, claimed_at))
 
 
 def local_action(question):

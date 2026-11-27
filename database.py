@@ -2403,12 +2403,17 @@ def get_guild_ids_for_ally_code(ally_code: str) -> set:
     может состоять в нескольких зарегистрированных гильдиях сразу — см. player_units_sync_loop
     в cogs/stat_requirements.py, тот же паттерн). Используется ручным синком с /activity,
     чтобы не потерять события для "чужой" гильдии, если игрок состоит сразу в нескольких."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT guild_id FROM user_mapping WHERE ally_code = ?", (ally_code,))
-    rows = {r[0] for r in cursor.fetchall()}
-    conn.close()
-    return rows
+    with closing(sqlite3.connect(DB_NAME)) as conn:
+        return _read_guild_ids_for_ally_code(conn.cursor(), ally_code) or set()
+
+
+def _read_guild_ids_for_ally_code(cursor, ally_code):
+    if not cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_mapping'").fetchone():
+        return None
+    return {guild_id for (guild_id,) in cursor.execute(
+        "SELECT DISTINCT guild_id FROM user_mapping WHERE ally_code=?", (ally_code,)
+    )}
+
 
 def sync_guild_roster(guild_id: int, roster_rows):
     """Полная замена состава гильдии guild_id в user_mapping: roster_rows —
@@ -6006,8 +6011,11 @@ def upsert_player_units(ally_code: str, units: dict):
     """units: {base_id: сырой rosterUnit-словарь из comlink.get_player}"""
     if not units:
         return
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _write_player_units(conn.cursor(), ally_code, units)
+
+
+def _write_player_units(cursor, ally_code, units):
     _ensure_player_unit_cache_table(cursor)
     _ensure_player_unit_sync_state_table(cursor)
     rows = [(ally_code, base_id, player_json.dumps(unit_dict)) for base_id, unit_dict in units.items()]
@@ -6015,9 +6023,8 @@ def upsert_player_units(ally_code: str, units: dict):
         INSERT OR REPLACE INTO player_unit_cache (ally_code, base_id, unit_json, updated_at)
         VALUES (?, ?, ?, datetime('now'))
     """, rows)
-    cursor.execute("INSERT OR REPLACE INTO player_unit_sync_state (ally_code, updated_at) VALUES (?, datetime('now'))", (str(ally_code),))
-    conn.commit()
-    conn.close()
+    cursor.execute("""INSERT OR REPLACE INTO player_unit_sync_state (ally_code, updated_at)
+                      VALUES (?, datetime('now'))""", (str(ally_code),))
 
 
 def get_player_units_age_seconds(ally_code: str):
@@ -6032,6 +6039,11 @@ def get_player_units_age_seconds(ally_code: str):
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+def _ensure_player_roster_observations_table(cursor):
+    cursor.execute("""CREATE TABLE IF NOT EXISTS player_roster_observations (
+        ally_code TEXT PRIMARY KEY, observed_at REAL NOT NULL)""")
 
 
 def _ensure_player_unit_sync_state_table(cursor):
@@ -6084,12 +6096,13 @@ def get_player_unit(ally_code: str, base_id: str):
 def get_player_units(ally_code: str) -> dict:
     """base_id -> сырой rosterUnit словарь, весь закэшированный ростер игрока разом
     (для диффа активности в player_units_sync_loop — см. services/activity_diff.py)."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    with closing(sqlite3.connect(DB_NAME)) as conn:
+        return _read_player_units(conn.cursor(), ally_code)
+
+
+def _read_player_units(cursor, ally_code):
     _ensure_player_unit_cache_table(cursor)
-    cursor.execute("SELECT base_id, unit_json FROM player_unit_cache WHERE ally_code = ?", (ally_code,))
-    rows = cursor.fetchall()
-    conn.close()
+    rows = cursor.execute("SELECT base_id, unit_json FROM player_unit_cache WHERE ally_code = ?", (ally_code,))
     return {base_id: player_json.loads(unit_json) for base_id, unit_json in rows}
 
 
@@ -6619,19 +6632,21 @@ def add_guild_activity_event(guild_id: int, ally_code: str, base_id: str, action
     """Возвращает id новой строки, если она реально добавлена, иначе None (уже была,
     INSERT OR IGNORE проглотил дубль) — id нужен вызывающему коду (services/activity_diff.py)
     для omicron-событий, чтобы потом отметить их объявленными через mark_activity_event_announced."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    _ensure_guild_activity_events_table(cursor)
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        cursor = conn.cursor()
+        _ensure_guild_activity_events_table(cursor)
+        return _insert_guild_activity_event(cursor, guild_id, ally_code, base_id, action_type,
+                                            old_value, new_value, event_date)
+
+
+def _insert_guild_activity_event(cursor, guild_id, ally_code, base_id, action_type, old_value, new_value, event_date):
     announced = 0 if action_type == "omicron" else 1
     cursor.execute("""
         INSERT OR IGNORE INTO guild_activity_events
             (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, scraped_at, announced)
         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
     """, (guild_id, ally_code, base_id, action_type, old_value, new_value, event_date, announced))
-    conn.commit()
-    event_id = cursor.lastrowid if cursor.rowcount > 0 else None
-    conn.close()
-    return event_id
+    return cursor.lastrowid if cursor.rowcount > 0 else None
 
 
 def get_unannounced_omicron_events() -> list[tuple]:
@@ -7991,7 +8006,7 @@ def get_all_skill_tier_info() -> dict:
 
 
 # Датакроны игроков (сырой player.datacron из comlink.get_player) — пишутся попутно в ежечасном
-# синке ростеров (services/activity_diff.py::fetch_player_units), без отдельных запросов. Нужны
+# синке ростеров (services/activity_diff.py::sync_player), без отдельных запросов. Нужны
 # для гильдийского подсчёта «у кого есть нужный ДК» (деф ВГ, tw_def_engine.py).
 def _ensure_player_datacron_cache_table(cursor):
     cursor.execute("""
@@ -8004,19 +8019,20 @@ def _ensure_player_datacron_cache_table(cursor):
 
 
 def upsert_player_datacrons(ally_code: str, datacrons: list) -> None:
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _write_player_datacrons(conn.cursor(), ally_code, datacrons)
+
+
+def _write_player_datacrons(cursor, ally_code, datacrons):
     _ensure_player_datacron_cache_table(cursor)
     cursor.execute("""
         INSERT OR REPLACE INTO player_datacron_cache (ally_code, datacron_json, updated_at)
         VALUES (?, ?, datetime('now'))
     """, (str(ally_code), player_json.dumps(datacrons or [])))
-    conn.commit()
-    conn.close()
 
 
 # Профиль игрока помимо ростера (статы ВА, ранги арены, лига) — services/player_profile.py::
-# player_meta, пишется попутно в ежечасном синке (activity_diff.fetch_player_units). Нужен
+# player_meta, пишется попутно в ежечасном синке (activity_diff.sync_player). Нужен
 # гильдийскому /профиль, чтобы не дёргать get_player по каждому участнику.
 def _ensure_player_profile_cache_table(cursor):
     cursor.execute("""
@@ -8029,15 +8045,16 @@ def _ensure_player_profile_cache_table(cursor):
 
 
 def upsert_player_profile(ally_code: str, profile: dict) -> None:
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    with closing(sqlite3.connect(DB_NAME)) as conn, conn:
+        _write_player_profile(conn.cursor(), ally_code, profile)
+
+
+def _write_player_profile(cursor, ally_code, profile):
     _ensure_player_profile_cache_table(cursor)
     cursor.execute(
         "INSERT OR REPLACE INTO player_profile_cache (ally_code, profile_json, updated_at) VALUES (?, ?, datetime('now'))",
         (str(ally_code), player_json.dumps(profile)),
     )
-    conn.commit()
-    conn.close()
 
 
 def get_player_profiles_bulk(ally_codes: list) -> dict:

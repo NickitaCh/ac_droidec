@@ -148,6 +148,27 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(orders.config(1)['enabled'])
         self.assertEqual(orders.history(1)[0]['result'], 'Не подтверждён')
 
+    async def test_write_deadline_releases_pause_confirmation(self):
+        load = (('target', 'player', b'secret'), {'read_request': base64.b64encode(raw()).decode()}, lambda: True)
+        started = asyncio.Event()
+
+        async def slow_rpc(*args, **kwargs):
+            started.set()
+            await asyncio.Future()
+
+        with patch.object(orders, 'COMMAND_TIMEOUT_SECONDS', 0.1), \
+                patch.object(orders, 'read', AsyncMock(return_value=self.state)), \
+                patch.object(orders.accounts, '_load', return_value=load), \
+                patch.object(ga, '_read_payload', AsyncMock(side_effect=slow_rpc)):
+            processing = asyncio.create_task(orders.process(1, 'owner', self.state))
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                await asyncio.wait_for(orders.pause_and_wait(1), 2)
+            finally:
+                await asyncio.wait_for(processing, 2)
+        self.assertFalse(orders.config(1)['enabled'])
+        self.assertEqual(orders.history(1)[0]['result'], 'Не подтверждён')
+
     async def test_only_bound_owner_runs_and_changed_phase_pauses(self):
         with patch.object(orders, 'read', AsyncMock()) as read:
             await orders.process(1, 'another', self.state)
@@ -167,6 +188,70 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                     self.fail('Second writer entered')
             await orders.process(1, 'owner', self.state)
             self.assertTrue(orders.config(1)['enabled'])
+
+    async def test_pause_during_game_write_stops_the_next_target(self):
+        second = self.key + '_strike01'
+        other_rule = dict(self.rule, id='other', priority=2, target=second)
+        orders.save_rules(self.user, '123', self.state, [self.rule, other_rule], True, 1)
+        after = copy.deepcopy(self.state)
+        after['zones'][self.key]['command'] = 3
+        load = (('target', 'player', b'secret'), {'read_request': base64.b64encode(raw()).decode()}, lambda: True)
+
+        async def send_and_pause(*args, **kwargs):
+            orders.pause(1)
+            return b''
+
+        with patch.object(orders, 'read', AsyncMock(side_effect=[self.state, after])), \
+                patch.object(orders.accounts, '_load', return_value=load), \
+                patch.object(ga, '_read_payload', AsyncMock(side_effect=send_and_pause)) as send:
+            await orders.process(1, 'owner', self.state)
+            send.assert_awaited_once()
+        self.assertFalse(orders.config(1)['enabled'])
+        self.assertEqual(orders.history(1)[0]['result'], 'Подтверждён')
+
+    async def test_pause_cannot_confirm_between_lease_and_rpc(self):
+        after = copy.deepcopy(self.state)
+        after['zones'][self.key]['command'] = 3
+        load = (('target', 'player', b'secret'), {'read_request': base64.b64encode(raw()).decode()}, lambda: True)
+        lease_checked = asyncio.Event()
+        resume_rpc = asyncio.Event()
+        pause_saved = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        original_to_thread = asyncio.to_thread
+        original_pause = orders.pause
+
+        async def thread_call(function, *args, **kwargs):
+            result = await original_to_thread(function, *args, **kwargs)
+            if function is orders._lease and kwargs.get('revision') is not None:
+                lease_checked.set()
+                await resume_rpc.wait()
+            return result
+
+        def pause(gid):
+            original_pause(gid)
+            loop.call_soon_threadsafe(pause_saved.set)
+
+        with patch.object(orders, 'read', AsyncMock(side_effect=[self.state, after])), \
+                patch.object(orders.accounts, '_load', return_value=load), \
+                patch.object(ga, '_read_payload', AsyncMock(return_value=b'')) as send, \
+                patch.object(orders, 'pause', side_effect=pause), \
+                patch.object(asyncio, 'to_thread', side_effect=thread_call):
+            processing = asyncio.create_task(orders.process(1, 'owner', self.state))
+            try:
+                await asyncio.wait_for(lease_checked.wait(), 5)
+                pausing = asyncio.create_task(orders.pause_and_wait(1))
+                try:
+                    await asyncio.wait_for(pause_saved.wait(), 5)
+                    await asyncio.sleep(0)
+                    self.assertFalse(pausing.done())
+                    send.assert_not_awaited()
+                finally:
+                    resume_rpc.set()
+                    await asyncio.wait_for(pausing, 5)
+            finally:
+                resume_rpc.set()
+                await asyncio.wait_for(processing, 5)
+            send.assert_awaited_once()
 
     async def test_identical_order_does_not_send_again(self):
         self.state['zones'][self.key]['command'] = 3

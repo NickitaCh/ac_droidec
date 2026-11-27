@@ -68,6 +68,7 @@ async def main():
         await run_polling(app)
     finally:
         notifier_task.cancel()
+        await asyncio.gather(notifier_task, return_exceptions=True)
         await memory_maintenance.stop()
         await api.close()
 

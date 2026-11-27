@@ -69,11 +69,25 @@ class WebTests(unittest.TestCase):
     def test_pause_does_not_require_a_working_game_session(self):
         csrf = self.csrf()
         orders.save_rules(self.user, '123', state(), [], True, 0)
-        with patch.object(orders, 'read', AsyncMock(side_effect=ga.SessionExpired('expired'))) as read:
-            response = self.client.post('/tb/commands', data={'csrf': csrf, 'action': 'pause', 'revision': '1'}, follow_redirects=False)
+        orders._lease(1, 'other-worker', acquire=True)
+        self.addCleanup(orders._lease, 1, 'other-worker', release=True)
+        with patch.object(ga, 'require_game_officer') as authorize, \
+                patch.object(web, '_code', side_effect=AssertionError('pause needs no registered account')), \
+                patch.object(orders, 'read', AsyncMock()) as read:
+            response = self.client.post('/tb/commands', data={'csrf': csrf, 'action': 'pause', 'revision': '0'},
+                                        follow_redirects=False)
             self.assertEqual(response.status_code, 303)
+            authorize.assert_called_once()
             read.assert_not_awaited()
         self.assertFalse(orders.config(1)['enabled'])
+
+    def test_pause_visible_without_main_account_or_live_snapshot(self):
+        orders.save_rules(self.user, '123', state(), [], True, 0)
+        with patch.object(web, '_code', return_value=None):
+            response = self.client.get('/tb/commands')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('value="pause"', response.text)
+        self.assertNotIn('value="refresh"', response.text)
 
     def test_rule_editor_roundtrips_conditions_and_stays_paused(self):
         csrf = self.csrf()

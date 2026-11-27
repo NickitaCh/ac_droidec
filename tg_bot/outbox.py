@@ -80,7 +80,8 @@ def ensure_tables(cursor):
     except sqlite3.OperationalError:
         pass  # колонка уже есть
     # Пересылка в ветку по метке: адресат задан прямо в строке очереди.
-    for column in ("chat_id INTEGER", "thread_id INTEGER", "attachments TEXT", "bot_profile TEXT NOT NULL DEFAULT 'test'"):
+    for column in ("chat_id INTEGER", "thread_id INTEGER", "attachments TEXT", "bot_profile TEXT NOT NULL DEFAULT 'test'",
+                   "next_attempt_at REAL", "delivery_progress TEXT"):
         try:
             cursor.execute(f"ALTER TABLE tg_outbox ADD COLUMN {column}")
         except sqlite3.OperationalError:
@@ -272,17 +273,36 @@ def pending(limit: int = 20, *, profile: str | None = None) -> list[dict]:
     database.get_all_guild_configs(active_only=False)
     conn = _connect()
     rows = conn.execute(
-        "SELECT o.id, o.guild_id, o.kind, o.owner_id, o.text, o.created_at, o.chat_id, o.thread_id, o.attachments"
+        "SELECT o.id, o.guild_id, o.kind, o.owner_id, o.text, o.created_at, o.chat_id, o.thread_id, o.attachments, o.delivery_progress"
         " FROM tg_outbox o LEFT JOIN guilds g ON g.id=o.guild_id"
-        " WHERE o.sent_at IS NULL AND COALESCE(g.bot_profile, o.bot_profile)=? ORDER BY o.id LIMIT ?",
-        (profile, limit),
+        " WHERE o.sent_at IS NULL AND COALESCE(o.next_attempt_at, 0)<=? AND COALESCE(g.bot_profile, o.bot_profile)=? ORDER BY o.id LIMIT ?",
+        (time.time(), profile, limit),
     ).fetchall()
     conn.close()
-    keys = ("id", "guild_id", "kind", "owner_id", "text", "created_at", "chat_id", "thread_id", "attachments")
+    keys = ("id", "guild_id", "kind", "owner_id", "text", "created_at", "chat_id", "thread_id", "attachments", "delivery_progress")
     items = [dict(zip(keys, r)) for r in rows]
     for item in items:
         item["attachments"] = json.loads(item["attachments"]) if item["attachments"] else []
+        item["delivery_progress"] = json.loads(item["delivery_progress"] or "{}")
     return items
+
+
+def record_delivery_progress(item_id: int, progress: dict):
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("UPDATE tg_outbox SET delivery_progress=? WHERE id=?", (json.dumps(progress), item_id))
+    finally:
+        conn.close()
+
+
+def retry_delivery(item_id: int, next_attempt: float):
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("UPDATE tg_outbox SET next_attempt_at=? WHERE id=?", (next_attempt, item_id))
+    finally:
+        conn.close()
 
 
 def mark_sent(item_id: int, error: str | None = None):

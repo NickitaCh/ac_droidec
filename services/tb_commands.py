@@ -12,15 +12,23 @@ import json
 import secrets
 import sqlite3
 import time
+from pathlib import Path
 
 import database
 from services import game_account as ga, game_account_readonly as accounts, tb_live, tb_forecast
+from services.sync_queue import shared_file_lock
 import tb_plan_reader
+
+COMMAND_TIMEOUT_SECONDS = 30
 
 STATES = {1: "Без приказа", 2: "Концентрация", 3: "Запрет"}
 
 
 class Busy(ga.AccountError):
+    pass
+
+
+class AutomationPaused(Exception):
     pass
 
 
@@ -101,7 +109,7 @@ def _authorize(user, code):
         raise ga.AccountError('Аккаунт должен состоять в вашей игровой гильдии.')
 
 
-def _lease(gid, token, *, acquire=False, release=False):
+def _lease(gid, token, *, acquire=False, release=False, revision=None):
     now = time.time()
     with closing(_db()) as db, db:
         db.execute('BEGIN IMMEDIATE')
@@ -114,6 +122,10 @@ def _lease(gid, token, *, acquire=False, release=False):
         row = db.execute('SELECT token FROM tb_command_locks WHERE guild_id=?', (gid,)).fetchone()
         if not row or row['token'] != token:
             raise Busy('Приказы уже обновляются. Повторите после завершения.')
+        if revision is not None and not db.execute(
+            'SELECT 1 FROM tb_command_config WHERE guild_id=? AND enabled=1 AND revision=?', (gid, revision)
+        ).fetchone():
+            raise AutomationPaused
         db.execute('UPDATE tb_command_locks SET expires=? WHERE guild_id=? AND token=?', (now + 180, gid, token))
 
 
@@ -147,7 +159,12 @@ def request(raw, player, event, target, command, message):
         (4, 2, b'TerritoryRpc'), (5, 2, b'CommandTerritory'), (6, 2, ga.pack(args))])
 
 
-async def _apply(user, code, state, target, command, message, reason, token):
+def _send_lock(gid):
+    db = Path(database.DB_NAME).resolve()
+    return shared_file_lock(db.parent / "cache" / f"{db.name}.tb-command-{gid}.lock")
+
+
+async def _apply(user, code, state, target, command, message, reason, token, *, revision=None):
     gid, owner = user['guild_id'], str(user['discord_id'])
     await asyncio.to_thread(_authorize, user, code)
     active(state, state['event'], state['phase'])
@@ -162,9 +179,14 @@ async def _apply(user, code, state, target, command, message, reason, token):
         raise ga.AccountError('Подключение изменилось.')
     body = request(base64.b64decode(credentials['read_request'], validate=True), connection[1],
                    state['event'], target, command, message)
-    await asyncio.to_thread(_lease, gid, token)
     try:
-        await ga._read_payload(body, 'TerritoryRpc', 'CommandTerritory', allow_empty=True)
+        async with _send_lock(gid):
+            await asyncio.to_thread(_lease, gid, token, revision=revision)
+            try:
+                async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):
+                    await ga._read_payload(body, 'TerritoryRpc', 'CommandTerritory', allow_empty=True)
+            except TimeoutError:
+                raise ga.AccountError('Игра не подтвердила приказ вовремя. Обновите состояние.') from None
         if not is_current():
             raise ga.AccountError('Подключение изменилось во время изменения приказа.')
         fresh = await read(user, code)
@@ -172,8 +194,11 @@ async def _apply(user, code, state, target, command, message, reason, token):
         actual = targets(fresh).get(target, {})
         if actual.get('command') != command or actual.get('message', '') != message:
             raise ga.AccountError('Игра не подтвердила приказ. Обновите состояние перед повтором.')
+    except (AutomationPaused, Busy):
+        raise
     except BaseException:
-        await asyncio.to_thread(_pause, gid, 'Изменение не подтверждено. Проверьте приказы и включите правила заново.')
+        await asyncio.to_thread(_pause, gid, 'Изменение не подтверждено. Проверьте приказы и включите правила заново.',
+                                revision=revision)
         await asyncio.to_thread(_log, gid, owner, state, target, command, message, reason, 'Не подтверждён')
         raise
     await asyncio.to_thread(_log, gid, owner, fresh, target, command, message, reason, 'Подтверждён')
@@ -196,9 +221,23 @@ async def change(user, code, event, phase, target, command, message, expected):
     return state
 
 
-def _pause(gid, status):
+def _pause(gid, status, *, revision=None):
     with closing(_db()) as db, db:
-        db.execute('UPDATE tb_command_config SET enabled=0,status=?,revision=revision+1 WHERE guild_id=?', (status, gid))
+        db.execute('UPDATE tb_command_config SET enabled=0,status=?,revision=revision+1 '
+                   'WHERE guild_id=? AND (? IS NULL OR revision=?)', (status, gid, revision, revision))
+
+
+def pause(gid):
+    with closing(_db()) as db, db:
+        db.execute('UPDATE tb_command_config SET enabled=0,status=?,revision=revision+1 '
+                   'WHERE guild_id=? AND enabled=1', ('Пауза по команде офицера.', gid))
+
+
+async def pause_and_wait(gid):
+    await asyncio.to_thread(pause, gid)
+    # Confirm only after any RPC that passed the old revision has left the send lock.
+    async with _send_lock(gid):
+        pass
 
 
 def pause_owner(gid, owner, status):
@@ -344,7 +383,7 @@ async def process(gid, owner, state):
         async with locked(gid) as token:
             # Reread config under the same lease as manual edits.
             cfg = await asyncio.to_thread(config, gid)
-            if not cfg['enabled'] or cfg['owner'] != str(owner):
+            if not cfg or not cfg['enabled'] or cfg['owner'] != str(owner):
                 return state
             user = {'discord_id': owner, 'guild_id': gid, 'bot_profile': cfg['profile'], 'tier': 'officer'}
             fresh = await read(user, cfg['code'])
@@ -355,13 +394,16 @@ async def process(gid, owner, state):
                 selected = winners(cfg['rules'], fresh)
                 if rule := selected.get(target):
                     fresh = await _apply(user, cfg['code'], fresh, target, rule['command'],
-                                         rule.get('message', ''), rule['name'], token)
+                                         rule.get('message', ''), rule['name'], token, revision=cfg['revision'])
             return fresh
     except Busy:
         return state
+    except AutomationPaused:
+        return fresh
     except ga.AccountError as error:
-        await asyncio.to_thread(_pause, gid, str(error))
+        await asyncio.to_thread(_pause, gid, str(error), revision=cfg['revision'])
         return fresh
     except Exception:
-        await asyncio.to_thread(_pause, gid, 'Ошибка выполнения. Проверьте состояние и включите правила заново.')
+        await asyncio.to_thread(_pause, gid, 'Ошибка выполнения. Проверьте состояние и включите правила заново.',
+                                revision=cfg['revision'])
         return fresh

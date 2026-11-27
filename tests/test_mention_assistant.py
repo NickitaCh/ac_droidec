@@ -78,13 +78,25 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in rows], [reminder_id])
         self.assertEqual(a.claim_due("test", now), [])
         self.assertEqual(len(a.claim_due("prod", now)), 1)
+        self.assertTrue(a.begin_reminder_send(reminder_id, rows[0]["claimed_at"]))
         a.finish_reminder(reminder_id, "sent")
         self.assertEqual(a.claim_due("test", now + 600), [])
+
+    def test_expired_claim_recovers_before_send_and_fences_old_worker(self):
+        reminder_id = self.add()
+        now = time.time() + 3700
+        old = a.claim_due("test", now)[0]
+        current = a.claim_due("test", now + 301)[0]
+        self.assertEqual(current["id"], reminder_id)
+        self.assertFalse(a.begin_reminder_send(reminder_id, old["claimed_at"]))
+        self.assertTrue(a.begin_reminder_send(reminder_id, current["claimed_at"]))
 
     def test_ambiguous_interrupted_send_fails_without_duplicate(self):
         reminder_id = self.add()
         now = time.time() + 3700
-        a.claim_due("test", now)
+        row = a.claim_due("test", now)[0]
+        with patch.object(a.time, "time", return_value=now):
+            self.assertTrue(a.begin_reminder_send(reminder_id, row["claimed_at"]))
         self.assertEqual(a.claim_due("test", now + 301), [])
         with a.connection() as conn:
             self.assertEqual(conn.execute("SELECT status FROM assistant_reminders WHERE id=?", (reminder_id,)).fetchone()[0], "failed")
@@ -403,15 +415,37 @@ class AssistantCogTests(unittest.IsolatedAsyncioTestCase):
     async def test_delivery_uses_chosen_channel_and_only_mentions_creator(self):
         from cogs.mention_assistant import MentionAssistantCog
         recipient = SimpleNamespace(send=AsyncMock())
-        row = {"id": 1, "owner": "456", "guild_id": 1, "channel_id": "50", "discord_guild_id": "60", "due": time.time()-1, "text": "ВГ"}
-        with patch.object(a, "claim_due", return_value=[row]), patch.object(a, "access_for", return_value={"guild_id": 1}), patch.object(a, "finish_reminder") as finish, patch("cogs.mention_assistant.checked_channel", new=AsyncMock(return_value=recipient)) as check:
+        row = {"id": 1, "owner": "456", "guild_id": 1, "channel_id": "50", "discord_guild_id": "60", "due": time.time()-1, "text": "ВГ", "claimed_at": time.time()}
+        with patch.object(a, "claim_due", return_value=[row]), patch.object(a, "access_for", return_value={"guild_id": 1}), patch.object(a, "begin_reminder_send", return_value=True), patch.object(a, "finish_reminder") as finish, patch("cogs.mention_assistant.checked_channel", new=AsyncMock(return_value=recipient)) as check:
             await MentionAssistantCog.reminders.coro(self.cog)
         check.assert_awaited_once_with(self.cog.bot, "456", "60", "50")
         recipient.send.assert_awaited_once()
         mentions = recipient.send.call_args.kwargs["allowed_mentions"].to_dict()
         self.assertEqual(mentions["users"], [456])
         self.assertNotIn("everyone", mentions["parse"])
-        finish.assert_called_once_with(1, "sent")
+        finish.assert_called_once_with(1, "sent", claimed_at=None)
+
+    async def test_cooperative_cancellation_finishes_claimed_delivery(self):
+        from cogs.mention_assistant import MentionAssistantCog
+        recipient = SimpleNamespace(send=AsyncMock())
+        row = {"id": 1, "owner": "456", "guild_id": 1, "channel_id": "50", "discord_guild_id": "60",
+               "due": time.time() - 1, "text": "ВГ", "claimed_at": time.time()}
+        loop = asyncio.get_running_loop()
+
+        def begin(*args):
+            loop.call_soon_threadsafe(poll.cancel)
+            return True
+
+        with patch.object(a, "claim_due", return_value=[row]), \
+                patch.object(a, "access_for", return_value={"guild_id": 1}), \
+                patch.object(a, "begin_reminder_send", side_effect=begin), \
+                patch.object(a, "finish_reminder") as finish, \
+                patch("cogs.mention_assistant.checked_channel", new=AsyncMock(return_value=recipient)):
+            poll = asyncio.create_task(MentionAssistantCog.reminders.coro(self.cog))
+            with self.assertRaises(asyncio.CancelledError):
+                await poll
+        recipient.send.assert_awaited_once()
+        finish.assert_called_once_with(1, "sent", claimed_at=None)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import disnake
 from disnake.ext import commands, tasks
 
 from services import assistant_context, bot_profiles, mention_assistant as assistant, unit_abilities
+from services.sync_queue import complete_on_cancel
 
 log = logging.getLogger(__name__)
 NO_MENTIONS = disnake.AllowedMentions.none()
@@ -353,30 +354,44 @@ class MentionAssistantCog(commands.Cog):
             log.warning("Assistant model request failed", exc_info=True)
             await self.reply(message, "ИИ сейчас не ответил. Попробуйте позже. Просмотр и отмена напоминаний работают без ИИ.")
 
+    async def _send_reminder(self, row, recipient):
+        prefix = f"<@{row['owner']}> " if row.get("channel_id") else ""
+        mentions = disnake.AllowedMentions(users=[disnake.Object(id=int(row["owner"]))], roles=False,
+                                           everyone=False) if prefix else NO_MENTIONS
+        text = f"⏰ {prefix}Напоминание №{row['id']}\n{safe(row['text'])}\n{assistant.format_due(row['due'])}"
+        if not await asyncio.to_thread(assistant.begin_reminder_send, row["id"], row["claimed_at"]):
+            return
+        status = "sent"
+        try:
+            await recipient.send(text, allowed_mentions=mentions)
+        except Exception:
+            status = "failed"
+            log.warning("Assistant reminder %s could not be delivered", row["id"], exc_info=True)
+        await asyncio.to_thread(assistant.finish_reminder, row["id"], status, claimed_at=None)
+
     @tasks.loop(seconds=30)
     async def reminders(self):
         try:
             rows = await asyncio.to_thread(assistant.claim_due, self.profile)
             for row in rows:
-                status = "failed"
                 try:
                     access = await asyncio.to_thread(assistant.access_for, row["owner"])
                     if not access or access["guild_id"] != row["guild_id"] or time.time() - row["due"] > 86400:
-                        status = "cancelled"
+                        await asyncio.to_thread(assistant.finish_reminder, row["id"], "cancelled",
+                                                claimed_at=row["claimed_at"])
+                        continue
+                    if row.get("channel_id"):
+                        recipient = await checked_channel(self.bot, row["owner"], row["discord_guild_id"], row["channel_id"])
                     else:
-                        if row.get("channel_id"):
-                            recipient = await checked_channel(self.bot, row["owner"], row["discord_guild_id"], row["channel_id"])
-                        else:
-                            recipient = self.bot.get_user(int(row["owner"])) or await self.bot.fetch_user(int(row["owner"]))
-                        prefix = f"<@{row['owner']}> " if row.get("channel_id") else ""
-                        mentions = disnake.AllowedMentions(users=[disnake.Object(id=int(row["owner"]))], roles=False, everyone=False) if prefix else NO_MENTIONS
-                        await recipient.send("⏰ " + prefix + "Напоминание №" + str(row["id"]) + "\n" + safe(row["text"])
-                                             + "\n" + assistant.format_due(row["due"]), allowed_mentions=mentions)
-                        status = "sent"
+                        recipient = self.bot.get_user(int(row["owner"])) or await self.bot.fetch_user(int(row["owner"]))
+                except (ValueError, disnake.Forbidden, disnake.NotFound):
+                    await asyncio.to_thread(assistant.finish_reminder, row["id"], "failed", claimed_at=row["claimed_at"])
+                    continue
                 except Exception:
-                    log.warning("Assistant reminder %s could not be delivered", row["id"], exc_info=True)
-                finally:
-                    await asyncio.to_thread(assistant.finish_reminder, row["id"], status)
+                    # No message was sent. The claim can be recovered after the lease expires.
+                    log.warning("Assistant reminder %s could not be prepared", row["id"], exc_info=True)
+                    continue
+                await complete_on_cancel(self._send_reminder(row, recipient))
         except Exception:
             log.exception("Assistant reminder poll failed")
 

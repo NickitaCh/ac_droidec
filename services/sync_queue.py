@@ -10,6 +10,7 @@ import functools
 import os
 import time
 import weakref
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 LOCK_PATH = Path(os.getenv("SHARED_CACHE_DIR", str(Path(__file__).resolve().parents[1] / "cache"))) / "heavy-sync.lock"
@@ -46,6 +47,40 @@ def _unlock(handle):
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+@asynccontextmanager
+async def shared_file_lock(path):
+    """Hold an OS lock shared by workers using the same file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if handle.seek(0, 2) == 0:
+            handle.write(b"0")
+            handle.flush()
+        while not _try_lock(handle):
+            await asyncio.sleep(0.2)
+        try:
+            yield
+        finally:
+            _unlock(handle)
+
+
+async def complete_on_cancel(coroutine):
+    """Finish an operation already started when its caller is cancelled."""
+    worker = asyncio.create_task(coroutine)
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not worker.cancelled():
+            worker.exception()
+        raise
+
+
 def serialized_sync(label, *, quiet=False):
     """FIFO within an event loop; mutually exclusive across application processes.
 
@@ -63,46 +98,23 @@ Nested calls in the same task reuse the slot; unrelated child tasks do not.
             queued = time.monotonic()
             if not quiet:
                 print(f"⏳ [Синхронизация] В очереди: {label}", flush=True)
-            async with lock:
-                LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-                with LOCK_PATH.open("a+b") as handle:
-                    if handle.seek(0, 2) == 0:
-                        handle.write(b"0")
-                        handle.flush()
-                    while not _try_lock(handle):
-                        await asyncio.sleep(0.2)
-                    started = time.monotonic()
-                    if not quiet:
-                        print(f"▶ [Синхронизация] Начало: {label}; ожидание {started - queued:.1f} с", flush=True)
+            async with lock, shared_file_lock(LOCK_PATH):
+                started = time.monotonic()
+                if not quiet:
+                    print(f"▶ [Синхронизация] Начало: {label}; ожидание {started - queued:.1f} с", flush=True)
 
-                    async def run():
-                        task = asyncio.current_task()
-                        _owners.add(task)
-                        try:
-                            return await func(*args, **kwargs)
-                        finally:
-                            _owners.discard(task)
-
+                async def run():
+                    task = asyncio.current_task()
+                    _owners.add(task)
                     try:
-                        worker = asyncio.create_task(run())
-                        try:
-                            return await asyncio.shield(worker)
-                        except asyncio.CancelledError:
-                            # shield alone is insufficient: releasing early overlaps
-                            # the next job with a still-running blocking network call.
-                            while not worker.done():
-                                try:
-                                    await asyncio.shield(worker)
-                                except asyncio.CancelledError:
-                                    continue
-                                except Exception:
-                                    break
-                            if not worker.cancelled():
-                                worker.exception()
-                            raise
+                        return await func(*args, **kwargs)
                     finally:
-                        _unlock(handle)
-                        if not quiet:
-                            print(f"■ [Синхронизация] Завершено: {label}; {time.monotonic() - started:.1f} с", flush=True)
+                        _owners.discard(task)
+
+                try:
+                    return await complete_on_cancel(run())
+                finally:
+                    if not quiet:
+                        print(f"■ [Синхронизация] Завершено: {label}; {time.monotonic() - started:.1f} с", flush=True)
         return wrapped
     return decorate

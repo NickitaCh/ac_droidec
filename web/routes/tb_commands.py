@@ -25,18 +25,23 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / 
 _access = feature_flags.require_feature('tb_reports')
 
 
-def _code(user):
+def _code(user, *, optional=False):
     owner = str(user['discord_id'])
     ga.require_game_officer(owner, user['guild_id'], user.get('bot_profile'), user['tier'])
-    return ga.select_account(owner, user['guild_id'])
+    try:
+        return ga.select_account(owner, user['guild_id'])
+    except ga.AccountError:
+        if not optional:
+            raise
+        return None
 
 
 def render(request, user, error=None):
     try:
-        code = _code(user)
+        code = _code(user, optional=True)
     except ga.AccountError as denied:
         raise HTTPException(403, str(denied)) from None
-    recent = tb_live.history(user['guild_id'], str(user['discord_id']), 1)
+    recent = tb_live.history(user['guild_id'], str(user['discord_id']), 1) if code else []
     state = recent[0][1] if recent else None
     cfg = orders.config(user['guild_id'])
     available = orders.targets(state)
@@ -106,8 +111,13 @@ async def action(request: Request, user: dict = Depends(_access)):
         from fastapi import HTTPException
         raise HTTPException(403)
     try:
-        code = await asyncio.to_thread(_code, user)
         kind = form.get('action')
+        if kind == 'pause':
+            await asyncio.to_thread(ga.require_game_officer, str(user['discord_id']), user['guild_id'],
+                                    user.get('bot_profile'), user['tier'])
+            await orders.pause_and_wait(user['guild_id'])
+            return RedirectResponse('/tb/commands', status_code=303)
+        code = await asyncio.to_thread(_code, user)
         if kind == 'refresh':
             await orders.read(user, code)
         elif kind == 'reconnect':
@@ -120,13 +130,6 @@ async def action(request: Request, user: dict = Depends(_access)):
             await orders.change(user, code, str(form['event']), int(form['phase']), str(form['target']),
                                 int(form['command']), str(form.get('message', '')),
                                 [int(form['old_command']), str(form.get('old_message', ''))])
-        elif kind == 'pause':
-            # Stopping automation must work even when the game is unavailable.
-            async with orders.locked(user['guild_id']):
-                cfg = await asyncio.to_thread(orders.config, user['guild_id'])
-                if (cfg['revision'] if cfg else 0) != int(form['revision']):
-                    raise ga.AccountError('Правила уже изменились. Обновите страницу.')
-                await asyncio.to_thread(orders._pause, user['guild_id'], 'Пауза по команде офицера.')
         else:
             async with orders.locked(user['guild_id']):
                 state = await orders.read(user, code)

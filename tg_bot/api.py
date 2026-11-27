@@ -20,11 +20,17 @@ def _strip_tags(text: str) -> str:
     return html.unescape(re.sub(r"</?(b|i|u|s|code|pre|a)( [^>]*)?>", "", text))
 
 
+def retry_after_header(response: httpx.Response) -> int | None:
+    value = response.headers.get("Retry-After", "").strip()
+    return int(value) if value.isascii() and value.isdecimal() else None
+
+
 class TelegramError(Exception):
-    def __init__(self, method: str, description: str, error_code: int | None = None):
+    def __init__(self, method: str, description: str, error_code: int | None = None, retry_after: int | None = None):
         super().__init__(f"{method}: {description}")
         self.description = description
         self.error_code = error_code
+        self.retry_after = retry_after
 
 
 class TelegramAPI:
@@ -44,9 +50,18 @@ class TelegramAPI:
             resp = await self._client.post(url, data=data, files=files)
         else:
             resp = await self._client.post(url, json=params)
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except ValueError:
+            # HTTPStatusError would include the bot token embedded in the request URL.
+            raise TelegramError(method, f"Неожиданный ответ Telegram (HTTP {resp.status_code}).",
+                                resp.status_code, retry_after_header(resp)) from None
         if not payload.get("ok"):
-            raise TelegramError(method, payload.get("description", resp.text), payload.get("error_code"))
+            retry_after = (payload.get("parameters") or {}).get("retry_after")
+            if retry_after is None and resp.status_code == 429:
+                retry_after = retry_after_header(resp)
+            raise TelegramError(method, payload.get("description", resp.text),
+                                payload.get("error_code", resp.status_code), retry_after)
         return payload["result"]
 
     async def get_me(self) -> dict:

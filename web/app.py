@@ -3,11 +3,11 @@
 запускается на том же VPS, рядом с процессом бота.
 
 Запуск локально (для разработки): из корня репозитория
-    uvicorn web.app:app --reload --port 8000
+    set WEB_ENV=development in your shell, then run uvicorn web.app:app --reload --port 8000
 (корень репозитория должен быть текущей директорией — иначе не найдутся
 database.py/guild_resolver.py/services/, которые лежат рядом с cogs/, не внутри web/)."""
 
-import os
+import asyncio
 import traceback
 from pathlib import Path
 from urllib.parse import quote
@@ -24,6 +24,7 @@ load_dotenv()
 
 from services import demo_mode
 from web import audit, auth
+from web.session_settings import session_settings
 from web.routes import game_account, game_lab
 from web.routes import admin, alliances, birthdays, conquest, raid_tickets, raids, dashboard, datacrons, game_event_live, gear_farm, gl_matrix, guild_dashboard, mod_analysis, mod_ku, mod_optimizer, mod_progress, mod_scan, mod_search, omicron, payments, qa_checklist, registration, stat_builder, stat_forecast, stat_plates, steal_build, subscribe, support, tasks, tb_live, tb_map, tb_squads, telegram, tw_defense, tw_scout, unit_images
 
@@ -101,7 +102,7 @@ async def _log_server_error(request: Request, exc: Exception):
     trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     print(f"❌ [web] {request.method} {request.url.path}\n{trace}")
     try:
-        error_id = database.log_web_error(discord_id, request.method, str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""), trace)
+        error_id = await asyncio.to_thread(database.log_web_error, discord_id, request.method, request.url.path, trace)
     except Exception:
         error_id = None
     number = f" №{error_id}" if error_id else ""
@@ -134,17 +135,11 @@ async def _stop_memory_maintenance():
     await game_watch.shutdown()
     await memory_maintenance.stop()
 
-session_secret = os.getenv("WEB_SESSION_SECRET")
-if not session_secret:
-    # Только для локальной разработки без .env — на проде WEB_SESSION_SECRET обязателен,
-    # иначе сессии (в т.ч. факт логина) не переживут перезапуск процесса.
-    session_secret = "dev-insecure-secret-change-me"
-    print("⚠️ [web] WEB_SESSION_SECRET не задан — использую небезопасный dev-секрет")
 app.add_middleware(audit.AuditMiddleware)
 from services.bot_profiles import ProfileMiddleware
 app.add_middleware(ProfileMiddleware)
 app.add_middleware(demo_mode.DemoMiddleware)  # внутри SessionMiddleware — ему нужна сессия
-app.add_middleware(SessionMiddleware, secret_key=session_secret)
+app.add_middleware(SessionMiddleware, **session_settings())
 
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)

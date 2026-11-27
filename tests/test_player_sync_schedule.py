@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,7 +161,6 @@ class CogScheduleTests(unittest.IsolatedAsyncioTestCase):
         cog.cog_unload()
 
     async def test_legacy_timestamps_are_seeded_once_without_rescanning_units(self):
-        import sqlite3
         with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'legacy.db')):
             with closing(sqlite3.connect(database.DB_NAME)) as conn:
                 database._ensure_player_unit_cache_table(conn.cursor())
@@ -174,7 +174,6 @@ class CogScheduleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(database.get_player_units_sync_times(['123456789']), first)
 
     async def test_database_cache_is_text_and_preserves_activity_events(self):
-        import sqlite3
         from services import activity_diff
         with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'test.db')):
             old = {'UNIT': {'definitionId': 'UNIT:SEVEN_STAR', 'currentTier': 12,
@@ -184,9 +183,105 @@ class CogScheduleTests(unittest.IsolatedAsyncioTestCase):
             client = SimpleNamespace(get_player=Mock(return_value={'rosterUnit': [new], 'datacron': [], 'name': 'Игрок', 'profileStat': []}))
             fetched, added, hits = await activity_diff.sync_player(client, '123456789', {1}, '2026-11-19', {'sk': (8, 9)})
             self.assertTrue(fetched)
-            self.assertGreaterEqual(added, 3)
+            self.assertEqual(added, 4)
+            self.assertEqual(dict(database.get_guild_activity_type_counts(1)).get('zeta'), 1)
             self.assertEqual(hits[0][1:], ('UNIT', 'sk', 1))
             self.assertEqual(database.get_player_units('123456789')['UNIT'], new)
             with closing(sqlite3.connect(database.DB_NAME)) as conn:
                 self.assertEqual(conn.execute('select typeof(unit_json) from player_unit_cache').fetchone()[0], 'text')
             self.assertIn('123456789', database.get_player_units_sync_times(['123456789']))
+
+    async def test_manual_refresh_records_upgrades_for_each_current_guild(self):
+        from services import activity_diff
+        code = '123456789'
+        with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'test.db')):
+            database.init_db()
+            with closing(sqlite3.connect(database.DB_NAME)) as conn, conn:
+                conn.executemany(
+                    'INSERT INTO user_mapping(discord_id, ally_code, ingame_name, guild_id) VALUES (?,?,?,?)',
+                    [('one', code, 'Test', 1), ('two', code, 'Test', 2)],
+                )
+            database.upsert_player_units(code, {'UNIT': {'currentTier': 12, 'skill': [{'id': 'sk', 'tier': 7}]}})
+            new = {'rosterUnit': [{'baseId': 'UNIT', 'currentTier': 13, 'skill': [{'id': 'sk', 'tier': 9}]}]}
+            with patch.object(database, 'get_all_skill_tier_thresholds', return_value={'sk': (8, 9)}), \
+                    patch.object(activity_diff.player_json, 'get_player', return_value=new):
+                self.assertTrue(await activity_diff.refresh_player_units(None, code, force=True))
+                for gid in (1, 2):
+                    counts = dict(database.get_guild_activity_type_counts(gid))
+                    self.assertEqual(counts, {'gear': 1, 'omicron': 1, 'zeta': 1})
+                self.assertEqual((await activity_diff.sync_player(None, code, {1}, '2026-11-27', {}))[1], 0)
+
+    async def test_event_write_rollback_and_stale_snapshot(self):
+        from services import activity_diff
+        code = '123456789'
+        with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'test.db')):
+            older = {'UNIT': {'currentTier': 12, 'currentRarity': 6}}
+            latest = {'UNIT': {'currentTier': 13, 'currentRarity': 7}}
+            database.upsert_player_units(code, older)
+            insert = database._insert_guild_activity_event
+
+            def fail_second(*args):
+                if args[4] == 'star':
+                    raise RuntimeError('database busy')
+                return insert(*args)
+
+            with patch.object(database, '_insert_guild_activity_event', side_effect=fail_second):
+                with self.assertRaisesRegex(RuntimeError, 'database busy'):
+                    activity_diff._store_roster_diff(code, latest, {1}, '2026-11-27', {}, 2.0, {})
+            self.assertEqual(database.get_player_units(code), older)
+            self.assertEqual(database.get_guild_activity_type_counts(1), [])
+            self.assertEqual(activity_diff._store_roster_diff(code, latest, {1}, '2026-11-27', {}, 2.0, {})[0], 2)
+            self.assertEqual(activity_diff._store_roster_diff(code, older, {1}, '2026-11-27', {}, 1.0, {})[0], 0)
+            self.assertEqual(database.get_player_units(code), latest)
+
+    async def test_late_comlink_response_cannot_overwrite_datacrons_or_profile(self):
+        import threading
+        from services import activity_diff
+
+        code = '123456789'
+        first_started = threading.Event()
+        release_first = threading.Event()
+        tiers = iter([12, 13])
+
+        def get_player(*args):
+            tier = next(tiers)
+            if tier == 12:
+                first_started.set()
+                if not release_first.wait(5):
+                    raise TimeoutError('test did not release the first fetch')
+            return {'rosterUnit': [{'baseId': 'UNIT', 'currentTier': tier}],
+                    'datacron': [{'id': str(tier)}], 'profileStat': [], 'name': str(tier)}
+
+        with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'test.db')), \
+                patch.object(activity_diff.player_json, 'get_player', side_effect=get_player):
+            earlier = asyncio.create_task(activity_diff.sync_player(None, code, (), '2026-11-27', {}))
+            try:
+                self.assertTrue(await asyncio.to_thread(first_started.wait, 5))
+                self.assertTrue((await activity_diff.sync_player(None, code, (), '2026-11-27', {}))[0])
+            finally:
+                release_first.set()
+                await earlier
+            self.assertEqual(database.get_player_units(code)['UNIT']['currentTier'], 13)
+            self.assertEqual(database.get_player_datacrons_bulk([code])[code], [{'id': '13'}])
+            self.assertEqual(database.get_player_profiles_bulk([code])[code]['name'], '13')
+
+    async def test_membership_is_checked_after_comlink_returns(self):
+        from services import activity_diff
+
+        code = '123456789'
+        with tempfile.TemporaryDirectory() as td, patch.object(database, 'DB_NAME', str(Path(td) / 'test.db')):
+            database.init_db()
+            database.upsert_player_units(code, {'UNIT': {'currentTier': 11}})
+            with closing(sqlite3.connect(database.DB_NAME)) as conn, conn:
+                conn.execute('INSERT INTO user_mapping(discord_id, ally_code, ingame_name, guild_id) VALUES (?,?,?,?)',
+                             ('one', code, 'Test', 1))
+
+            def get_player(*args):
+                with closing(sqlite3.connect(database.DB_NAME)) as conn, conn:
+                    conn.execute('UPDATE user_mapping SET guild_id=2 WHERE ally_code=?', (code,))
+                return {'rosterUnit': [{'baseId': 'UNIT', 'currentTier': 12}]}
+
+            with patch.object(activity_diff.player_json, 'get_player', side_effect=get_player):
+                self.assertEqual((await activity_diff.sync_player(None, code, {1}, '2026-11-27', {}))[1], 1)
+            self.assertEqual(database.get_guild_activity_type_counts(1), [])
+            self.assertEqual(database.get_guild_activity_type_counts(2), [('gear', 1)])

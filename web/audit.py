@@ -2,14 +2,14 @@
 изменяющий запрос (не GET/HEAD/OPTIONS), страница — /admin/audit.
 
 Две половинки, потому что ни одна не видит всего сама:
-  * capture_request — глобальная FastAPI-зависимость (web/app.py). Работает ПОСЛЕ
-    того, как FastAPI уже распарсил тело (form/json кэшируются на Request), поэтому
-    повторное чтение безопасно. Резолвит автора и кладёт черновик записи в scope.
-  * AuditMiddleware — чистый ASGI-мидлварь: видит итоговый HTTP-статус (в т.ч. после
-    exception_handler'ов) и пишет запись уже со статусом.
+  * capture_request резолвит автора и кладёт черновик записи в scope.
+  * AuditMiddleware добавляет итоговый HTTP-статус и уже прочитанные параметры.
+    Разбор тела запроса и ограничения остаются у обработчика маршрута.
 """
 
+import asyncio
 import json
+from urllib.parse import parse_qsl, urlencode
 
 from starlette.datastructures import UploadFile
 from fastapi import Request
@@ -40,13 +40,25 @@ def section_for(path: str) -> str:
     return SECTION_LABELS.get(first, first or "—")
 
 
+def _is_secret(key):
+    return any(marker in key.lower() for marker in _SECRET_MARKERS)
+
+
+def _redact_json(value):
+    if isinstance(value, dict):
+        return {key: "***" if _is_secret(key) else _redact_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_json(item) for item in value]
+    return value
+
+
 def _clean_value(key: str, value):
-    if any(m in key.lower() for m in _SECRET_MARKERS):
+    if _is_secret(key):
         return "***"
     if isinstance(value, UploadFile):
         return f"<файл {value.filename}>"
     if not isinstance(value, str):
-        value = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+        value = json.dumps(_redact_json(value), ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
     return value if len(value) <= _MAX_VALUE_LEN else value[:_MAX_VALUE_LEN] + "…"
 
 
@@ -55,12 +67,12 @@ async def _request_params(request: Request) -> dict:
     ctype = request.headers.get("content-type", "")
     try:
         if ctype.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
-            form = await request.form()
-            for key in form.keys():
+            form = getattr(request, "_form", None)
+            for key in form or ():
                 values = form.getlist(key)
                 cleaned = [_clean_value(key, v) for v in values]
                 params[key] = cleaned[0] if len(cleaned) == 1 else ", ".join(cleaned)
-        elif ctype.startswith("application/json"):
+        elif ctype.startswith("application/json") and hasattr(request, "_body"):
             body = await request.json()
             if isinstance(body, dict):
                 params = {k: _clean_value(k, v) for k, v in body.items()}
@@ -69,7 +81,8 @@ async def _request_params(request: Request) -> dict:
     except Exception:  # аудит не должен ронять запрос
         pass
     if request.url.query:
-        params["?"] = _clean_value("query", request.url.query)
+        pairs = parse_qsl(request.url.query, keep_blank_values=True)
+        params["?"] = _clean_value("query", urlencode([(key, _clean_value(key, value)) for key, value in pairs]))
     return params
 
 
@@ -83,7 +96,7 @@ async def capture_request(request: Request) -> None:
         return
     try:
         from web.deps import get_current_user
-        user = get_current_user(request)
+        user = await asyncio.to_thread(get_current_user, request)
     except Exception:
         return
     if user.get("tier") != "officer" and not user.get("is_super_admin"):
@@ -94,7 +107,7 @@ async def capture_request(request: Request) -> None:
         "actor_discord_id": user.get("discord_id"),
         "actor_name": user.get("username"),
         "is_super_admin": bool(user.get("is_super_admin")),
-        "details": await _request_params(request),
+        "request": request,
     }
 
 
@@ -122,6 +135,9 @@ class AuditMiddleware:
             entry = scope.get("audit_entry")
             if entry:
                 try:
-                    database.log_audit("web", status=str(status["code"] or ""), **entry)
+                    request = entry.pop("request")
+                    details = await _request_params(request)
+                    await asyncio.to_thread(database.log_audit, "web", status=str(status["code"] or ""),
+                                            details=details, **entry)
                 except Exception as e:
                     print(f"⚠️ [audit] не удалось записать: {e}")

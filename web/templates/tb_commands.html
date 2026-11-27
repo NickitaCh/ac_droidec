@@ -34,9 +34,17 @@
 <section class="page-hero"><h1>Приказы ТБ</h1><a class="hero-link" href="/tb/live">ТБ сейчас</a></section>
 <p>Заливка, взводы, каждый бой и ОЗ. Изменения отправляются в игру от вашего подключённого аккаунта и проверяются повторным чтением.</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if cfg %}<p role="status">{{ 'Автоматика включена' if cfg.enabled else 'Автоматика на паузе' }}{% if cfg.status %} · {{ cfg.status }}{% endif %}</p>{% endif %}
+{% if cfg and cfg.enabled %}
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" name="action" value="pause">Пауза</button></form>
+{% endif %}
+{% if code %}
 <form method="post">{{ scope() }}<button class="btn" name="action" value="refresh">Обновить из игры</button></form>
 <details class="panel"><summary>Если игровая сессия завершилась</summary>
 <p>{{ login_warning }}</p><form method="post">{{ scope() }}<label class="checkbox"><input type="checkbox" name="confirm_login" required> Подтверждаю новый вход</label><button class="btn" name="action" value="reconnect">Войти в игру и обновить</button></form></details>
+{% else %}
+<p>Для игровых действий зарегистрируйте основной аккаунт.</p>
+{% endif %}
 {% if state %}
 <p>Этап {{ state.phase }} · аккаунт {{ code }}. Перед сохранением проверяем, что приказ и этап не изменились.</p>
 {% if stale %}<p class="error">Время этого этапа прошло. Обновите данные из игры.</p>{% endif %}
@@ -54,10 +62,9 @@
 </div>
 <h2>Автоматические правила</h2>
 <p>Меньшее число приоритета главнее. Для каждой цели действует первое подходящее правило. Правила привязаны к этой ТБ и этому этапу.</p>
-{% if cfg %}<p role="status">{{ 'Автоматика включена' if cfg.enabled else 'Автоматика на паузе' }}{% if cfg.status %} · {{ cfg.status }}{% endif %}</p>{% endif %}
 {% if watch %}<p>Наблюдение: {{ watch.message }}</p>{% endif %}
 <p class="muted">После включения используется сохранённая игровая сессия. При её завершении автоматика прекращает работу. Опрос — раз в минуту, если наблюдение ещё не запущено; уже выбранный интервал сохраняется.</p>
-<form method="post" class="tbc-actions">{{ scope() }}<button class="btn btn-primary" name="action" value="enable">Включить автоматику от моего аккаунта</button><button class="btn" name="action" value="pause">Пауза</button></form>
+<form method="post" class="tbc-actions">{{ scope() }}<button class="btn btn-primary" name="action" value="enable">Включить автоматику от моего аккаунта</button></form>
 <details class="panel"><summary>Подготовить пять правил заливки</summary>
 <p>Выберите только планеты, которые закрываем на этом этапе. Подготовка заменит список правил текущего этапа и поставит автоматику на паузу.</p>
 <form method="post">{{ scope() }}<input type="hidden" name="action" value="recipe">

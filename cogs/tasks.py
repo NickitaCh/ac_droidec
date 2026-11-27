@@ -209,11 +209,11 @@ class TasksCog(commands.Cog):
         """Запись в лог-канал гильдии (guilds.tasks_log_channel_id, /настройки задачи_канал)
         о завершении/провале задачи. ЛС игроку намеренно не шлём (решено 2026-09-04,
         Discord-тред "Гайд по АС Боту") — только выбранный канал."""
-        unit_name = database.get_game_unit_name(base_id) or base_id
+        unit_name = await asyncio.to_thread(database.get_game_unit_name, base_id) or base_id
         verb = "выполнена 🎉" if status == "COMPLETED" else "просрочена — истёк срок ⏰"
-        target_label = self._format_target_label(target_type, target_value)
+        target_label = await asyncio.to_thread(self._format_target_label, target_type, target_value)
         text = f"Задача **{unit_name}** ({target_label}) для **{player_name}** {verb}"
-        outbox.enqueue_guild(guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
+        await asyncio.to_thread(outbox.enqueue_guild, guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
 
         log_channel_id = guild_cfg.get("tasks_log_channel_id")
         if not log_channel_id:
@@ -230,13 +230,13 @@ class TasksCog(commands.Cog):
                                   target_value: str, status: str, player_name: str):
         """Личная задача (игрок поставил себе сам) — результат в ЛС тому, кто её поставил
         (tasks.created_by), а не в канал задач (решение пользователя 2026-10-19)."""
-        task = database.get_task(task_id)
+        task = await asyncio.to_thread(database.get_task, task_id)
         discord_id = task[12] if task else None
         if not discord_id:
             return
-        unit_name = database.get_game_unit_name(base_id) or base_id
-        target_label = self._format_target_label(target_type, target_value)
-        if status == "COMPLETED" and fun_features.should_trigger("personal_task_praise", discord_id):
+        unit_name = await asyncio.to_thread(database.get_game_unit_name, base_id) or base_id
+        target_label = await asyncio.to_thread(self._format_target_label, target_type, target_value)
+        if status == "COMPLETED" and await asyncio.to_thread(fun_features.should_trigger, "personal_task_praise", discord_id):
             praise = fun_features.FUN_ACTIONS["personal_task_praise"]["praise"]
             text = f"💋 {praise}!\n🎉 Личная задача выполнена: **{unit_name}** ({target_label}) — {player_name}."
         elif status == "COMPLETED":
@@ -244,7 +244,7 @@ class TasksCog(commands.Cog):
         else:
             text = f"⏰ Личная задача просрочена: **{unit_name}** ({target_label}) — {player_name}, срок истёк."
         if outbox.is_tg_owner(discord_id):  # поставил из Telegram-аккаунта (tg_bot/store.py)
-            outbox.enqueue_dm(discord_id, text)
+            await asyncio.to_thread(outbox.enqueue_dm, discord_id, text)
             return
         if not str(discord_id).isdigit():
             return
@@ -257,11 +257,11 @@ class TasksCog(commands.Cog):
     async def _send_reminder(self, guild_cfg: dict, base_id: str, target_type: str,
                               target_value: str, deadline: str, player_name: str):
         """Только в лог-канал гильдии — см. _notify_task_result про отказ от ЛС."""
-        unit_name = database.get_game_unit_name(base_id) or base_id
-        target_label = self._format_target_label(target_type, target_value)
+        unit_name = await asyncio.to_thread(database.get_game_unit_name, base_id) or base_id
+        target_label = await asyncio.to_thread(self._format_target_label, target_type, target_value)
         text = (f"⏳ Напоминание: у задачи **{unit_name}** ({target_label}) для **{player_name}** "
                 f"истекает срок {deadline}.")
-        outbox.enqueue_guild(guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
+        await asyncio.to_thread(outbox.enqueue_guild, guild_cfg["id"], "tasks", text)  # Telegram-чаты гильдии (/notify)
 
         log_channel_id = guild_cfg.get("tasks_log_channel_id")
         if not log_channel_id:
@@ -299,22 +299,22 @@ class TasksCog(commands.Cog):
         print("🔍 Запуск ежечасного аудита заданий на прокачку...")
         # Per-skill индекс омикрон-ступени — единого порога вроде tier>=8 не существует
         # (см. services/activity_diff.py), грузим один раз на весь проход, не на задачу.
-        skill_thresholds = database.get_all_skill_tier_thresholds()
+        skill_thresholds = await asyncio.to_thread(database.get_all_skill_tier_thresholds)
         today_msk = datetime.now(MSK).date()
 
-        for guild_cfg in bot_profiles.served_guilds():
+        for guild_cfg in await asyncio.to_thread(bot_profiles.served_guilds):
             gid = guild_cfg["id"]
             gname = guild_cfg["name"]
-            if not feature_flags.is_enabled(gid, "tasks"):
+            if not await asyncio.to_thread(feature_flags.is_enabled, gid, "tasks"):
                 continue
             try:
-                active_tasks = database.get_active_tasks(gid)
+                active_tasks = await asyncio.to_thread(database.get_active_tasks, gid)
                 if not active_tasks:
                     continue
                 cache = self.bot.guild_roster_caches.get(gid, {})
                 # Кэш состава в памяти пуст сразу после рестарта (аудит стартует раньше, чем
                 # ViolationsCog его заполнит) и не знает выбывших — имя берём ещё и из БД.
-                db_names = database.get_player_names(gid)
+                db_names = await asyncio.to_thread(database.get_player_names, gid)
                 print(f"📊 [{gname}] Аудит: нашёл в базе {len(active_tasks)} active tasks.")
 
                 for task in active_tasks:
@@ -326,7 +326,7 @@ class TasksCog(commands.Cog):
                     except ValueError:
                         deadline_date = None
                     if deadline_date is not None and today_msk > deadline_date:
-                        database.update_task_status(task_id, "FAILED")
+                        await asyncio.to_thread(database.update_task_status, task_id, "FAILED")
                         print(f"⏰ [{gname}] Срок задачи #{task_id} для {player_name} по юниту {base_id} истёк.")
                         if is_personal:
                             await self._dm_personal_result(task_id, base_id, target_type, target_value, "FAILED", player_name)
@@ -339,7 +339,7 @@ class TasksCog(commands.Cog):
                         continue
 
                     if self._is_target_completed(unit_data, target_type, target_value, skill_thresholds):
-                        database.update_task_status(task_id, "COMPLETED")
+                        await asyncio.to_thread(database.update_task_status, task_id, "COMPLETED")
                         print(f"🎉 [{gname}] Задача #{task_id} ВЫПОЛНЕНА игроком {player_name}!")
                         if is_personal:
                             await self._dm_personal_result(task_id, base_id, target_type, target_value, "COMPLETED", player_name)
@@ -349,7 +349,7 @@ class TasksCog(commands.Cog):
 
                     current_value = self._current_progress_value(unit_data, target_type, target_value)
                     in_progress = initial_value is not None and current_value != initial_value
-                    database.update_task_progress(task_id, current_value, in_progress)
+                    await asyncio.to_thread(database.update_task_progress, task_id, current_value, in_progress)
             except Exception as e:
                 # Один сбой (гильдия/задача/сеть) не должен останавливать весь цикл до
                 # рестарта бота, как это уже произошло однажды из-за бага выше.
@@ -391,12 +391,14 @@ class TasksCog(commands.Cog):
 
             try:
                 cache = self.bot.guild_roster_caches.get(gid, {})
-                db_names = database.get_player_names(gid)
-                reminder_rows = database.get_tasks_needing_reminder(gid, self.bot.TASK_REMINDER_DAYS_BEFORE)
+                db_names = await asyncio.to_thread(database.get_player_names, gid)
+                reminder_rows = await asyncio.to_thread(
+                    database.get_tasks_needing_reminder, gid, self.bot.TASK_REMINDER_DAYS_BEFORE
+                )
                 for task_id, ally_code, base_id, target_type, target_value, deadline_str in reminder_rows:
                     player_name = cache.get(ally_code) or db_names.get(str(ally_code)) or f"Игрок [{ally_code}]"
                     await self._send_reminder(guild_cfg, base_id, target_type, target_value, deadline_str, player_name)
-                    database.mark_task_reminder_sent(task_id)
+                    await asyncio.to_thread(database.mark_task_reminder_sent, task_id)
             except Exception as e:
                 print(f"⚠️ [Задачи] Напоминания для гильдии {gid} упали: {e}")
 

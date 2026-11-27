@@ -1,5 +1,19 @@
 # ac_droidec
 
+Установка и проверки используют Python 3.11 и зависимости из `requirements.txt`.
+
+```sh
+python -m pip install -r requirements.txt
+```
+
+Чтобы обновить зависимости, измените `requirements.in` и пересоберите список:
+
+```sh
+uv pip compile requirements.in --python-version 3.11 --universal -o requirements.txt
+```
+
+Веб по умолчанию запускается в рабочем режиме с защищённой cookie сессии. Сохраняйте `WEB_SESSION_SECRET` между перезапусками. Для местного запуска по HTTP задайте `WEB_ENV=development`.
+
 Проверки исправлений без обращений к Discord, Telegram и Comlink:
 
 ```sh

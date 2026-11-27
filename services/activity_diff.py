@@ -13,27 +13,24 @@ sync_player() — общая точка входа, используется и 
 собственный SwgohComlink на один и тот же comlink-сайдкар, но диффят/пишут события одинаково."""
 
 import asyncio
+from contextlib import closing
+from datetime import datetime
+import sqlite3
+import time
+from zoneinfo import ZoneInfo
 
 import database
 import stat_engine
 from services import player_profile, player_json
 
 
-def _store_player_meta(ally_code: str, player_data: dict) -> None:
-    # Датакроны приходят в том же ответе — сохраняем попутно (деф ВГ: «у кого нужный ДК»).
-    if "datacron" in player_data:
-        database.upsert_player_datacrons(ally_code, player_data.get("datacron") or [])
-    # Статы ВА/ранги арены — для гильдийского /профиль (services/player_profile.py).
-    if player_data.get("profileStat") is not None:
-        database.upsert_player_profile(ally_code, player_profile.player_meta(player_data))
-
-
 async def fetch_player_units(comlink, ally_code: str) -> dict:
-    """base_id -> сырой rosterUnit из comlink.get_player. Блокирующий сетевой вызов — через to_thread."""
+    """Read a live roster for a report without updating the shared snapshot."""
     player_data = await asyncio.to_thread(player_json.get_player, comlink, str(ally_code))
-    # Запись в БД — тоже в потоке: на занятой базе commit ждёт блокировку секундами и
-    # держал event loop (watchdog 2026-10-21, падали автодополнения во время синка).
-    await asyncio.to_thread(_store_player_meta, str(ally_code), player_data)
+    return _roster_units(player_data)
+
+
+def _roster_units(player_data):
     roster = player_data.get("rosterUnit") or player_data.get("roster") or []
     units = {}
     for u in roster:
@@ -53,20 +50,20 @@ _refresh_locks: dict[str, asyncio.Lock] = {}
 
 
 async def refresh_player_units(comlink, ally_code: str, *, force: bool = False) -> bool:
-    """Свежий ростер в player_unit_cache. False — кэш свежее кулдауна.
+    """Свежий ростер в player_unit_cache. False — свежий кэш или ростер не получен.
 
     force=True для явного «обновить» в /юнит: пропускает кулдаун, сохраняя lock.
     """
     ally_code = str(ally_code)
     lock = _refresh_locks.setdefault(ally_code, asyncio.Lock())
     async with lock:
-        age = database.get_player_units_age_seconds(ally_code)
+        age = await asyncio.to_thread(database.get_player_units_age_seconds, ally_code)
         if not force and age is not None and age < REFRESH_COOLDOWN_SECONDS:
             return False
-        units = await fetch_player_units(comlink, ally_code)
-        if units:
-            await asyncio.to_thread(database.upsert_player_units, ally_code, units)
-        return True
+        thresholds = await asyncio.to_thread(database.get_all_skill_tier_thresholds)
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+        fetched, _, _ = await sync_player(comlink, ally_code, (), today, thresholds)
+        return fetched
 
 
 def diff_unit(old: dict, new: dict, skill_tier_map: dict) -> list[tuple[str, str, str]]:
@@ -104,7 +101,7 @@ def diff_unit(old: dict, new: dict, skill_tier_map: dict) -> list[tuple[str, str
         zeta_tier, omicron_tier = skill_tier_map.get(skill_id, (None, None))
         if omicron_tier is not None and new_tier >= omicron_tier and (old_tier is None or old_tier < omicron_tier):
             events.append(("omicron", "", skill_id))
-        elif zeta_tier is not None and new_tier >= zeta_tier and (old_tier is None or old_tier < zeta_tier):
+        if zeta_tier is not None and new_tier >= zeta_tier and (old_tier is None or old_tier < zeta_tier):
             events.append(("zeta", "", skill_id))
 
     return events
@@ -137,9 +134,9 @@ def diff_roster(old_units: dict, new_units: dict, is_first_sync: bool, skill_tie
 async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill_tier_map: dict, timeout: float = 15.0) -> tuple[bool, int, list]:
     """Тянет живой ростер игрока (Comlink-вызов ограничен timeout секунд — тот же паттерн,
     что в web/routes/datacrons.py::_build_guild_report, а не голый to_thread без дедлайна),
-    диффит против player_unit_cache, обновляет кэш и пишет новые события активности в
-    guild_activity_events для каждой из guild_ids (обычно одна — но игрок теоретически может
-    состоять в нескольких зарегистрированных гильдиях сразу).
+    Диффит против player_unit_cache и сохраняет снимок и события в одной транзакции.
+    Гильдии для событий берутся из актуального user_mapping в этой транзакции.
+    guild_ids используется как резервный список при отсутствии таблицы user_mapping.
 
     skill_tier_map — database.get_all_skill_tier_thresholds(), загружается ОДИН раз за весь
     цикл синка вызывающим кодом (не на каждого игрока — таблица одна на всех), и прокидывается
@@ -155,35 +152,56 @@ async def sync_player(comlink, ally_code: str, guild_ids, event_date: str, skill
     успешной отправки (см. cogs/stat_requirements.py::_announce_omicrons и восстановление
     после рестарта бота через database.get_unannounced_omicron_events). Веб-вызов (/activity/sync)
     это поле игнорирует, т.к. веб-процесс не держит Discord-клиента и постить не может."""
+    observed_at = time.time()
     try:
-        new_units = await asyncio.wait_for(fetch_player_units(comlink, ally_code), timeout=timeout)
+        player_data = await asyncio.wait_for(
+            asyncio.to_thread(player_json.get_player, comlink, str(ally_code)), timeout=timeout
+        )
     except asyncio.TimeoutError:
         return False, 0, []
+    new_units = _roster_units(player_data)
     if not new_units:
         return False, 0, []
     added, omicron_hits = await asyncio.to_thread(
-        _store_roster_diff, ally_code, new_units, guild_ids, event_date, skill_tier_map
+        _store_roster_diff, ally_code, new_units, guild_ids, event_date, skill_tier_map, observed_at, player_data
     )
     return True, added, omicron_hits
 
 
-def _store_roster_diff(ally_code: str, new_units: dict, guild_ids, event_date: str, skill_tier_map: dict) -> tuple[int, list]:
-    """Дифф против кэша + запись кэша и событий — вне event loop (чтение ~300 юнитов и
-    commit на занятой базе стоили 2–4 с на игрока)."""
-    old_units = database.get_player_units(ally_code)
-    events = diff_roster(old_units, new_units, is_first_sync=not old_units, skill_tier_map=skill_tier_map)
-    database.upsert_player_units(ally_code, new_units)
+def _store_roster_diff(ally_code, new_units, guild_ids, event_date, skill_tier_map, observed_at, player_data):
     added = 0
     omicron_hits = []
-    for base_id, action_type, old_value, new_value in events:
-        for guild_id in guild_ids:
-            event_id = database.add_guild_activity_event(
-                guild_id=guild_id, ally_code=ally_code, base_id=base_id,
-                action_type=action_type, old_value=old_value, new_value=new_value,
-                event_date=event_date,
-            )
-            if event_id is not None:
-                added += 1
-                if action_type == "omicron":
-                    omicron_hits.append((event_id, base_id, new_value, guild_id))
+    with closing(sqlite3.connect(database.DB_NAME)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        database._ensure_player_roster_observations_table(cursor)
+        previous = cursor.execute(
+            "SELECT observed_at FROM player_roster_observations WHERE ally_code=?", (ally_code,)
+        ).fetchone()
+        if previous and previous[0] >= observed_at:
+            return added, omicron_hits
+
+        old_units = database._read_player_units(cursor, ally_code)
+        events = diff_roster(old_units, new_units, is_first_sync=not old_units, skill_tier_map=skill_tier_map)
+        if events:
+            current_guilds = database._read_guild_ids_for_ally_code(cursor, ally_code)
+            # A player may have transferred or left while Comlink was in flight.
+            guild_ids = set(guild_ids) if current_guilds is None else current_guilds
+            if guild_ids:
+                database._ensure_guild_activity_events_table(cursor)
+            for base_id, action_type, old_value, new_value in events:
+                for guild_id in guild_ids:
+                    event_id = database._insert_guild_activity_event(
+                        cursor, guild_id, ally_code, base_id, action_type, old_value, new_value, event_date,
+                    )
+                    if event_id is not None:
+                        added += 1
+                        if action_type == "omicron":
+                            omicron_hits.append((event_id, base_id, new_value, guild_id))
+        database._write_player_units(cursor, ally_code, new_units)
+        if "datacron" in player_data:
+            database._write_player_datacrons(cursor, ally_code, player_data["datacron"])
+        if player_data.get("profileStat") is not None:
+            database._write_player_profile(cursor, ally_code, player_profile.player_meta(player_data))
+        cursor.execute("INSERT OR REPLACE INTO player_roster_observations VALUES (?, ?)", (ally_code, observed_at))
     return added, omicron_hits
